@@ -19,6 +19,7 @@ under the clean-room rules in `../GROUNDRULES.md`. Facts carry a status:
 | [level.md](level.md) | `LEVELS/LEVEL.nnn`: header, block grid, object grid |
 | [blk.md](blk.md) | `LEVELS/BLK.nnn`: block dictionary |
 | [graphics.md](graphics.md) | Palette, textures, sky and the other raw `GFX` images |
+| [lemmings.md](lemmings.md) | Lemming sprite cells (`LEMM.MHC`) and frame groups |
 | [camera.md](camera.md) | Preset cameras, the no-pitch camera, the off-centre projection |
 
 ## Conventions

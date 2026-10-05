@@ -79,6 +79,17 @@ enum Cmd {
         #[arg(long, default_value_t = 1.0)]
         sy: f64,
     },
+    /// Decode an MHC sprite file and write all cells as a PNG contact sheet
+    /// (16 cells per row), printing the manifest summary.
+    Mhc {
+        #[arg(default_value = "LEMM/LEMM.MHC")]
+        path: String,
+        /// Cell size in pixels (64 for LEMM.MHC, 128 for LEMM128.MHC).
+        #[arg(long, default_value_t = 64)]
+        size: usize,
+        #[arg(long)]
+        out: PathBuf,
+    },
     /// Render a raw 8-bit indexed image file from the disc to PNG.
     Png {
         path: String,
@@ -369,6 +380,44 @@ fn main() -> Result<()> {
             for (i, c) in raw.chunks(3).enumerate().filter(|(i, _)| i % 16 == 0 || *i < 16) {
                 println!("  {i:3}: {c:?}");
             }
+        }
+        Cmd::Mhc { path, size, out } => {
+            let mut fs = open_fs(&disc)?;
+            let pal = load_palette(&mut fs, "GFX/LM3D.PAL")?;
+            let data = rnc::unpack_if_packed(fs.read_path(path)?)?;
+            let mhc = l3d_formats::mhc::MhcFile::parse(&data, *size)?;
+            // Manifest summary: cells per animation and the flag values seen.
+            let mut per_anim: BTreeMap<u8, (usize, BTreeSet<u8>)> = BTreeMap::new();
+            for e in &mhc.entries {
+                let s = per_anim.entry(e.animation).or_default();
+                s.0 += 1;
+                s.1.insert(e.flags);
+            }
+            for (a, (n, flags)) in &per_anim {
+                println!("animation {a:3}: {n:3} cells, flags {flags:02x?}");
+            }
+            let per_row = 16;
+            let rows = mhc.entries.len().div_ceil(per_row);
+            let (w, h) = (per_row * size, rows * size);
+            let mut sheet = vec![0u8; w * h];
+            let mut failed = 0;
+            for i in 0..mhc.entries.len() {
+                match mhc.cell(i) {
+                    Ok(cell) => {
+                        let (ox, oy) = ((i % per_row) * size, (i / per_row) * size);
+                        for y in 0..*size {
+                            sheet[(oy + y) * w + ox..(oy + y) * w + ox + size]
+                                .copy_from_slice(&cell.pixels[y * size..(y + 1) * size]);
+                        }
+                    }
+                    Err(e) => {
+                        failed += 1;
+                        eprintln!("{e}");
+                    }
+                }
+            }
+            write_png(out, w as u32, &sheet, &pal)?;
+            println!("{} cells, {failed} failed -> {}", mhc.entries.len(), out.display());
         }
         Cmd::Png { path, width, palette, skip, out } => {
             let mut fs = open_fs(&disc)?;

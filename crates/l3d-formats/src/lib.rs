@@ -8,6 +8,7 @@ pub mod disc;
 pub mod gamedata;
 pub mod iso9660;
 pub mod level;
+pub mod mhc;
 pub mod rnc;
 
 #[derive(Debug, thiserror::Error)]
