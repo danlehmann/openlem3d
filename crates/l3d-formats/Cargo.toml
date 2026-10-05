@@ -1,0 +1,9 @@
+[package]
+name = "l3d-formats"
+description = "Parsers for the Lemmings 3D data formats"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror.workspace = true

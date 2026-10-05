@@ -1,0 +1,387 @@
+//! Converts a level's block grid into triangle geometry. Engine-independent:
+//! produces plain vertex arrays.
+//!
+//! World space equals grid space: cell `(x, y, z)` occupies the unit cube
+//! `[x, x+1] × [y, y+1] × [z, z+1]`.
+
+use l3d_formats::blk::{BlockSet, FaceDir, flags, modifiers};
+use l3d_formats::level::{BlockCell, Level, SIZE_X, SIZE_Y, SIZE_Z};
+
+/// Number of 64×64 tiles in a `TEXTURE` file.
+pub const TILES: u32 = 100;
+
+/// Triangle geometry with per-vertex position, texture coordinate and
+/// brightness. `uv` addresses the whole 64×6400 texture strip.
+#[derive(Default, Debug)]
+pub struct MeshData {
+    pub positions: Vec<[f32; 3]>,
+    pub normals: Vec<[f32; 3]>,
+    pub uvs: Vec<[f32; 2]>,
+    pub colors: Vec<[f32; 4]>,
+    pub indices: Vec<u32>,
+}
+
+/// Geometry split by how it must be drawn.
+#[derive(Default, Debug)]
+pub struct LevelMesh {
+    /// Faces without transparency.
+    pub opaque: MeshData,
+    /// Faces whose palette index 0 is transparent.
+    pub cutout: MeshData,
+    /// Cells whose shape is not modelled yet, as `(shape, count)`.
+    pub unsupported_shapes: Vec<(u8, usize)>,
+}
+
+/// A planar polygon of a shape, in unit-cube local coordinates.
+struct Poly {
+    verts: Vec<[f32; 3]>,
+    /// The block-definition face whose texture this polygon shows.
+    src: FaceDir,
+    /// For polygons lying on a cube face: the direction of that face, so it can
+    /// be culled against a solid neighbour.
+    on_face: Option<FaceDir>,
+}
+
+/// A shape polygon placed in world space: vertices, tile texture
+/// coordinates, and the source polygon.
+type PlacedPoly<'a> = (Vec<[f32; 3]>, Vec<[f32; 2]>, &'a Poly);
+
+fn poly(verts: &[[f32; 3]], src: FaceDir, on_face: Option<FaceDir>) -> Poly {
+    Poly { verts: verts.to_vec(), src, on_face }
+}
+
+fn mirror_y(p: Poly) -> Poly {
+    let flip = |d: FaceDir| match d {
+        FaceDir::PosY => FaceDir::NegY,
+        FaceDir::NegY => FaceDir::PosY,
+        d => d,
+    };
+    Poly {
+        verts: p.verts.iter().map(|v| [v[0], 1.0 - v[1], v[2]]).collect(),
+        src: flip(p.src),
+        on_face: p.on_face.map(flip),
+    }
+}
+
+/// Polygons of a shape at rotation 0. Shapes follow `docs/spec/level.md`
+/// (descriptions from [L3DEdit], unverified); unknown shapes return `None`.
+fn shape_polys(shape: u8) -> Option<Vec<Poly>> {
+    use FaceDir::*;
+    let full = |d: FaceDir| -> Poly {
+        let v = match d {
+            PosZ => [[0., 0., 1.], [1., 0., 1.], [1., 1., 1.], [0., 1., 1.]],
+            NegZ => [[0., 0., 0.], [1., 0., 0.], [1., 1., 0.], [0., 1., 0.]],
+            PosX => [[1., 0., 0.], [1., 0., 1.], [1., 1., 1.], [1., 1., 0.]],
+            NegX => [[0., 0., 0.], [0., 0., 1.], [0., 1., 1.], [0., 1., 0.]],
+            PosY => [[0., 1., 0.], [1., 1., 0.], [1., 1., 1.], [0., 1., 1.]],
+            NegY => [[0., 0., 0.], [1., 0., 0.], [1., 0., 1.], [0., 0., 1.]],
+        };
+        poly(&v, d, Some(d))
+    };
+    Some(match shape {
+        0 => FaceDir::ALL.iter().map(|&d| full(d)).collect(),
+        // Square pyramid, apex up; 1 is half height, 3 full height.
+        1 | 3 => {
+            let h = if shape == 1 { 0.5 } else { 1.0 };
+            let a = [0.5, h, 0.5];
+            vec![
+                full(NegY),
+                poly(&[[0., 0., 1.], [1., 0., 1.], a], PosZ, None),
+                poly(&[[0., 0., 0.], [1., 0., 0.], a], NegZ, None),
+                poly(&[[1., 0., 0.], [1., 0., 1.], a], PosX, None),
+                poly(&[[0., 0., 0.], [0., 0., 1.], a], NegX, None),
+            ]
+        }
+        2 | 4 => shape_polys(shape - 1)?.into_iter().map(mirror_y).collect(),
+        // 45° ramp rising towards −Z (surface faces +Z/+Y).
+        5 => vec![
+            full(NegY),
+            full(NegZ),
+            poly(&[[0., 0., 0.], [0., 0., 1.], [0., 1., 0.]], NegX, Some(NegX)),
+            poly(&[[1., 0., 0.], [1., 0., 1.], [1., 1., 0.]], PosX, Some(PosX)),
+            poly(&[[0., 0., 1.], [1., 0., 1.], [1., 1., 0.], [0., 1., 0.]], PosZ, None),
+        ],
+        6 => shape_polys(5)?.into_iter().map(mirror_y).collect(),
+        // Vertical 45° deflector, diagonal face towards +Z/+X.
+        7 => vec![
+            poly(&[[0., 0., 0.], [1., 0., 0.], [0., 0., 1.]], NegY, Some(NegY)),
+            poly(&[[0., 1., 0.], [1., 1., 0.], [0., 1., 1.]], PosY, Some(PosY)),
+            full(NegZ),
+            full(NegX),
+            poly(&[[1., 0., 0.], [0., 0., 1.], [0., 1., 1.], [1., 1., 0.]], PosZ, None),
+        ],
+        // 22.5° ramp over the upper half, falling towards +Z.
+        8 => vec![
+            full(NegY),
+            full(NegZ),
+            poly(&[[0., 0., 0.], [0., 0., 1.], [0., 0.5, 1.], [0., 1., 0.]], NegX, Some(NegX)),
+            poly(&[[1., 0., 0.], [1., 0., 1.], [1., 0.5, 1.], [1., 1., 0.]], PosX, Some(PosX)),
+            poly(&[[0., 0., 1.], [1., 0., 1.], [1., 0.5, 1.], [0., 0.5, 1.]], PosZ, Some(PosZ)),
+            poly(&[[0., 0.5, 1.], [1., 0.5, 1.], [1., 1., 0.], [0., 1., 0.]], PosY, None),
+        ],
+        9 => shape_polys(8)?.into_iter().map(mirror_y).collect(),
+        // Outer corner of two 45° ramps rising towards +X and +Z.
+        10 => vec![
+            full(NegY),
+            poly(&[[0., 0., 0.], [1., 0., 0.], [1., 1., 1.]], NegZ, None),
+            poly(&[[0., 0., 0.], [0., 0., 1.], [1., 1., 1.]], NegX, None),
+            poly(&[[1., 0., 0.], [1., 0., 1.], [1., 1., 1.]], PosX, Some(PosX)),
+            poly(&[[0., 0., 1.], [1., 0., 1.], [1., 1., 1.]], PosZ, Some(PosZ)),
+        ],
+        11 => shape_polys(10)?.into_iter().map(mirror_y).collect(),
+        // Corner piece with one sloped face towards −X/−Z/+Y.
+        12 => vec![
+            poly(&[[1., 0., 0.], [1., 0., 1.], [0., 0., 1.]], NegY, Some(NegY)),
+            poly(&[[1., 0., 0.], [0., 0., 1.], [1., 1., 1.]], PosZ, None),
+            poly(&[[1., 0., 0.], [1., 0., 1.], [1., 1., 1.]], PosX, Some(PosX)),
+            poly(&[[0., 0., 1.], [1., 0., 1.], [1., 1., 1.]], PosZ, Some(PosZ)),
+        ],
+        13 => shape_polys(12)?.into_iter().map(mirror_y).collect(),
+        _ => return None,
+    })
+}
+
+/// Rotates a horizontal direction by `r` quarter turns anticlockwise seen
+/// from above (+X → −Z → −X → +Z).
+fn rotate_dir(d: FaceDir, r: u8) -> FaceDir {
+    use FaceDir::*;
+    let mut d = d;
+    for _ in 0..r % 4 {
+        d = match d {
+            PosX => NegZ,
+            NegZ => NegX,
+            NegX => PosZ,
+            PosZ => PosX,
+            v => v,
+        };
+    }
+    d
+}
+
+/// Rotates a local point about the cell's vertical centre line, matching
+/// [`rotate_dir`].
+fn rotate_point(p: [f32; 3], r: u8) -> [f32; 3] {
+    let (mut x, mut z) = (p[0] - 0.5, p[2] - 0.5);
+    for _ in 0..r % 4 {
+        // +X (1,0) → −Z (0,−1): (x, z) → (z, −x).
+        (x, z) = (z, -x);
+    }
+    [x + 0.5, p[1], z + 0.5]
+}
+
+fn dir_offset(d: FaceDir) -> [i32; 3] {
+    match d {
+        FaceDir::PosX => [1, 0, 0],
+        FaceDir::NegX => [-1, 0, 0],
+        FaceDir::PosY => [0, 1, 0],
+        FaceDir::NegY => [0, -1, 0],
+        FaceDir::PosZ => [0, 0, 1],
+        FaceDir::NegZ => [0, 0, -1],
+    }
+}
+
+/// Texture coordinates within a tile for a local point, projected onto the
+/// source face's plane. `v` runs down the tile.
+fn tile_uv(src: FaceDir, p: [f32; 3]) -> [f32; 2] {
+    let [x, y, z] = p;
+    match src {
+        FaceDir::PosZ => [x, 1.0 - y],
+        FaceDir::NegZ => [1.0 - x, 1.0 - y],
+        FaceDir::PosX => [1.0 - z, 1.0 - y],
+        FaceDir::NegX => [z, 1.0 - y],
+        FaceDir::PosY => [x, z],
+        FaceDir::NegY => [x, 1.0 - z],
+    }
+}
+
+/// Block ids with hard-coded invisible behaviour (see `docs/spec/blk.md`).
+const INVISIBLE_IDS: [u8; 2] = [3, 4];
+
+/// Vertical extent `(bottom, top)` within the cell, from the segment mask.
+fn segment_span(segments: u8) -> (f32, f32) {
+    let lo = segments.trailing_zeros() as f32;
+    let hi = 8.0 - segments.leading_zeros() as f32; // index of highest set bit + 1
+    (lo / 4.0, hi / 4.0)
+}
+
+struct Grid<'a> {
+    level: &'a Level,
+    blocks: &'a BlockSet,
+}
+
+impl Grid<'_> {
+    fn cell(&self, p: [i32; 3]) -> Option<BlockCell> {
+        let in_range = |v: i32, n: usize| v >= 0 && (v as usize) < n;
+        (in_range(p[0], SIZE_X) && in_range(p[1], SIZE_Y) && in_range(p[2], SIZE_Z))
+            .then(|| self.level.block(p[0] as usize, p[1] as usize, p[2] as usize))
+    }
+
+    /// True if the cell is an opaque full cube, or the face-suppressing block 3.
+    fn hides_neighbour_faces(&self, p: [i32; 3]) -> bool {
+        let Some(c) = self.cell(p) else { return false };
+        if c.is_empty() {
+            return false;
+        }
+        if c.id == 3 {
+            return true;
+        }
+        let def = &self.blocks.defs[c.id as usize];
+        c.shape == 0
+            && c.segments == 0xF
+            && !INVISIBLE_IDS.contains(&c.id)
+            && !def.is_placeholder()
+            && def.flags & flags::DOUBLE_SIDED == 0
+            && def.faces.iter().all(|f| f.modifiers & (modifiers::COLOR0_TRANSPARENT | modifiers::REVERSE_SIDE) == 0)
+    }
+}
+
+impl MeshData {
+    fn push_poly(&mut self, verts: &[[f32; 3]], uvs: &[[f32; 2]], brightness: f32, both_sides: bool) {
+        let n = {
+            let (a, b, c) = (verts[0], verts[1], verts[2]);
+            let u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+            let v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+            let n = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+            let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt().max(1e-6);
+            n.map(|c| c / len)
+        };
+        let color = [brightness, brightness, brightness, 1.0];
+        for side in 0..if both_sides { 2 } else { 1 } {
+            let base = self.positions.len() as u32;
+            let normal = if side == 0 { n } else { n.map(|c| -c) };
+            for (p, uv) in verts.iter().zip(uvs) {
+                self.positions.push(*p);
+                self.normals.push(normal);
+                self.uvs.push(*uv);
+                self.colors.push(color);
+            }
+            for i in 1..verts.len() as u32 - 1 {
+                if side == 0 {
+                    self.indices.extend([base, base + i, base + i + 1]);
+                } else {
+                    self.indices.extend([base, base + i + 1, base + i]);
+                }
+            }
+        }
+    }
+}
+
+/// Builds the geometry of all visible blocks.
+pub fn build(level: &Level, blocks: &BlockSet) -> LevelMesh {
+    let grid = Grid { level, blocks };
+    let mut out = LevelMesh::default();
+    let mut unsupported = std::collections::BTreeMap::<u8, usize>::new();
+    for (x, y, z, cell, _) in level.cells() {
+        if cell.is_empty() || INVISIBLE_IDS.contains(&cell.id) {
+            continue;
+        }
+        let def = &blocks.defs[cell.id as usize];
+        if def.is_placeholder() {
+            continue;
+        }
+        let Some(polys) = shape_polys(cell.shape) else {
+            *unsupported.entry(cell.shape).or_default() += 1;
+            continue;
+        };
+        let (y0, y1) = segment_span(cell.segments);
+        let origin = [x as f32, y as f32, z as f32];
+        let mut solid_verts: Vec<[f32; 3]> = Vec::new();
+        let mut placed: Vec<PlacedPoly> = Vec::new();
+        for p in &polys {
+            let uvs: Vec<[f32; 2]> = p
+                .verts
+                .iter()
+                .map(|v| {
+                    let ly = y0 + v[1] * (y1 - y0);
+                    tile_uv(p.src, [v[0], ly, v[2]])
+                })
+                .collect();
+            let verts: Vec<[f32; 3]> = p
+                .verts
+                .iter()
+                .map(|v| {
+                    let r = rotate_point([v[0], y0 + v[1] * (y1 - y0), v[2]], cell.rotation);
+                    [r[0] + origin[0], r[1] + origin[1], r[2] + origin[2]]
+                })
+                .collect();
+            solid_verts.extend(&verts);
+            placed.push((verts, uvs, p));
+        }
+        let centre = {
+            let n = solid_verts.len() as f32;
+            let s = solid_verts.iter().fold([0.0; 3], |a, v| [a[0] + v[0], a[1] + v[1], a[2] + v[2]]);
+            s.map(|c| c / n)
+        };
+        for (mut verts, mut uvs, p) in placed {
+            // Faces on the cell boundary are hidden by an opaque neighbour.
+            if let Some(local) = p.on_face {
+                let world = rotate_dir(local, cell.rotation);
+                let on_boundary = match world {
+                    FaceDir::PosY => y1 >= 1.0,
+                    FaceDir::NegY => y0 <= 0.0,
+                    _ => true,
+                };
+                let o = dir_offset(world);
+                let n = [x as i32 + o[0], y as i32 + o[1], z as i32 + o[2]];
+                if on_boundary && grid.hides_neighbour_faces(n) {
+                    continue;
+                }
+            }
+            let face = def.face(p.src);
+            if face.texture == 0xFF || face.texture as u32 >= TILES {
+                continue;
+            }
+            // Wind the polygon counter-clockwise as seen from outside.
+            let (a, b, c) = (verts[0], verts[1], verts[2]);
+            let u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+            let v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+            let n = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+            let pc = {
+                let k = verts.len() as f32;
+                let s = verts.iter().fold([0.0; 3], |acc, q| [acc[0] + q[0], acc[1] + q[1], acc[2] + q[2]]);
+                s.map(|c| c / k)
+            };
+            let out_dir = [pc[0] - centre[0], pc[1] - centre[1], pc[2] - centre[2]];
+            if n[0] * out_dir[0] + n[1] * out_dir[1] + n[2] * out_dir[2] < 0.0 {
+                verts.reverse();
+                uvs.reverse();
+            }
+            let tile = face.texture as f32;
+            let strip_uvs: Vec<[f32; 2]> =
+                uvs.iter().map(|[u, v]| [*u, (tile + v.clamp(0.0, 1.0)) / TILES as f32]).collect();
+            let brightness = 1.0 - (face.shading.min(8) as f32) * 0.07;
+            let transparent = face.modifiers & (modifiers::COLOR0_TRANSPARENT | modifiers::REVERSE_SIDE) != 0;
+            let double = def.flags & flags::DOUBLE_SIDED != 0;
+            let target = if transparent { &mut out.cutout } else { &mut out.opaque };
+            target.push_poly(&verts, &strip_uvs, brightness, double);
+        }
+    }
+    out.unsupported_shapes = unsupported.into_iter().collect();
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rotation_consistency() {
+        // Rotating a face's points must move them onto the rotated face.
+        for r in 0..4 {
+            for d in [FaceDir::PosX, FaceDir::NegX, FaceDir::PosZ, FaceDir::NegZ] {
+                let o = dir_offset(d);
+                let p = [0.5 + o[0] as f32 * 0.5, 0.5, 0.5 + o[2] as f32 * 0.5];
+                let rp = rotate_point(p, r);
+                let ro = dir_offset(rotate_dir(d, r));
+                assert_eq!(rp, [0.5 + ro[0] as f32 * 0.5, 0.5, 0.5 + ro[2] as f32 * 0.5]);
+            }
+        }
+    }
+
+    #[test]
+    fn segments() {
+        assert_eq!(segment_span(0b1111), (0.0, 1.0));
+        assert_eq!(segment_span(0b1100), (0.5, 1.0));
+        assert_eq!(segment_span(0b0010), (0.25, 0.5));
+    }
+}

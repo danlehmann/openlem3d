@@ -1,0 +1,12 @@
+[package]
+name = "l3d-tool"
+description = "Command-line inspector for Lemmings 3D game data"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+l3d-formats.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+png.workspace = true

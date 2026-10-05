@@ -1,0 +1,305 @@
+//! openlem3d: level viewer (first milestone of the game).
+//!
+//! Usage: `openlem3d [--data DIR] [--level N] [--camera 1-4] [--screenshot FILE]`
+//!
+//! Controls: W/S/A/D or arrows move, Q/E or right-drag turn, R/F rise/fall,
+//! 1–4 preset cameras, N/P next/previous level.
+
+mod level_mesh;
+mod scene_build;
+mod scene_render;
+
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use bevy::core_pipeline::tonemapping::Tonemapping;
+use bevy::input::mouse::AccumulatedMouseMotion;
+use bevy::prelude::*;
+use bevy::render::RenderPlugin;
+use bevy::render::settings::{Backends, RenderCreation, WgpuSettings};
+use bevy::render::view::screenshot::{Screenshot, save_to_disk};
+use l3d_formats::gamedata::{GameData, locate_data_dir};
+use l3d_formats::level::CameraPreset;
+use scene_render::{SceneCamera, SceneContent, SceneRenderPlugin};
+
+/// Command-line options.
+#[derive(Resource, Clone)]
+struct Options {
+    data: Option<PathBuf>,
+    level: u32,
+    camera: Option<usize>,
+    screenshot: Option<PathBuf>,
+    /// Vertical field of view in degrees.
+    fov_y: f32,
+    /// Height of the horizon on screen, as a fraction from the top.
+    horizon: f32,
+    /// Initial window size in physical pixels.
+    size: Option<(u32, u32)>,
+}
+
+fn parse_args() -> Options {
+    let mut o = Options {
+        data: None,
+        level: 1,
+        camera: None,
+        screenshot: None,
+        fov_y: DEFAULT_FOV_Y,
+        horizon: DEFAULT_HORIZON,
+        size: None,
+    };
+    let mut args = std::env::args().skip(1);
+    while let Some(a) = args.next() {
+        let mut val = || args.next().unwrap_or_else(|| panic!("{a} needs a value"));
+        match a.as_str() {
+            "--data" => o.data = Some(val().into()),
+            "--level" => o.level = val().parse().expect("--level takes a number"),
+            "--camera" => o.camera = Some(val().parse().expect("--camera takes 1-4")),
+            "--screenshot" => o.screenshot = Some(val().into()),
+            "--fov" => o.fov_y = val().parse().expect("--fov takes degrees"),
+            "--horizon" => o.horizon = val().parse().expect("--horizon takes a fraction"),
+            "--size" => {
+                let v = val();
+                let (w, h) = v.split_once('x').expect("--size takes WxH");
+                o.size = Some((w.parse().expect("width"), h.parse().expect("height")));
+            }
+            _ => panic!("unknown argument {a}"),
+        }
+    }
+    o
+}
+
+/// GPU backend selection. Vulkan on Windows-on-ARM (Adreno) loses the device
+/// after a few seconds, so Windows defaults to DX12. `WGPU_BACKEND` overrides.
+fn wgpu_settings() -> WgpuSettings {
+    let mut s = WgpuSettings::default();
+    if cfg!(windows) && std::env::var_os("WGPU_BACKEND").is_none() {
+        s.backends = Some(Backends::DX12);
+    }
+    s
+}
+
+fn main() {
+    let opts = parse_args();
+    let dir = locate_data_dir(opts.data.as_deref());
+    let data = GameData::open(&dir).unwrap_or_else(|e| {
+        eprintln!("Cannot open the Lemmings 3D CD image in {}: {e}", dir.display());
+        eprintln!("Put the .cue and .bin in ./gamedata, set OPENLEM3D_DATA, or pass --data DIR.");
+        std::process::exit(1);
+    });
+    App::new()
+        .add_plugins(
+            DefaultPlugins
+                .set(WindowPlugin {
+                    primary_window: Some(Window {
+                        title: "openlem3d".into(),
+                        resolution: match opts.size {
+                            Some((w, h)) => bevy::window::WindowResolution::new(w, h).with_scale_factor_override(1.0),
+                            None => default(),
+                        },
+                        ..default()
+                    }),
+                    ..default()
+                })
+                .set(RenderPlugin {
+                    render_creation: RenderCreation::Automatic(Box::new(wgpu_settings())),
+                    ..default()
+                }),
+        )
+        .add_plugins(SceneRenderPlugin)
+        .insert_resource(ClearColor(Color::srgb(0.35, 0.55, 0.85)))
+        .insert_resource(opts.clone())
+        .insert_resource(Data(data))
+        .insert_resource(CurrentLevel { number: opts.level, loaded: None })
+        .add_systems(Startup, spawn_camera)
+        .add_systems(Update, (switch_level, load_level, camera_controls, screenshot_when_ready).chain())
+        .run();
+}
+
+#[derive(Resource)]
+struct Data(GameData);
+
+/// The level being shown; `loaded` lags `number` until the level is built.
+#[derive(Resource)]
+struct CurrentLevel {
+    number: u32,
+    loaded: Option<u32>,
+}
+
+/// The current level's preset cameras.
+#[derive(Resource)]
+struct LevelInfo {
+    cameras: [CameraPreset; 4],
+}
+
+/// The player camera: free horizontal position and yaw; never pitches.
+#[derive(Component)]
+struct ViewCamera {
+    pos: Vec3,
+    /// Facing in radians; 0 faces −X, π/2 faces −Z (the original's rotation
+    /// steps, see `docs/spec/level.md`).
+    yaw: f32,
+}
+
+impl ViewCamera {
+    fn forward(&self) -> Vec3 {
+        Vec3::new(-self.yaw.cos(), 0.0, -self.yaw.sin())
+    }
+
+    fn set_preset(&mut self, p: &CameraPreset) {
+        self.pos = Vec3::new(16.0 + p.x as f32 / 256.0, 8.0 + p.y as f32 / 256.0, 16.0 + p.z as f32 / 256.0);
+        self.yaw = p.rotation as f32 * std::f32::consts::FRAC_PI_2;
+    }
+}
+
+/// Vertical field of view of the scene camera.
+const DEFAULT_FOV_Y: f32 = 51.0;
+
+/// Default horizon height (fraction of the screen from the top). The original
+/// never pitches its camera but draws the horizon well above the middle of
+/// the screen, i.e. it uses an off-centre projection.
+const DEFAULT_HORIZON: f32 = 0.3125;
+
+/// Perspective projection whose horizon (the camera's eye level) lies at
+/// `horizon` (fraction from the top of the screen) instead of the centre.
+fn projection(fov_y_deg: f32, aspect: f32, horizon: f32) -> Mat4 {
+    // Adding `shift · w_clip` (w_clip = −z_view) to clip-space y moves every
+    // NDC y by `shift`; the horizon (y_view = 0, z_view → −∞) lands at `shift`.
+    let shift = 1.0 - 2.0 * horizon;
+    // The far plane reaches the edge of the sea plane (see scene_build).
+    let mut p = Mat4::perspective_rh(fov_y_deg.to_radians(), aspect, 0.05, 8000.0);
+    p.z_axis.y -= shift;
+    p
+}
+
+/// Sky texel column at the left edge of a 640-wide screen for a camera
+/// facing `yaw`. The 1024-texel panorama spans one full turn and each texel
+/// covers two screen pixels; facing +Z (yaw 3π/2) puts column 928 at the
+/// screen centre (`docs/spec/camera.md`).
+fn sky_left_column(yaw: f32) -> f32 {
+    const CENTRE_AT_POS_Z: f32 = 928.0;
+    let centre = CENTRE_AT_POS_Z + (yaw - 3.0 * std::f32::consts::FRAC_PI_2) * 1024.0 / std::f32::consts::TAU;
+    (centre - 160.0).rem_euclid(1024.0)
+}
+
+fn spawn_camera(mut commands: Commands) {
+    // A 2D camera drives the frame; the scene renderer draws the 3D level
+    // into its target before sprites and UI.
+    commands.spawn((Camera2d, Tonemapping::None, Msaa::Off, ViewCamera { pos: Vec3::new(16.0, 8.0, 16.0), yaw: 0.0 }));
+}
+
+fn switch_level(keys: Res<ButtonInput<KeyCode>>, mut current: ResMut<CurrentLevel>) {
+    if keys.just_pressed(KeyCode::KeyN) {
+        current.number = (current.number + 1) % 100;
+    }
+    if keys.just_pressed(KeyCode::KeyP) {
+        current.number = (current.number + 99) % 100;
+    }
+}
+
+fn load_level(
+    mut commands: Commands,
+    mut current: ResMut<CurrentLevel>,
+    mut data: ResMut<Data>,
+    opts: Res<Options>,
+    mut scene: ResMut<SceneContent>,
+    mut cams: Query<&mut ViewCamera>,
+    mut windows: Query<&mut Window>,
+) {
+    if current.loaded == Some(current.number) {
+        return;
+    }
+    let n = current.number;
+    current.loaded = Some(n);
+    let (level, content, mesh) = match scene_build::build(&mut data.0, n) {
+        Ok(v) => v,
+        Err(e) => {
+            error!("level {n}: {e}");
+            return;
+        }
+    };
+    if !mesh.unsupported_shapes.is_empty() {
+        warn!("level {n}: unsupported shapes (shape, cells): {:?}", mesh.unsupported_shapes);
+    }
+    info!(
+        "level {n:03} {:?}: texture set {}, {} opaque + {} cutout triangles",
+        level.title,
+        level.texture_set,
+        mesh.opaque.indices.len() / 3,
+        mesh.cutout.indices.len() / 3
+    );
+    for mut w in &mut windows {
+        w.title = format!("openlem3d - LEVEL.{n:03} {}", level.title);
+    }
+    scene.version += 1;
+    scene.data = Some(Arc::new(content));
+    let preset = opts.camera.filter(|c| (1..=4).contains(c)).unwrap_or(1) - 1;
+    for mut cam in &mut cams {
+        cam.set_preset(&level.cameras[preset]);
+    }
+    commands.insert_resource(LevelInfo { cameras: level.cameras });
+}
+
+#[allow(clippy::too_many_arguments)] // Bevy system parameters
+fn camera_controls(
+    opts: Res<Options>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    motion: Res<AccumulatedMouseMotion>,
+    time: Res<Time>,
+    info: Option<Res<LevelInfo>>,
+    windows: Query<&Window>,
+    mut scene_cam: ResMut<SceneCamera>,
+    mut q: Query<&mut ViewCamera>,
+) {
+    let dt = time.delta_secs();
+    for mut cam in &mut q {
+        let presets = [KeyCode::Digit1, KeyCode::Digit2, KeyCode::Digit3, KeyCode::Digit4];
+        if let Some(info) = &info {
+            for (i, k) in presets.iter().enumerate() {
+                if keys.just_pressed(*k) {
+                    cam.set_preset(&info.cameras[i]);
+                }
+            }
+        }
+        let held = |a: KeyCode, b: KeyCode| (keys.pressed(a) || keys.pressed(b)) as i32 as f32;
+        let turn = held(KeyCode::KeyE, KeyCode::KeyE) - held(KeyCode::KeyQ, KeyCode::KeyQ);
+        cam.yaw += turn * 1.8 * dt;
+        if mouse.pressed(MouseButton::Right) {
+            cam.yaw += motion.delta.x * 0.005;
+        }
+        let fwd = cam.forward();
+        let right = Vec3::new(-fwd.z, 0.0, fwd.x);
+        let speed = if keys.pressed(KeyCode::ShiftLeft) { 16.0 } else { 6.0 };
+        let mv = fwd * (held(KeyCode::KeyW, KeyCode::ArrowUp) - held(KeyCode::KeyS, KeyCode::ArrowDown))
+            + right * (held(KeyCode::KeyD, KeyCode::ArrowRight) - held(KeyCode::KeyA, KeyCode::ArrowLeft))
+            + Vec3::Y * (held(KeyCode::KeyR, KeyCode::PageUp) - held(KeyCode::KeyF, KeyCode::PageDown));
+        cam.pos += mv * speed * dt;
+        let aspect = windows.iter().next().map_or(16.0 / 9.0, |w| w.width() / w.height().max(1.0));
+        let view = Mat4::look_to_rh(cam.pos, cam.forward(), Vec3::Y);
+        scene_cam.view_proj = projection(opts.fov_y, aspect, opts.horizon) * view;
+        scene_cam.horizon = opts.horizon;
+        scene_cam.time = time.elapsed_secs();
+        scene_cam.sky_column = sky_left_column(cam.yaw);
+    }
+}
+
+/// With `--screenshot`, saves one frame once the level has rendered, then exits.
+fn screenshot_when_ready(
+    mut commands: Commands,
+    opts: Res<Options>,
+    current: Res<CurrentLevel>,
+    mut frames: Local<u32>,
+    mut exit: MessageWriter<AppExit>,
+) {
+    let Some(path) = &opts.screenshot else { return };
+    if current.loaded.is_none() {
+        return;
+    }
+    *frames += 1;
+    if *frames == 30 {
+        commands.spawn(Screenshot::primary_window()).observe(save_to_disk(path.clone()));
+    }
+    if *frames == 60 {
+        exit.write(AppExit::Success);
+    }
+}

@@ -1,0 +1,11 @@
+[package]
+name = "openlem3d"
+description = "Open-source reimplementation of Lemmings 3D"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+l3d-formats.workspace = true
+bevy = "0.19.1"
+wgpu = "29.0.4"
