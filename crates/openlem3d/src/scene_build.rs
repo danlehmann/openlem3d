@@ -225,6 +225,51 @@ fn object_base_y(y: usize, block: BlockCell) -> f32 {
     }
 }
 
+/// Interactive-object type values (header `0x114`, [L3DEdit]).
+const TRAP_TRAMPOLINE: u8 = 3;
+const TRAP_SPRING: u8 = 4;
+const TRAP_TELEPORTER: u8 = 5;
+
+/// Height of the top of the block in a cell, if the cell holds one.
+fn block_top(y: usize, block: BlockCell) -> Option<f32> {
+    (block.segments != 0).then(|| y as f32 + (8 - block.segments.leading_zeros()) as f32 / 4.0)
+}
+
+/// Interactive objects (`0x60`–`0x67`) from the level's `TRAPS` sheet of
+/// 64×64 frames. Trampolines are flat top-down pads on their block; other
+/// types are side-view sprites. Placement follows [L3DEdit] (unverified);
+/// objects show their first frame until the simulation animates them.
+fn trap_layer(data: &mut GameData, level: &Level, pal: &Palette) -> Option<SceneLayer> {
+    let kind = level.trap_type;
+    let traps = (kind != 0xFF).then(|| data.gfx("TRAPS", kind).ok()).flatten()?;
+    let tex = [64.0, (traps.len() / 64) as f32];
+    let mut b = LayerBuilder::default();
+    for (x, y, z, block, o) in level.cells() {
+        if !(0x60..=0x67).contains(&o.kind) {
+            continue;
+        }
+        let (cx, cz) = (x as f32 + 0.5, z as f32 + 0.5);
+        let top = block_top(y, block);
+        match kind {
+            TRAP_TRAMPOLINE | TRAP_SPRING | TRAP_TELEPORTER => {
+                // These need a block to stand on ([L3DEdit]).
+                let Some(top) = top else { continue };
+                if kind == TRAP_TRAMPOLINE {
+                    // Red pads use frames 0–3, blue pads frames 4–7.
+                    let frame = if o.kind >= 0x64 { 4.0 } else { 0.0 };
+                    let y = top + DECAL_OFFSET;
+                    let (x0, z0, x1, z1) = (x as f32, z as f32, x as f32 + 1.0, z as f32 + 1.0);
+                    b.quad([[x0, y, z1], [x1, y, z1], [x1, y, z0], [x0, y, z0]], [0.0, frame * 64.0, 64.0, 64.0], tex, 1.0);
+                } else {
+                    b.sprite([cx, top, cz], [0.0, 0.0, 64.0, 64.0], tex, 1, 0.0);
+                }
+            }
+            _ => b.sprite([cx, top.unwrap_or(y as f32), cz], [0.0, 0.0, 64.0, 64.0], tex, 1, 0.0),
+        }
+    }
+    (!b.indices.is_empty()).then(|| b.finish(indexed_to_rgba(&traps, 64, pal)))
+}
+
 /// Sprite layers for static (`OBJ`) and animated (`ANIMOBJ`) objects.
 fn object_layers(data: &mut GameData, level: &Level, pal: &Palette) -> Vec<SceneLayer> {
     let mut layers = Vec::new();
@@ -458,6 +503,7 @@ pub fn build(data: &mut GameData, n: u32) -> Result<BuiltLevel, l3d_formats::Err
     scene.layers.push(block_layer(&mesh, indexed_to_rgba(&tex, 64, &pal)));
     scene.layers.extend(object_layers(data, &level, &pal));
     scene.layers.extend(decal_layers(data, &level, &pal));
+    scene.layers.extend(trap_layer(data, &level, &pal));
 
     scene.sprite_atlas = lemming_atlas(data, &pal).ok();
 
