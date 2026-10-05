@@ -174,6 +174,7 @@ public static class Lem3dWin32
     /// in another application.
     public static IntPtr Target = IntPtr.Zero;
 
+    /// Sends a press or move, but only while the target window has focus.
     static void Send(INPUT i)
     {
         if (Target != IntPtr.Zero && GetForegroundWindow() != Target && !Focus(Target))
@@ -181,8 +182,36 @@ public static class Lem3dWin32
         SendInput(1, new[] { i }, Marshal.SizeOf(typeof(INPUT)));
     }
 
-    public static void KeyDown(string name) { Send(KeyInput(ScanOf(name), false)); }
-    public static void KeyUp(string name) { Send(KeyInput(ScanOf(name), true)); }
+    /// Sends a release unconditionally: a release must never be withheld,
+    /// or the key stays held system-wide and auto-repeats into whatever
+    /// window has focus.
+    static void SendRelease(INPUT i)
+    {
+        SendInput(1, new[] { i }, Marshal.SizeOf(typeof(INPUT)));
+    }
+
+    /// Keys and mouse buttons currently held down by this process.
+    static readonly HashSet<string> HeldKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    static readonly HashSet<string> HeldButtons = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+    public static void KeyDown(string name)
+    {
+        Send(KeyInput(ScanOf(name), false));
+        HeldKeys.Add(name);
+    }
+
+    public static void KeyUp(string name)
+    {
+        SendRelease(KeyInput(ScanOf(name), true));
+        HeldKeys.Remove(name);
+    }
+
+    /// Releases every key and mouse button still held by this process.
+    public static void ReleaseAll()
+    {
+        foreach (var k in new List<string>(HeldKeys)) KeyUp(k);
+        foreach (var b in new List<string>(HeldButtons)) Button(b, false);
+    }
 
     // ---- mouse ----------------------------------------------------------
 
@@ -209,7 +238,16 @@ public static class Lem3dWin32
         }
         var i = new INPUT { type = INPUT_MOUSE };
         i.u.mi.dwFlags = f;
-        Send(i);
+        if (down)
+        {
+            Send(i);
+            HeldButtons.Add(which);
+        }
+        else
+        {
+            SendRelease(i);
+            HeldButtons.Remove(which);
+        }
     }
 
     [DllImport("user32.dll")] static extern bool GetClipCursor(out RECT r);

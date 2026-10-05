@@ -108,6 +108,10 @@ function Click([string]$btn, [string]$xy, [int]$ms) {
     [Lem3dWin32]::Button($btn, $false)
 }
 
+# Everything pressed is released when this script ends, normally or by an
+# error: a key left held would keep auto-repeating into whatever window has
+# focus. Consequently `down:` holds do not outlast one send.ps1 call.
+try {
 foreach ($a in $Actions) {
     # Bare words are key names (so DOWN is the arrow key), except the mouse
     # verbs below; everything else is verb:argument.
@@ -162,4 +166,7 @@ foreach ($a in $Actions) {
         }
     }
     Start-Sleep -Milliseconds $GapMs
+}
+} finally {
+    [Lem3dWin32]::ReleaseAll()
 }
