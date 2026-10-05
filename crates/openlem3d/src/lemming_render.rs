@@ -78,8 +78,6 @@ impl ViewAngle {
 /// How an action's cells are arranged by viewing angle.
 #[derive(Clone, Copy)]
 enum Angles {
-    /// One block for every angle.
-    One,
     /// Five blocks, front to back; the left-hand angles mirror the
     /// three-quarter and side blocks. The stored side views are assumed to
     /// face screen-right (unverified).
@@ -134,7 +132,6 @@ fn cell_for(a: Anim, view: ViewAngle, ticks: u32) -> (u32, bool) {
     let step = ticks / TICKS_PER_FRAME;
     let frame = if a.once { step.min(a.frames - 1) } else { step % a.frames };
     let (block, mirror) = match a.angles {
-        Angles::One => (0, false),
         Angles::Eight => (view.round_index(), false),
         Angles::Five => {
             let r = view.round_index();
