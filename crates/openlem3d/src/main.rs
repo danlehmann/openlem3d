@@ -1,11 +1,13 @@
 //! openlem3d: level viewer (first milestone of the game).
 //!
 //! Usage: `openlem3d [--data DIR] [--level N] [--camera 1-4] [--screenshot FILE]`
+//! Without `--level` the game starts at the level-select screen.
 //!
 //! Controls: W/S/A/D or arrows move, Q/E or right-drag turn, R/F rise/fall,
-//! 1–4 preset cameras, P pause, [ / ] previous/next level.
+//! 1–4 preset cameras, P pause, [ / ] previous/next level, Esc level select.
 
 mod hud;
+mod menu;
 mod lemming_render;
 mod level_mesh;
 mod scene_build;
@@ -29,7 +31,8 @@ use scene_render::{SceneCamera, SceneContent, SceneRenderPlugin};
 #[derive(Resource, Clone)]
 struct Options {
     data: Option<PathBuf>,
-    level: u32,
+    /// Level to start in directly; the level-select screen otherwise.
+    level: Option<u32>,
     camera: Option<usize>,
     screenshot: Option<PathBuf>,
     /// Vertical field of view in degrees.
@@ -45,7 +48,7 @@ struct Options {
 fn parse_args() -> Options {
     let mut o = Options {
         data: None,
-        level: 1,
+        level: None,
         camera: None,
         screenshot: None,
         fov_y: DEFAULT_FOV_Y,
@@ -58,7 +61,7 @@ fn parse_args() -> Options {
         let mut val = || args.next().unwrap_or_else(|| panic!("{a} needs a value"));
         match a.as_str() {
             "--data" => o.data = Some(val().into()),
-            "--level" => o.level = val().parse().expect("--level takes a number"),
+            "--level" => o.level = Some(val().parse().expect("--level takes a number")),
             "--camera" => o.camera = Some(val().parse().expect("--camera takes 1-4")),
             "--screenshot" => o.screenshot = Some(val().into()),
             "--fov" => o.fov_y = val().parse().expect("--fov takes degrees"),
@@ -112,26 +115,31 @@ fn main() {
                     ..default()
                 }),
         )
-        .add_plugins((SceneRenderPlugin, hud::HudPlugin))
+        .add_plugins((SceneRenderPlugin, hud::HudPlugin, menu::MenuPlugin))
         .insert_resource(ClearColor(Color::srgb(0.35, 0.55, 0.85)))
         .insert_resource(opts.clone())
         .insert_resource(Data(data))
-        .insert_resource(CurrentLevel { number: opts.level, loaded: None })
+        .insert_resource(CurrentLevel { number: opts.level.unwrap_or(0), loaded: None })
+        .insert_state(if opts.level.is_some() { menu::AppState::Playing } else { menu::AppState::Menu })
+        .add_systems(Update, screenshot_when_ready)
         .insert_resource(Game::default())
         .insert_resource(Time::<Fixed>::from_hz(l3d_sim::TICKS_PER_SECOND as f64))
-        .add_systems(FixedUpdate, step_simulation)
+        .add_systems(FixedUpdate, step_simulation.run_if(in_state(menu::AppState::Playing)))
         .add_systems(PostUpdate, update_lemming_sprites)
         .add_systems(Startup, spawn_camera)
-        .add_systems(Update, (switch_level, load_level, camera_controls, screenshot_when_ready).chain())
+        .add_systems(
+            Update,
+            (switch_level, load_level, camera_controls).chain().run_if(in_state(menu::AppState::Playing)),
+        )
         .run();
 }
 
 #[derive(Resource)]
-struct Data(GameData);
+pub struct Data(pub GameData);
 
 /// The level being shown; `loaded` lags `number` until the level is built.
 #[derive(Resource)]
-struct CurrentLevel {
+pub struct CurrentLevel {
     number: u32,
     loaded: Option<u32>,
 }
@@ -342,12 +350,13 @@ fn screenshot_when_ready(
     mut commands: Commands,
     opts: Res<Options>,
     current: Res<CurrentLevel>,
+    state: Res<State<menu::AppState>>,
     time: Res<Time>,
     mut elapsed: Local<Option<f32>>,
     mut exit: MessageWriter<AppExit>,
 ) {
     let Some(path) = &opts.screenshot else { return };
-    if current.loaded.is_none() {
+    if current.loaded.is_none() && *state.get() != menu::AppState::Menu {
         return;
     }
     let before = elapsed.unwrap_or(-time.delta_secs());

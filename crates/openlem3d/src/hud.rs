@@ -6,6 +6,7 @@ use bevy::text::FontSize;
 use l3d_sim::{SUB, Skill};
 
 use crate::Game;
+use crate::menu::AppState;
 use crate::scene_render::SceneCamera;
 
 pub struct HudPlugin;
@@ -14,7 +15,24 @@ impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SelectedSkill>()
             .add_systems(Startup, spawn_hud)
-            .add_systems(Update, (skill_buttons, skill_keys, update_labels, assign_on_pointer).chain());
+            .add_systems(
+                Update,
+                (skill_buttons, skill_keys, update_labels, assign_on_pointer)
+                    .chain()
+                    .run_if(in_state(AppState::Playing)),
+            )
+            .add_systems(Update, show_in_play);
+    }
+}
+
+/// Shows the HUD only while a level is being played.
+fn show_in_play(state: Res<State<AppState>>, mut roots: Query<&mut Visibility, With<HudRoot>>) {
+    if !state.is_changed() {
+        return;
+    }
+    let v = if *state.get() == AppState::Playing { Visibility::Inherited } else { Visibility::Hidden };
+    for mut vis in &mut roots {
+        *vis = v;
     }
 }
 
@@ -31,6 +49,10 @@ struct SkillLabel(Skill);
 #[derive(Component)]
 struct StatusText;
 
+/// Marks the top-level HUD nodes, hidden outside play.
+#[derive(Component)]
+struct HudRoot;
+
 const BUTTON_IDLE: Color = Color::srgba(0.1, 0.1, 0.2, 0.75);
 const BUTTON_SELECTED: Color = Color::srgba(0.8, 0.2, 0.1, 0.9);
 
@@ -40,18 +62,22 @@ fn spawn_hud(mut commands: Commands) {
         TextFont { font_size: FontSize::Px(18.0), ..default() },
         Node { position_type: PositionType::Absolute, top: px(8), left: px(8), ..default() },
         StatusText,
+        HudRoot,
     ));
     commands
-        .spawn(Node {
-            position_type: PositionType::Absolute,
-            bottom: px(0),
-            left: px(0),
-            right: px(0),
-            justify_content: JustifyContent::Center,
-            column_gap: px(4),
-            padding: UiRect::all(px(4)),
-            ..default()
-        })
+        .spawn((
+            HudRoot,
+            Node {
+                position_type: PositionType::Absolute,
+                bottom: px(0),
+                left: px(0),
+                right: px(0),
+                justify_content: JustifyContent::Center,
+                column_gap: px(4),
+                padding: UiRect::all(px(4)),
+                ..default()
+            },
+        ))
         .with_children(|bar| {
             for skill in Skill::ALL {
                 bar.spawn((
