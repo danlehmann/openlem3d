@@ -108,6 +108,32 @@ impl LayerBuilder {
         self.indices.extend([base, base + 1, base + 2, base, base + 2, base + 3]);
     }
 
+    /// Adds a fixed quad with corners bottom-left, bottom-right, top-right,
+    /// top-left as seen from its front, showing texel rectangle `rect`
+    /// (`[x, y, w, h]`) of a texture of `tex_size`.
+    fn quad(&mut self, corners: [[f32; 3]; 4], rect: [f32; 4], tex_size: [f32; 2], brightness: f32) {
+        let [x, y, w, h] = rect;
+        let (u0, u1) = (x / tex_size[0], (x + w) / tex_size[0]);
+        let (v0, v1) = (y / tex_size[1], (y + h) / tex_size[1]);
+        let base = self.base();
+        for (p, uv) in corners.iter().zip([[u0, v1], [u1, v1], [u1, v0], [u0, v0]]) {
+            Vertex::fixed(*p, uv, brightness, true).push(&mut self.vertices);
+        }
+        self.indices.extend([base, base + 1, base + 2, base, base + 2, base + 3]);
+    }
+
+    /// A vertical quad whose bottom edge is centred on `centre`, facing
+    /// horizontal direction `normal`, `width` × `height` units.
+    fn vertical_quad(&mut self, centre: [f32; 3], normal: [f32; 2], width: f32, height: f32, rect: [f32; 4], tex: [f32; 2], brightness: f32) {
+        // Right as seen from the front: +Y × normal.
+        let right = [normal[1], -normal[0]];
+        let (hw, [cx, cy, cz]) = (width / 2.0, centre);
+        let bl = [cx - right[0] * hw, cy, cz - right[1] * hw];
+        let br = [cx + right[0] * hw, cy, cz + right[1] * hw];
+        let up = |p: [f32; 3]| [p[0], p[1] + height, p[2]];
+        self.quad([bl, br, up(br), up(bl)], rect, tex, brightness);
+    }
+
     fn finish(self, texture: RgbaImage) -> SceneLayer {
         SceneLayer { vertices: self.vertices, indices: self.indices, texture }
     }
@@ -255,6 +281,93 @@ fn object_layers(data: &mut GameData, level: &Level, pal: &Palette) -> Vec<Scene
     layers
 }
 
+/// Gap between a decal and the cell face it is painted on.
+const DECAL_OFFSET: f32 = 0.004;
+
+/// Horizontal outward normals of a cell's sides in the order signs and walls
+/// number them: +X, −Z, −X, +Z.
+const SIDE_NORMALS: [[f32; 2]; 4] = [[1.0, 0.0], [0.0, -1.0], [-1.0, 0.0], [0.0, 1.0]];
+
+/// Texel rectangle of sign graphic `g` (0–15) in a 64×768 `SIGNS` sheet:
+/// graphics 0–7 are 64×32, 8–15 are 64×64.
+fn sign_rect(g: u8) -> [f32; 4] {
+    if g < 8 { [0.0, g as f32 * 32.0, 64.0, 32.0] } else { [0.0, 256.0 + (g - 8) as f32 * 64.0, 64.0, 64.0] }
+}
+
+/// Sign (`0x20`–`0x3F`) and wall-decal (`0x70`–`0xEF`) layers
+/// ([L3DEdit] semantics, unverified).
+fn decal_layers(data: &mut GameData, level: &Level, pal: &Palette) -> Vec<SceneLayer> {
+    let signs = (level.sign_set != 0xFF).then(|| data.gfx("SIGNS", level.sign_set).ok()).flatten();
+    let walls = (level.walls_set != 0xFF).then(|| data.gfx("WALLS", level.walls_set).ok()).flatten();
+    let sign_tex = [64.0, signs.as_ref().map_or(768, |s| s.len() / 64) as f32];
+    let wall_tex = [64.0, walls.as_ref().map_or(1024, |w| w.len() / 64) as f32];
+    let (mut sign_b, mut wall_b) = (LayerBuilder::default(), LayerBuilder::default());
+    for (x, y, z, block, o) in level.cells() {
+        let base_y = object_base_y(y, block);
+        let (cx, cz) = (x as f32 + 0.5, z as f32 + 0.5);
+        match o.kind {
+            0x20..=0x3F if signs.is_some() => {
+                // Low 2 bits: the edge; bits 2–3: the graphic pair. The front
+                // graphic faces out of the cell, the back one into it.
+                let n = SIDE_NORMALS[(o.kind & 3) as usize];
+                let pair = (o.kind >> 2) & 3;
+                let (front, back) = if o.kind < 0x30 {
+                    (8 + pair, 12 + pair)
+                } else {
+                    [(0, 2), (1, 3), (4, 6), (5, 7)][pair as usize]
+                };
+                let at = |d: f32| [cx + n[0] * d, base_y, cz + n[1] * d];
+                let (fr, br) = (sign_rect(front), sign_rect(back));
+                sign_b.vertical_quad(at(0.5 + DECAL_OFFSET), n, 1.0, fr[3] / 64.0, fr, sign_tex, 1.0);
+                sign_b.vertical_quad(at(0.5 - DECAL_OFFSET), [-n[0], -n[1]], 1.0, br[3] / 64.0, br, sign_tex, 1.0);
+            }
+            0x70..=0xEF if walls.is_some() => {
+                let rect = [0.0, (o.kind & 0xF) as f32 * 64.0, 64.0, 64.0];
+                let (x0, z0, x1, z1) = (x as f32, z as f32, x as f32 + 1.0, z as f32 + 1.0);
+                match o.kind >> 4 {
+                    side @ 0x7..=0xA => {
+                        let n = SIDE_NORMALS[(side - 0x7) as usize];
+                        let c = [cx + n[0] * (0.5 + DECAL_OFFSET), base_y, cz + n[1] * (0.5 + DECAL_OFFSET)];
+                        wall_b.vertical_quad(c, n, 1.0, 1.0, rect, wall_tex, 1.0);
+                    }
+                    0xB => {
+                        // Underside; the image's bottom edge faces −X.
+                        let y = base_y - DECAL_OFFSET;
+                        wall_b.quad([[x0, y, z1], [x0, y, z0], [x1, y, z0], [x1, y, z1]], rect, wall_tex, 1.0);
+                    }
+                    0xC => {
+                        // Top; the image's bottom edge faces −X.
+                        let y = base_y + 1.0 + DECAL_OFFSET;
+                        wall_b.quad([[x0, y, z0], [x0, y, z1], [x1, y, z1], [x1, y, z0]], rect, wall_tex, 1.0);
+                    }
+                    half @ (0xD | 0xE) => {
+                        // Half-height, darkened panel through the middle of the
+                        // cell: along Z (0xD) or along X (0xE), seen from both sides.
+                        let n = if half == 0xD { [1.0, 0.0] } else { [0.0, 1.0] };
+                        let c = [cx, base_y, cz];
+                        wall_b.vertical_quad(c, n, 1.0, 0.5, rect, wall_tex, 0.6);
+                        wall_b.vertical_quad(c, [-n[0], -n[1]], 1.0, 0.5, rect, wall_tex, 0.6);
+                    }
+                    _ => {}
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut layers = Vec::new();
+    if let Some(s) = signs
+        && !sign_b.indices.is_empty()
+    {
+        layers.push(sign_b.finish(indexed_to_rgba(&s, 64, pal)));
+    }
+    if let Some(w) = walls
+        && !wall_b.indices.is_empty()
+    {
+        layers.push(wall_b.finish(indexed_to_rgba(&w, 64, pal)));
+    }
+    layers
+}
+
 /// Cells per row in the lemming atlas.
 pub const ATLAS_COLUMNS: u32 = 32;
 /// Size of one lemming cell in `LEMM.MHC`.
@@ -343,6 +456,7 @@ pub fn build(data: &mut GameData, n: u32) -> Result<BuiltLevel, l3d_formats::Err
     let block_layer_index = scene.layers.len();
     scene.layers.push(block_layer(&mesh, indexed_to_rgba(&tex, 64, &pal)));
     scene.layers.extend(object_layers(data, &level, &pal));
+    scene.layers.extend(decal_layers(data, &level, &pal));
 
     scene.sprite_atlas = lemming_atlas(data, &pal).ok();
 
