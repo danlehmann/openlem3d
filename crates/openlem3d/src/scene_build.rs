@@ -66,9 +66,9 @@ impl Vertex {
 
 /// Accumulates vertices and indices for one layer.
 #[derive(Default)]
-struct LayerBuilder {
-    vertices: Vec<f32>,
-    indices: Vec<u32>,
+pub struct LayerBuilder {
+    pub vertices: Vec<f32>,
+    pub indices: Vec<u32>,
 }
 
 impl LayerBuilder {
@@ -80,8 +80,21 @@ impl LayerBuilder {
     /// `rect` is the sprite's texel rectangle `[x, y, w, h]` in a texture of
     /// `tex_size`; `frames` > 1 animates by stepping down `frame_stride` texels.
     fn sprite(&mut self, anchor: [f32; 3], rect: [f32; 4], tex_size: [f32; 2], frames: u32, frame_stride: f32) {
+        self.sprite_scaled(anchor, rect, tex_size, frames, frame_stride, SPRITE_TEXELS_PER_UNIT);
+    }
+
+    /// Like [`Self::sprite`] with an explicit texel density.
+    pub fn sprite_scaled(
+        &mut self,
+        anchor: [f32; 3],
+        rect: [f32; 4],
+        tex_size: [f32; 2],
+        frames: u32,
+        frame_stride: f32,
+        texels_per_unit: f32,
+    ) {
         let [x, y, w, h] = rect;
-        let (hw, hh) = (w / SPRITE_TEXELS_PER_UNIT / 2.0, h / SPRITE_TEXELS_PER_UNIT);
+        let (hw, hh) = (w / texels_per_unit / 2.0, h / texels_per_unit);
         let (u0, u1) = (x / tex_size[0], (x + w) / tex_size[0]);
         let (v0, v1) = (y / tex_size[1], (y + h) / tex_size[1]);
         let anim = [frames as f32, frame_stride / tex_size[1]];
@@ -240,6 +253,31 @@ fn object_layers(data: &mut GameData, level: &Level, pal: &Palette) -> Vec<Scene
     layers
 }
 
+/// Cells per row in the lemming atlas.
+pub const ATLAS_COLUMNS: u32 = 32;
+/// Size of one lemming cell in `LEMM.MHC`.
+pub const LEMMING_CELL: u32 = 64;
+
+/// All `LEMM.MHC` cells packed into one texture, [`ATLAS_COLUMNS`] per row;
+/// cell `i` is at column `i % ATLAS_COLUMNS`, row `i / ATLAS_COLUMNS`.
+fn lemming_atlas(data: &mut GameData, pal: &Palette) -> Result<RgbaImage, l3d_formats::Error> {
+    let raw = data.read("LEMM/LEMM.MHC")?;
+    let mhc = l3d_formats::mhc::MhcFile::parse(&raw, LEMMING_CELL as usize)?;
+    let n = mhc.entries.len() as u32;
+    let (w, h) = (ATLAS_COLUMNS * LEMMING_CELL, n.div_ceil(ATLAS_COLUMNS) * LEMMING_CELL);
+    let mut pixels = vec![0u8; (w * h) as usize];
+    for i in 0..n {
+        let cell = mhc.cell(i as usize)?;
+        let (ox, oy) = ((i % ATLAS_COLUMNS) * LEMMING_CELL, (i / ATLAS_COLUMNS) * LEMMING_CELL);
+        for y in 0..LEMMING_CELL {
+            let dst = ((oy + y) * w + ox) as usize;
+            let src = (y * LEMMING_CELL) as usize;
+            pixels[dst..dst + LEMMING_CELL as usize].copy_from_slice(&cell.pixels[src..src + LEMMING_CELL as usize]);
+        }
+    }
+    Ok(indexed_to_rgba(&pixels, w, pal))
+}
+
 /// Builds everything drawn for level `n`.
 pub fn build(data: &mut GameData, n: u32) -> Result<(Level, SceneData, LevelMesh), l3d_formats::Error> {
     let level = data.level(n)?;
@@ -278,6 +316,8 @@ pub fn build(data: &mut GameData, n: u32) -> Result<(Level, SceneData, LevelMesh
     }
     scene.layers.push(block_layer(&mesh, indexed_to_rgba(&tex, 64, &pal)));
     scene.layers.extend(object_layers(data, &level, &pal));
+
+    scene.sprite_atlas = lemming_atlas(data, &pal).ok();
 
     if level.sky_gfx != 0xFF
         && let Ok(sky) = data.gfx("SKY", level.sky_gfx)

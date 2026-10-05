@@ -37,6 +37,17 @@ pub struct SceneData {
     pub layers: Vec<SceneLayer>,
     /// Panoramic backdrop drawn above the horizon, if any.
     pub sky: Option<RgbaImage>,
+    /// Texture for the per-frame sprites in [`SceneSprites`].
+    pub sprite_atlas: Option<RgbaImage>,
+}
+
+/// Geometry rebuilt every frame (moving sprites such as lemmings), textured
+/// with [`SceneData::sprite_atlas`].
+#[derive(Resource, Clone, ExtractResource, Default)]
+pub struct SceneSprites {
+    /// Interleaved vertices, [`VERTEX_FLOATS`] per vertex.
+    pub vertices: Vec<f32>,
+    pub indices: Vec<u32>,
 }
 
 /// Triangles sharing one texture.
@@ -74,10 +85,14 @@ pub struct SceneRenderPlugin;
 
 impl Plugin for SceneRenderPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<SceneContent>().init_resource::<SceneCamera>().add_plugins((
-            ExtractResourcePlugin::<SceneContent>::default(),
-            ExtractResourcePlugin::<SceneCamera>::default(),
-        ));
+        app.init_resource::<SceneContent>()
+            .init_resource::<SceneCamera>()
+            .init_resource::<SceneSprites>()
+            .add_plugins((
+                ExtractResourcePlugin::<SceneContent>::default(),
+                ExtractResourcePlugin::<SceneCamera>::default(),
+                ExtractResourcePlugin::<SceneSprites>::default(),
+            ));
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else { return };
         render_app
             .add_systems(Render, prepare_scene.in_set(RenderSystems::Prepare))
@@ -106,6 +121,9 @@ struct SceneGpu {
     version: Option<u64>,
     layers: Vec<UploadedLayer>,
     sky: Option<wgpu::BindGroup>,
+    sprite_atlas: Option<wgpu::BindGroup>,
+    /// Per-frame sprite geometry: buffers (grown as needed) and index count.
+    sprites: Option<(wgpu::Buffer, wgpu::Buffer, u32)>,
     /// Depth buffer and its size.
     depth: Option<((u32, u32), wgpu::TextureView)>,
     /// Size of the colour target, for the sky parameters.
@@ -180,6 +198,8 @@ impl FromWorld for SceneGpu {
             version: None,
             layers: Vec::new(),
             sky: None,
+            sprite_atlas: None,
+            sprites: None,
             depth: None,
             target_size: (1, 1),
         }
@@ -309,6 +329,7 @@ impl SceneGpu {
 
 fn prepare_scene(
     content: Res<SceneContent>,
+    sprites: Res<SceneSprites>,
     camera: Res<SceneCamera>,
     device: Res<RenderDevice>,
     queue: Res<RenderQueue>,
@@ -324,6 +345,7 @@ fn prepare_scene(
     uniforms.extend([camera.sky_column - extra / 2.0, camera.horizon * h as f32, scale, camera.time]);
     uniforms.extend([camera.right.x, camera.right.y, camera.right.z, 0.0]);
     queue.write_buffer(&gpu.uniforms, 0, &f32_bytes(&uniforms));
+    upload_sprites(device, &queue, &mut gpu, &sprites);
     if gpu.version == Some(content.version) {
         return;
     }
@@ -331,6 +353,7 @@ fn prepare_scene(
     let Some(data) = content.data.as_ref() else {
         gpu.layers.clear();
         gpu.sky = None;
+        gpu.sprite_atlas = None;
         return;
     };
     let layers = data
@@ -354,6 +377,40 @@ fn prepare_scene(
         .collect();
     gpu.layers = layers;
     gpu.sky = data.sky.as_ref().map(|s| gpu.bind_texture(device, &queue, s));
+    gpu.sprite_atlas = data.sprite_atlas.as_ref().map(|s| gpu.bind_texture(device, &queue, s));
+}
+
+/// Copies this frame's sprite geometry into GPU buffers, growing them when
+/// they are too small.
+fn upload_sprites(device: &wgpu::Device, queue: &wgpu::Queue, gpu: &mut SceneGpu, sprites: &SceneSprites) {
+    let count = sprites.indices.len() as u32;
+    if count == 0 {
+        if let Some(s) = &mut gpu.sprites {
+            s.2 = 0;
+        }
+        return;
+    }
+    let vbytes = f32_bytes(&sprites.vertices);
+    let ibytes: Vec<u8> = sprites.indices.iter().flat_map(|i| i.to_le_bytes()).collect();
+    let fits = gpu
+        .sprites
+        .as_ref()
+        .is_some_and(|(v, i, _)| v.size() >= vbytes.len() as u64 && i.size() >= ibytes.len() as u64);
+    if !fits {
+        let alloc = |len: usize, usage| {
+            device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("scene sprites"),
+                size: (len as u64 * 2).next_multiple_of(wgpu::COPY_BUFFER_ALIGNMENT),
+                usage: usage | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            })
+        };
+        gpu.sprites = Some((alloc(vbytes.len(), wgpu::BufferUsages::VERTEX), alloc(ibytes.len(), wgpu::BufferUsages::INDEX), 0));
+    }
+    let (v, i, n) = gpu.sprites.as_mut().unwrap();
+    queue.write_buffer(v, 0, &vbytes);
+    queue.write_buffer(i, 0, &ibytes);
+    *n = count;
 }
 
 fn draw_scene(view: ViewQuery<&ViewTarget>, mut gpu: ResMut<SceneGpu>, mut ctx: RenderContext) {
@@ -364,7 +421,7 @@ fn draw_scene(view: ViewQuery<&ViewTarget>, mut gpu: ResMut<SceneGpu>, mut ctx: 
     let depth = gpu.depth_view(&device, (size.width, size.height));
     gpu.ensure_pipelines(&device, target.main_texture_format());
     let gpu = &*gpu;
-    if gpu.layers.is_empty() && gpu.sky.is_none() {
+    if gpu.layers.is_empty() && gpu.sky.is_none() && gpu.sprites.is_none() {
         return;
     }
     let (_, geometry, sky_pipeline) = gpu.pipelines.as_ref().unwrap();
@@ -391,6 +448,14 @@ fn draw_scene(view: ViewQuery<&ViewTarget>, mut gpu: ResMut<SceneGpu>, mut ctx: 
         pass.set_vertex_buffer(0, layer.vertices.slice(..));
         pass.set_index_buffer(layer.indices.slice(..), wgpu::IndexFormat::Uint32);
         pass.draw_indexed(0..layer.index_count, 0, 0..1);
+    }
+    if let (Some(atlas), Some((v, i, n))) = (&gpu.sprite_atlas, &gpu.sprites)
+        && *n > 0
+    {
+        pass.set_bind_group(0, atlas, &[]);
+        pass.set_vertex_buffer(0, v.slice(..));
+        pass.set_index_buffer(i.slice(..), wgpu::IndexFormat::Uint32);
+        pass.draw_indexed(0..*n, 0, 0..1);
     }
 }
 

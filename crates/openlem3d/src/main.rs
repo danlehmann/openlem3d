@@ -3,8 +3,9 @@
 //! Usage: `openlem3d [--data DIR] [--level N] [--camera 1-4] [--screenshot FILE]`
 //!
 //! Controls: W/S/A/D or arrows move, Q/E or right-drag turn, R/F rise/fall,
-//! 1–4 preset cameras, N/P next/previous level.
+//! 1–4 preset cameras, P pause, [ / ] previous/next level.
 
+mod lemming_render;
 mod level_mesh;
 mod scene_build;
 mod scene_render;
@@ -35,6 +36,8 @@ struct Options {
     horizon: f32,
     /// Initial window size in physical pixels.
     size: Option<(u32, u32)>,
+    /// Seconds after loading before `--screenshot` captures.
+    wait: f32,
 }
 
 fn parse_args() -> Options {
@@ -46,6 +49,7 @@ fn parse_args() -> Options {
         fov_y: DEFAULT_FOV_Y,
         horizon: DEFAULT_HORIZON,
         size: None,
+        wait: 0.5,
     };
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -57,6 +61,7 @@ fn parse_args() -> Options {
             "--screenshot" => o.screenshot = Some(val().into()),
             "--fov" => o.fov_y = val().parse().expect("--fov takes degrees"),
             "--horizon" => o.horizon = val().parse().expect("--horizon takes a fraction"),
+            "--wait" => o.wait = val().parse().expect("--wait takes seconds"),
             "--size" => {
                 let v = val();
                 let (w, h) = v.split_once('x').expect("--size takes WxH");
@@ -110,6 +115,10 @@ fn main() {
         .insert_resource(opts.clone())
         .insert_resource(Data(data))
         .insert_resource(CurrentLevel { number: opts.level, loaded: None })
+        .insert_resource(Game::default())
+        .insert_resource(Time::<Fixed>::from_hz(l3d_sim::TICKS_PER_SECOND as f64))
+        .add_systems(FixedUpdate, step_simulation)
+        .add_systems(PostUpdate, update_lemming_sprites)
         .add_systems(Startup, spawn_camera)
         .add_systems(Update, (switch_level, load_level, camera_controls, screenshot_when_ready).chain())
         .run();
@@ -188,20 +197,46 @@ fn spawn_camera(mut commands: Commands) {
 }
 
 fn switch_level(keys: Res<ButtonInput<KeyCode>>, mut current: ResMut<CurrentLevel>) {
-    if keys.just_pressed(KeyCode::KeyN) {
+    if keys.just_pressed(KeyCode::BracketRight) {
         current.number = (current.number + 1) % 100;
     }
-    if keys.just_pressed(KeyCode::KeyP) {
+    if keys.just_pressed(KeyCode::BracketLeft) {
         current.number = (current.number + 99) % 100;
     }
 }
 
+/// The level being played.
+#[derive(Resource, Default)]
+struct Game {
+    sim: Option<l3d_sim::Simulation>,
+    paused: bool,
+}
+
+fn step_simulation(keys: Res<ButtonInput<KeyCode>>, mut game: ResMut<Game>) {
+    if keys.just_pressed(KeyCode::KeyP) {
+        game.paused = !game.paused;
+    }
+    if !game.paused
+        && let Some(sim) = &mut game.sim
+    {
+        sim.step();
+    }
+}
+
+fn update_lemming_sprites(game: Res<Game>, mut sprites: ResMut<scene_render::SceneSprites>) {
+    let Some(sim) = &game.sim else { return };
+    let rows = (l3d_formats::mhc::MANIFEST_ENTRIES as u32).div_ceil(scene_build::ATLAS_COLUMNS);
+    *sprites = lemming_render::build(&sim.lemmings, rows);
+}
+
+#[allow(clippy::too_many_arguments)] // Bevy system parameters
 fn load_level(
     mut commands: Commands,
     mut current: ResMut<CurrentLevel>,
     mut data: ResMut<Data>,
     opts: Res<Options>,
     mut scene: ResMut<SceneContent>,
+    mut game: ResMut<Game>,
     mut cams: Query<&mut ViewCamera>,
     mut windows: Query<&mut Window>,
 ) {
@@ -237,6 +272,10 @@ fn load_level(
         cam.set_preset(&level.cameras[preset]);
     }
     commands.insert_resource(LevelInfo { cameras: level.cameras });
+    match data.0.blocks(n) {
+        Ok(blocks) => game.sim = Some(l3d_sim::Simulation::new(&level, &blocks)),
+        Err(e) => error!("level {n}: {e}"),
+    }
 }
 
 #[allow(clippy::too_many_arguments)] // Bevy system parameters
@@ -284,23 +323,28 @@ fn camera_controls(
     }
 }
 
-/// With `--screenshot`, saves one frame once the level has rendered, then exits.
+/// With `--screenshot`, saves one frame `--wait` seconds after the level has
+/// loaded, then exits.
 fn screenshot_when_ready(
     mut commands: Commands,
     opts: Res<Options>,
     current: Res<CurrentLevel>,
-    mut frames: Local<u32>,
+    time: Res<Time>,
+    mut elapsed: Local<Option<f32>>,
     mut exit: MessageWriter<AppExit>,
 ) {
     let Some(path) = &opts.screenshot else { return };
     if current.loaded.is_none() {
         return;
     }
-    *frames += 1;
-    if *frames == 30 {
+    let before = elapsed.unwrap_or(-time.delta_secs());
+    let now = before + time.delta_secs();
+    *elapsed = Some(now);
+    let shot_at = opts.wait.max(0.5);
+    if before < shot_at && now >= shot_at {
         commands.spawn(Screenshot::primary_window()).observe(save_to_disk(path.clone()));
     }
-    if *frames == 60 {
+    if now >= shot_at + 0.5 {
         exit.write(AppExit::Success);
     }
 }

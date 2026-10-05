@@ -10,6 +10,7 @@ rust-version = "1.99"
 
 [workspace.dependencies]
 l3d-formats = { path = "crates/l3d-formats" }
+l3d-sim = { path = "crates/l3d-sim" }
 thiserror = "2"
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }

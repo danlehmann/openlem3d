@@ -1,0 +1,9 @@
+[package]
+name = "l3d-sim"
+description = "Deterministic Lemmings 3D game simulation"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+l3d-formats.workspace = true

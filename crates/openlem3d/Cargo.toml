@@ -9,3 +9,4 @@ license.workspace = true
 l3d-formats.workspace = true
 bevy = "0.19.1"
 wgpu = "29.0.4"
+l3d-sim.workspace = true

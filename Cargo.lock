@@ -3384,6 +3384,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "l3d-sim"
+version = "0.1.0"
+dependencies = [
+ "l3d-formats",
+]
+
+[[package]]
 name = "l3d-tool"
 version = "0.1.0"
 dependencies = [
@@ -4149,6 +4156,7 @@ version = "0.1.0"
 dependencies = [
  "bevy",
  "l3d-formats",
+ "l3d-sim",
  "wgpu",
 ]
 

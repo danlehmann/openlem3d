@@ -42,7 +42,9 @@ impl<'a> MhcFile<'a> {
             return Err(Error::Format("MHC file shorter than its manifest".into()));
         }
         let entries = data[..MANIFEST_LEN]
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .map(|e| {
                 let animation = e[0];
                 let rel = u16::from_le_bytes([e[2], e[3]]) as usize;
