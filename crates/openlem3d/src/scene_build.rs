@@ -96,7 +96,8 @@ impl LayerBuilder {
         texels_per_unit: f32,
     ) {
         let [x, y, w, h] = rect;
-        let (hw, hh) = (w / texels_per_unit / 2.0, h / texels_per_unit);
+        // A negative width mirrors the image horizontally.
+        let (hw, hh) = (w.abs() / texels_per_unit / 2.0, h / texels_per_unit);
         let (u0, u1) = (x / tex_size[0], (x + w) / tex_size[0]);
         let (v0, v1) = (y / tex_size[1], (y + h) / tex_size[1]);
         let anim = [frames as f32, frame_stride / tex_size[1]];
