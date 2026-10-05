@@ -79,16 +79,58 @@ enum Cmd {
         #[arg(long, default_value_t = 1.0)]
         sy: f64,
     },
-    /// Decode an MHC sprite file and write all cells as a PNG contact sheet
-    /// (16 cells per row), printing the manifest summary.
+    /// Decode an MHC sprite file and write its cells as a PNG contact sheet,
+    /// printing the manifest summary.
     Mhc {
         #[arg(default_value = "LEMM/LEMM.MHC")]
         path: String,
         /// Cell size in pixels (64 for LEMM.MHC, 128 for LEMM128.MHC).
         #[arg(long, default_value_t = 64)]
         size: usize,
+        /// Cells to include, as FIRST..END. Defaults to all cells.
+        #[arg(long)]
+        cells: Option<String>,
+        /// Cells per row.
+        #[arg(long, default_value_t = 16)]
+        per_row: usize,
+        /// Integer upscaling factor.
+        #[arg(long, default_value_t = 1)]
+        scale: usize,
+        /// Separate the cells with a gap and print each cell's index above it.
+        #[arg(long)]
+        labels: bool,
         #[arg(long)]
         out: PathBuf,
+    },
+    /// Rank the cells of an MHC sprite file by how closely each one matches a
+    /// sprite in screenshots. Cells are tried as stored and mirrored, and
+    /// compared on their opaque pixels.
+    MhcMatch {
+        /// Screenshots (PNG), each ranked separately.
+        #[arg(required = true)]
+        shots: Vec<PathBuf>,
+        /// Without --scale: the sprite's tight bounding box, as X,Y,W,H; each
+        /// cell's opaque bounding box is stretched onto it. With --scale: the
+        /// area to search.
+        #[arg(long)]
+        rect: String,
+        /// Draw cells at this fixed scale and search every position in --rect.
+        #[arg(long)]
+        scale: Option<f64>,
+        /// Cells to try, as FIRST..END. Defaults to all cells.
+        #[arg(long)]
+        cells: Option<String>,
+        #[arg(long, default_value = "LEMM/LEMM.MHC")]
+        path: String,
+        /// Cell size in pixels (64 for LEMM.MHC, 128 for LEMM128.MHC).
+        #[arg(long, default_value_t = 64)]
+        size: usize,
+        /// Largest shift, in screenshot pixels, tried for each rectangle edge.
+        #[arg(long, default_value_t = 2)]
+        jitter: i32,
+        /// Number of best matches to print.
+        #[arg(long, default_value_t = 10)]
+        top: usize,
     },
     /// Render a raw 8-bit indexed image file from the disc to PNG.
     Png {
@@ -116,13 +158,68 @@ fn load_palette(fs: &mut IsoFs, path: &str) -> Result<Vec<[u8; 3]>> {
 fn write_png(path: &Path, width: u32, pixels: &[u8], pal: &[[u8; 3]]) -> Result<()> {
     let height = pixels.len() as u32 / width;
     let rgb: Vec<u8> = pixels[..(width * height) as usize].iter().flat_map(|&i| pal[i as usize]).collect();
+    write_rgb_png(path, width, &rgb)
+}
+
+fn write_rgb_png(path: &Path, width: u32, rgb: &[u8]) -> Result<()> {
+    let height = rgb.len() as u32 / (width * 3);
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
     let mut enc = png::Encoder::new(std::io::BufWriter::new(std::fs::File::create(path)?), width, height);
     enc.set_color(png::ColorType::Rgb);
-    enc.write_header()?.write_image_data(&rgb)?;
+    enc.write_header()?.write_image_data(&rgb[..(width * height * 3) as usize])?;
     Ok(())
+}
+
+/// 3×5 bitmaps of the digits 0–9; each row is 3 bits, most significant bit
+/// leftmost.
+const DIGITS: [[u8; 5]; 10] = [
+    [7, 5, 5, 5, 7],
+    [2, 6, 2, 2, 7],
+    [7, 1, 7, 4, 7],
+    [7, 1, 7, 1, 7],
+    [5, 5, 7, 1, 1],
+    [7, 4, 7, 1, 7],
+    [7, 4, 7, 5, 7],
+    [7, 1, 1, 1, 1],
+    [7, 5, 7, 5, 7],
+    [7, 5, 7, 1, 7],
+];
+
+/// An RGB8 image with a fixed width.
+struct Canvas {
+    width: usize,
+    rgb: Vec<u8>,
+}
+
+impl Canvas {
+    fn new(width: usize, height: usize, fill: [u8; 3]) -> Self {
+        Canvas { width, rgb: fill.repeat(width * height) }
+    }
+
+    fn fill_rect(&mut self, x: usize, y: usize, w: usize, h: usize, c: [u8; 3]) {
+        for yy in y..y + h {
+            for xx in x..x + w {
+                let i = (yy * self.width + xx) * 3;
+                self.rgb[i..i + 3].copy_from_slice(&c);
+            }
+        }
+    }
+
+    /// Draws `n` in decimal with its top-left corner at (x, y), each font
+    /// pixel `px` canvas pixels wide.
+    fn number(&mut self, x: usize, y: usize, n: usize, px: usize, c: [u8; 3]) {
+        for (k, d) in n.to_string().bytes().enumerate() {
+            for (row, bits) in DIGITS[(d - b'0') as usize].iter().enumerate() {
+                for col in 0..3 {
+                    if bits & (4 >> col) != 0 {
+                        self.fill_rect(x + (k * 4 + col) * px, y + row * px, px, px, c);
+                    }
+                }
+            }
+        }
+    }
 }
 
 fn load_level(fs: &mut IsoFs, n: u32) -> Result<Level> {
@@ -170,6 +267,18 @@ fn parse_range(s: &str) -> Result<std::ops::Range<i32>> {
     Ok(a.parse()?..b.parse()?)
 }
 
+/// The cell indices selected by an optional FIRST..END argument, clamped to
+/// `0..len`; all cells when absent.
+fn cell_range(arg: Option<&str>, len: usize) -> Result<std::ops::Range<usize>> {
+    Ok(match arg {
+        Some(s) => {
+            let r = parse_range(s)?;
+            (r.start.max(0) as usize).min(len)..(r.end.max(0) as usize).min(len)
+        }
+        None => 0..len,
+    })
+}
+
 /// Mean absolute RGB difference between `a[x, y]` and `b[x + dx, y]` over the
 /// region, or `None` if the shifted region leaves image B.
 fn region_diff(a: &(u32, u32, Vec<u8>), b: &(u32, u32, Vec<u8>), rows: &std::ops::Range<i32>, cols: &std::ops::Range<i32>, dx: i32) -> Option<f64> {
@@ -189,6 +298,84 @@ fn region_diff(a: &(u32, u32, Vec<u8>), b: &(u32, u32, Vec<u8>), rows: &std::ops
         }
     }
     Some(sum as f64 / n as f64)
+}
+
+/// How a cell's opaque bounding box is laid onto a screenshot.
+enum Placement {
+    /// Stretched onto the rectangle (X,Y,W,H) with each edge shifted by up to
+    /// `jitter` pixels.
+    Fit { rect: [i32; 4], jitter: i32 },
+    /// Scaled by `scale` and moved to every position where it lies inside
+    /// the rectangle (X,Y,W,H).
+    Search { rect: [i32; 4], scale: f64 },
+}
+
+/// A cell's best fit to a screenshot: mean absolute RGB difference over the
+/// cell's opaque pixels, whether the cell was mirrored, and the screenshot
+/// position of the cell's opaque bounding box.
+struct CellFit {
+    score: f64,
+    mirrored: bool,
+    at: (i32, i32),
+}
+
+/// Best (lowest-scoring) fit of a cell to the screenshot over all mirrorings
+/// and positions the placement allows; `None` if the cell is empty or never
+/// fits.
+fn best_cell_fit(pixels: &[u8], size: usize, pal: &[[u8; 3]], img: &(u32, u32, Vec<u8>), placement: &Placement) -> Option<CellFit> {
+    let opaque: Vec<(usize, usize)> = (0..size * size).filter(|&k| pixels[k] != 0).map(|k| (k % size, k / size)).collect();
+    let (bx0, by0) = (opaque.iter().map(|p| p.0).min()?, opaque.iter().map(|p| p.1).min()?);
+    let (bx1, by1) = (opaque.iter().map(|p| p.0).max()? + 1, opaque.iter().map(|p| p.1).max()? + 1);
+    let (bw, bh) = ((bx1 - bx0) as f64, (by1 - by0) as f64);
+    // Compare at most about 400 evenly spread opaque pixels.
+    let step = opaque.len().div_ceil(400);
+    let samples: Vec<(usize, usize)> = opaque.into_iter().step_by(step).collect();
+    // Candidate placements as (x0, y0, x scale, y scale).
+    let mut candidates: Vec<(i32, i32, f64, f64)> = Vec::new();
+    match *placement {
+        Placement::Fit { rect: [x, y, w, h], jitter } => {
+            for dx0 in -jitter..=jitter {
+                for dx1 in -jitter..=jitter {
+                    for dy0 in -jitter..=jitter {
+                        for dy1 in -jitter..=jitter {
+                            let (cw, ch) = (w + dx1 - dx0, h + dy1 - dy0);
+                            if cw > 0 && ch > 0 {
+                                candidates.push((x + dx0, y + dy0, cw as f64 / bw, ch as f64 / bh));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Placement::Search { rect: [x, y, w, h], scale } => {
+            let (sw, sh) = ((bw * scale).ceil() as i32, (bh * scale).ceil() as i32);
+            for y0 in y..=y + h - sh {
+                for x0 in x..=x + w - sw {
+                    candidates.push((x0, y0, scale, scale));
+                }
+            }
+        }
+    }
+    let (iw, ih) = (img.0 as i32, img.1 as i32);
+    let mut best: Option<CellFit> = None;
+    for mirrored in [false, true] {
+        for &(x0, y0, sx, sy) in &candidates {
+            let mut sum = 0u64;
+            for &(cx, cy) in &samples {
+                let u = if mirrored { bx1 - 1 - cx } else { cx - bx0 };
+                let px = x0 + ((u as f64 + 0.5) * sx) as i32;
+                let py = y0 + (((cy - by0) as f64 + 0.5) * sy) as i32;
+                let c = pal[pixels[cy * size + cx] as usize];
+                let i = ((py.clamp(0, ih - 1) * iw + px.clamp(0, iw - 1)) * 3) as usize;
+                sum += (0..3).map(|k| (img.2[i + k] as i32 - c[k] as i32).unsigned_abs() as u64).sum::<u64>();
+            }
+            let score = sum as f64 / (samples.len() * 3) as f64;
+            if best.as_ref().is_none_or(|b| score < b.score) {
+                best = Some(CellFit { score, mirrored, at: (x0, y0) });
+            }
+        }
+    }
+    best
 }
 
 fn main() -> Result<()> {
@@ -381,7 +568,7 @@ fn main() -> Result<()> {
                 println!("  {i:3}: {c:?}");
             }
         }
-        Cmd::Mhc { path, size, out } => {
+        Cmd::Mhc { path, size, cells, per_row, scale, labels, out } => {
             let mut fs = open_fs(&disc)?;
             let pal = load_palette(&mut fs, "GFX/LM3D.PAL")?;
             let data = rnc::unpack_if_packed(fs.read_path(path)?)?;
@@ -396,18 +583,31 @@ fn main() -> Result<()> {
             for (a, (n, flags)) in &per_anim {
                 println!("animation {a:3}: {n:3} cells, flags {flags:02x?}");
             }
-            let per_row = 16;
-            let rows = mhc.entries.len().div_ceil(per_row);
-            let (w, h) = (per_row * size, rows * size);
-            let mut sheet = vec![0u8; w * h];
+            let range = cell_range(cells.as_deref(), mhc.entries.len())?;
+            anyhow::ensure!(!range.is_empty() && *per_row > 0 && *scale > 0, "nothing to draw");
+            // Layout: each slot is a label strip (if any) above the scaled cell,
+            // plus a gap to the right and below (if labelled).
+            let cell_px = size * scale;
+            let (gap, label_h) = if *labels { (4, 14) } else { (0, 0) };
+            let (slot_w, slot_h) = (cell_px + gap, label_h + cell_px + gap);
+            let rows = range.len().div_ceil(*per_row);
+            let background = if *labels { [48, 64, 80] } else { pal[0] };
+            let mut sheet = Canvas::new(per_row * slot_w, rows * slot_h, background);
             let mut failed = 0;
-            for i in 0..mhc.entries.len() {
+            for (k, i) in range.clone().enumerate() {
+                let (ox, oy) = ((k % per_row) * slot_w, (k / per_row) * slot_h);
+                if *labels {
+                    sheet.number(ox + 1, oy + 2, i, 2, [255, 255, 0]);
+                }
                 match mhc.cell(i) {
                     Ok(cell) => {
-                        let (ox, oy) = ((i % per_row) * size, (i / per_row) * size);
-                        for y in 0..*size {
-                            sheet[(oy + y) * w + ox..(oy + y) * w + ox + size]
-                                .copy_from_slice(&cell.pixels[y * size..(y + 1) * size]);
+                        for y in 0..cell_px {
+                            for x in 0..cell_px {
+                                let p = cell.pixels[(y / scale) * size + x / scale];
+                                if p != 0 || !*labels {
+                                    sheet.fill_rect(ox + x, oy + label_h + y, 1, 1, pal[p as usize]);
+                                }
+                            }
                         }
                     }
                     Err(e) => {
@@ -416,8 +616,35 @@ fn main() -> Result<()> {
                     }
                 }
             }
-            write_png(out, w as u32, &sheet, &pal)?;
-            println!("{} cells, {failed} failed -> {}", mhc.entries.len(), out.display());
+            write_rgb_png(out, sheet.width as u32, &sheet.rgb)?;
+            println!("{} cells, {failed} failed -> {}", range.len(), out.display());
+        }
+        Cmd::MhcMatch { shots, rect, scale, cells, path, size, jitter, top } => {
+            let mut fs = open_fs(&disc)?;
+            let pal = load_palette(&mut fs, "GFX/LM3D.PAL")?;
+            let data = rnc::unpack_if_packed(fs.read_path(path)?)?;
+            let mhc = l3d_formats::mhc::MhcFile::parse(&data, *size)?;
+            let r: Vec<i32> = rect.split(',').map(str::parse).collect::<Result<_, _>>().context("rect must be X,Y,W,H")?;
+            let rect: [i32; 4] = r.try_into().ok().filter(|r: &[i32; 4]| r[2] > 0 && r[3] > 0).context("rect must be X,Y,W,H")?;
+            let placement = match scale {
+                Some(scale) => Placement::Search { rect, scale: *scale },
+                None => Placement::Fit { rect, jitter: *jitter },
+            };
+            let range = cell_range(cells.as_deref(), mhc.entries.len())?;
+            let decoded: Vec<(usize, Vec<u8>)> = range.map(|i| Ok((i, mhc.cell(i)?.pixels))).collect::<Result<_>>()?;
+            for shot in shots {
+                let img = read_rgb(shot)?;
+                let mut results: Vec<(usize, CellFit)> = decoded
+                    .iter()
+                    .filter_map(|(i, px)| best_cell_fit(px, *size, &pal, &img, &placement).map(|f| (*i, f)))
+                    .collect();
+                results.sort_by(|a, b| a.1.score.total_cmp(&b.1.score));
+                println!("{}:", shot.display());
+                for (i, f) in results.iter().take(*top) {
+                    let m = if f.mirrored { " mirrored" } else { "" };
+                    println!("  cell {i:3}{m:9} at ({:4},{:4}): mean abs diff {:.1}", f.at.0, f.at.1, f.score);
+                }
+            }
         }
         Cmd::Png { path, width, palette, skip, out } => {
             let mut fs = open_fs(&disc)?;
