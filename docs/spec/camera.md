@@ -83,8 +83,13 @@ How we verified it:
 - **Sea:** drawn as an endless plane at the top of grid layer 0 (y = 1).
   Verified visually: island blocks in layer 0 sit flush with the water in
   `LEVEL.000`.
-- **Sea texture:** **unverified.** The scale per grid unit and the use of the
-  64×256 `SEA` strip (animation frames?) are guesses. Our tiling shows a
-  visible grid where the original looks like uniform noise.
+- **Sea texture, with the level flag `0x0020`:** the 16 KB `SEA` file is one
+  128×128 texture.
+  - Verified visually in `LEVEL.000`: read this way, the sea shows the
+    original's even noise pattern. Read as 64-wide frames, it showed a
+    visible tile grid.
+  - Our density of 64 texels per grid unit is unverified.
+- **Sea texture, without the flag:** a 64-wide strip, probably 64×64
+  animation frames (unverified).
 - **Land polygons:** drawn at the same height with the `LAND` texture. Shape
   verified visually in `LEVEL.000`; texture scale unverified.

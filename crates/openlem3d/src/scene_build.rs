@@ -18,6 +18,7 @@ const SPRITE_TEXELS_PER_UNIT: f32 = 64.0;
 mod level_flags {
     pub const SEA_SOLID_COLOUR: u16 = 0x0001;
     pub const LAND_INVISIBLE: u16 = 0x0004;
+    pub const SEA_128: u16 = 0x0020;
     pub const LAND_128: u16 = 0x0100;
     pub const SURROUND_SKY: u16 = 0x0200;
     pub const LAND_HALF_SCALE: u16 = 0x0800;
@@ -314,9 +315,15 @@ pub fn build(data: &mut GameData, n: u32) -> Result<BuiltLevel, l3d_formats::Err
         && flags & level_flags::SEA_SOLID_COLOUR == 0
         && let Ok(sea) = data.gfx("SEA", level.sea_gfx)
     {
-        // First 64×64 frame; one texture repeat per grid unit (unverified).
-        let frame = &sea[..64 * 64.min(sea.len() / 64)];
-        scene.layers.push(plane_layer(GROUND_Y - 0.01, 1.0, indexed_to_rgba(frame, 64, &pal)));
+        // With the "128×128" flag the 16 KB file is one 128×128 texture;
+        // otherwise it is a 64-wide strip whose first 64×64 frame we use.
+        // Texel density matches block faces, 64 per grid unit (unverified).
+        let (img, tile) = if flags & level_flags::SEA_128 != 0 {
+            (indexed_to_rgba(&sea[..(128 * 128).min(sea.len())], 128, &pal), 2.0)
+        } else {
+            (indexed_to_rgba(&sea[..(64 * 64).min(sea.len())], 64, &pal), 1.0)
+        };
+        scene.layers.push(plane_layer(GROUND_Y - 0.01, tile, img));
     }
     if level.land_gfx != 0xFF
         && flags & level_flags::LAND_INVISIBLE == 0
