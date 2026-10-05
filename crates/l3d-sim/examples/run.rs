@@ -43,6 +43,11 @@ fn main() {
             states(|s| matches!(s, State::Falling { .. })),
         );
     }
+    let changes = sim.world.take_changes();
+    println!("terrain cells changed: {}", changes.len());
+    for (c, b) in changes.iter().take(12) {
+        println!("  cell {c:?} -> segments {:04b}", b.segments);
+    }
     for (i, l) in sim.lemmings.iter().enumerate().take(10) {
         let p = l.pos.map(|v| v as f32 / SUB as f32);
         println!("lemming {i}: {:?} at ({:.2}, {:.2}, {:.2}) heading {:?} gone {}", l.state, p[0], p[1], p[2], l.dir, l.gone);

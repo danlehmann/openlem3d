@@ -34,6 +34,9 @@ pub struct World {
     /// Cells whose block changed since the last [`World::take_changes`], with
     /// their new contents (segments 0 = removed).
     changes: Vec<([usize; 3], BlockCell)>,
+    /// The level's most common ordinary block id (≥ 9), used for terrain
+    /// that lemmings create where no block gives a better choice.
+    pub common_id: u8,
 }
 
 /// A non-empty cell that blocks lemmings.
@@ -63,7 +66,12 @@ impl World {
             .filter(|p| p.len() >= 3)
             .map(|p| p.iter().map(|v| (v.x as i32, v.z as i32)).collect())
             .collect();
-        World { cells, land, bottom_solid: level.flags & FLAG_BOTTOM_SOLID != 0, changes: Vec::new() }
+        let mut counts = [0u32; 64];
+        for c in cells.iter().flatten() {
+            counts[c.block.id as usize] += 1;
+        }
+        let common_id = (9..64).max_by_key(|&i| (counts[i], std::cmp::Reverse(i))).unwrap_or(9) as u8;
+        World { cells, land, bottom_solid: level.flags & FLAG_BOTTOM_SOLID != 0, changes: Vec::new(), common_id }
     }
 
     /// Removes the segments in `mask` from cell `c`. Steel blocks are
@@ -76,6 +84,28 @@ impl World {
         cell.block.segments &= !mask;
         let i = index(c[0] as usize, c[1] as usize, c[2] as usize);
         self.cells[i] = (cell.block.segments != 0).then_some(cell);
+        self.changes.push((c.map(|v| v as usize), cell.block));
+        true
+    }
+
+    /// Adds the segments in `mask` to cell `c`. An empty cell becomes a cube
+    /// of `template`'s block id; an occupied cell keeps its block. Returns
+    /// whether anything was added.
+    pub fn add_segments(&mut self, c: [i32; 3], mask: u8, template: BlockCell) -> bool {
+        let ok = |v: i32, n: usize| v >= 0 && (v as usize) < n;
+        if !(ok(c[0], SIZE_X) && ok(c[1], SIZE_Y) && ok(c[2], SIZE_Z)) {
+            return false;
+        }
+        let i = index(c[0] as usize, c[1] as usize, c[2] as usize);
+        let mut cell = self.cells[i].unwrap_or(SolidCell {
+            block: BlockCell { id: template.id, shape: 0, rotation: 0, segments: 0 },
+            flags: 0,
+        });
+        if cell.block.segments & mask == mask {
+            return false;
+        }
+        cell.block.segments |= mask;
+        self.cells[i] = Some(cell);
         self.changes.push((c.map(|v| v as usize), cell.block));
         true
     }

@@ -53,6 +53,29 @@ A walker enters an exit block (id 1) when it walks into the block through its
 doorway. The doorway is the block's +Z face, turned with the block's rotation
 [L3DEdit].
 
+## Skills (provisional, not yet observed in the original)
+
+Skill ids follow the skill-panel order: blocker, turner, bomber, builder,
+basher, miner, digger, climber, floater. Evidence: [L3DEdit] says the ids
+follow the panel, and the Practice level titles (`LEVEL.080`–`088`) run in
+the same order.
+
+Terrain is changed one quarter-height segment at a time. Steel blocks are
+never removed.
+
+| Skill | Behaviour |
+|---|---|
+| Blocker | Stands still. Walkers entering its area (⅓ unit) turn around. |
+| Turner | Stands still. Walkers are sent a quarter turn clockwise from the turner's heading. |
+| Bomber | 5-second fuse, then removes segments within 1 unit and dies. |
+| Builder | 8 bricks, one every 24 ticks. Each brick is one segment in the cell ahead, at feet height, and the builder steps half a cell onto it. Bricks copy the block id below the builder, or the level's most common ordinary block. |
+| Basher | Every 16 ticks, removes the segments from the feet up in the cell ahead and advances ¼ unit. Stops when nothing is left to bash. |
+| Miner | Every 20 ticks, removes the segments from the feet down in the cell ahead, then advances and descends ¼ unit. |
+| Digger | Every 12 ticks, removes the top segment under the feet. |
+| Climber | Climbs vertical walls. Falls back off at a ceiling. |
+| Floater | Opens an umbrella after falling ½ unit, then falls slowly and never splats. |
+| Nuke | Stops releases and gives every lemming a fuse, staggered by one tick each. |
+
 ## Deaths
 
 | Cause | Result |

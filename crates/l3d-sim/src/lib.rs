@@ -7,7 +7,7 @@
 pub mod world;
 
 use l3d_formats::blk::{BlockSet, flags};
-use l3d_formats::level::{Level, SIZE_X, SIZE_Y, SIZE_Z};
+use l3d_formats::level::{BlockCell, Level, SIZE_X, SIZE_Y, SIZE_Z};
 pub use world::{Floor, SUB, World};
 
 /// Simulation ticks per second.
@@ -41,6 +41,13 @@ const FUSE_TICKS: u32 = 5 * TICKS_PER_SECOND;
 const BLAST_RADIUS: i32 = SUB;
 /// Ticks per segment dug (provisional).
 const DIG_TICKS: u32 = 12;
+/// Ticks per brick laid by a builder (provisional).
+const BUILD_TICKS: u32 = 24;
+/// Bricks per builder (provisional).
+const BRICKS: u8 = 8;
+/// Ticks per stroke of a basher or miner (provisional).
+const BASH_TICKS: u32 = 16;
+const MINE_TICKS: u32 = 20;
 /// Duration of terminal animations, in ticks (provisional).
 const EXIT_TICKS: u32 = 24;
 const DEATH_TICKS: u32 = 30;
@@ -166,6 +173,12 @@ pub enum State {
     /// Standing and redirecting walkers a quarter turn.
     Turning,
     Digging,
+    /// Laying steps; the count is the bricks still to lay.
+    Building { bricks_left: u8 },
+    /// Removing terrain straight ahead.
+    Bashing,
+    /// Removing terrain diagonally ahead and down.
+    Mining,
     Exiting,
     Exploding,
     Splatting,
@@ -319,9 +332,12 @@ impl Simulation {
             Skill::Climber => !l.climber,
             Skill::Floater => !l.floater,
             Skill::Bomber => l.fuse.is_none(),
-            Skill::Blocker | Skill::Turner | Skill::Digger => l.state == State::Walking && !busy,
-            // Not implemented yet.
-            Skill::Builder | Skill::Basher | Skill::Miner => false,
+            Skill::Blocker
+            | Skill::Turner
+            | Skill::Digger
+            | Skill::Builder
+            | Skill::Basher
+            | Skill::Miner => l.state == State::Walking && !busy,
         }
     }
 
@@ -339,7 +355,9 @@ impl Simulation {
             Skill::Blocker => l.set_state(State::Blocking),
             Skill::Turner => l.set_state(State::Turning),
             Skill::Digger => l.set_state(State::Digging),
-            Skill::Builder | Skill::Basher | Skill::Miner => unreachable!("rejected by can_assign"),
+            Skill::Builder => l.set_state(State::Building { bricks_left: BRICKS }),
+            Skill::Basher => l.set_state(State::Bashing),
+            Skill::Miner => l.set_state(State::Mining),
         }
         true
     }
@@ -461,6 +479,9 @@ impl Simulation {
             State::Walking => self.walk(l, obstacles),
             State::Climbing => self.climb(l),
             State::Digging => self.dig(l),
+            State::Building { bricks_left } => self.build(l, bricks_left),
+            State::Bashing => self.bash(l),
+            State::Mining => self.mine(l),
             State::Blocking | State::Turning => {
                 // Standing still; fall if the ground disappears.
                 let (ground, _) = self.world.surface_below(l.pos[0], l.pos[1], l.pos[2]);
@@ -557,6 +578,111 @@ impl Simulation {
             let (ground, _) = self.world.surface_below(l.pos[0], l.pos[1] + STEP_UP, l.pos[2]);
             l.pos[1] = ground.max(l.pos[1]);
             l.set_state(State::Walking);
+        }
+    }
+
+    /// The cell containing a sub-unit point.
+    fn cell_of(p: [i32; 3]) -> [i32; 3] {
+        p.map(|v| v.div_euclid(SUB))
+    }
+
+    /// Falls or stands depending on the ground now under the feet.
+    fn settle(&mut self, l: &mut Lemming) -> bool {
+        let (ground, _) = self.world.surface_below(l.pos[0], l.pos[1] + STEP_UP, l.pos[2]);
+        if ground < l.pos[1] - STEP_DOWN {
+            let from = l.pos[1];
+            l.set_state(State::Falling { from_y: from });
+            false
+        } else {
+            l.pos[1] = ground;
+            true
+        }
+    }
+
+    /// Lays a step of one segment's height in the cell ahead, then climbs
+    /// onto it (provisional: one segment per cell, inheriting the block id
+    /// of the cell stood on).
+    fn build(&mut self, l: &mut Lemming, bricks_left: u8) {
+        if !l.state_ticks.is_multiple_of(BUILD_TICKS) {
+            return;
+        }
+        if bricks_left == 0 {
+            l.set_state(State::Walking);
+            return;
+        }
+        let d = l.dir.delta();
+        let ahead = [l.pos[0] + d[0] * (SUB / 2 + REACH), l.pos[1], l.pos[2] + d[2] * (SUB / 2 + REACH)];
+        let cell = Self::cell_of(ahead);
+        // The brick's segment: the quarter just above the current feet height.
+        let seg = ((l.pos[1] - cell[1] * SUB) / (SUB / 4)).clamp(0, 3);
+        let under = self.world.block(Self::cell_of([l.pos[0], l.pos[1] - 1, l.pos[2]]));
+        let template = match under {
+            Some((b, _)) if b.id >= 9 => b,
+            _ => BlockCell { id: self.world.common_id, ..Default::default() },
+        };
+        if self.world.solid([ahead[0], l.pos[1] + STEP_UP + 1, ahead[2]]) {
+            // Blocked by a wall: stop building and turn around.
+            l.dir = l.dir.reverse();
+            l.set_state(State::Walking);
+            return;
+        }
+        self.world.add_segments(cell, 1 << seg, template);
+        // Walk onto the new brick.
+        l.pos[0] += d[0] * (SUB / 2);
+        l.pos[2] += d[2] * (SUB / 2);
+        if self.settle(l) {
+            l.state = State::Building { bricks_left: bricks_left - 1 };
+        }
+    }
+
+    /// Removes body-height terrain in the cell ahead and moves into the gap;
+    /// stops when nothing is left to bash (provisional).
+    fn bash(&mut self, l: &mut Lemming) {
+        if !l.state_ticks.is_multiple_of(BASH_TICKS) {
+            return;
+        }
+        let d = l.dir.delta();
+        let ahead = [l.pos[0] + d[0] * (SUB / 2), l.pos[1], l.pos[2] + d[2] * (SUB / 2)];
+        let cell = Self::cell_of(ahead);
+        // Segments from the feet up to about head height.
+        let first = ((l.pos[1] - cell[1] * SUB) / (SUB / 4)).clamp(0, 3);
+        let mask = (0xFu8 << first) & 0xF;
+        match self.world.block(cell) {
+            Some((b, f)) if b.segments & mask != 0 => {
+                if f & flags::STEEL != 0 {
+                    l.set_state(State::Walking);
+                    return;
+                }
+                self.world.remove_segments(cell, mask);
+                l.pos[0] += d[0] * (SUB / 4);
+                l.pos[2] += d[2] * (SUB / 4);
+                self.settle(l);
+            }
+            _ => l.set_state(State::Walking),
+        }
+    }
+
+    /// Removes the terrain ahead at and below the feet, stepping forward and
+    /// down a segment per stroke (provisional).
+    fn mine(&mut self, l: &mut Lemming) {
+        if !l.state_ticks.is_multiple_of(MINE_TICKS) {
+            return;
+        }
+        let d = l.dir.delta();
+        let ahead = [l.pos[0] + d[0] * (SUB / 2), l.pos[1] - 1, l.pos[2] + d[2] * (SUB / 2)];
+        let cell = Self::cell_of(ahead);
+        let seg = ((ahead[1] - cell[1] * SUB) / (SUB / 4)).clamp(0, 3);
+        let mask = (0xFu8 << seg) & 0xF;
+        match self.world.block(cell) {
+            Some((_, f)) if f & flags::STEEL != 0 => l.set_state(State::Walking),
+            Some(_) => {
+                self.world.remove_segments(cell, mask);
+                l.pos[0] += d[0] * (SUB / 4);
+                l.pos[2] += d[2] * (SUB / 4);
+                l.pos[1] -= SUB / 4;
+                self.settle(l);
+            }
+            None => l.set_state(State::Walking),
         }
     }
 
