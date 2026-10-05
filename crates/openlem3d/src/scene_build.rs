@@ -1,6 +1,7 @@
 //! Assembles a level's renderable content (blocks, sea, land, sky, sprite
 //! objects) from the game data. Formats and conventions: `docs/spec/`.
 
+use l3d_formats::blk::BlockSet;
 use l3d_formats::gamedata::{GameData, Palette};
 use l3d_formats::level::{BlockCell, Level, SIZE_X, SIZE_Z};
 
@@ -278,8 +279,26 @@ fn lemming_atlas(data: &mut GameData, pal: &Palette) -> Result<RgbaImage, l3d_fo
     Ok(indexed_to_rgba(&pixels, w, pal))
 }
 
+/// A loaded level with its renderable content.
+pub struct BuiltLevel {
+    pub level: Level,
+    pub blocks: BlockSet,
+    pub scene: SceneData,
+    pub mesh: LevelMesh,
+    /// Index in `scene.layers` of the block geometry.
+    pub block_layer: usize,
+}
+
+/// Replaces the block geometry of `scene` with a mesh of the current grid.
+pub fn rebuild_blocks(scene: &SceneData, layer: usize, level: &Level, blocks: &BlockSet) -> SceneData {
+    let mut out = scene.clone();
+    let texture = out.layers[layer].texture.clone();
+    out.layers[layer] = block_layer(&level_mesh::build(level, blocks), texture);
+    out
+}
+
 /// Builds everything drawn for level `n`.
-pub fn build(data: &mut GameData, n: u32) -> Result<(Level, SceneData, LevelMesh), l3d_formats::Error> {
+pub fn build(data: &mut GameData, n: u32) -> Result<BuiltLevel, l3d_formats::Error> {
     let level = data.level(n)?;
     let blocks = data.blocks(n)?;
     let pal = data.palette("GFX/LM3D.PAL")?;
@@ -314,6 +333,7 @@ pub fn build(data: &mut GameData, n: u32) -> Result<(Level, SceneData, LevelMesh
         }
         scene.layers.push(land_layer(&level, indexed_to_rgba(first, 128, &pal), tile));
     }
+    let block_layer_index = scene.layers.len();
     scene.layers.push(block_layer(&mesh, indexed_to_rgba(&tex, 64, &pal)));
     scene.layers.extend(object_layers(data, &level, &pal));
 
@@ -326,5 +346,5 @@ pub fn build(data: &mut GameData, n: u32) -> Result<(Level, SceneData, LevelMesh
         // 1024×64 panoramas only; 200×320 all-round skies are not handled yet.
         scene.sky = Some(indexed_to_rgba(&sky, 1024, &pal));
     }
-    Ok((level, scene, mesh))
+    Ok(BuiltLevel { level, blocks, scene, mesh, block_layer: block_layer_index })
 }

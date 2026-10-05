@@ -31,7 +31,7 @@ pub struct SceneContent {
 }
 
 /// CPU-side scene content.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct SceneData {
     /// Geometry, drawn in order.
     pub layers: Vec<SceneLayer>,
@@ -51,6 +51,7 @@ pub struct SceneSprites {
 }
 
 /// Triangles sharing one texture.
+#[derive(Clone)]
 pub struct SceneLayer {
     /// Interleaved vertices, [`VERTEX_FLOATS`] per vertex.
     pub vertices: Vec<f32>,

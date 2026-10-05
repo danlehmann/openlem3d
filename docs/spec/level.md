@@ -72,7 +72,7 @@ Their *effects* in game are **unverified** unless stated.
 | `0x13F` | 2 | "Face render limit" (an engine budget; not relevant to us) |
 | `0x143` | 1 | Theme (selects the preview screen and music) |
 | `0x151` | 1 | Music variant within the theme |
-| `0x153` | 4 | Kill boundary: min X, min Z, max X, max Z |
+| `0x153` | 4 | Kill boundary in cells: **min Z, min X, max Z, max X** (see below) |
 | `0x157` | 1 | More flags: bit 0 = slippery level bottom, bit 1 = slippery land |
 | `0x159` | 3 | Preview-camera pivot (y, z, x) |
 | `0x15C` | 1 | Kill ceiling (Y) |
@@ -101,6 +101,17 @@ The following is **unverified** [L3DEdit]:
 - They are drawn at the bottom of the level with the `LAND` texture.
 - The top 3 bits of `options` darken the texture; the low 3 bits pick a
   sub-texture in multi-texture `LAND` files.
+
+### Kill boundary (`0x153`): axis order
+
+The four bytes are `[min Z, min X, max Z, max X]`, Z before X, like the land
+vertices `(z, x)` and the camera records `(y, z, x)`. [L3DEdit] gives
+`[min X, min Z, max X, max Z]`, which is **wrong**.
+
+How we verified it: in the Practice levels `LEVEL.080`, `082` and `086`,
+the boundary is `[8, 8, 19, 27…30]` and the hatch sits at x ≈ 20–27,
+z ≈ 13.5. Read X-first, every hatch lies outside the boundary and every
+lemming would die on release. Read Z-first, all of them are inside.
 
 ### Flags at `0x11B` (unverified, [L3DEdit])
 

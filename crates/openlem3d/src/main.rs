@@ -5,6 +5,7 @@
 //! Controls: W/S/A/D or arrows move, Q/E or right-drag turn, R/F rise/fall,
 //! 1–4 preset cameras, P pause, [ / ] previous/next level.
 
+mod hud;
 mod lemming_render;
 mod level_mesh;
 mod scene_build;
@@ -20,7 +21,8 @@ use bevy::render::RenderPlugin;
 use bevy::render::settings::{Backends, RenderCreation, WgpuSettings};
 use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use l3d_formats::gamedata::{GameData, locate_data_dir};
-use l3d_formats::level::CameraPreset;
+use l3d_formats::blk::BlockSet;
+use l3d_formats::level::{CameraPreset, Level};
 use scene_render::{SceneCamera, SceneContent, SceneRenderPlugin};
 
 /// Command-line options.
@@ -110,7 +112,7 @@ fn main() {
                     ..default()
                 }),
         )
-        .add_plugins(SceneRenderPlugin)
+        .add_plugins((SceneRenderPlugin, hud::HudPlugin))
         .insert_resource(ClearColor(Color::srgb(0.35, 0.55, 0.85)))
         .insert_resource(opts.clone())
         .insert_resource(Data(data))
@@ -207,20 +209,32 @@ fn switch_level(keys: Res<ButtonInput<KeyCode>>, mut current: ResMut<CurrentLeve
 
 /// The level being played.
 #[derive(Resource, Default)]
-struct Game {
-    sim: Option<l3d_sim::Simulation>,
-    paused: bool,
+pub struct Game {
+    pub sim: Option<l3d_sim::Simulation>,
+    pub paused: bool,
+    pub save_requirement: u32,
+    /// The level's block grid as currently shaped (destructible skills change
+    /// it), its block dictionary, and the scene layer showing it.
+    terrain: Option<(Level, BlockSet, usize)>,
 }
 
-fn step_simulation(keys: Res<ButtonInput<KeyCode>>, mut game: ResMut<Game>) {
+fn step_simulation(keys: Res<ButtonInput<KeyCode>>, mut game: ResMut<Game>, mut scene: ResMut<SceneContent>) {
     if keys.just_pressed(KeyCode::KeyP) {
         game.paused = !game.paused;
     }
-    if !game.paused
-        && let Some(sim) = &mut game.sim
-    {
-        sim.step();
+    let Game { sim: Some(sim), paused: false, terrain, .. } = &mut *game else { return };
+    sim.step();
+    let changes = sim.world.take_changes();
+    if changes.is_empty() {
+        return;
     }
+    let (Some((level, blocks, layer)), Some(current)) = (terrain, &scene.data) else { return };
+    for ([x, y, z], cell) in changes {
+        level.set_block(x, y, z, cell);
+    }
+    let rebuilt = scene_build::rebuild_blocks(current, *layer, level, blocks);
+    scene.version += 1;
+    scene.data = Some(Arc::new(rebuilt));
 }
 
 fn update_lemming_sprites(game: Res<Game>, mut sprites: ResMut<scene_render::SceneSprites>) {
@@ -245,7 +259,7 @@ fn load_level(
     }
     let n = current.number;
     current.loaded = Some(n);
-    let (level, content, mesh) = match scene_build::build(&mut data.0, n) {
+    let scene_build::BuiltLevel { level, blocks, scene: content, mesh, block_layer } = match scene_build::build(&mut data.0, n) {
         Ok(v) => v,
         Err(e) => {
             error!("level {n}: {e}");
@@ -272,10 +286,9 @@ fn load_level(
         cam.set_preset(&level.cameras[preset]);
     }
     commands.insert_resource(LevelInfo { cameras: level.cameras });
-    match data.0.blocks(n) {
-        Ok(blocks) => game.sim = Some(l3d_sim::Simulation::new(&level, &blocks)),
-        Err(e) => error!("level {n}: {e}"),
-    }
+    game.sim = Some(l3d_sim::Simulation::new(&level, &blocks));
+    game.save_requirement = level.save_requirement as u32;
+    game.terrain = Some((level, blocks, block_layer));
 }
 
 #[allow(clippy::too_many_arguments)] // Bevy system parameters

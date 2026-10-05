@@ -49,6 +49,11 @@ impl BlockCell {
     pub fn is_empty(&self) -> bool {
         self.segments == 0
     }
+
+    /// The 16-bit grid value of this cell.
+    pub fn to_raw(self) -> u16 {
+        (self.id as u16) << 10 | (self.shape as u16 & 0xF) << 6 | (self.rotation as u16 & 3) << 4 | (self.segments as u16 & 0xF)
+    }
 }
 
 /// One cell of the object grid.
@@ -201,6 +206,10 @@ impl Level {
 
     pub fn block(&self, x: usize, y: usize, z: usize) -> BlockCell {
         BlockCell::from_raw(self.blocks[cell_index(x, y, z)])
+    }
+
+    pub fn set_block(&mut self, x: usize, y: usize, z: usize, cell: BlockCell) {
+        self.blocks[cell_index(x, y, z)] = cell.to_raw();
     }
 
     pub fn block_raw(&self, x: usize, y: usize, z: usize) -> u16 {

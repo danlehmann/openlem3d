@@ -30,6 +30,12 @@ fn frames_for(state: State) -> Frames {
     match state {
         State::Walking => Frames { first: 0, count: 10 },
         State::Falling { .. } => Frames { first: 128, count: 8 },
+        State::Floating => Frames { first: 352, count: 8 },
+        State::Climbing => Frames { first: 144, count: 8 },
+        State::Blocking => Frames { first: 96, count: 8 },
+        State::Turning => Frames { first: 112, count: 8 },
+        State::Digging => Frames { first: 256, count: 8 },
+        State::Exploding => Frames { first: 528, count: 4 },
         State::Exiting => Frames { first: 392, count: 8 },
         State::Splatting => Frames { first: 160, count: 8 },
         State::Drowning => Frames { first: 440, count: 8 },

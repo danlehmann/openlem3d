@@ -31,6 +31,9 @@ pub struct World {
     /// Convex land polygons as `(x, z)` corner points, in grid units.
     land: Vec<Vec<(i32, i32)>>,
     bottom_solid: bool,
+    /// Cells whose block changed since the last [`World::take_changes`], with
+    /// their new contents (segments 0 = removed).
+    changes: Vec<([usize; 3], BlockCell)>,
 }
 
 /// A non-empty cell that blocks lemmings.
@@ -60,7 +63,31 @@ impl World {
             .filter(|p| p.len() >= 3)
             .map(|p| p.iter().map(|v| (v.x as i32, v.z as i32)).collect())
             .collect();
-        World { cells, land, bottom_solid: level.flags & FLAG_BOTTOM_SOLID != 0 }
+        World { cells, land, bottom_solid: level.flags & FLAG_BOTTOM_SOLID != 0, changes: Vec::new() }
+    }
+
+    /// Removes the segments in `mask` from cell `c`. Steel blocks are
+    /// unaffected. Returns whether anything was removed.
+    pub fn remove_segments(&mut self, c: [i32; 3], mask: u8) -> bool {
+        let Some(mut cell) = self.cell(c[0], c[1], c[2]) else { return false };
+        if cell.flags & flags::STEEL != 0 || cell.block.segments & mask == 0 {
+            return false;
+        }
+        cell.block.segments &= !mask;
+        let i = index(c[0] as usize, c[1] as usize, c[2] as usize);
+        self.cells[i] = (cell.block.segments != 0).then_some(cell);
+        self.changes.push((c.map(|v| v as usize), cell.block));
+        true
+    }
+
+    /// The solid block in cell `c`, with its flags.
+    pub fn block(&self, c: [i32; 3]) -> Option<(BlockCell, u8)> {
+        self.cell(c[0], c[1], c[2]).map(|s| (s.block, s.flags))
+    }
+
+    /// Drains the list of changed cells.
+    pub fn take_changes(&mut self) -> Vec<([usize; 3], BlockCell)> {
+        std::mem::take(&mut self.changes)
     }
 
     fn cell(&self, x: i32, y: i32, z: i32) -> Option<SolidCell> {
