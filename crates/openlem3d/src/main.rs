@@ -280,6 +280,7 @@ fn camera_controls(
         scene_cam.horizon = opts.horizon;
         scene_cam.time = time.elapsed_secs();
         scene_cam.sky_column = sky_left_column(cam.yaw);
+        scene_cam.right = right;
     }
 }
 

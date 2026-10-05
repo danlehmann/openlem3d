@@ -18,8 +18,9 @@ use bevy::render::view::ViewTarget;
 use bevy::render::{Render, RenderApp, RenderSystems};
 use wgpu::util::DeviceExt;
 
-/// Floats per vertex: position (3), uv (2), brightness (1), cutout flag (1).
-pub const VERTEX_FLOATS: usize = 7;
+/// Floats per vertex: position (3), uv (2), brightness (1), cutout flag (1),
+/// billboard offset (2), animation frame count and uv stride (2).
+pub const VERTEX_FLOATS: usize = 11;
 
 /// What the scene shows. `version` changes whenever the content does; the
 /// renderer re-uploads only then.
@@ -65,6 +66,8 @@ pub struct SceneCamera {
     pub horizon: f32,
     /// Seconds since start, for animated textures.
     pub time: f32,
+    /// Camera right vector; billboards face the camera along it.
+    pub right: Vec3,
 }
 
 pub struct SceneRenderPlugin;
@@ -88,7 +91,7 @@ impl Plugin for SceneRenderPlugin {
 }
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
-const UNIFORM_SIZE: u64 = 80;
+const UNIFORM_SIZE: u64 = 96;
 
 /// GPU resources of the scene renderer.
 #[derive(Resource)]
@@ -202,7 +205,9 @@ impl SceneGpu {
                 buffers: &[wgpu::VertexBufferLayout {
                     array_stride: (VERTEX_FLOATS * 4) as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x2, 2 => Float32x2],
+                    attributes: &wgpu::vertex_attr_array![
+                        0 => Float32x3, 1 => Float32x2, 2 => Float32x2, 3 => Float32x2, 4 => Float32x2
+                    ],
                 }],
                 compilation_options: Default::default(),
             },
@@ -317,6 +322,7 @@ fn prepare_scene(
     // screens show more sky around the same centre.
     let extra = (w as f32 / scale - 640.0) / 2.0;
     uniforms.extend([camera.sky_column - extra / 2.0, camera.horizon * h as f32, scale, camera.time]);
+    uniforms.extend([camera.right.x, camera.right.y, camera.right.z, 0.0]);
     queue.write_buffer(&gpu.uniforms, 0, &f32_bytes(&uniforms));
     if gpu.version == Some(content.version) {
         return;

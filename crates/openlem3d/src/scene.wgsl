@@ -7,6 +7,8 @@ struct Uniforms {
     // z: framebuffer pixels per original-screen pixel (height / 480),
     // w: time in seconds.
     sky: vec4<f32>,
+    // Camera right vector (xyz); billboards are spanned by it and +Y.
+    right: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> u: Uniforms;
@@ -18,7 +20,15 @@ struct VIn {
     @location(1) uv: vec2<f32>,
     // x: brightness, y: 1 if palette index 0 is transparent.
     @location(2) params: vec2<f32>,
+    // Billboard corner offset from `pos`, in world units along the camera
+    // right vector (x) and up (y). Zero for fixed geometry.
+    @location(3) offset: vec2<f32>,
+    // x: animation frame count (<= 1: static), y: uv distance between frames.
+    @location(4) anim: vec2<f32>,
 };
+
+/// Animation frames per second of animated sprites (unverified).
+const ANIM_FPS: f32 = 8.0;
 
 struct VOut {
     @builtin(position) clip: vec4<f32>,
@@ -29,8 +39,13 @@ struct VOut {
 @vertex
 fn vs(v: VIn) -> VOut {
     var o: VOut;
-    o.clip = u.view_proj * vec4(v.pos, 1.0);
-    o.uv = v.uv;
+    let world = v.pos + u.right.xyz * v.offset.x + vec3(0.0, v.offset.y, 0.0);
+    o.clip = u.view_proj * vec4(world, 1.0);
+    var frame = 0.0;
+    if (v.anim.x > 1.0) {
+        frame = floor(u.sky.w * ANIM_FPS) % v.anim.x;
+    }
+    o.uv = v.uv + vec2(0.0, frame * v.anim.y);
     o.params = v.params;
     return o;
 }
