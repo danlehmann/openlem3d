@@ -187,7 +187,11 @@ fn assign_on_pointer(
     let point = if mouse.just_pressed(MouseButton::Left) {
         window.cursor_position()
     } else {
-        touches.iter_just_pressed().next().map(|t| t.position())
+        // A tap is a touch released without having been dragged.
+        touches
+            .iter_just_released()
+            .find(|t| t.distance().length() < crate::touch::TAP_SLOP)
+            .map(|t| t.position())
     };
     let Some(point) = point else { return };
     let Some(sim) = &mut game.sim else { return };
