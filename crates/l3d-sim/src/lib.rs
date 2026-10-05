@@ -239,6 +239,12 @@ pub struct Simulation {
     pub skills_left: [u32; 9],
     /// Release rate, 1..=99 (higher releases faster).
     pub release_rate: i32,
+    /// The level's starting release rate; the player can't go below it.
+    pub min_release_rate: i32,
+    /// Ticks left on the level clock.
+    pub time_left: u32,
+    /// Set once the player has nuked the level.
+    pub nuked: bool,
     pub tick: u64,
     /// Ticks until the next release.
     release_timer: u32,
@@ -283,6 +289,9 @@ impl Simulation {
             counts: Counts::default(),
             skills_left,
             release_rate: (level.release_rate as i32).clamp(1, 99),
+            min_release_rate: (level.release_rate as i32).clamp(1, 99),
+            time_left: (level.time_minutes as u32 * 60 + level.time_seconds as u32) * TICKS_PER_SECOND,
+            nuked: false,
             tick: 0,
             release_timer: 0,
             next_entrance: 0,
@@ -337,7 +346,11 @@ impl Simulation {
 
     /// Advances the simulation by one tick.
     pub fn step(&mut self) {
+        if self.finished() {
+            return;
+        }
         self.tick += 1;
+        self.time_left = self.time_left.saturating_sub(1);
         if self.counts.released < self.to_release && !self.entrances.is_empty() {
             if self.release_timer == 0 {
                 let e = self.entrances[self.next_entrance % self.entrances.len()];
@@ -377,6 +390,35 @@ impl Simulation {
                 self.lemmings[i] = l;
             }
         }
+    }
+
+    /// Changes the release rate by `delta`, between the level's starting rate
+    /// and 99.
+    pub fn adjust_release_rate(&mut self, delta: i32) {
+        self.release_rate = (self.release_rate + delta).clamp(self.min_release_rate, 99);
+    }
+
+    /// Stops further releases and gives every lemming in play a bomber fuse,
+    /// staggered by one tick per lemming (provisional).
+    pub fn nuke(&mut self) {
+        if self.nuked {
+            return;
+        }
+        self.nuked = true;
+        self.to_release = self.counts.released;
+        let mut stagger = 0;
+        for l in self.lemmings.iter_mut().filter(|l| !l.gone && !l.state.is_terminal()) {
+            if l.fuse.is_none() {
+                l.fuse = Some(FUSE_TICKS + stagger);
+                stagger += 1;
+            }
+        }
+    }
+
+    /// Whether the level is over: time ran out, or every lemming has been
+    /// released and has left play.
+    pub fn finished(&self) -> bool {
+        self.time_left == 0 || (self.counts.released >= self.to_release && self.out() == 0)
     }
 
     /// Lemmings still in play.

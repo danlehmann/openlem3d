@@ -17,7 +17,7 @@ impl Plugin for HudPlugin {
             .add_systems(Startup, spawn_hud)
             .add_systems(
                 Update,
-                (skill_buttons, skill_keys, update_labels, assign_on_pointer)
+                (skill_buttons, skill_keys, controls, update_labels, result_panel, assign_on_pointer)
                     .chain()
                     .run_if(in_state(AppState::Playing)),
             )
@@ -79,6 +79,15 @@ fn spawn_hud(mut commands: Commands) {
             },
         ))
         .with_children(|bar| {
+            for (label, action) in [("-", Control::Slower), ("+", Control::Faster)] {
+                bar.spawn((
+                    Button,
+                    action,
+                    Node { width: px(44), height: px(52), justify_content: JustifyContent::Center, align_items: AlignItems::Center, ..default() },
+                    BackgroundColor(BUTTON_IDLE),
+                ))
+                .with_child((Text::new(label), TextFont { font_size: FontSize::Px(22.0), ..default() }));
+            }
             for skill in Skill::ALL {
                 bar.spawn((
                     Button,
@@ -101,7 +110,96 @@ fn spawn_hud(mut commands: Commands) {
                     ));
                 });
             }
+            bar.spawn((
+                Button,
+                Control::Nuke,
+                Node { width: px(64), height: px(52), justify_content: JustifyContent::Center, align_items: AlignItems::Center, ..default() },
+                BackgroundColor(Color::srgba(0.45, 0.05, 0.05, 0.85)),
+            ))
+            .with_child((Text::new("Nuke"), TextFont { font_size: FontSize::Px(14.0), ..default() }));
         });
+    commands.spawn((
+        ResultPanel,
+        Node {
+            position_type: PositionType::Absolute,
+            top: percent(30),
+            left: percent(25),
+            width: percent(50),
+            padding: UiRect::all(px(16)),
+            justify_content: JustifyContent::Center,
+            ..default()
+        },
+        BackgroundColor(Color::srgba(0.05, 0.05, 0.12, 0.9)),
+        Visibility::Hidden,
+        children![(
+            Text::new(""),
+            TextFont { font_size: FontSize::Px(22.0), ..default() },
+            TextLayout::justify(Justify::Center),
+            ResultText,
+        )],
+    ));
+}
+
+/// Release-rate and nuke buttons.
+#[derive(Component, Clone, Copy)]
+enum Control {
+    Slower,
+    Faster,
+    Nuke,
+}
+
+/// The end-of-level panel and its text.
+#[derive(Component)]
+struct ResultPanel;
+#[derive(Component)]
+struct ResultText;
+
+/// Applies a control: from its button or its key (− / + for the release
+/// rate, Alt+Q to nuke as in the original).
+fn controls(
+    buttons: Query<(&Interaction, &Control), Changed<Interaction>>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mut game: ResMut<Game>,
+) {
+    let mut actions: Vec<Control> =
+        buttons.iter().filter(|(i, _)| **i == Interaction::Pressed).map(|(_, c)| *c).collect();
+    if keys.just_pressed(KeyCode::Minus) || keys.just_pressed(KeyCode::NumpadSubtract) {
+        actions.push(Control::Slower);
+    }
+    if keys.just_pressed(KeyCode::Equal) || keys.just_pressed(KeyCode::NumpadAdd) {
+        actions.push(Control::Faster);
+    }
+    if keys.pressed(KeyCode::AltLeft) && keys.just_pressed(KeyCode::KeyQ) {
+        actions.push(Control::Nuke);
+    }
+    let Some(sim) = &mut game.sim else { return };
+    for a in actions {
+        match a {
+            Control::Slower => sim.adjust_release_rate(-1),
+            Control::Faster => sim.adjust_release_rate(1),
+            Control::Nuke => sim.nuke(),
+        }
+    }
+}
+
+/// Shows the result panel once the level is over.
+fn result_panel(
+    game: Res<Game>,
+    mut panel: Query<&mut Visibility, With<ResultPanel>>,
+    mut text: Query<&mut Text, With<ResultText>>,
+) {
+    let Some(sim) = &game.sim else { return };
+    let done = sim.finished();
+    for mut v in &mut panel {
+        *v = if done { Visibility::Inherited } else { Visibility::Hidden };
+    }
+    if done {
+        let saved = sim.counts.saved;
+        let verdict = if saved >= game.save_requirement { "Level complete!" } else { "Not enough lemmings saved." };
+        for mut t in &mut text {
+            t.0 = format!("{verdict}\nSaved {saved}, needed {}\n\nEsc: choose a level", game.save_requirement);
+        }
+    }
 }
 
 fn skill_buttons(
@@ -152,13 +250,17 @@ fn update_labels(
     }
     for mut text in &mut status {
         let c = sim.counts;
+        let secs = sim.time_left / l3d_sim::TICKS_PER_SECOND;
         text.0 = format!(
-            "Out {}   In {} / {}   Released {} / {}{}",
+            "Out {}   In {} / {}   Released {} / {}   Rate {}   Time {}:{:02}{}",
             sim.out(),
             c.saved,
             game.save_requirement,
             c.released,
             sim.to_release,
+            sim.release_rate,
+            secs / 60,
+            secs % 60,
             if game.paused { "   PAUSED" } else { "" }
         );
     }
