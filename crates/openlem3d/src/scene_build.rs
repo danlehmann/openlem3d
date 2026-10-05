@@ -124,6 +124,7 @@ impl LayerBuilder {
 
     /// A vertical quad whose bottom edge is centred on `centre`, facing
     /// horizontal direction `normal`, `width` × `height` units.
+    #[allow(clippy::too_many_arguments)]
     fn vertical_quad(&mut self, centre: [f32; 3], normal: [f32; 2], width: f32, height: f32, rect: [f32; 4], tex: [f32; 2], brightness: f32) {
         // Right as seen from the front: +Y × normal.
         let right = [normal[1], -normal[0]];
