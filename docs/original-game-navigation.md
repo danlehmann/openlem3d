@@ -255,6 +255,12 @@ below the horizon changes with height.
   Accuracy is a few pixels. If the in-game Mouse speed slider or DOSBox-X's
   `sensitivity` changes, run `calibrate-mouse.ps1` on a static screen (for
   example the Options screen) and pass the new values to `send.ps1`.
+- **Stuck keys.** A press whose release is lost stays held system-wide, and
+  Windows then auto-repeats it into whatever window has focus (this once
+  flooded the user's terminal). `send.ps1` always sends releases and releases
+  everything it pressed when it exits, but a killed script can still leave a
+  key held. **Run `check-keys.ps1` after every input sequence**: it reports
+  and releases any held key or mouse button.
 - **Focus.** Synthetic keys and clicks go to whichever window is in the
   foreground. `send.ps1` brings DOSBox-X to the front first, and the helper
   refuses to send any event while another window has focus: the script fails
