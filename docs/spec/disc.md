@@ -17,7 +17,10 @@ Each track's extent in the image file runs from its own `INDEX 01` to the next
 track's `INDEX 00` (or `INDEX 01` if it has none), or to the end of the file.
 
 The mapping from the level header's theme and music index to an audio track
-hasn't been established yet.
+hasn't been established yet. **Provisional mapping** used by the viewer:
+track = 2 + 2·(theme − 1) + (music index & 1). That gives two tracks per
+theme for themes 1–10 and leaves tracks 22–24 unused. It is a guess: to be
+replaced by observing which track the original plays for each theme.
 
 ## Filesystem inventory (verified)
 

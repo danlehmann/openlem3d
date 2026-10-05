@@ -7,6 +7,6 @@ license.workspace = true
 
 [dependencies]
 l3d-formats.workspace = true
-bevy = "0.19.1"
+bevy = { version = "0.19.1", features = ["wav"] }
 wgpu = "29.0.4"
 l3d-sim.workspace = true

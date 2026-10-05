@@ -4,10 +4,12 @@
 //! Without `--level` the game starts at the level-select screen.
 //!
 //! Controls: W/S/A/D or arrows move, Q/E or right-drag turn, R/F rise/fall,
-//! 1–4 preset cameras, P pause, [ / ] previous/next level, Esc level select.
+//! 1–4 preset cameras, P pause, [ / ] previous/next level, Esc level select,
+//! M mute music.
 
 mod hud;
 mod menu;
+mod music;
 mod lemming_render;
 mod level_mesh;
 mod scene_build;
@@ -115,7 +117,7 @@ fn main() {
                     ..default()
                 }),
         )
-        .add_plugins((SceneRenderPlugin, hud::HudPlugin, menu::MenuPlugin))
+        .add_plugins((SceneRenderPlugin, hud::HudPlugin, menu::MenuPlugin, music::MusicPlugin))
         .insert_resource(ClearColor(Color::srgb(0.35, 0.55, 0.85)))
         .insert_resource(opts.clone())
         .insert_resource(Data(data))
@@ -259,6 +261,7 @@ fn load_level(
     opts: Res<Options>,
     mut scene: ResMut<SceneContent>,
     mut game: ResMut<Game>,
+    (mut sources, music, muted): (ResMut<Assets<bevy::audio::AudioSource>>, music::MusicQuery, Res<music::MusicMuted>),
     mut cams: Query<&mut ViewCamera>,
     mut windows: Query<&mut Window>,
 ) {
@@ -296,6 +299,8 @@ fn load_level(
     commands.insert_resource(LevelInfo { cameras: level.cameras });
     game.sim = Some(l3d_sim::Simulation::new(&level, &blocks));
     game.save_requirement = level.save_requirement as u32;
+    let track = music::track_for(level.theme, level.music);
+    music::play_track(&mut commands, &mut sources, &music::current(&music), &data.0.disc, track, muted.0);
     game.terrain = Some((level, blocks, block_layer));
 }
 
