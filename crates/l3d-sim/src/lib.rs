@@ -10,24 +10,28 @@ use l3d_formats::blk::{BlockSet, flags};
 use l3d_formats::level::{BlockCell, Level, SIZE_X, SIZE_Y, SIZE_Z};
 pub use world::{Floor, SUB, World};
 
-/// Simulation ticks per second.
-pub const TICKS_PER_SECOND: u32 = 30;
+/// Simulation ticks per second (verified: 14 Hz, `docs/spec/behaviour.md`).
+pub const TICKS_PER_SECOND: u32 = 14;
 
-/// Walking speed, sub-units per tick (provisional).
-const WALK_SPEED: i32 = SUB / 48;
-/// Falling speed, sub-units per tick (provisional).
-const FALL_SPEED: i32 = SUB / 12;
+/// Walking speed, sub-units per tick (verified: 1/32 unit per tick).
+const WALK_SPEED: i32 = SUB / 32;
+/// Falling speed for the first ticks of a fall, then the full speed
+/// (verified ±6%: about 1/6, then 1/4 unit per tick).
+const FALL_SPEED_START: i32 = SUB / 6;
+const FALL_SPEED: i32 = SUB / 4;
+/// Ticks of a fall at the starting speed (verified: about 4).
+const FALL_START_TICKS: u32 = 4;
 /// Floating speed with an open umbrella (provisional).
-const FLOAT_SPEED: i32 = SUB / 40;
+const FLOAT_SPEED: i32 = SUB / 19;
 /// Distance fallen before a floater opens the umbrella (provisional).
 const FLOAT_OPEN: i32 = SUB / 2;
-/// Climbing speed (provisional).
-const CLIMB_SPEED: i32 = SUB / 64;
+/// Climbing speed (rough measurement: about 0.04 unit per tick).
+const CLIMB_SPEED: i32 = SUB / 25;
 /// Highest step a walker climbs without turning (provisional: one segment).
 const STEP_UP: i32 = SUB / 4;
 /// Lowest drop a walker steps down without falling (provisional).
 const STEP_DOWN: i32 = SUB / 4;
-/// Falls longer than this splat (provisional).
+/// Falls longer than this splat (bracketed: 2 units survive, 4¼ splat).
 const SPLAT_HEIGHT: i32 = 4 * SUB;
 /// Height checked for headroom when walking (provisional).
 const HEAD_HEIGHT: i32 = SUB / 2;
@@ -35,22 +39,25 @@ const HEAD_HEIGHT: i32 = SUB / 2;
 const REACH: i32 = SUB / 4;
 /// Half-size of the area around a blocker or turner that redirects walkers.
 const BLOCK_RADIUS: i32 = SUB / 3;
-/// Bomber fuse length (provisional: 5 seconds, as in the original Lemmings).
-const FUSE_TICKS: u32 = 5 * TICKS_PER_SECOND;
-/// Explosion radius in sub-units (provisional).
+/// Ticks per countdown digit shown over a bomber (verified: about 8).
+pub const FUSE_DIGIT_TICKS: u32 = 8;
+/// Bomber fuse length from assignment to explosion (verified: about 3.6 s,
+/// a 5…1 countdown of 8-tick digits followed by the swelling animation).
+const FUSE_TICKS: u32 = 50;
+/// Explosion radius in sub-units (rough: the hole is about one cell long).
 const BLAST_RADIUS: i32 = SUB;
 /// Ticks per segment dug (provisional).
-const DIG_TICKS: u32 = 12;
+const DIG_TICKS: u32 = 6;
 /// Ticks per brick laid by a builder (provisional).
-const BUILD_TICKS: u32 = 24;
-/// Bricks per builder (provisional).
+const BUILD_TICKS: u32 = 11;
+/// Bricks per builder (provisional; at least 5 observed).
 const BRICKS: u8 = 8;
 /// Ticks per stroke of a basher or miner (provisional).
-const BASH_TICKS: u32 = 16;
-const MINE_TICKS: u32 = 20;
+const BASH_TICKS: u32 = 7;
+const MINE_TICKS: u32 = 9;
 /// Duration of terminal animations, in ticks (provisional).
-const EXIT_TICKS: u32 = 24;
-const DEATH_TICKS: u32 = 30;
+const EXIT_TICKS: u32 = 11;
+const DEATH_TICKS: u32 = 14;
 
 /// Block ids with hard-coded meaning (`docs/spec/blk.md`).
 const ENTRANCE_ID: u8 = 0;
@@ -314,11 +321,9 @@ impl Simulation {
         }
     }
 
-    /// Ticks between releases (provisional: classic Lemmings timing scaled to
-    /// our tick rate).
+    /// Ticks between releases (verified: `101 − rate`).
     fn release_interval(&self) -> u32 {
-        let frames_17hz = (99 - self.release_rate) / 2 + 4;
-        (frames_17hz as u32 * TICKS_PER_SECOND).div_ceil(17)
+        (101 - self.release_rate) as u32
     }
 
     /// Whether `skill` can be given to lemming `i` right now.
@@ -536,7 +541,8 @@ impl Simulation {
     }
 
     fn fall(&mut self, l: &mut Lemming, from_y: i32) {
-        let target = l.pos[1] - FALL_SPEED;
+        let speed = if l.state_ticks <= FALL_START_TICKS { FALL_SPEED_START } else { FALL_SPEED };
+        let target = l.pos[1] - speed;
         let (surface, on_block) = self.world.surface_below(l.pos[0], l.pos[1], l.pos[2]);
         if surface >= target {
             l.pos[1] = surface;

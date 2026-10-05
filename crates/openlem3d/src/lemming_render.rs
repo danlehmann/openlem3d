@@ -18,9 +18,9 @@ use crate::scene_render::SceneSprites;
 /// Fun 1; unverified).
 const LEMMING_TEXELS_PER_UNIT: f32 = 128.0;
 
-/// Simulation ticks per animation frame: about 15 frames per second at
-/// 30 ticks per second (rough measurement, `docs/spec/lemmings.md`).
-const TICKS_PER_FRAME: u32 = 2;
+/// Simulation ticks per animation frame: one, at 14 ticks per second (the
+/// original's sprites change once per tick; `docs/spec/behaviour.md`).
+const TICKS_PER_FRAME: u32 = 1;
 
 /// Which way a lemming faces as seen by the camera, in eighths of a turn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

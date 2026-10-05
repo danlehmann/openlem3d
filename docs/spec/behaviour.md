@@ -44,7 +44,7 @@ at each death.
   per tick. The release intervals below fit 71.4–71.8 ms per tick. The
   game's clock runs in real time: 1.00 s per displayed second over 12 s.
   14 Hz is 70 Hz VGA refresh divided by 5, which may be the underlying
-  timer. The implementation still runs at 30 ticks per second.
+  timer. The implementation runs at 14 ticks per second.
 
 ## Collision
 
@@ -103,13 +103,13 @@ position along the release direction was not measured.
 
 | Quantity | Value | Status |
 |---|---|---|
-| Walking speed | 1/32 unit per tick (0.4375 units/s) | **verified ±3%** (sim still uses 1/48 per tick at 30 Hz = 0.625 units/s) |
-| Falling speed | about 1/6 unit per tick for the first ~4 ticks, then about 1/4 unit per tick (3.5 units/s) | **verified ±6%** (sim: constant 2.5 units/s) |
-| Fall height that splats | more than 2 units, at most 4¼ units | **bracketed**; exact value provisional (sim: more than 4) |
+| Walking speed | 1/32 unit per tick (0.4375 units/s) | **verified ±3%** (implemented) |
+| Falling speed | about 1/6 unit per tick for the first ~4 ticks, then about 1/4 unit per tick (3.5 units/s) | **verified ±6%** (implemented: 1/6 for 4 ticks, then 1/4) |
+| Fall height that splats | more than 2 units, at most 4¼ units | **bracketed**; exact value provisional (implemented: more than 4) |
 | Highest step climbed without turning | at least ¼ unit | **partly verified**: walkers climb builder steps of ¼. Steps of 1 and 2 units turn them around. ½ untested |
 | Largest drop stepped down without falling | ¼ unit | provisional |
 | Headroom needed to walk | ½ unit | provisional |
-| Climbing speed | about 0.04 unit per tick (≈0.6 units/s) | **rough** (sim: 1/64 per tick) |
+| Climbing speed | about 0.04 unit per tick (≈0.6 units/s) | **rough** (implemented: 1/25 per tick) |
 
 How each value was measured:
 
@@ -165,8 +165,8 @@ never removed (provisional).
 |---|---|---|
 | Blocker | Stands still. Walkers entering its area (⅓ unit) turn around. | provisional |
 | Turner | Stands still. Walkers are sent a quarter turn clockwise from the turner's heading. | provisional |
-| Bomber | A countdown 5…1 over the lemming's head, each digit for about 8 ticks (0.57 s). After about 10 more ticks the lemming swells and explodes, about 3.6 s after assignment. The blast left a hole roughly one cell long in the 1-unit path blocks. | **timing verified ±1 tick per digit**; blast shape rough (sim: 5 s fuse, 1-unit radius) |
-| Builder | Each brick is a thin slab about ½ unit long in the walking direction. Each one is ¼ unit higher than the previous, so the staircase rises ¼ per ½ run. Walkers walk up and down it. At least 5 bricks were seen; the total, the timing and the brick width are not measured. | **rise and run verified roughly (±10%)** (sim: 8 bricks, one segment per cell) |
+| Bomber | A countdown 5…1 over the lemming's head, each digit for about 8 ticks (0.57 s). After about 10 more ticks the lemming swells and explodes, about 3.6 s after assignment. The blast left a hole roughly one cell long in the 1-unit path blocks. | **timing verified ±1 tick per digit**; blast shape rough (implemented: 50-tick fuse, 1-unit radius) |
+| Builder | Each brick is a thin slab about ½ unit long in the walking direction. Each one is ¼ unit higher than the previous, so the staircase rises ¼ per ½ run. Walkers walk up and down it. At least 5 bricks were seen; the total, the timing and the brick width are not measured. | **rise and run verified roughly (±10%)** (implemented: 8 bricks, each ¼ up and ½ forward; brick count provisional) |
 | Basher | Every 16 ticks, removes the segments from the feet up in the cell ahead and advances ¼ unit. Stops when nothing is left to bash. | provisional |
 | Miner | Every 20 ticks, removes the segments from the feet down in the cell ahead, then advances and descends ¼ unit. | provisional |
 | Digger | Every 12 ticks, removes the top segment under the feet. | provisional |
