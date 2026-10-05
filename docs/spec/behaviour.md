@@ -104,8 +104,7 @@ rotations 1 and 3 but **wrong** for 0 and 2.
   (`LEVEL.080`/`082`/`084`/`085`/`087`/`088`). Lemmings walk from the hatch
   towards the exit at x = 14.
 
-**The implementation still uses the [L3DEdit] order** (rotations 0 and 2
-swapped).
+**Implemented** as clockwise steps from −Z.
 
 **Release point (partly verified):** the lemming drops from the hatch and
 walks along the centre line of the hatch's row. On the Practice paths, the
@@ -189,15 +188,15 @@ implementation never removes steel (provisional).
 
 | Skill | Behaviour | Status |
 |---|---|---|
-| Blocker | Stands still. A walker turns around when its centre comes within about ½ unit of the blocker's centre, measured along the walker's path. The width of the area across the path is not measured. | **turn distance verified: 0.48 ± 0.05 unit** (implemented: ⅓ unit square) |
-| Turner | Stands still and keeps standing after turning walkers. It points one arm sideways, and walkers that reach it leave in the direction the arm points. A turner assigned while walking +Z pointed +X, and walkers arriving along +Z were sent to +X: the turner's own left. Walkers arriving from other directions were not tested. | **verified for one heading** (implemented: a quarter turn the other way, +Z → −X) |
+| Blocker | Stands still. A walker turns around when its centre comes within about ½ unit of the blocker's centre, measured along the walker's path. The width of the area across the path is not measured. | **turn distance verified: 0.48 ± 0.05 unit** (implemented: a 0.48-unit square) |
+| Turner | Stands still and keeps standing after turning walkers. It points one arm sideways, and walkers that reach it leave in the direction the arm points. A turner assigned while walking +Z pointed +X, and walkers arriving along +Z were sent to +X: the turner's own left. Walkers arriving from other directions were not tested. | **verified for one heading** (implemented: walkers leave a quarter turn anticlockwise from the turner's heading, +Z → +X) |
 | Bomber | A countdown 5…1 over the lemming's head, each digit for about 8 ticks (0.57 s). After about 10 more ticks the lemming swells and explodes, about 3.6 s after assignment. The blast left a hole roughly one cell long in the 1-unit path blocks. | **timing verified ±1 tick per digit**; blast shape rough (implemented: 50-tick fuse, 1-unit radius) |
-| Builder | Lays thin bricks, each about 0.55 unit long in the walking direction and about 0.28 unit higher than the last (¼ up per ½ forward within the measurement error), climbing onto each. One assignment laid **6 bricks**, one every **25 ± 1 ticks** (1.8 s). After the last brick the builder walked on off the end of the staircase and fell. A shrug was not seen. Brick width across the path is not measured. | **verified: count, timing, rise and run (±10%)** (implemented: 8 bricks, 11 ticks per brick) |
-| Basher | Bashing a 1-unit crate took about 2.1–2.4 s (30–34 ticks): cracks spread over the crate, then the lower ½ unit (two segments) of the whole cell vanished at once, leaving the top half hanging. Walkers then walked through the gap. The basher went back to walking after the crate. | **rough** (implemented: every 7 ticks removes all segments from the feet up and advances ¼) |
-| Miner | Removes a chunk about one cell long ahead of it at once after a crack animation, roughly every 3.5 s. The slope and depth per stroke could not be read from the views used. | **provisional; timing rough** (implemented: every 9 ticks, ¼ forward and ¼ down) |
-| Digger | Removes the top ¼-unit segment of the **whole cell** under it at once, after a crack animation, about every 2.8 s (≈ 40 ticks, ±20%). It dug through a 1-unit block in about 8.4 s and then fell. | **rough** (implemented: every 6 ticks) |
+| Builder | Lays thin bricks, each about 0.55 unit long in the walking direction and about 0.28 unit higher than the last (¼ up per ½ forward within the measurement error), climbing onto each. One assignment laid **6 bricks**, one every **25 ± 1 ticks** (1.8 s). After the last brick the builder walked on off the end of the staircase and fell. A shrug was not seen. Brick width across the path is not measured. | **verified: count, timing, rise and run (±10%)** (implemented: 6 bricks, 25 ticks each, ¼ up and ½ forward) |
+| Basher | Bashing a 1-unit crate took about 2.1–2.4 s (30–34 ticks): cracks spread over the crate, then the lower ½ unit (two segments) of the whole cell vanished at once, leaving the top half hanging. Walkers then walked through the gap. The basher went back to walking after the crate. | **rough** (implemented: every 32 ticks removes the two segments from the feet up in the cell ahead) |
+| Miner | Removes a chunk about one cell long ahead of it at once after a crack animation, roughly every 3.5 s. The slope and depth per stroke could not be read from the views used. | **provisional; timing rough** (implemented: every 49 ticks, ¼ forward and ¼ down; shape provisional) |
+| Digger | Removes the top ¼-unit segment of the **whole cell** under it at once, after a crack animation, about every 2.8 s (≈ 40 ticks, ±20%). It dug through a 1-unit block in about 8.4 s and then fell. | **rough** (implemented: one segment every 40 ticks) |
 | Climber | Climbs vertical walls at about 0.6 units/s, then walks over the top and drops off the far side like a walker (2-unit drops survived). Behaviour at a ceiling is untested. The skill is permanent: one climber climbed both walls on Practice "Climber". | **verified** (speed rough) |
-| Floater | Falls normally at first; the umbrella opened about 7 ticks (0.5 s) and about 1½ units into the fall. It then falls at **1/32 unit per tick** (0.45 units/s, the walking speed) and survived a 6¼-unit fall that kills non-floaters. | **float speed verified ±5%; survival verified for 6¼ units; opening point rough** (implemented: opens after ½ unit, then 1/19 unit per tick) |
+| Floater | Falls normally at first; the umbrella opened about 7 ticks (0.5 s) and about 1½ units into the fall. It then falls at **1/32 unit per tick** (0.45 units/s, the walking speed) and survived a 6¼-unit fall that kills non-floaters. | **float speed verified ±5%; survival verified for 6¼ units; opening point rough** (implemented: opens after 1½ units, then 1/32 unit per tick) |
 | Nuke | Stops releases and gives every lemming a fuse, staggered by one tick each. | provisional |
 
 ### How the skills were measured

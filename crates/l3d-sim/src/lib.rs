@@ -21,10 +21,11 @@ const FALL_SPEED_START: i32 = SUB / 6;
 const FALL_SPEED: i32 = SUB / 4;
 /// Ticks of a fall at the starting speed (verified: about 4).
 const FALL_START_TICKS: u32 = 4;
-/// Floating speed with an open umbrella (provisional).
-const FLOAT_SPEED: i32 = SUB / 19;
-/// Distance fallen before a floater opens the umbrella (provisional).
-const FLOAT_OPEN: i32 = SUB / 2;
+/// Floating speed with an open umbrella (verified ±5%: the walking speed).
+const FLOAT_SPEED: i32 = SUB / 32;
+/// Distance fallen before a floater opens the umbrella (verified, rough:
+/// about 1½ units, ~7 ticks).
+const FLOAT_OPEN: i32 = 3 * SUB / 2;
 /// Climbing speed (rough measurement: about 0.04 unit per tick).
 const CLIMB_SPEED: i32 = SUB / 25;
 /// Highest step a walker climbs without turning (provisional: one segment).
@@ -37,8 +38,9 @@ const SPLAT_HEIGHT: i32 = 4 * SUB;
 const HEAD_HEIGHT: i32 = SUB / 2;
 /// How far ahead of its centre a walker probes for walls.
 const REACH: i32 = SUB / 4;
-/// Half-size of the area around a blocker or turner that redirects walkers.
-const BLOCK_RADIUS: i32 = SUB / 3;
+/// Half-size of the area around a blocker or turner that redirects walkers
+/// (verified along the path: 0.48 ± 0.05 unit; across the path assumed equal).
+const BLOCK_RADIUS: i32 = 123;
 /// Ticks per countdown digit shown over a bomber (verified: about 8).
 pub const FUSE_DIGIT_TICKS: u32 = 8;
 /// Bomber fuse length from assignment to explosion (verified: about 3.6 s,
@@ -46,15 +48,16 @@ pub const FUSE_DIGIT_TICKS: u32 = 8;
 pub const FUSE_TICKS: u32 = 50;
 /// Explosion radius in sub-units (rough: the hole is about one cell long).
 const BLAST_RADIUS: i32 = SUB;
-/// Ticks per segment dug (provisional).
-const DIG_TICKS: u32 = 6;
-/// Ticks per brick laid by a builder (provisional).
-const BUILD_TICKS: u32 = 11;
-/// Bricks per builder (provisional; at least 5 observed).
-const BRICKS: u8 = 8;
-/// Ticks per stroke of a basher or miner (provisional).
-const BASH_TICKS: u32 = 7;
-const MINE_TICKS: u32 = 9;
+/// Ticks per segment dug (verified, rough: about 40 ±20%).
+const DIG_TICKS: u32 = 40;
+/// Ticks per brick laid by a builder (verified: 25 ± 1).
+const BUILD_TICKS: u32 = 25;
+/// Bricks per builder (verified: 6).
+const BRICKS: u8 = 6;
+/// Ticks per stroke of a basher (verified, rough: 30–34) and of a miner
+/// (rough: about 3.5 s).
+const BASH_TICKS: u32 = 32;
+const MINE_TICKS: u32 = 49;
 /// Duration of terminal animations, in ticks (provisional).
 const EXIT_TICKS: u32 = 11;
 const DEATH_TICKS: u32 = 14;
@@ -282,13 +285,13 @@ impl Simulation {
             // Entrances only work with the top two segments present and the
             // bottom two absent; at most four are active ([L3DEdit], unverified).
             if b.id == ENTRANCE_ID && b.segments == 0b1100 && entrances.len() < 4 {
-                // Unrotated hatches release towards +Z ([L3DEdit]); each
-                // rotation step turns the release direction +Z → +X → −Z → −X.
-                // Inferred from LEVEL.000, whose hatch (rotation 1) sits on
-                // the west edge of its island: only +X keeps lemmings on land.
-                let mut dir = Dir::PosZ;
+                // Release direction by rotation: 0 → −Z, 1 → +X, 2 → +Z,
+                // 3 → −X, i.e. clockwise steps from −Z (verified in the
+                // original for all four rotations; [L3DEdit]'s +Z start is
+                // wrong).
+                let mut dir = Dir::NegZ;
                 for _ in 0..b.rotation {
-                    dir = dir.anticlockwise();
+                    dir = dir.clockwise();
                 }
                 let spawn = [x as i32 * SUB + SUB / 2, y as i32 * SUB + SUB / 2 - 1, z as i32 * SUB + SUB / 2];
                 entrances.push(Entrance { spawn, dir });
@@ -402,7 +405,7 @@ impl Simulation {
                 State::Blocking => Some(Obstacle { pos: l.pos, turn_to: None }),
                 // A turner sends walkers off a quarter turn clockwise from its
                 // own heading (provisional).
-                State::Turning => Some(Obstacle { pos: l.pos, turn_to: Some(l.dir.clockwise()) }),
+                State::Turning => Some(Obstacle { pos: l.pos, turn_to: Some(l.dir.anticlockwise()) }),
                 _ => None,
             })
             .collect();
@@ -652,7 +655,8 @@ impl Simulation {
         let cell = Self::cell_of(ahead);
         // Segments from the feet up to about head height.
         let first = ((l.pos[1] - cell[1] * SUB) / (SUB / 4)).clamp(0, 3);
-        let mask = (0xFu8 << first) & 0xF;
+        // The lower half-unit (two segments) from the feet up (verified, rough).
+        let mask = (0b11u8 << first) & 0xF;
         match self.world.block(cell) {
             Some((b, f)) if b.segments & mask != 0 => {
                 if f & flags::STEEL != 0 {
