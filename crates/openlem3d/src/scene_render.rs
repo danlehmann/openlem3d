@@ -37,6 +37,9 @@ pub struct SceneData {
     pub layers: Vec<SceneLayer>,
     /// Panoramic backdrop drawn above the horizon, if any.
     pub sky: Option<RgbaImage>,
+    /// The sky is a tiled all-round backdrop covering the whole screen
+    /// (space levels) rather than a panorama above the horizon.
+    pub sky_surround: bool,
     /// Texture for the per-frame sprites in [`SceneSprites`].
     pub sprite_atlas: Option<RgbaImage>,
 }
@@ -344,7 +347,8 @@ fn prepare_scene(
     // screens show more sky around the same centre.
     let extra = (w as f32 / scale - 640.0) / 2.0;
     uniforms.extend([camera.sky_column - extra / 2.0, camera.horizon * h as f32, scale, camera.time]);
-    uniforms.extend([camera.right.x, camera.right.y, camera.right.z, 0.0]);
+    let surround = content.data.as_ref().is_some_and(|d| d.sky_surround);
+    uniforms.extend([camera.right.x, camera.right.y, camera.right.z, if surround { 1.0 } else { 0.0 }]);
     queue.write_buffer(&gpu.uniforms, 0, &f32_bytes(&uniforms));
     upload_sprites(device, &queue, &mut gpu, &sprites);
     if gpu.version == Some(content.version) {

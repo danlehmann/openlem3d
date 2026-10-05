@@ -463,10 +463,18 @@ pub fn build(data: &mut GameData, n: u32) -> Result<BuiltLevel, l3d_formats::Err
 
     if level.sky_gfx != 0xFF
         && let Ok(sky) = data.gfx("SKY", level.sky_gfx)
-        && sky.len() == 1024 * 64
     {
-        // 1024×64 panoramas only; 200×320 all-round skies are not handled yet.
-        scene.sky = Some(indexed_to_rgba(&sky, 1024, &pal));
+        match sky.len() {
+            // 1024×64 panorama above the horizon (verified).
+            65536 => scene.sky = Some(indexed_to_rgba(&sky, 1024, &pal)),
+            // 200×320 all-round sky; drawn tiled over the whole screen
+            // (placement and panning provisional).
+            64000 => {
+                scene.sky = Some(indexed_to_rgba(&sky, 200, &pal));
+                scene.sky_surround = true;
+            }
+            _ => {}
+        }
     }
     Ok(BuiltLevel { level, blocks, scene, mesh, block_layer: block_layer_index })
 }

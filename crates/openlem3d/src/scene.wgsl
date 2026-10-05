@@ -8,6 +8,7 @@ struct Uniforms {
     // w: time in seconds.
     sky: vec4<f32>,
     // Camera right vector (xyz); billboards are spanned by it and +Y.
+    // w: 1 for an all-round tiled sky, 0 for a panorama above the horizon.
     right: vec4<f32>,
 };
 
@@ -79,6 +80,11 @@ fn vs_sky(@builtin(vertex_index) i: u32) -> SkyOut {
 fn fs_sky(v: SkyOut) -> @location(0) vec4<f32> {
     let dims = vec2<f32>(textureDimensions(tex));
     let col = u.sky.x + v.clip.x / (2.0 * u.sky.z);
+    if (u.right.w > 0.5) {
+        // All-round sky: tile at 2× scale over the whole screen (provisional).
+        let tiled = vec2(col, v.clip.y / (2.0 * u.sky.z)) / dims;
+        return vec4(textureSampleLevel(tex, samp, tiled, 0.0).rgb, 1.0);
+    }
     let row = clamp(v.clip.y / u.sky.y, 0.0, 1.0) * dims.y;
     let uv = vec2(col / dims.x, min(row, dims.y - 0.5) / dims.y);
     return vec4(textureSampleLevel(tex, samp, uv, 0.0).rgb, 1.0);
