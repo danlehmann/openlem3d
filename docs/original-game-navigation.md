@@ -63,6 +63,7 @@ They share `Lem3dCommon.ps1` (defaults and helpers) and `Lem3dWin32.cs`
 | `shot.ps1 [-Name n] [-Width w] [-Method auto\|print\|screen]` | Saves a PNG of the emulated screen to `LEM3D_SHOTS` and prints the path. `-Width 640` gives one pixel per game pixel. The default `print` method works even when the window is covered. |
 | `start-level.ps1 [-Rating Fun\|Tricky\|Taxing\|Mayhem] [-CurrentRating …] [-Code X] [-RowY y] [-Paused]` | From the main menu, opens a level list, clicks a row, continues through the briefing and waits until the level runs. |
 | `quit-level.ps1 [-WaitSeconds 15]` | Nukes the level, waits for the results screen and returns to the main menu. |
+| `burst.ps1 -Name n [-Count c] [-IntervalMs ms] [-Width w]` | Grabs a timed series of screenshots (down to about 17 ms apart) as `n-0000.png`… plus `n.csv` with each grab time. Use it for timing measurements. |
 | `quit.ps1` | Closes DOSBox-X (WM_CLOSE, then kill after 5 s). |
 | `calibrate-mouse.ps1` | Re-measures the mouse scale factors (see §5). Run it on a static screen. |
 | `lem3d.conf` | DOSBox-X base config: SVGA S3, 16 MB, dynamic core, `cycles=max`, SB16, 1280x960 window at (40,40), no menu bar, no quit prompt. |
@@ -176,8 +177,14 @@ Five cards along the bottom of the 640x480 screen:
   music, effects, window, mouse and camera. Click "Exit and Save" at about
   (550,450) to leave. "Default config" is at the bottom left.
 - **Practice** (rating card on Practice, then F1): a different screen with an
-  EXIT button at about (562,385). It was only briefly explored
-  **[unverified]**.
+  EXIT button at about (562,385). **[verified]** It is "Select Item to
+  Practice", a grid of 20 icons for the Practice levels (`LEVEL.080`–`099`),
+  all available from the start. Row 1 at y≈110: blocker, turner, bomber,
+  builder, basher, miner and digger, at x≈75, 160, 225, 320, 405, 470 and
+  555. Row 2 at y≈240 starts with climber (75) and floater (160). Row 3 is
+  at y≈380; (160,380) is "Slippery Block". Hovering shows an item's name at
+  the bottom. Clicking an item opens its briefing (left click = Continue).
+  `quit-level.ps1` returns from a Practice level to this screen.
 
 ### In a level
 

@@ -38,6 +38,11 @@ enum Cmd {
     Levels,
     /// Print a level's header fields and block statistics.
     Level { number: u32 },
+    /// Print each non-empty layer of a level's block grid as a map, X across
+    /// and Z down. `.` is empty, `#` a full cube, a hex digit a cube with only
+    /// those segments (bit 3 = top), and a lowercase letter a non-cube shape
+    /// (`a` = shape 1, `b` = shape 2, ...). Rows that are empty are left out.
+    LevelMap { number: u32 },
     /// For each level, count block ids used by the grid that are placeholders
     /// in BLK.<level number> versus BLK.<texture set>.
     BlkMatch,
@@ -78,6 +83,59 @@ enum Cmd {
         /// Vertical scale applied to B (nearest-neighbour).
         #[arg(long, default_value_t = 1.0)]
         sy: f64,
+    },
+    /// Crop the same rectangle from a series of screenshots and tile the
+    /// crops into one labelled contact sheet. Works on local PNG files; no CD
+    /// image needed.
+    ImgMontage {
+        #[arg(required = true)]
+        shots: Vec<PathBuf>,
+        /// Rectangle to crop, as X,Y,W,H.
+        #[arg(long)]
+        rect: String,
+        /// Crops per row.
+        #[arg(long, default_value_t = 8)]
+        per_row: usize,
+        /// Integer upscaling factor.
+        #[arg(long, default_value_t = 1)]
+        scale: usize,
+        #[arg(long)]
+        out: PathBuf,
+    },
+    /// For a series of screenshots, print where the content of a rectangle
+    /// changes: each run of frames whose crops match is one line, labelled
+    /// with the first frame that showed matching content. Works on local PNG
+    /// files; no CD image needed.
+    ImgChanges {
+        #[arg(required = true)]
+        shots: Vec<PathBuf>,
+        /// Rectangle to compare, as X,Y,W,H.
+        #[arg(long)]
+        rect: String,
+        /// Largest mean absolute difference per colour channel at which two
+        /// crops still match.
+        #[arg(long, default_value_t = 0.0)]
+        tolerance: f64,
+    },
+    /// For each screenshot, print the connected blobs of marked pixels inside a
+    /// rectangle: bounding box, pixel count and centroid. Without
+    /// --background a pixel is marked when it is "lemming blue" (blue exceeds
+    /// both red and green by at least --margin); with it, when its summed RGB
+    /// difference from the background image exceeds --margin. Works on local
+    /// PNG files; no CD image needed.
+    ImgBlobs {
+        #[arg(required = true)]
+        shots: Vec<PathBuf>,
+        /// Rectangle to search, as X,Y,W,H.
+        #[arg(long)]
+        rect: String,
+        #[arg(long, default_value_t = 60)]
+        margin: i32,
+        /// Smallest blob, in pixels, that is printed.
+        #[arg(long, default_value_t = 6)]
+        min_size: usize,
+        #[arg(long)]
+        background: Option<PathBuf>,
     },
     /// Decode an MHC sprite file and write its cells as a PNG contact sheet,
     /// printing the manifest summary.
@@ -276,6 +334,29 @@ fn read_rgb(path: &Path) -> Result<(u32, u32, Vec<u8>)> {
         .flat_map(|p| if ch < 3 { [p[0]; 3] } else { [p[0], p[1], p[2]] })
         .collect();
     Ok((info.width, info.height, rgb))
+}
+
+/// Parses X,Y,W,H.
+fn parse_rect(s: &str) -> Result<[i32; 4]> {
+    let v: Vec<i32> = s.split(',').map(|p| p.trim().parse()).collect::<Result<_, _>>().context("rect must be X,Y,W,H")?;
+    v.try_into().ok().filter(|r: &[i32; 4]| r[2] > 0 && r[3] > 0).context("rect must be X,Y,W,H with W, H > 0")
+}
+
+/// The RGB8 pixels of rectangle X,Y,W,H of an image; pixels outside the
+/// image are black.
+fn crop_rgb(img: &(u32, u32, Vec<u8>), [x, y, w, h]: [i32; 4]) -> Vec<u8> {
+    let mut out = Vec::with_capacity((w * h * 3) as usize);
+    for yy in y..y + h {
+        for xx in x..x + w {
+            if (0..img.0 as i32).contains(&xx) && (0..img.1 as i32).contains(&yy) {
+                let i = ((yy as u32 * img.0 + xx as u32) * 3) as usize;
+                out.extend_from_slice(&img.2[i..i + 3]);
+            } else {
+                out.extend_from_slice(&[0, 0, 0]);
+            }
+        }
+    }
+    out
 }
 
 fn parse_range(s: &str) -> Result<std::ops::Range<i32>> {
@@ -491,10 +572,113 @@ fn main() -> Result<()> {
         }
         return Ok(());
     }
+    if let Cmd::ImgMontage { shots, rect, per_row, scale, out } = &cli.cmd {
+        let [x, y, w, h] = parse_rect(rect)?;
+        let (gap, label) = (2, 8);
+        let (cw, ch) = (w as usize * scale + gap, h as usize * scale + gap + label);
+        let rows = shots.len().div_ceil(*per_row);
+        let mut sheet = Canvas::new(cw * per_row, ch * rows, [40, 40, 40]);
+        for (k, shot) in shots.iter().enumerate() {
+            let img = read_rgb(shot)?;
+            let crop = crop_rgb(&img, [x, y, w, h]);
+            let (ox, oy) = ((k % per_row) * cw, (k / per_row) * ch);
+            sheet.number(ox + 1, oy + 1, k, 1, [255, 255, 0]);
+            for yy in 0..h as usize * scale {
+                for xx in 0..w as usize * scale {
+                    let i = ((yy / scale) * w as usize + xx / scale) * 3;
+                    let c = [crop[i], crop[i + 1], crop[i + 2]];
+                    sheet.fill_rect(ox + xx, oy + label + yy, 1, 1, c);
+                }
+            }
+        }
+        write_rgb_png(out, sheet.width as u32, &sheet.rgb)?;
+        return Ok(());
+    }
+    if let Cmd::ImgBlobs { shots, rect, margin, min_size, background } = &cli.cmd {
+        let [rx, ry, rw, rh] = parse_rect(rect)?;
+        let bg = background.as_ref().map(|p| read_rgb(p).map(|img| crop_rgb(&img, [rx, ry, rw, rh]))).transpose()?;
+        let (w, h) = (rw as usize, rh as usize);
+        for (k, shot) in shots.iter().enumerate() {
+            let crop = crop_rgb(&read_rgb(shot)?, [rx, ry, rw, rh]);
+            let mut mask: Vec<bool> = crop
+                .chunks(3)
+                .enumerate()
+                .map(|(i, p)| match &bg {
+                    Some(bg) => (0..3).map(|c| (p[c] as i32 - bg[i * 3 + c] as i32).abs()).sum::<i32>() > *margin,
+                    None => {
+                        let (r, g, b) = (p[0] as i32, p[1] as i32, p[2] as i32);
+                        b - r >= *margin && b - g >= *margin
+                    }
+                })
+                .collect();
+            let mut blobs = Vec::new();
+            for start in 0..w * h {
+                if !mask[start] {
+                    continue;
+                }
+                mask[start] = false;
+                let mut stack = vec![start];
+                let (mut x0, mut y0, mut x1, mut y1, mut n, mut sx, mut sy) = (w, h, 0, 0, 0usize, 0usize, 0usize);
+                while let Some(i) = stack.pop() {
+                    let (x, y) = (i % w, i / w);
+                    (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x), y1.max(y));
+                    (n, sx, sy) = (n + 1, sx + x, sy + y);
+                    for dy in -1i32..=1 {
+                        for dx in -1i32..=1 {
+                            let (nx, ny) = (x as i32 + dx, y as i32 + dy);
+                            if (0..w as i32).contains(&nx) && (0..h as i32).contains(&ny) {
+                                let j = ny as usize * w + nx as usize;
+                                if mask[j] {
+                                    mask[j] = false;
+                                    stack.push(j);
+                                }
+                            }
+                        }
+                    }
+                }
+                if n >= *min_size {
+                    blobs.push((x0, y0, x1, y1, n, sx as f64 / n as f64, sy as f64 / n as f64));
+                }
+            }
+            blobs.sort_by(|a, b| a.5.total_cmp(&b.5));
+            let list: Vec<String> = blobs
+                .iter()
+                .map(|&(x0, y0, x1, y1, n, cx, cy)| {
+                    let (ox, oy) = (rx as usize, ry as usize);
+                    format!("[{}..{} x {}..{} n{n} c({:.1},{:.1})]", x0 + ox, x1 + ox, y0 + oy, y1 + oy, cx + ox as f64, cy + oy as f64)
+                })
+                .collect();
+            println!("{k:4}: {}", list.join(" "));
+        }
+        return Ok(());
+    }
+    if let Cmd::ImgChanges { shots, rect, tolerance } = &cli.cmd {
+        let r = parse_rect(rect)?;
+        let mean_diff = |a: &[u8], b: &[u8]| a.iter().zip(b).map(|(p, q)| u64::from(p.abs_diff(*q))).sum::<u64>() as f64 / a.len() as f64;
+        let mut seen: Vec<(Vec<u8>, usize)> = Vec::new();
+        let mut prev: Option<usize> = None;
+        for (k, shot) in shots.iter().enumerate() {
+            let crop = crop_rgb(&read_rgb(shot)?, r);
+            let id = match seen.iter().position(|s| mean_diff(&s.0, &crop) <= *tolerance) {
+                Some(i) => i,
+                None => {
+                    seen.push((crop, k));
+                    seen.len() - 1
+                }
+            };
+            if prev != Some(id) {
+                println!("frame {k:4}: content #{id} (first seen at frame {})", seen[id].1);
+                prev = Some(id);
+            }
+        }
+        return Ok(());
+    }
     let dir = data_dir(&cli);
     let disc = Disc::open_dir(&dir).with_context(|| format!("opening CD image in {}", dir.display()))?;
     match &cli.cmd {
-        Cmd::ImgShift { .. } | Cmd::ImgFind { .. } => unreachable!("handled before opening the disc"),
+        Cmd::ImgShift { .. } | Cmd::ImgFind { .. } | Cmd::ImgMontage { .. } | Cmd::ImgChanges { .. } | Cmd::ImgBlobs { .. } => {
+            unreachable!("handled before opening the disc")
+        }
         Cmd::Tracks => {
             for t in &disc.tracks {
                 println!("{:2} {:?} {} sectors ({:.1}s) at byte {}", t.number, t.mode, t.sectors, t.seconds(), t.byte_offset);
@@ -564,6 +748,30 @@ fn main() -> Result<()> {
                     l.trap_type, l.sky_gfx, l.walls_set, l.theme, l.music, l.lemmings, l.save_requirement,
                     l.time_minutes, l.time_seconds, l.release_rate, l.flags
                 );
+            }
+        }
+        Cmd::LevelMap { number } => {
+            use l3d_formats::level::{SIZE_X, SIZE_Y, SIZE_Z};
+            let level = load_level(&mut open_fs(&disc)?, *number)?;
+            let header: String = (0..SIZE_X).map(|x| char::from_digit((x % 10) as u32, 10).unwrap()).collect();
+            for y in 0..SIZE_Y {
+                if (0..SIZE_X).all(|x| (0..SIZE_Z).all(|z| level.block(x, y, z).is_empty())) {
+                    continue;
+                }
+                println!("layer y={y}\n    x {header}");
+                for z in 0..SIZE_Z {
+                    let row: String = (0..SIZE_X)
+                        .map(|x| match level.block(x, y, z) {
+                            c if c.is_empty() => '.',
+                            c if c.shape != 0 => (b'a' + c.shape - 1) as char,
+                            c if c.segments == 0xF => '#',
+                            c => char::from_digit(c.segments as u32, 16).unwrap(),
+                        })
+                        .collect();
+                    if row.bytes().any(|b| b != b'.') {
+                        println!("z={z:2} {row}");
+                    }
+                }
             }
         }
         Cmd::Level { number } => {

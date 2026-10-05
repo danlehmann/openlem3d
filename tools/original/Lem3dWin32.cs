@@ -379,6 +379,50 @@ public static class Lem3dWin32
 
     public static void GrabClient(IntPtr h, string path) { GrabClient(h, path, "auto"); }
 
+    /// Grabs the client area `count` times, `intervalMs` apart (measured from
+    /// the first grab), scaled to `width` pixels wide with nearest-neighbour
+    /// sampling, and saves frame i as `<prefix>-<iiii>.png`. Frames are held
+    /// in memory until the series ends so that saving does not slow the
+    /// grabs. Returns each frame's grab time in milliseconds after the first.
+    public static long[] GrabSeries(IntPtr h, string prefix, int count, int intervalMs, int width)
+    {
+        int[] r = ClientRectOnScreen(h);
+        int w = width > 0 ? width : r[2];
+        int hgt = (int)((long)r[3] * w / r[2]);
+        var frames = new List<Bitmap>();
+        var times = new long[count];
+        var sw = Stopwatch.StartNew();
+        using (var full = new Bitmap(r[2], r[3], PixelFormat.Format32bppArgb))
+        {
+            for (int i = 0; i < count; i++)
+            {
+                long due = (long)i * intervalMs;
+                while (sw.ElapsedMilliseconds < due) Thread.Sleep(1);
+                times[i] = sw.ElapsedMilliseconds;
+                using (var g = Graphics.FromImage(full))
+                {
+                    IntPtr hdc = g.GetHdc();
+                    PrintWindow(h, hdc, 0x1 | 0x2);
+                    g.ReleaseHdc(hdc);
+                }
+                var small = new Bitmap(w, hgt, PixelFormat.Format24bppRgb);
+                using (var g = Graphics.FromImage(small))
+                {
+                    g.InterpolationMode = System.Drawing.Drawing2D.InterpolationMode.NearestNeighbor;
+                    g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.Half;
+                    g.DrawImage(full, 0, 0, w, hgt);
+                }
+                frames.Add(small);
+            }
+        }
+        for (int i = 0; i < frames.Count; i++)
+        {
+            frames[i].Save(prefix + "-" + i.ToString("D4") + ".png", ImageFormat.Png);
+            frames[i].Dispose();
+        }
+        return times;
+    }
+
     static bool IsBlank(Bitmap b)
     {
         // A sparse sample: an all-black or all-transparent result means the
