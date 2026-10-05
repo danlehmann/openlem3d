@@ -42,7 +42,12 @@ enum Cmd {
     /// and Z down. `.` is empty, `#` a full cube, a hex digit a cube with only
     /// those segments (bit 3 = top), and a lowercase letter a non-cube shape
     /// (`a` = shape 1, `b` = shape 2, ...). Rows that are empty are left out.
-    LevelMap { number: u32 },
+    LevelMap {
+        number: u32,
+        /// Show cells whose block is flagged steel as `S`, whatever their shape.
+        #[arg(long)]
+        steel: bool,
+    },
     /// For each level, count block ids used by the grid that are placeholders
     /// in BLK.<level number> versus BLK.<texture set>.
     BlkMatch,
@@ -750,9 +755,12 @@ fn main() -> Result<()> {
                 );
             }
         }
-        Cmd::LevelMap { number } => {
+        Cmd::LevelMap { number, steel } => {
             use l3d_formats::level::{SIZE_X, SIZE_Y, SIZE_Z};
-            let level = load_level(&mut open_fs(&disc)?, *number)?;
+            let mut fs = open_fs(&disc)?;
+            let level = load_level(&mut fs, *number)?;
+            let blk = load_blk(&mut fs, *number)?;
+            let is_steel = |id: u8| blk.defs[id as usize].flags & l3d_formats::blk::flags::STEEL != 0;
             let header: String = (0..SIZE_X).map(|x| char::from_digit((x % 10) as u32, 10).unwrap()).collect();
             for y in 0..SIZE_Y {
                 if (0..SIZE_X).all(|x| (0..SIZE_Z).all(|z| level.block(x, y, z).is_empty())) {
@@ -763,6 +771,7 @@ fn main() -> Result<()> {
                     let row: String = (0..SIZE_X)
                         .map(|x| match level.block(x, y, z) {
                             c if c.is_empty() => '.',
+                            c if *steel && is_steel(c.id) => 'S',
                             c if c.shape != 0 => (b'a' + c.shape - 1) as char,
                             c if c.segments == 0xF => '#',
                             c => char::from_digit(c.segments as u32, 16).unwrap(),

@@ -182,7 +182,7 @@ Five cards along the bottom of the 640x480 screen:
   all available from the start. Row 1 at y≈110: blocker, turner, bomber,
   builder, basher, miner and digger, at x≈75, 160, 225, 320, 405, 470 and
   555. Row 2 at y≈240 starts with climber (75) and floater (160). Row 3 is
-  at y≈380; (160,380) is "Slippery Block". Hovering shows an item's name at
+  at y≈380; (160,380) is "Slippery Block" and (235,380) "Rope Slide"; (555,240) is "One Way". Hovering shows an item's name at
   the bottom. Clicking an item opens its briefing (left click = Continue).
   `quit-level.ps1` returns from a Practice level to this screen.
 
@@ -202,6 +202,9 @@ Screen layout (640x480 game pixels, approximate centres):
 - bottom row: an arrow at (24,440) (red normally, green in the virtual-lemming
   view), the virtual-lemming face at (68,440), then the skill icons at y≈440
   starting at x≈122, about 52 px apart. Each skill shows its remaining count.
+  Verified clicks: blocker 122, turner 174, builder 278, basher 330, miner
+  382, digger 434 and floater 585 (the umbrella lemming at the far right;
+  538 is not the floater).
 
 | Action | Input | Status |
 |---|---|---|

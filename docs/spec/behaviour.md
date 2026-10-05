@@ -21,7 +21,7 @@ z = 13.5. The tools:
   background frame) and prints their positions. `img-montage` makes
   contact sheets for inspection.
 - `l3d-tool level-map` prints a level's block layers, giving the geometry
-  the lemmings walk on.
+  the lemmings walk on; `--steel` marks steel blocks as `S`.
 
 Screen distances are turned into grid units with the verified projection in
 [camera.md](camera.md): focal length about 503 px at 640×480, with the
@@ -80,17 +80,32 @@ under 0.5 s while paused, and 12 steps in a 150 ms hold. A press shorter
 than about 120 ms changed nothing. A press takes effect while the game is
 paused.
 
-**Direction:** each rotation step turns the release direction +Z → +X → −Z
-→ −X. An unrotated entrance releases towards +Z [L3DEdit].
+**Direction (verified for all four rotations):** an unrotated entrance
+releases towards **−Z**, and each rotation step turns the direction
+−Z → +X → +Z → −X. [L3DEdit] says +Z → +X → −Z → −X, which is right for
+rotations 1 and 3 but **wrong** for 0 and 2.
 
+- Rotation 0 → −Z: **verified** on two levels. Practice "Rope Slide"
+  (`LEVEL.096`, hatch (20,7,23)), camera 1 facing +X (screen left is −Z):
+  each lemming appeared under the hatch at screen x ≈ 379 and walked
+  straight to the left at about 48 px/s, onto the rope slide that runs
+  towards −Z. Tricky 1 "Jelly Climber" (`LEVEL.020`, hatch (15,3,30) at the
+  +Z end of a path), camera 1 facing +X: new lemmings dropped at screen
+  x ≈ 449 and walked left (−Z) along the path, 14 px per 0.5 s.
 - Rotation 1 → +X: **verified** on Fun 1 (`LEVEL.000`, hatch (3,2,16)).
   Camera 1 faces +Z, so +X is screen left. The lemmings walk out to the
   left, along the hatch's row, onto the ramp at x = 6.
+- Rotation 2 → +Z: **verified** on Practice "Turner" (`LEVEL.081`, hatch
+  (19,2,8) on a path along x = 19). Camera 2 faces −X, so +Z is screen left:
+  every lemming came in from the screen right (z = 8 side) and walked left
+  to the junction at z = 13. Camera 3, at the +Z end looking −Z, saw them
+  walk towards the camera.
 - Rotation 3 → −X: **verified** on Practice 1, 3, 5, 6, 8 and 9
   (`LEVEL.080`/`082`/`084`/`085`/`087`/`088`). Lemmings walk from the hatch
   towards the exit at x = 14.
-- Rotations 0 and 2: **unverified**. One look at Practice "Slippery Block"
-  (rotation 0, on ice) was inconclusive.
+
+**The implementation still uses the [L3DEdit] order** (rotations 0 and 2
+swapped).
 
 **Release point (partly verified):** the lemming drops from the hatch and
 walks along the centre line of the hatch's row. On the Practice paths, the
@@ -144,7 +159,16 @@ doorway. The doorway is the block's +Z face, turned with the block's rotation
 **Partly verified** for rotation 1. On the Practice levels the exit
 (14,1,13) has rotation 1. Its house door faces +X (camera 4, looking −X,
 sees the door head-on). A climber walking −X along the path was saved
-there, entering through that face. Other rotations are unverified.
+there, entering through that face.
+
+Rotation 3 **(seen, not tested by a save):** on Practice "One Way"
+(`LEVEL.093`) the exit house (21,1,13) has rotation 3, and camera 2 (looking
+−Z) shows its door on the −X face. So rotations 1 and 3 put the doorway on
+the +X and −X faces, as both the [L3DEdit] rule and the entrance rule above
+predict. Rotations 0 and 2 are **unverified**: those two rules disagree for
+them (+Z or −Z face), and the only reachable level with such exits
+(Tricky 1, `LEVEL.020`) draws them as flat pads with no visible door. No
+lemming reached one in our run.
 
 ## Skills
 
@@ -158,21 +182,70 @@ the Practice menu's first nine items are these skills.
 then click a lemming while the game runs. Clicks on a paused game didn't
 assign.
 
-Terrain is changed one quarter-height segment at a time. Steel blocks are
-never removed (provisional).
+Terrain is changed one quarter-height segment at a time. The basher and the
+digger were seen to remove segments across a whole cell at once. Whether
+steel stops them, and when exactly a basher stops, is untested; the
+implementation never removes steel (provisional).
 
 | Skill | Behaviour | Status |
 |---|---|---|
-| Blocker | Stands still. Walkers entering its area (⅓ unit) turn around. | provisional |
-| Turner | Stands still. Walkers are sent a quarter turn clockwise from the turner's heading. | provisional |
+| Blocker | Stands still. A walker turns around when its centre comes within about ½ unit of the blocker's centre, measured along the walker's path. The width of the area across the path is not measured. | **turn distance verified: 0.48 ± 0.05 unit** (implemented: ⅓ unit square) |
+| Turner | Stands still and keeps standing after turning walkers. It points one arm sideways, and walkers that reach it leave in the direction the arm points. A turner assigned while walking +Z pointed +X, and walkers arriving along +Z were sent to +X: the turner's own left. Walkers arriving from other directions were not tested. | **verified for one heading** (implemented: a quarter turn the other way, +Z → −X) |
 | Bomber | A countdown 5…1 over the lemming's head, each digit for about 8 ticks (0.57 s). After about 10 more ticks the lemming swells and explodes, about 3.6 s after assignment. The blast left a hole roughly one cell long in the 1-unit path blocks. | **timing verified ±1 tick per digit**; blast shape rough (implemented: 50-tick fuse, 1-unit radius) |
-| Builder | Each brick is a thin slab about ½ unit long in the walking direction. Each one is ¼ unit higher than the previous, so the staircase rises ¼ per ½ run. Walkers walk up and down it. At least 5 bricks were seen; the total, the timing and the brick width are not measured. | **rise and run verified roughly (±10%)** (implemented: 8 bricks, each ¼ up and ½ forward; brick count provisional) |
-| Basher | Every 16 ticks, removes the segments from the feet up in the cell ahead and advances ¼ unit. Stops when nothing is left to bash. | provisional |
-| Miner | Every 20 ticks, removes the segments from the feet down in the cell ahead, then advances and descends ¼ unit. | provisional |
-| Digger | Every 12 ticks, removes the top segment under the feet. | provisional |
+| Builder | Lays thin bricks, each about 0.55 unit long in the walking direction and about 0.28 unit higher than the last (¼ up per ½ forward within the measurement error), climbing onto each. One assignment laid **6 bricks**, one every **25 ± 1 ticks** (1.8 s). After the last brick the builder walked on off the end of the staircase and fell. A shrug was not seen. Brick width across the path is not measured. | **verified: count, timing, rise and run (±10%)** (implemented: 8 bricks, 11 ticks per brick) |
+| Basher | Bashing a 1-unit crate took about 2.1–2.4 s (30–34 ticks): cracks spread over the crate, then the lower ½ unit (two segments) of the whole cell vanished at once, leaving the top half hanging. Walkers then walked through the gap. The basher went back to walking after the crate. | **rough** (implemented: every 7 ticks removes all segments from the feet up and advances ¼) |
+| Miner | Removes a chunk about one cell long ahead of it at once after a crack animation, roughly every 3.5 s. The slope and depth per stroke could not be read from the views used. | **provisional; timing rough** (implemented: every 9 ticks, ¼ forward and ¼ down) |
+| Digger | Removes the top ¼-unit segment of the **whole cell** under it at once, after a crack animation, about every 2.8 s (≈ 40 ticks, ±20%). It dug through a 1-unit block in about 8.4 s and then fell. | **rough** (implemented: every 6 ticks) |
 | Climber | Climbs vertical walls at about 0.6 units/s, then walks over the top and drops off the far side like a walker (2-unit drops survived). Behaviour at a ceiling is untested. The skill is permanent: one climber climbed both walls on Practice "Climber". | **verified** (speed rough) |
-| Floater | Opens an umbrella after falling ½ unit, then falls slowly and never splats. | provisional |
+| Floater | Falls normally at first; the umbrella opened about 7 ticks (0.5 s) and about 1½ units into the fall. It then falls at **1/32 unit per tick** (0.45 units/s, the walking speed) and survived a 6¼-unit fall that kills non-floaters. | **float speed verified ±5%; survival verified for 6¼ units; opening point rough** (implemented: opens after ½ unit, then 1/19 unit per tick) |
 | Nuke | Stops releases and gives every lemming a fuse, staggered by one tick each. | provisional |
+
+### How the skills were measured
+
+All on the Practice levels, with timed screenshot series (`burst.ps1`,
+100 ms apart unless noted) started just before the assigning click. Screen
+distances use the focal length of about 503 px; the depth is the distance
+from the preset camera to the lemmings' row.
+
+- **Blocker** (`LEVEL.080`, camera 1 facing −Z, path 7.5 units away, so
+  67 px per unit; 150 ms frames). The blocker's sprite centre stayed at
+  screen x = 426.3. Walkers coming from the hatch reversed with their
+  centre at x = 388.5–394.0 (four approaches), 32–38 px short of it:
+  0.48–0.56 unit. With the 2 px walking step per tick and the sprites'
+  different shapes, that is 0.5 ± 0.05.
+- **Turner** (`LEVEL.081`). Camera 3 sits at the +Z end of the x = 19 path
+  looking −Z. The turner, assigned to a walker heading +Z, faced the camera
+  with its arm out to screen right (+X). The next walkers left the path
+  towards screen right. Camera 2 (looking −X) showed the same walkers turning
+  at the junction towards the camera (+X) while the turner stayed put for
+  more than 10 s and at least three turned walkers.
+- **Builder** (`LEVEL.083`, camera 1 facing −Z, 7.5 units, 67 px per unit).
+  Thin brown bricks were found by differencing against the frame before the
+  click. Their tops are at screen y = 262, 239, 223, 203, 187 and 167
+  (spacing 16–23 px, mean 19 px ≈ 0.28 unit) and they are 35–40 px
+  (≈ 0.55 unit) long, stepping 37 px sideways each. Bricks 1–5 first
+  appeared 4.4, 6.3, 8.1, 9.9 and 11.6 s after the start of the series:
+  1.80 s apart, 25 ticks. The sixth brick is hidden by the builder until it
+  walks off at 14.9 s. No seventh brick appeared in the next 25 s. A first
+  run gave the same staircase.
+- **Basher** (`LEVEL.084`, camera 2, the crate at 3.5 units). The crate
+  (one full cube at (20,1,13)) cracked for about 2.1–2.4 s, then its lower
+  part vanished in one frame. The remaining bottom edge projects to
+  y ≈ 1.4, close to the 1.5 expected for two removed segments.
+- **Digger** (`LEVEL.086`, camera 1, 8.5 units, 59 px per unit). The bottom
+  of the hole dropped in steps of 15–17 px (≈ ¼ unit) at about 5.7, 9.6,
+  13.0 and 14.2 s into the series; the irregular spacing (crack animation,
+  occlusion by the digger) gives the ±20%.
+- **Miner** (`LEVEL.085`, camera 2 from the side). Two chunks were removed,
+  about 3.5 s apart, each about one unit long. The near-side blocks along the
+  path hide the floor of the cut, so slope and depth are not measured.
+- **Floater** (`LEVEL.088`, camera 3 facing +X, the tower 10.5 units away,
+  48 px per unit). A floater stepped off the slab at y = 7¼. Its feet fell
+  97 → 148 px in four frames (full falling speed), and the umbrella canopy
+  was first visible 0.6 s after leaving the edge, about 75 px (1½ units)
+  down. The canopy top then moved from y = 110 at 6.01 s to y = 300 at
+  14.80 s: 21.6 px/s, 0.45 units/s, 0.032 unit per tick. The OUT counter
+  dropped only at the regular deaths of the non-floaters that followed it.
 
 ## Deaths
 
