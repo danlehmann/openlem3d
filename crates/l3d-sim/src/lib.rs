@@ -43,7 +43,7 @@ const BLOCK_RADIUS: i32 = SUB / 3;
 pub const FUSE_DIGIT_TICKS: u32 = 8;
 /// Bomber fuse length from assignment to explosion (verified: about 3.6 s,
 /// a 5…1 countdown of 8-tick digits followed by the swelling animation).
-const FUSE_TICKS: u32 = 50;
+pub const FUSE_TICKS: u32 = 50;
 /// Explosion radius in sub-units (rough: the hole is about one cell long).
 const BLAST_RADIUS: i32 = SUB;
 /// Ticks per segment dug (provisional).
