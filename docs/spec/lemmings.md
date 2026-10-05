@@ -33,25 +33,100 @@ complete lemming frames.
 bank. Banks hold 8–19 consecutive cells, and their boundaries don't line up
 with action boundaries. Cells are effectively one flat list, indexed 0–567.
 
-## Frame groups (to be determined)
+## Frame groups
 
 The file doesn't say which cell ranges form which action, or which viewing
-direction. Lemmings are pre-rendered from several angles relative to the
-camera. A first look at the contact sheet shows these frame sets:
+direction. The table below comes from the contact sheet (`l3d-tool mhc
+--labels`) and from in-game captures of Fun 1 and Mayhem 1 (level 61), ranked
+against the cells with `l3d-tool mhc-match`. Mirror relations come from
+`l3d-tool mhc-mirrors`.
 
-- **Walking:** several blocks of about 10 frames each, from different angles.
-- **Blocker:** arms spread.
-- **Falling** and **splat**.
-- **Climbing.**
-- **Digging and mining:** pickaxe.
-- **Bashing.**
-- **Floater:** umbrella frames, which are separate cells.
-- **Builder:** carrying bricks.
-- **Bomber:** swelling up, then a smoke cloud.
-- **Electrocution:** blue skeleton, lightning cloud.
-- **Drowning.**
-- **Exiting.**
-- A few non-lemming cells: smoke puffs and a trap mechanism.
+### Layout: five viewing angles, mirrored for the rest
 
-The exact cell ranges, frame order, playback rate and viewing-angle
-selection will be filled in by matching in-game captures against the sheet.
+Almost every action is stored as **5 consecutive blocks, one per viewing
+angle, each holding the action's frames in playback order**. Within an
+action, the blocks run from front to back:
+
+| Block | Viewing angle (lemming's heading relative to the camera) |
+|---|---|
+| A0 | facing the camera (front) |
+| A1 | front three-quarter |
+| A2 | side profile |
+| A3 | rear three-quarter |
+| A4 | walking away (back) |
+
+Five rendered angles cover 8 headings: the three headings on the other side
+(the other three-quarter views and the other profile) are the A1–A3 cells
+drawn mirrored left to right. **Verified** for walkers: lemmings seen from
+the side and from behind match both plain and mirrored cells (for example
+cells 15 and 18 mirrored, and 24 mirrored, in different captures), and no other
+cell range holds additional walker angles. Front and back views need no
+mirroring of their own, but for symmetric cycles the second half of the
+cycle is (nearly) the first half mirrored: walker cells 3, 4, 5 are 0, 1, 2
+mirrored, 27–29 are 24–26 mirrored (mean RGB difference 18–32, against 50+
+for unrelated cells). The engine might therefore mirror those too; the file
+stores them anyway.
+
+How the engine quantises the heading into these angles (for example 45°
+sectors) is **not yet measured**.
+
+Exceptions are actions whose pose is not left–right symmetric (turner,
+floater): they store 8 blocks, one per heading, see the table.
+
+### Cell ranges
+
+"Verified" means the action was seen in the running game and the cells
+ranked best (or matched by eye) against it; the method is given. Everything
+else is **guessed** from the contact sheet's appearance.
+
+| Cells | Action | Blocks × frames | Status |
+|---|---|---|---|
+| 0–29 | Walker | 5 × 6 (A0 0–5, A1 6–11, A2 12–17, A3 18–23, A4 24–29) | **Verified.** A4: lemming-cam burst (camera behind a walker) ranked 24, 25, 26, 27, 28, 29 in that cyclic order (mean diff 18–20). A2: a side-on walker ranked cell 12 best (diff 14.8, next other range 20.4). A0: walkers coming towards the camera ranked cells 2–5 best (weaker, 34–35, because lemmings overlapped). A1/A3: matched 13–23 (plain and mirrored) on lemmings walking at an angle. |
+| 30–85 | Turner (pointing with one arm; head turns) | 8 × 7 (30–36, 37–43, 44–50, 51–57, 58–64, 65–71, 72–78, 79–85) | **Partly verified.** A turner seen side-on in Fun 1 ranked only cells from 72–78 (diff ≈ 31) over a 3 s burst, cycling through them. The block order (front, front ¾, side, rear ¾, back, rear ¾, side, front ¾, going round the lemming) is guessed from the sheet. Pairs 30–57 and 58–85 are near-mirrors (diff 30–45), not exact copies, because the pointing arm changes sides. |
+| 86–120 | Blocker (arms out, head turns left and right) | 5 × 7 | Guessed. The pose matches the blocker skill icon. |
+| 121–160 | Falling (arms up, tumbling head over heels) | 5 × 8 | Guessed. A lemming falling through a dug hole in Mayhem 1 was too small to rank reliably. Could instead be the long fall before a splat. |
+| 161–200 | Digger (crouched, scooping with one arm) | 5 × 8 | **Verified by eye**: a digger in Mayhem 1 showed this crouched scooping pose (side view, 177–192), then fell through the hole. Too small for a reliable `mhc-match` ranking. |
+| 201–240 | Basher (a mallet in each hand) | 5 × 8 | Guessed. |
+| 241–270 | Miner (pickaxe, swinging down and forward) | 5 × 6 | Guessed. |
+| 271–295 | Bomber swelling up (hand to mouth, then inflating) | 5 × 5 | **Verified** for the last frames: during a nuke in Fun 1, the swelling lemming ranked 290 and 295 best (diff 20–25). The first frames (hand to mouth) were not ranked reliably. |
+| 296–335 | Floater hanging from the umbrella (lemming only) | 8 × 5 (296–300, …, 331–335) | Guessed. 296–315 and 316–335 are near-mirrors (diff 30–55). Might instead be 4 angles × 10 frames. |
+| 336–343 | Umbrella canopy (drawn above the floater) | 8 × 1, or 1 × 8 opening frames | Guessed. |
+| 344–368 | Builder laying a brick | 5 × 5 | **Verified by eye**: a builder in Mayhem 1 raised a brick with the sack on its back, as in 349–363. |
+| 369–398 | Drowning (sinking, arms up) | 5 × 6 | **Verified by eye**: a lemming that fell through a dug hole into water in Mayhem 1 showed only the head and raised arms above the water, as in these cells. |
+| 399–428 | Arms out, legs dangling: probably falling, or the start of a splat | 5 × 6 | Guessed. |
+| 429–443 | Lying on the back, feet up: probably splat | 5 × 3 | Guessed. |
+| 444–473 | Builder walking between bricks (sack on the back) | 5 × 6 | **Verified by eye**: the Mayhem 1 builder walked between bricks with this sack (side view, as in 450–461). |
+| 474–488 | Builder out of bricks (shrug) | 5 × 3 | Guessed. |
+| 489–513 | Standing, arms out, falling over onto the back | 5 × 5 | Guessed: splat, stunned or "oh no". |
+| 514–523 | Electrocution: normal and X-ray skeleton frames alternating | 5 × 2 | Guessed (pairs 514/515 front … 522/523 back). |
+| 524–533 | Electrocution cloud (gathers, lightning, shrinks) | 1 × 10 | Guessed. View-independent. |
+| 534–537 | Smoke puff, shrinking (bomber explosion) | 1 × 4 | Guessed. View-independent. |
+| 538–562 | Climber (arms raised against a wall, legs alternating) | 5 × 5 | Guessed. The back block (558–562) matches the climber skill icon's pose. |
+| 563–567 | Film camera (the level's camera marker, not a lemming) | 5 × 1 | Guessed. |
+
+Not found: an exit animation (lemmings were not seen exiting), the bomber
+countdown digits (they are drawn above the lemming in game, so probably not
+in this file), and the "inflated lemmings flying" seen after a nuke, which
+looks like the swollen 271–295 frames moving through the air rather than
+separate cells.
+
+### Playback rate
+
+Rough estimate, **unverified**: in the lemming-cam burst, the 6-frame walk
+cycle repeated every 9 captures, about 0.39 s, so each cell is shown for
+about 65 ms (≈ 15 frames per second). DOSBox-X ran with `cycles=max`, and
+screenshots are not synchronised to the game's frames, so this needs a
+better measurement (for example a frame counter in a long recording).
+
+### How the cells were matched
+
+1. `l3d-tool mhc --cells A..B --labels --scale 2` for contact sheets.
+2. In game: pause, aim the camera, take a burst of screenshots (about 25
+   per second) while the game runs, pause again.
+3. `l3d-tool mhc-match --rect X,Y,W,H --scale MIN..MAX --cells A..B` ranks
+   cells (plain and mirrored) at every position and scale inside the
+   rectangle. Matches are reliable when the sprite is at least about 80
+   screen pixels tall (in the 1280×960 capture); smaller sprites rank
+   unrelated cells, so those were judged by eye instead.
+4. `l3d-tool mhc-mirrors` lists, for each cell, the other cell closest to
+   its mirror image.

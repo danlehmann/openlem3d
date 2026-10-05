@@ -102,6 +102,21 @@ enum Cmd {
         #[arg(long)]
         out: PathBuf,
     },
+    /// For each cell of an MHC sprite file, print the other cell that is
+    /// closest to its mirror image, allowing a small horizontal shift.
+    MhcMirrors {
+        #[arg(default_value = "LEMM/LEMM.MHC")]
+        path: String,
+        /// Cell size in pixels (64 for LEMM.MHC, 128 for LEMM128.MHC).
+        #[arg(long, default_value_t = 64)]
+        size: usize,
+        /// Cells to compare, as FIRST..END. Defaults to all cells.
+        #[arg(long)]
+        cells: Option<String>,
+        /// Only print pairs whose mean absolute difference is at most this.
+        #[arg(long, default_value_t = 255.0)]
+        max_diff: f64,
+    },
     /// Rank the cells of an MHC sprite file by how closely each one matches a
     /// sprite in screenshots. Cells are tried as stored and mirrored, and
     /// compared on their opaque pixels.
@@ -114,9 +129,10 @@ enum Cmd {
         /// area to search.
         #[arg(long)]
         rect: String,
-        /// Draw cells at this fixed scale and search every position in --rect.
+        /// Draw cells at this scale and search every position in --rect. A
+        /// range MIN..MAX tries scales from MIN to MAX in steps of 3%.
         #[arg(long)]
-        scale: Option<f64>,
+        scale: Option<String>,
         /// Cells to try, as FIRST..END. Defaults to all cells.
         #[arg(long)]
         cells: Option<String>,
@@ -305,18 +321,59 @@ enum Placement {
     /// Stretched onto the rectangle (X,Y,W,H) with each edge shifted by up to
     /// `jitter` pixels.
     Fit { rect: [i32; 4], jitter: i32 },
-    /// Scaled by `scale` and moved to every position where it lies inside
-    /// the rectangle (X,Y,W,H).
-    Search { rect: [i32; 4], scale: f64 },
+    /// Scaled by each of `scales` and moved to every position where it lies
+    /// inside the rectangle (X,Y,W,H).
+    Search { rect: [i32; 4], scales: Vec<f64> },
+}
+
+/// The scales named by a `--scale` argument: one number, or MIN..MAX meaning
+/// MIN, MIN × 1.03, … up to MAX.
+fn parse_scales(s: &str) -> Result<Vec<f64>> {
+    let Some((a, b)) = s.split_once("..") else {
+        return Ok(vec![s.parse().context("scale must be a number or MIN..MAX")?]);
+    };
+    let (min, max): (f64, f64) = (a.parse()?, b.parse()?);
+    anyhow::ensure!(min > 0.0 && min <= max, "scale range must be MIN..MAX with 0 < MIN <= MAX");
+    Ok(std::iter::successors(Some(min), |s| Some(s * 1.03)).take_while(|s| *s <= max * 1.0001).collect())
+}
+
+/// How far cell `b`, mirrored left to right and shifted by up to 4 pixels,
+/// is from cell `a`: the mean absolute RGB difference over the pixels opaque
+/// in either cell (an opaque pixel against a transparent one counts as 255),
+/// and the shift giving it. `None` if both cells are empty.
+fn mirror_diff(a: &[u8], b: &[u8], size: usize, pal: &[[u8; 3]]) -> Option<(f64, i32)> {
+    (-4..=4)
+        .filter_map(|dx: i32| {
+            let (mut sum, mut opaque) = (0u64, 0u64);
+            for y in 0..size {
+                for x in 0..size {
+                    let mx = size as i32 - 1 - x as i32 + dx;
+                    let pb = if (0..size as i32).contains(&mx) { b[y * size + mx as usize] } else { 0 };
+                    let pa = a[y * size + x];
+                    match (pa, pb) {
+                        (0, 0) => continue,
+                        (0, _) | (_, 0) => sum += 255,
+                        _ => {
+                            let (ca, cb) = (pal[pa as usize], pal[pb as usize]);
+                            sum += (0..3).map(|k| u64::from(ca[k].abs_diff(cb[k]))).sum::<u64>() / 3;
+                        }
+                    }
+                    opaque += 1;
+                }
+            }
+            (opaque > 0).then(|| (sum as f64 / opaque as f64, dx))
+        })
+        .min_by(|p, q| p.0.total_cmp(&q.0))
 }
 
 /// A cell's best fit to a screenshot: mean absolute RGB difference over the
-/// cell's opaque pixels, whether the cell was mirrored, and the screenshot
-/// position of the cell's opaque bounding box.
+/// cell's opaque pixels, whether the cell was mirrored, the screenshot
+/// position of the cell's opaque bounding box, and the box's size there.
 struct CellFit {
     score: f64,
     mirrored: bool,
     at: (i32, i32),
+    size: (i32, i32),
 }
 
 /// Best (lowest-scoring) fit of a cell to the screenshot over all mirrorings
@@ -347,11 +404,13 @@ fn best_cell_fit(pixels: &[u8], size: usize, pal: &[[u8; 3]], img: &(u32, u32, V
                 }
             }
         }
-        Placement::Search { rect: [x, y, w, h], scale } => {
-            let (sw, sh) = ((bw * scale).ceil() as i32, (bh * scale).ceil() as i32);
-            for y0 in y..=y + h - sh {
-                for x0 in x..=x + w - sw {
-                    candidates.push((x0, y0, scale, scale));
+        Placement::Search { rect: [x, y, w, h], ref scales } => {
+            for &scale in scales {
+                let (sw, sh) = ((bw * scale).ceil() as i32, (bh * scale).ceil() as i32);
+                for y0 in y..=y + h - sh {
+                    for x0 in x..=x + w - sw {
+                        candidates.push((x0, y0, scale, scale));
+                    }
                 }
             }
         }
@@ -371,7 +430,8 @@ fn best_cell_fit(pixels: &[u8], size: usize, pal: &[[u8; 3]], img: &(u32, u32, V
             }
             let score = sum as f64 / (samples.len() * 3) as f64;
             if best.as_ref().is_none_or(|b| score < b.score) {
-                best = Some(CellFit { score, mirrored, at: (x0, y0) });
+                let size = ((bw * sx).round() as i32, (bh * sy).round() as i32);
+                best = Some(CellFit { score, mirrored, at: (x0, y0), size });
             }
         }
     }
@@ -619,6 +679,24 @@ fn main() -> Result<()> {
             write_rgb_png(out, sheet.width as u32, &sheet.rgb)?;
             println!("{} cells, {failed} failed -> {}", range.len(), out.display());
         }
+        Cmd::MhcMirrors { path, size, cells, max_diff } => {
+            let mut fs = open_fs(&disc)?;
+            let pal = load_palette(&mut fs, "GFX/LM3D.PAL")?;
+            let data = rnc::unpack_if_packed(fs.read_path(path)?)?;
+            let mhc = l3d_formats::mhc::MhcFile::parse(&data, *size)?;
+            let range = cell_range(cells.as_deref(), mhc.entries.len())?;
+            let decoded: Vec<(usize, Vec<u8>)> = range.map(|i| Ok((i, mhc.cell(i)?.pixels))).collect::<Result<_>>()?;
+            for (i, a) in &decoded {
+                let best = decoded
+                    .iter()
+                    .filter(|(j, _)| j != i)
+                    .filter_map(|(j, b)| mirror_diff(a, b, *size, &pal).map(|(d, dx)| (*j, d, dx)))
+                    .min_by(|p, q| p.1.total_cmp(&q.1));
+                if let Some((j, d, dx)) = best.filter(|b| b.1 <= *max_diff) {
+                    println!("cell {i:3} ~ mirrored cell {j:3} shifted {dx:+2}: mean abs diff {d:.1}");
+                }
+            }
+        }
         Cmd::MhcMatch { shots, rect, scale, cells, path, size, jitter, top } => {
             let mut fs = open_fs(&disc)?;
             let pal = load_palette(&mut fs, "GFX/LM3D.PAL")?;
@@ -627,7 +705,7 @@ fn main() -> Result<()> {
             let r: Vec<i32> = rect.split(',').map(str::parse).collect::<Result<_, _>>().context("rect must be X,Y,W,H")?;
             let rect: [i32; 4] = r.try_into().ok().filter(|r: &[i32; 4]| r[2] > 0 && r[3] > 0).context("rect must be X,Y,W,H")?;
             let placement = match scale {
-                Some(scale) => Placement::Search { rect, scale: *scale },
+                Some(scale) => Placement::Search { rect, scales: parse_scales(scale)? },
                 None => Placement::Fit { rect, jitter: *jitter },
             };
             let range = cell_range(cells.as_deref(), mhc.entries.len())?;
@@ -642,7 +720,8 @@ fn main() -> Result<()> {
                 println!("{}:", shot.display());
                 for (i, f) in results.iter().take(*top) {
                     let m = if f.mirrored { " mirrored" } else { "" };
-                    println!("  cell {i:3}{m:9} at ({:4},{:4}): mean abs diff {:.1}", f.at.0, f.at.1, f.score);
+                    let (x, y, (w, h)) = (f.at.0, f.at.1, f.size);
+                    println!("  cell {i:3}{m:9} at {x:4},{y:4} size {w:3}x{h:3}: mean abs diff {:.1}", f.score);
                 }
             }
         }
