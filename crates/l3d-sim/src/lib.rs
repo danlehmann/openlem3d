@@ -4,6 +4,7 @@
 //! Behaviour constants are provisional until measured against the original
 //! game; see `docs/spec/behaviour.md`.
 
+pub mod objects;
 pub mod world;
 
 use l3d_formats::blk::{BlockSet, flags};
@@ -69,6 +70,8 @@ const MINE_TICKS: u32 = 49;
 /// Duration of terminal animations, in ticks (provisional).
 const EXIT_TICKS: u32 = 11;
 const DEATH_TICKS: u32 = 14;
+/// How long a killing trap stays busy after taking a lemming (provisional).
+const TRAP_BUSY_TICKS: u32 = 28;
 
 /// Block ids with hard-coded meaning (`docs/spec/blk.md`).
 const ENTRANCE_ID: u8 = 0;
@@ -205,12 +208,14 @@ pub enum State {
     Drowning,
     /// Killed by the level boundary (the original shows a lightning zap).
     Zapped,
+    /// Caught by a trap; the trap's own animation shows the death.
+    Trapped,
 }
 
 impl State {
     /// Whether the lemming is finished and only playing a last animation.
     pub fn is_terminal(self) -> bool {
-        matches!(self, State::Exiting | State::Exploding | State::Splatting | State::Drowning | State::Zapped)
+        matches!(self, State::Exiting | State::Exploding | State::Splatting | State::Drowning | State::Zapped | State::Trapped)
     }
 }
 
@@ -284,6 +289,9 @@ pub struct Simulation {
     next_entrance: usize,
     /// Splitter cells, and whether the next walker through goes left.
     splitters: Vec<([i32; 3], bool)>,
+    /// The level's interactive objects and what they all are.
+    pub object_kind: Option<objects::ObjectKind>,
+    pub objects: Vec<objects::Object>,
     /// Kill boundary `[min_x, min_z, max_x, max_z]` in cells.
     border: [i32; 4],
     ceiling: i32,
@@ -330,6 +338,8 @@ impl Simulation {
             tick: 0,
             release_timer: 0,
             next_entrance: 0,
+            object_kind: objects::level_objects(level).map(|(k, _)| k),
+            objects: objects::level_objects(level).map(|(_, o)| o).unwrap_or_default(),
             splitters: level
                 .cells()
                 .filter(|(_, _, _, b, _)| b.id == SPLITTER_ID && !b.is_empty())
@@ -429,6 +439,9 @@ impl Simulation {
                 self.release_timer -= 1;
             }
         }
+        for o in &mut self.objects {
+            o.busy = o.busy.saturating_sub(1);
+        }
         let obstacles: Vec<Obstacle> = self
             .lemmings
             .iter()
@@ -506,6 +519,12 @@ impl Simulation {
                     self.counts.saved += 1;
                 }
             }
+            State::Trapped => {
+                if l.state_ticks >= TRAP_BUSY_TICKS {
+                    l.gone = true;
+                    self.counts.dead += 1;
+                }
+            }
             State::Exploding | State::Splatting | State::Drowning | State::Zapped => {
                 if l.state_ticks >= DEATH_TICKS {
                     l.gone = true;
@@ -531,6 +550,20 @@ impl Simulation {
         }
         if !l.state.is_terminal() && !self.in_bounds(l.pos) {
             l.set_state(State::Zapped);
+        }
+        self.spring_traps(l);
+    }
+
+    /// Killing traps take a lemming that steps on them, then are busy for a
+    /// while, letting others pass (provisional, as in the 2D games).
+    fn spring_traps(&mut self, l: &mut Lemming) {
+        if !self.object_kind.is_some_and(|k| k.kills()) || l.state.is_terminal() || matches!(l.state, State::Falling { .. } | State::Floating) {
+            return;
+        }
+        if let Some(o) = self.objects.iter_mut().find(|o| o.busy == 0 && o.touches(l.pos)) {
+            o.busy = TRAP_BUSY_TICKS;
+            l.fuse = None;
+            l.set_state(State::Trapped);
         }
     }
 

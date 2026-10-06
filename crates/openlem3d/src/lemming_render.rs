@@ -151,7 +151,7 @@ fn anim_for(state: State) -> Anim {
         State::Building { .. } => anim(344, 5, Five),
         State::Drowning => once(369, 6, Five),
         State::Splatting => once(429, 3, Five),
-        State::Zapped => anim(514, 2, Five),
+        State::Zapped | State::Trapped => anim(514, 2, Five),
         State::Climbing => anim(538, 5, Five),
     }
 }
@@ -179,7 +179,8 @@ fn cell_for(a: Anim, view: ViewAngle, ticks: u32) -> (u32, bool) {
 pub fn build(lemmings: &[Lemming], atlas_rows: u32, camera_yaw: f32) -> SceneSprites {
     let mut b = LayerBuilder::default();
     let tex = [(ATLAS_COLUMNS * LEMMING_CELL) as f32, (atlas_rows * LEMMING_CELL) as f32];
-    for l in lemmings.iter().filter(|l| !l.gone) {
+    // Trapped lemmings are shown by the trap's own animation.
+    for l in lemmings.iter().filter(|l| !l.gone && l.state != State::Trapped) {
         let view = ViewAngle::from_yaws(l.dir.yaw(), camera_yaw);
         let (cell, mirror) = match l.state {
             // The stored turner points to its left (assumed from the one
