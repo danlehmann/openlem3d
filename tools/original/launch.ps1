@@ -19,13 +19,18 @@ Extra wait after the window appears (lets the game reach its first screen).
 
 .PARAMETER SkipIntro
 Skips the intro videos and ends on the main menu (about 20 s in total).
+
+.PARAMETER ExtraConf
+Further DOSBox-X config files, loaded after the generated one (for example a
+[log] section).
 #>
 param(
     [string[]]$Run = @('D:', 'L3D'),
     [int]$WaitSeconds = 0,
     [switch]$SkipIntro,
     [int]$IntroDelay = 8,
-    [switch]$Force
+    [switch]$Force,
+    [string[]]$ExtraConf = @()
 )
 . (Join-Path $PSScriptRoot 'Lem3dCommon.ps1')
 
@@ -50,7 +55,9 @@ $lines = @(
 Set-Content -Path $gen -Value $lines -Encoding ascii
 
 $base = Join-Path $PSScriptRoot 'lem3d.conf'
-$dbArgs = @('-conf', "`"$base`"", '-conf', "`"$gen`"", '-nopromptfolder')
+$dbArgs = @('-conf', "`"$base`"", '-conf', "`"$gen`"")
+foreach ($c in $ExtraConf) { $dbArgs += @('-conf', "`"$((Resolve-Path $c).Path)`"") }
+$dbArgs += '-nopromptfolder'
 $proc = Start-Process -FilePath $Lem3dDosbox -ArgumentList $dbArgs `
     -WorkingDirectory (Split-Path $Lem3dDosbox) -PassThru
 @{ pid = $proc.Id; started = (Get-Date).ToString('o') } | ConvertTo-Json | Set-Content $Lem3dState

@@ -152,22 +152,35 @@ How each value was measured:
 ## Exits
 
 A walker enters an exit block (id 1) when it walks into the block through its
-doorway. The doorway is the block's +Z face, turned with the block's rotation
-[L3DEdit].
+doorway. The doorway is the block's +Z face turned with the block's rotation
+[L3DEdit], one quarter turn per step: rotation 0 → +Z, 1 → +X, 2 → −Z,
+3 → −X. **Verified for all four rotations** (the same turning order as the
+entrance's release direction, but starting from +Z instead of −Z):
 
-**Partly verified** for rotation 1. On the Practice levels the exit
-(14,1,13) has rotation 1. Its house door faces +X (camera 4, looking −X,
-sees the door head-on). A climber walking −X along the path was saved
-there, entering through that face.
+- Rotation 0 → +Z: Taxing 1 "Spaghetti Junction" (`LEVEL.040`), exit house
+  (8,1,7). Camera 4 (looking −Z from z = 14.5) shows the house door head-on,
+  with the path leading up to it from the +Z side.
+- Rotation 1 → +X: on the Practice levels the exit (14,1,13) has rotation 1.
+  Its house door faces +X (camera 4, looking −X, sees the door head-on). A
+  climber walking −X along the path was saved there, entering through that
+  face.
+- Rotation 2 → −Z: Fun 3 "The Bean Machine" (`LEVEL.002`), exit (8,5,22) on
+  top of a cake. Camera 4 (looking +Z from z = 15.5, x = 8.5) shows the
+  doorway in the cake's −Z side, facing the camera.
+- Rotation 3 → −X: Practice "One Way" (`LEVEL.093`), exit house (21,1,13);
+  camera 2 (looking −Z) shows its door on the −X face.
 
-Rotation 3 **(seen, not tested by a save):** on Practice "One Way"
-(`LEVEL.093`) the exit house (21,1,13) has rotation 3, and camera 2 (looking
-−Z) shows its door on the −X face. So rotations 1 and 3 put the doorway on
-the +X and −X faces, as both the [L3DEdit] rule and the entrance rule above
-predict. Rotations 0 and 2 are **unverified**: those two rules disagree for
-them (+Z or −Z face), and the only reachable level with such exits
-(Tricky 1, `LEVEL.020`) draws them as flat pads with no visible door. No
-lemming reached one in our run.
+Only the rotation-1 case was confirmed by a lemming being saved through the
+door; the others are seen in the graphics.
+
+**Corroborated by the level data.** `l3d-tool level N` prints which side
+neighbours of each exit are empty. Over all 100 levels, exits with exactly
+one open side mostly have it on the predicted face: rotation 0 → +Z (17
+of 17), 1 → +X (39 of 41), 2 → −Z (7 of 7), 3 → −X (10 of 11). The
+exceptions (`LEVEL.009` and `LEVEL.027`: rotation 1 with only −X open; `LEVEL.012`: rotation 3 with only +X open;
+`LEVEL.011` and `LEVEL.064`: rotation 2 with +X, −X and +Z open but −Z
+blocked) were not examined; the blocking neighbour may be a non-solid or
+decorative block. Exits drawn as flat pads (Tricky 1, `LEVEL.020`) show no door.
 
 ## Skills
 
@@ -181,10 +194,23 @@ the Practice menu's first nine items are these skills.
 then click a lemming while the game runs. Clicks on a paused game didn't
 assign.
 
+**A turner takes two clicks (verified).** The first click on a lemming (with
+the turner selected) puts a white arrow over it; the lemming keeps walking
+and the arrow follows it. A second click, with the pointer moved to one side
+of the lemming, makes it a turner where it then stands. On Fun 1 (camera 3,
+looking +Z), a second click about 50 px to the screen left of the lemming
+made the following walkers turn towards screen left (+X). Which side gives
+which turn in general was not tested further.
+
 Terrain is changed one quarter-height segment at a time. The basher and the
 digger were seen to remove segments across a whole cell at once. Whether
 steel stops them, and when exactly a basher stops, is untested; the
-implementation never removes steel (provisional).
+implementation never removes steel (provisional). None of the levels
+reachable so far (level 1 of each rating, Fun 2 and 3, the Practice levels)
+puts a basher, miner or digger next to steel: their only steel cells
+(`level-map --steel`) are the entrance and exit blocks, which are flagged
+steel, and solid blocks around the exits (the Practice exit house; invisible
+block 4 under the trees by the Fun 2 exit). Testing it needs a later level code.
 
 | Skill | Behaviour | Status |
 |---|---|---|

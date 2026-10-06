@@ -47,6 +47,10 @@ enum Cmd {
         /// Show cells whose block is flagged steel as `S`, whatever their shape.
         #[arg(long)]
         steel: bool,
+        /// Show each non-empty cell's block id instead: `0`-`9`, `a`-`z`
+        /// (10-35), `A`-`Z` (36-61), `*` (62, 63).
+        #[arg(long, conflicts_with = "steel")]
+        ids: bool,
     },
     /// For each level, count block ids used by the grid that are placeholders
     /// in BLK.<level number> versus BLK.<texture set>.
@@ -755,7 +759,7 @@ fn main() -> Result<()> {
                 );
             }
         }
-        Cmd::LevelMap { number, steel } => {
+        Cmd::LevelMap { number, steel, ids } => {
             use l3d_formats::level::{SIZE_X, SIZE_Y, SIZE_Z};
             let mut fs = open_fs(&disc)?;
             let level = load_level(&mut fs, *number)?;
@@ -771,6 +775,7 @@ fn main() -> Result<()> {
                     let row: String = (0..SIZE_X)
                         .map(|x| match level.block(x, y, z) {
                             c if c.is_empty() => '.',
+                            c if *ids => id_char(c.id),
                             c if *steel && is_steel(c.id) => 'S',
                             c if c.shape != 0 => (b'a' + c.shape - 1) as char,
                             c if c.segments == 0xF => '#',
@@ -810,7 +815,25 @@ fn main() -> Result<()> {
             }
             println!("object kinds: {objs:?}");
             for (x, y, z, b, _) in l.cells().filter(|c| !c.3.is_empty() && c.3.id <= 2) {
-                println!("  special block {} at ({x},{y},{z}) rot {} segs {:04b}", b.id, b.rotation, b.segments);
+                // Side neighbours at the same height that are empty cells.
+                let open: Vec<&str> = [(1i32, 0i32, "+X"), (-1, 0, "-X"), (0, 1, "+Z"), (0, -1, "-Z")]
+                    .iter()
+                    .filter(|(dx, dz, _)| {
+                        let (nx, nz) = (x as i32 + dx, z as i32 + dz);
+                        (0..32).contains(&nx) && (0..32).contains(&nz) && l.block(nx as usize, y, nz as usize).is_empty()
+                    })
+                    .map(|(_, _, name)| *name)
+                    .collect();
+                println!(
+                    "  special block {} at ({x},{y},{z}) rot {} segs {:04b} open sides {}",
+                    b.id,
+                    b.rotation,
+                    b.segments,
+                    open.join(" ")
+                );
+            }
+            for (x, y, z, _, o) in l.cells().filter(|c| (0x60..=0x67).contains(&c.4.kind)) {
+                println!("  interactive object {:#04x} at ({x},{y},{z}) extra {:#04x}", o.kind, o.extra);
             }
             println!("header:");
             for (i, row) in l.header.chunks(16).enumerate() {
@@ -951,4 +974,15 @@ fn main() -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// One character for a block id: `0`-`9`, `a`-`z` (10-35), `A`-`Z` (36-61),
+/// `*` for 62 and 63.
+fn id_char(id: u8) -> char {
+    match id {
+        0..=9 => (b'0' + id) as char,
+        10..=35 => (b'a' + id - 10) as char,
+        36..=61 => (b'A' + id - 36) as char,
+        _ => '*',
+    }
 }

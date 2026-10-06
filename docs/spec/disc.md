@@ -16,11 +16,44 @@ Checked with `l3d-tool tracks`.
 Each track's extent in the image file runs from its own `INDEX 01` to the next
 track's `INDEX 00` (or `INDEX 01` if it has none), or to the end of the file.
 
-The mapping from the level header's theme and music index to an audio track
-hasn't been established yet. **Provisional mapping** used by the viewer:
-track = 2 + 2·(theme − 1) + (music index & 1). That gives two tracks per
-theme for themes 1–10 and leaves tracks 22–24 unused. It is a guess: to be
-replaced by observing which track the original plays for each theme.
+The provisional formula the viewer used, track = 2 + 2·(theme − 1) +
+(music index & 1), is **wrong**: it matches none of the observations below.
+
+### Level music (partly verified)
+
+**Method.** DOSBox-X logs CD-audio playback when its `[log]` section sets
+`misc = debug` (`tools/original/launch.ps1 -ExtraConf` loads such a file).
+Each play request then shows up as `CDROM: Playing track # N` in the log
+file; track numbers count the data track as 1, so audio tracks are 2–24. No
+debugger is involved; this is the emulator's own device log.
+
+**When music plays (verified).** The track starts when the level starts
+(after "Continue" on the briefing), not on the briefing or in the menus.
+Starting the same level again always gave the same track: Fun 1 about 17
+times in one session, Practice "Turner" twice in separate sessions.
+
+| Level | File | Theme (`0x143`) | Music (`0x151`) | Track |
+|---|---|---|---|---|
+| Fun 1 "Take a Dive" | `LEVEL.000` | 7 | 0 | 5 |
+| Fun 2 "That's Right" | `LEVEL.001` | 10 | 1 | 12 |
+| Fun 3 "The Bean Machine" | `LEVEL.002` | 4 | 2 | 14 |
+| Tricky 1 "Jelly Climber" | `LEVEL.020` | 4 | 1 | 23 |
+| Taxing 1 "Spaghetti Junction" | `LEVEL.040` | 8 | 2 | 9 |
+| Mayhem 1 "The Five Arches" | `LEVEL.060` | 1 | 2 | 13 |
+| Practice "Blocker" | `LEVEL.080` | 8 | 0 | 9 |
+| Practice "Turner" | `LEVEL.081` | 8 | 1 | 20 |
+| Practice "Bomber" | `LEVEL.082` | 8 | 2 | 9 |
+| Practice "Builder" | `LEVEL.083` | 8 | 0 | 9 |
+| Practice "Basher" | `LEVEL.084` | 8 | 1 | 20 |
+| Practice "Floater" | `LEVEL.088` | 8 | 2 | 9 |
+| Practice "Trampoline" | `LEVEL.098` | 8 | 0 | 9 |
+
+All rows are **verified** (one log line per level start). They are
+consistent with a fixed (theme, music) → track table: the eight theme-8
+levels split exactly by music index. In theme 8, music indices 0 and 2 both
+play track 9. No formula fits the five themes seen so far, so the remaining
+combinations are **unknown**; the table needs one level of each remaining
+(theme, music) pair, which needs more level codes.
 
 ## Filesystem inventory (verified)
 

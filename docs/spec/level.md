@@ -200,3 +200,39 @@ interactive objects, in detail.
 
 Objects are not solid. Official levels put an invisible block 4 in the same
 cell where solidity is needed (verified for `LEVEL.001`).
+
+## Level codes
+
+The original's level codes ("passwords") are eight letters. Codes still work
+in openlem3d (see `docs/GROUNDRULES.md`), so the table below is the
+verified code list. Every row was **verified** in the running game; codes
+not seen in game are deliberately left out.
+
+**Where codes appear (verified).** After a level is completed (enough
+lemmings saved), the results screen shows "Password :-" and a code; its
+buttons are "Next Level" (left) and "Menu" (right). The code belongs to the
+*next* level. A failed attempt shows no code. Replaying an already completed
+Practice level ("Floater") showed "You've played this level before" and no
+code.
+
+**Entering codes (verified).** On the code screen (F2 on the main menu), a
+valid code followed by Return goes straight to that level's briefing
+("Level n  TITLE"), whatever the selected rating. Both codes below were
+tested on a save where only level 1 of each rating was unlocked.
+
+| Code | Level | How verified |
+|---|---|---|
+| `BLIMBING` | 2 (Fun 2, "That's Right", `LEVEL.001`) | Shown after completing Fun 1; entered on the code screen, it opened the briefing "Level 2 That's Right". |
+| `FANAGALO` | 3 (Fun 3, "The Bean Machine", `LEVEL.002`) | Shown after completing Fun 2; entered, it opened the briefing "Level 3 The Bean Machine". |
+
+**Third-party lists don't match this edition.** A list published on
+megagames.com ("Lemmings 3D – Level Passwords") gives `STARTING` for
+level 2, and cheatbook.de gives `NASTALK`. The game itself gives `BLIMBING`
+for level 2, and both third-party codes had no effect (no briefing opened;
+the game returned to the main menu). These lists probably belong to another edition, so none of
+their codes are recorded here.
+
+**Pattern:** none visible from two codes. Both are real words (a fruit and a
+pidgin language), not encodings of the level number.
+
+Completing a level also adds the next level to its rating's level list.

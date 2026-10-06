@@ -126,19 +126,23 @@ ratings are Fun, Tricky, Taxing and Mayhem. The briefing for Tricky 1 shows
 "Level 21", so the levels are numbered overall in blocks of 20 per rating.
 **[verified]** for that one data point.
 
-Reaching any other level needs a valid level code: `start-level.ps1 -Code
-XXXXXXXX -Rating …`, then click the right row with `-RowY` (row spacing not yet
-measured). **No level code has been verified yet.** Two codes from third-party
-lists were tried and had no visible effect:
+Other levels are reached by completing the previous one (the next level then
+appears in the list; row 2 is at y≈135, so rows are about 34 px apart
+**[verified]**) or with a level code. A valid code goes straight to that
+level's briefing **[verified]** with `BLIMBING` (level 2) and `FANAGALO`
+(level 3), typed through DOSBox-X `AUTOTYPE` (see §6).
+`start-level.ps1 -Code XXXXXXXX` types the code and continues from the
+briefing; that script path is **[unverified]** (not run since the change). The results screen of a completed level
+shows the code of the next one ("Password :-"; buttons "Next Level" on the
+left, "Menu" on the right). Verified codes are listed in
+[spec/level.md](spec/level.md#level-codes).
+
+Codes from third-party lists don't work in this edition:
 
 | Code | Claimed level | Source | Result in game |
 |---|---|---|---|
-| `NASTALK` | 2 | cheatbook.de, "lemm3d.htm" | Typed and accepted with Return, back to the menu, Fun list unchanged. **Not verified.** |
-| `STARTING` | 2 | megagames.com, "Lemmings 3D – Level Passwords" | Same. **Not verified.** |
-
-These lists may belong to another edition, or a code may take effect somewhere
-other than the level list. The most promising next step is to complete a level
-and note the code the game itself shows.
+| `NASTALK` | 2 | cheatbook.de, "lemm3d.htm" | No effect; back to the menu. |
+| `STARTING` | 2 | megagames.com, "Lemmings 3D – Level Passwords" | No effect. The game's own code for level 2 is `BLIMBING`. |
 
 ## 4. Navigation reference
 
@@ -297,3 +301,45 @@ below the horizon changes with height.
   midway, `quit.ps1` still finds the process through the state file.
 - **DOSBox-X's own screenshots.** `captures` points at `LEM3D_SHOTS`, but no
   capture hotkey is wired into the scripts **[unverified]**. Use `shot.ps1`.
+
+## 6. When the desktop is locked: input without focus
+
+`send.ps1` needs DOSBox-X in the foreground. While the Windows session is
+locked, the foreground window is the lock screen and every send fails with
+"Could not bring the DOSBox-X window to the foreground" (no input is sent,
+so nothing leaks). Posting window messages (`PostMessage` with key or mouse
+messages) has no effect on DOSBox-X either. The following works without
+focus and was used for the level-code, music and exit measurements
+**[verified]**:
+
+- **Screenshots:** `shot.ps1 -Method print` keeps working, but only with
+  `output = surface` in an extra config; with the default `direct3d` output
+  the grabs stop updating while the session is locked.
+- **Extra config files:** `launch.ps1 -ExtraConf a.conf,b.conf` loads them
+  after the generated config.
+- **Keyboard:** DOSBox-X's `AUTOTYPE` command, run before the game in
+  `launch.ps1 -Run`, types a fixed key script into the game later, for
+  example `AUTOTYPE -w 8 -p 0.5 esc , n , ... f2 , b l i m b i n g , enter`
+  then `L3D` (`-w` initial delay, `-p` pause per key, `,` an extra pause;
+  `AUTOTYPE -list` prints the key names). Timing is blind, so about one run
+  in three lost the sequence; check with a screenshot.
+- **Mouse:** a serial mouse on a TCP "null modem". Add
+  `[serial]` / `serial1 = nullmodem port:5555 transparent:1`, load the
+  FreeDOS CuteMouse driver before the game (`CTMOUSE /S1 /M /R11`: COM1,
+  Mouse Systems protocol, highest resolution; GPL, downloaded separately
+  from the FreeDOS repositories and not kept in the repo), then connect to
+  `127.0.0.1:5555` and write 5-byte Mouse Systems packets
+  (`0x80 | inverted buttons`, dx, −dy, 0, 0; buttons L = 4, R = 1). With
+  `/R11`, one count moves the game pointer about 2.1 px in x and 2.5 px in
+  y. Moving far up-left first homes the pointer at the top-left corner, so
+  absolute positions are reliable to a few pixels. Clicks register when
+  packets are spaced about 50 ms apart.
+- **CD audio log:** a `[log]` section with `logfile = …` and `misc = debug`
+  records each CD-audio play request as `CDROM: Playing track # N`.
+
+Positions found with the serial mouse (640×480 game pixels): skill icons
+blocker 122, turner 174, digger about 460 (y 440); camera icon (538,205);
+fast-forward (590,143); results screen "Next Level"/"Retry" (60,450) and
+"Menu" (600,450); main-menu cards Play (65,400), Code (190,400),
+Options (320,400), rating card (455,400, a click steps the rating forward).
+Clicking the nuke icon (540,143) worked only sometimes.

@@ -80,7 +80,7 @@ Every file is exactly 1,408 bytes: 64 definitions × 22 bytes, uncompressed.
 | Id | Meaning |
 |---|---|
 | 0 | **Entrance.** Works only when the top two slices are present and the bottom two are absent. At most four entrances are active. Rotation sets the lemmings' initial heading, but turns opposite to block rotation [L3DEdit]. |
-| 1 | **Exit.** The +Z face is the doorway. Tile 8 animates to tile 11 while a lemming exits [L3DEdit]. In `BLK.001`, block 1 has tile 8 on +Z (verified). |
+| 1 | **Exit.** The doorway is the +Z face, turned with the rotation: 0 → +Z, 1 → +X, 2 → −Z, 3 → −X (verified in game for all four; see [behaviour.md](behaviour.md#exits)). Tile 8 animates to tile 11 while a lemming exits [L3DEdit]. In `BLK.001`, block 1 has tile 8 on +Z (verified). |
 | 2 | **Splitter** where non-solid [L3DEdit]. |
 | 3 | **Invisible solid.** Suppresses faces of neighbouring blocks that touch it, and is used around enclosed levels. Its slots hold placeholders (verified). |
 | 4 | **Invisible solid**, used under objects that should be solid. Verified: in `LEVEL.001`, block 4 is steel, its faces are placeholders, and it occurs exactly at the 9 tree cells. **Wrong:** [Owner] calls it a red exit floor pad. |
