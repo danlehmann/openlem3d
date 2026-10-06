@@ -25,6 +25,46 @@ impl Plugin for HudPlugin {
     }
 }
 
+/// The `LEMM.MHC` cell shown on each skill button: the first front-view
+/// frame of the skill's action (`docs/spec/lemmings.md`), in [`Skill::ALL`]
+/// order. The original's dedicated panel icons (`GFX/ICONS.RNC`) are not
+/// decoded yet.
+const SKILL_ICON_CELLS: [usize; 9] = [86, 30, 271, 344, 201, 241, 161, 538, 296];
+
+/// Cuts the skill-button icons from the user's `LEMM.MHC`. Returns `None`
+/// when the file can't be read; the buttons then show text only.
+fn skill_icons(data: &mut crate::Data, images: &mut Assets<Image>) -> Option<Vec<Handle<Image>>> {
+    use bevy::asset::RenderAssetUsages;
+    use bevy::image::ImageSampler;
+    use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+    let pal = data.0.palette("GFX/LM3D.PAL").ok()?;
+    let raw = data.0.read("LEMM/LEMM.MHC").ok()?;
+    let mhc = l3d_formats::mhc::MhcFile::parse(&raw, 64).ok()?;
+    SKILL_ICON_CELLS
+        .iter()
+        .map(|&i| {
+            let cell = mhc.cell(i).ok()?;
+            let rgba: Vec<u8> = cell
+                .pixels
+                .iter()
+                .flat_map(|&p| {
+                    let [r, g, b] = pal[p as usize];
+                    [r, g, b, if p == 0 { 0 } else { 255 }]
+                })
+                .collect();
+            let mut img = Image::new(
+                Extent3d { width: 64, height: 64, depth_or_array_layers: 1 },
+                TextureDimension::D2,
+                rgba,
+                TextureFormat::Rgba8UnormSrgb,
+                RenderAssetUsages::RENDER_WORLD,
+            );
+            img.sampler = ImageSampler::nearest();
+            Some(images.add(img))
+        })
+        .collect()
+}
+
 /// Shows the HUD only while a level is being played.
 fn show_in_play(state: Res<State<AppState>>, mut roots: Query<&mut Visibility, With<HudRoot>>) {
     if !state.is_changed() {
@@ -56,7 +96,8 @@ struct HudRoot;
 const BUTTON_IDLE: Color = Color::srgba(0.1, 0.1, 0.2, 0.75);
 const BUTTON_SELECTED: Color = Color::srgba(0.8, 0.2, 0.1, 0.9);
 
-fn spawn_hud(mut commands: Commands) {
+fn spawn_hud(mut commands: Commands, mut data: ResMut<crate::Data>, mut images: ResMut<Assets<Image>>) {
+    let icons = skill_icons(&mut data, &mut images);
     commands.spawn((
         Text::new(""),
         TextFont { font_size: FontSize::Px(18.0), ..default() },
@@ -94,7 +135,8 @@ fn spawn_hud(mut commands: Commands) {
                     SkillButton(skill),
                     Node {
                         width: px(84),
-                        height: px(52),
+                        height: px(84),
+                        flex_direction: FlexDirection::Column,
                         justify_content: JustifyContent::Center,
                         align_items: AlignItems::Center,
                         ..default()
@@ -102,6 +144,12 @@ fn spawn_hud(mut commands: Commands) {
                     BackgroundColor(BUTTON_IDLE),
                 ))
                 .with_children(|b| {
+                    if let Some(icons) = &icons {
+                        b.spawn((
+                            ImageNode::new(icons[skill as usize].clone()),
+                            Node { width: px(48), height: px(48), ..default() },
+                        ));
+                    }
                     b.spawn((
                         Text::new(skill.name()),
                         TextFont { font_size: FontSize::Px(14.0), ..default() },
