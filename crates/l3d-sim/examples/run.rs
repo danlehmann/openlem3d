@@ -1,7 +1,7 @@
 //! Headless run of a level:
 //! `cargo run -p l3d-sim --example run -- LEVEL [SECONDS] [TICK:LEMMING:SKILL ...]`.
 //! Prints the counters once per simulated second and each lemming's fate.
-//! Each `TICK:LEMMING:SKILL` assigns a skill (id 0–8, panel order) at a tick.
+//! Each `TICK:LEMMING:SKILL` assigns a skill (id 0–8, panel order) at a tick;`n//! a turner takes a fourth part, `cw` or `acw`, for the side it points to.
 
 use l3d_formats::gamedata::{GameData, locate_data_dir};
 use l3d_sim::{SUB, Simulation, Skill, State, TICKS_PER_SECOND};
@@ -10,10 +10,13 @@ fn main() {
     let mut args = std::env::args().skip(1);
     let n: u32 = args.next().and_then(|a| a.parse().ok()).unwrap_or(0);
     let seconds: u32 = args.next().and_then(|a| a.parse().ok()).unwrap_or(60);
-    let assignments: Vec<(u64, usize, Skill)> = args
+    let assignments: Vec<(u64, usize, Skill, Option<&str>)> = args
         .filter_map(|a| {
-            let mut p = a.split(':').map(|v| v.parse::<u64>().ok());
-            Some((p.next()??, p.next()?? as usize, Skill::from_id(p.next()?? as u8)?))
+            let a: &'static str = a.leak();
+            let mut p = a.split(':');
+            let mut num = || p.next()?.parse::<u64>().ok();
+            let (t, i, s) = (num()?, num()? as usize, Skill::from_id(num()? as u8)?);
+            Some((t, i, s, a.split(':').nth(3)))
         })
         .collect();
     let mut data = GameData::open(&locate_data_dir(None)).expect("open game data");
@@ -24,9 +27,13 @@ fn main() {
     for s in 1..=seconds {
         for _ in 0..TICKS_PER_SECOND {
             sim.step();
-            for &(t, i, skill) in &assignments {
+            for &(t, i, skill, side) in &assignments {
                 if t == sim.tick {
-                    let ok = sim.assign(i, skill);
+                    let ok = match (side, sim.lemmings.get(i).map(|l| l.dir)) {
+                        (Some("cw"), Some(d)) => sim.assign_turner(i, d.clockwise()),
+                        (Some("acw"), Some(d)) => sim.assign_turner(i, d.anticlockwise()),
+                        _ => sim.assign(i, skill),
+                    };
                     println!("tick {t}: assign {} to lemming {i}: {}", skill.name(), if ok { "ok" } else { "rejected" });
                 }
             }

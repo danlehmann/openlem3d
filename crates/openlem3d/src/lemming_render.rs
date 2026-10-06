@@ -59,6 +59,20 @@ impl ViewAngle {
         ][sector as usize]
     }
 
+    /// The angle seen in a mirror: left and right swapped.
+    fn mirrored(self) -> Self {
+        use ViewAngle::*;
+        match self {
+            FrontRight => FrontLeft,
+            FrontLeft => FrontRight,
+            Right => Left,
+            Left => Right,
+            BackRight => BackLeft,
+            BackLeft => BackRight,
+            v => v,
+        }
+    }
+
     /// Position going round the lemming from the front: 0 = front,
     /// 1 = front-right, … 4 = back, … 7 = front-left.
     fn round_index(self) -> u32 {
@@ -126,7 +140,7 @@ fn anim_for(state: State) -> Anim {
         State::Walking => anim(0, 6, Five),
         // Not found yet: lemmings walk into the exit.
         State::Exiting => anim(0, 6, Five),
-        State::Turning => anim(30, 7, Eight),
+        State::Turning { .. } => anim(30, 7, Eight),
         State::Blocking => anim(86, 7, Five),
         State::Falling { .. } => Anim { first: 399, frames: 5, angles: Five, playback: Playback::MirroredCycle(FALL_CYCLE) },
         State::Digging => anim(161, 8, Five),
@@ -167,7 +181,15 @@ pub fn build(lemmings: &[Lemming], atlas_rows: u32, camera_yaw: f32) -> SceneSpr
     let tex = [(ATLAS_COLUMNS * LEMMING_CELL) as f32, (atlas_rows * LEMMING_CELL) as f32];
     for l in lemmings.iter().filter(|l| !l.gone) {
         let view = ViewAngle::from_yaws(l.dir.yaw(), camera_yaw);
-        let (cell, mirror) = cell_for(anim_for(l.state), view, l.state_ticks);
+        let (cell, mirror) = match l.state {
+            // The stored turner points to its left (assumed from the one
+            // verified case); one pointing right is its mirror image.
+            State::Turning { to } if to == l.dir.clockwise() => {
+                let (cell, mirror) = cell_for(anim_for(l.state), view.mirrored(), l.state_ticks);
+                (cell, !mirror)
+            }
+            _ => cell_for(anim_for(l.state), view, l.state_ticks),
+        };
         let (cx, cy) = ((cell % ATLAS_COLUMNS) * LEMMING_CELL, (cell / ATLAS_COLUMNS) * LEMMING_CELL);
         let size = LEMMING_CELL as f32;
         let rect = if mirror { [cx as f32 + size, cy as f32, -size, size] } else { [cx as f32, cy as f32, size, size] };

@@ -182,8 +182,9 @@ pub enum State {
     Walking,
     Climbing,
     Blocking,
-    /// Standing and redirecting walkers a quarter turn.
-    Turning,
+    /// Standing and pointing one arm sideways; walkers that reach it leave in
+    /// the direction it points.
+    Turning { to: Dir },
     Digging,
     /// Laying steps; the count is the bricks still to lay.
     Building { bricks_left: u8 },
@@ -337,7 +338,7 @@ impl Simulation {
         if l.gone || l.state.is_terminal() || self.skills_left[skill as usize] == 0 {
             return false;
         }
-        let busy = matches!(l.state, State::Blocking | State::Turning);
+        let busy = matches!(l.state, State::Blocking | State::Turning { .. });
         match skill {
             Skill::Climber => !l.climber,
             Skill::Floater => !l.floater,
@@ -363,12 +364,25 @@ impl Simulation {
             Skill::Floater => l.floater = true,
             Skill::Bomber => l.fuse = Some(FUSE_TICKS),
             Skill::Blocker => l.set_state(State::Blocking),
-            Skill::Turner => l.set_state(State::Turning),
+            // The turner's own left (the one verified case; see ssign_turner).
+            Skill::Turner => l.set_state(State::Turning { to: l.dir.anticlockwise() }),
             Skill::Digger => l.set_state(State::Digging),
             Skill::Builder => l.set_state(State::Building { bricks_left: BRICKS }),
             Skill::Basher => l.set_state(State::Bashing),
             Skill::Miner => l.set_state(State::Mining),
         }
+        true
+    }
+
+    /// Makes lemming `i` a turner pointing `to`, a quarter turn either way
+    /// from its heading. In the original the player picks the side with a
+    /// second click (`docs/spec/behaviour.md`, "A turner takes two clicks").
+    pub fn assign_turner(&mut self, i: usize, to: Dir) -> bool {
+        let Some(l) = self.lemmings.get(i) else { return false };
+        if to == l.dir || to == l.dir.reverse() || !self.assign(i, Skill::Turner) {
+            return false;
+        }
+        self.lemmings[i].state = State::Turning { to };
         true
     }
 
@@ -407,9 +421,7 @@ impl Simulation {
             .filter(|l| !l.gone)
             .filter_map(|l| match l.state {
                 State::Blocking => Some(Obstacle { pos: l.pos, turn_to: None }),
-                // A turner sends walkers off a quarter turn clockwise from its
-                // own heading (provisional).
-                State::Turning => Some(Obstacle { pos: l.pos, turn_to: Some(l.dir.anticlockwise()) }),
+                State::Turning { to } => Some(Obstacle { pos: l.pos, turn_to: Some(to) }),
                 _ => None,
             })
             .collect();
@@ -494,7 +506,7 @@ impl Simulation {
             State::Building { bricks_left } => self.build(l, bricks_left),
             State::Bashing => self.bash(l),
             State::Mining => self.mine(l),
-            State::Blocking | State::Turning => {
+            State::Blocking | State::Turning { .. } => {
                 // Standing still; fall if the ground disappears.
                 let (ground, _) = self.world.surface_below(l.pos[0], l.pos[1], l.pos[2]);
                 if ground < l.pos[1] - STEP_DOWN {

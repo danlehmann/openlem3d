@@ -14,14 +14,15 @@ pub struct HudPlugin;
 impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SelectedSkill>()
-            .add_systems(Startup, spawn_hud)
+            .init_resource::<PendingTurner>()
+            .add_systems(Startup, (spawn_hud, spawn_turner_marker))
             .add_systems(
                 Update,
                 (skill_buttons, skill_keys, controls, update_labels, animate_skill_icons, result_panel, bomber_countdown, assign_on_pointer)
                     .chain()
                     .run_if(in_state(AppState::Playing)),
             )
-            .add_systems(Update, show_in_play);
+            .add_systems(Update, (show_in_play, place_turner_marker));
     }
 }
 
@@ -424,7 +425,34 @@ fn update_labels(
 /// within which a click selects a lemming.
 const PICK_RADIUS_UNITS: f32 = 0.35;
 
-/// Assigns the selected skill to the lemming nearest a click or tap.
+/// Where a world position appears on screen, in logical pixels, and the
+/// pixels per world unit at its depth; `None` behind the camera.
+fn to_screen(camera: &SceneCamera, size: Vec2, pos: Vec3) -> Option<(Vec2, f32)> {
+    let clip = camera.view_proj * pos.extend(1.0);
+    if clip.w <= 0.0 {
+        return None;
+    }
+    let ndc = clip.truncate() / clip.w;
+    let screen = Vec2::new((ndc.x + 1.0) / 2.0 * size.x, (1.0 - ndc.y) / 2.0 * size.y);
+    // From the projection's y scale.
+    let px_per_unit = camera.view_proj.y_axis.y.abs() / clip.w * size.y / 2.0;
+    Some((screen, px_per_unit))
+}
+
+/// A lemming's centre in world units.
+fn lemming_centre(l: &l3d_sim::Lemming) -> Vec3 {
+    Vec3::from_array(l.pos.map(|v| v as f32 / SUB as f32)) + Vec3::Y * 0.2
+}
+
+/// The lemming a first turner click picked; the next click picks the side it
+/// points to, as in the original.
+#[derive(Resource, Default)]
+pub struct PendingTurner(pub Option<usize>);
+
+/// Assigns the selected skill to the lemming nearest a click or tap. A
+/// turner takes two: one on the lemming, then one to the side it should
+/// point to.
+#[allow(clippy::too_many_arguments)]
 fn assign_on_pointer(
     mouse: Res<ButtonInput<MouseButton>>,
     touches: Res<Touches>,
@@ -432,8 +460,16 @@ fn assign_on_pointer(
     ui: Query<&Interaction>,
     camera: Res<SceneCamera>,
     selected: Res<SelectedSkill>,
+    mut pending: ResMut<PendingTurner>,
     mut game: ResMut<Game>,
 ) {
+    let Some(sim) = &mut game.sim else { return };
+    if selected.0 != Some(Skill::Turner) || mouse.just_pressed(MouseButton::Right) {
+        pending.0 = None;
+    }
+    if pending.0.is_some_and(|i| !sim.can_assign(i, Skill::Turner)) {
+        pending.0 = None;
+    }
     let Some(skill) = selected.0 else { return };
     let Ok(window) = windows.single() else { return };
     // Clicks on HUD buttons are not world clicks.
@@ -450,28 +486,84 @@ fn assign_on_pointer(
             .map(|t| t.position())
     };
     let Some(point) = point else { return };
-    let Some(sim) = &mut game.sim else { return };
     let size = Vec2::new(window.width(), window.height());
+    if let Some(i) = pending.0.take() {
+        // Point to whichever side of the lemming, as seen on screen, the
+        // click landed.
+        let l = &sim.lemmings[i];
+        let centre = lemming_centre(l);
+        let Some((at, _)) = to_screen(&camera, size, centre) else { return };
+        let side = |d: l3d_sim::Dir| {
+            let [x, _, z] = d.delta();
+            let tip = to_screen(&camera, size, centre + Vec3::new(x as f32, 0.0, z as f32) * 0.5);
+            tip.map_or(f32::MIN, |(tip, _)| (tip - at).normalize_or_zero().dot((point - at).normalize_or_zero()))
+        };
+        let (acw, cw) = (l.dir.anticlockwise(), l.dir.clockwise());
+        sim.assign_turner(i, if side(acw) >= side(cw) { acw } else { cw });
+        return;
+    }
     let mut best: Option<(usize, f32)> = None;
     for (i, l) in sim.lemmings.iter().enumerate() {
         if l.gone {
             continue;
         }
-        let centre = Vec3::from_array(l.pos.map(|v| v as f32 / SUB as f32)) + Vec3::Y * 0.2;
-        let clip = camera.view_proj * centre.extend(1.0);
-        if clip.w <= 0.0 {
-            continue;
-        }
-        let ndc = clip.truncate() / clip.w;
-        let screen = Vec2::new((ndc.x + 1.0) / 2.0 * size.x, (1.0 - ndc.y) / 2.0 * size.y);
-        // Pixels per world unit at this depth, from the projection's y scale.
-        let px_per_unit = camera.view_proj.y_axis.y.abs() / clip.w * size.y / 2.0;
+        let Some((screen, px_per_unit)) = to_screen(&camera, size, lemming_centre(l)) else { continue };
         let d = screen.distance(point);
         if d < PICK_RADIUS_UNITS * px_per_unit.max(20.0) && best.is_none_or(|(_, bd)| d < bd) {
             best = Some((i, d));
         }
     }
     if let Some((i, _)) = best {
-        sim.assign(i, skill);
+        if skill == Skill::Turner {
+            if sim.can_assign(i, skill) {
+                pending.0 = Some(i);
+            }
+        } else {
+            sim.assign(i, skill);
+        }
+    }
+}
+
+/// The double arrow over a lemming waiting for its turner direction.
+#[derive(Component)]
+struct TurnerMarker;
+
+fn spawn_turner_marker(mut commands: Commands) {
+    commands.spawn((
+        Text::new("<  >"),
+        TextFont { font_size: FontSize::Px(20.0), ..default() },
+        TextColor(Color::WHITE),
+        Node { position_type: PositionType::Absolute, ..default() },
+        Visibility::Hidden,
+        TurnerMarker,
+    ));
+}
+
+fn place_turner_marker(
+    state: Res<State<AppState>>,
+    pending: Res<PendingTurner>,
+    game: Res<Game>,
+    camera: Res<SceneCamera>,
+    windows: Query<&Window>,
+    mut marker: Query<(&mut Node, &mut Visibility, &ComputedNode), With<TurnerMarker>>,
+) {
+    let Ok((mut node, mut vis, computed)) = marker.single_mut() else { return };
+    let at = (|| {
+        if *state.get() != AppState::Playing {
+            return None;
+        }
+        let l = game.sim.as_ref()?.lemmings.get(pending.0?)?;
+        let window = windows.single().ok()?;
+        let size = Vec2::new(window.width(), window.height());
+        to_screen(&camera, size, lemming_centre(l) + Vec3::Y * 0.45).map(|(p, _)| p)
+    })();
+    match at {
+        Some(p) => {
+            let half = computed.size() * computed.inverse_scale_factor() / 2.0;
+            node.left = px(p.x - half.x);
+            node.top = px(p.y - half.y);
+            *vis = Visibility::Inherited;
+        }
+        None => *vis = Visibility::Hidden,
     }
 }
