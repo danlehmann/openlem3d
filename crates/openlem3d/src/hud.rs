@@ -6,6 +6,7 @@ use bevy::text::FontSize;
 use l3d_sim::{SUB, Skill};
 
 use crate::Game;
+use crate::lemming_cam::LemmingCam;
 use crate::menu::AppState;
 use crate::scene_render::SceneCamera;
 
@@ -37,7 +38,7 @@ const ICON_FPS: f32 = l3d_sim::TICKS_PER_SECOND as f32;
 
 /// Cuts the skill-button icons from the user's `LEMM.MHC`. Returns `None`
 /// when the file can't be read; the buttons then show text only.
-fn skill_icons(data: &mut crate::Data, images: &mut Assets<Image>) -> Option<Vec<Vec<Handle<Image>>>> {
+fn skill_icons(data: &mut crate::Data, images: &mut Assets<Image>) -> Option<(Vec<Vec<Handle<Image>>>, Handle<Image>)> {
     use bevy::asset::RenderAssetUsages;
     use bevy::image::ImageSampler;
     use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
@@ -64,8 +65,13 @@ fn skill_icons(data: &mut crate::Data, images: &mut Assets<Image>) -> Option<Vec
             img.sampler = ImageSampler::nearest();
             Some(images.add(img))
     };
-    SKILL_ICON_FRAMES.iter().map(|&(first, n)| (first..first + n).map(&mut cell_image).collect()).collect()
+    let skills = SKILL_ICON_FRAMES.iter().map(|&(first, n)| (first..first + n).map(&mut cell_image).collect()).collect::<Option<_>>()?;
+    Some((skills, cell_image(LEMMING_CAM_ICON)?))
 }
+
+/// The lemming-cam button shows a walker from behind (`LEMM.MHC` cell 24),
+/// the view it gives.
+const LEMMING_CAM_ICON: usize = 24;
 
 /// Shows the HUD only while a level is being played.
 fn show_in_play(state: Res<State<AppState>>, mut roots: Query<&mut Visibility, With<HudRoot>>) {
@@ -99,7 +105,7 @@ const BUTTON_IDLE: Color = Color::srgba(0.1, 0.1, 0.2, 0.75);
 const BUTTON_SELECTED: Color = Color::srgba(0.8, 0.2, 0.1, 0.9);
 
 fn spawn_hud(mut commands: Commands, mut data: ResMut<crate::Data>, mut images: ResMut<Assets<Image>>) {
-    let icons = skill_icons(&mut data, &mut images);
+    let (icons, cam_icon) = skill_icons(&mut data, &mut images).unzip();
     if let Some(frames) = &icons {
         commands.insert_resource(SkillIconFrames(frames.clone()));
     }
@@ -134,6 +140,20 @@ fn spawn_hud(mut commands: Commands, mut data: ResMut<crate::Data>, mut images: 
                 ))
                 .with_child((Text::new(label), TextFont { font_size: FontSize::Px(22.0), ..default() }));
             }
+            bar.spawn((
+                Button,
+                Control::LemmingCam,
+                Node { width: px(52), height: px(52), justify_content: JustifyContent::Center, align_items: AlignItems::Center, ..default() },
+                BackgroundColor(BUTTON_IDLE),
+            ))
+            .with_children(|b| match &cam_icon {
+                Some(img) => {
+                    b.spawn((ImageNode::new(img.clone()), Node { width: px(44), height: px(44), ..default() }));
+                }
+                None => {
+                    b.spawn((Text::new("Cam"), TextFont { font_size: FontSize::Px(14.0), ..default() }));
+                }
+            });
             for skill in Skill::ALL {
                 bar.spawn((
                     Button,
@@ -200,6 +220,7 @@ enum Control {
     Slower,
     Faster,
     Nuke,
+    LemmingCam,
 }
 
 /// The end-of-level panel and its text.
@@ -242,11 +263,15 @@ const REPEAT_PER_SECOND: f32 = 20.0;
 
 /// Applies a control: from its button or its key (− / + for the release
 /// rate, Alt+Q to nuke as in the original). − and + repeat while held.
+#[allow(clippy::too_many_arguments)]
 fn controls(
     buttons: Query<(&Interaction, &Control)>,
     keys: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
     mut held: Local<Option<(Control, f32)>>,
+    mut cam_held: Local<bool>,
+    mut views: Query<&mut crate::ViewCamera>,
+    mut lemming_cam: ResMut<LemmingCam>,
     mut game: ResMut<Game>,
 ) {
     let pressed = |c: Control| buttons.iter().any(|(i, b)| *i == Interaction::Pressed && *b == c);
@@ -257,7 +282,7 @@ fn controls(
     let step = |sim: &mut l3d_sim::Simulation, c: Control| match c {
         Control::Slower => sim.adjust_release_rate(-1),
         Control::Faster => sim.adjust_release_rate(1),
-        Control::Nuke => {}
+        Control::Nuke | Control::LemmingCam => {}
     };
     match (current, *held) {
         (Some(c), Some((h, since))) if c == h => {
@@ -276,6 +301,13 @@ fn controls(
         }
         (None, _) => *held = None,
     }
+    if let Ok(mut view) = views.single_mut()
+        && buttons.iter().any(|(i, b)| *i == Interaction::Pressed && *b == Control::LemmingCam)
+        && !*cam_held
+    {
+        lemming_cam.toggle(&mut view);
+    }
+    *cam_held = buttons.iter().any(|(i, b)| *i == Interaction::Pressed && *b == Control::LemmingCam);
     let nuke_button = buttons.iter().any(|(i, b)| *i == Interaction::Pressed && *b == Control::Nuke);
     if nuke_button || (keys.pressed(KeyCode::AltLeft) && keys.just_pressed(KeyCode::KeyQ)) {
         sim.nuke();
@@ -392,6 +424,8 @@ fn skill_keys(keys: Res<ButtonInput<KeyCode>>, mut selected: ResMut<SelectedSkil
 fn update_labels(
     game: Res<Game>,
     selected: Res<SelectedSkill>,
+    lemming_cam: Res<LemmingCam>,
+    mut controls: Query<(&Control, &mut BackgroundColor), Without<SkillButton>>,
     mut labels: Query<(&SkillLabel, &mut Text), Without<StatusText>>,
     mut buttons: Query<(&SkillButton, &mut BackgroundColor)>,
     mut status: Query<&mut Text, With<StatusText>>,
@@ -402,6 +436,11 @@ fn update_labels(
     }
     for (button, mut bg) in &mut buttons {
         bg.0 = if selected.0 == Some(button.0) { BUTTON_SELECTED } else { BUTTON_IDLE };
+    }
+    for (control, mut bg) in &mut controls {
+        if *control == Control::LemmingCam {
+            bg.0 = if *lemming_cam == LemmingCam::Off { BUTTON_IDLE } else { BUTTON_SELECTED };
+        }
     }
     for mut text in &mut status {
         let c = sim.counts;
@@ -461,16 +500,17 @@ fn assign_on_pointer(
     camera: Res<SceneCamera>,
     selected: Res<SelectedSkill>,
     mut pending: ResMut<PendingTurner>,
+    mut lemming_cam: ResMut<LemmingCam>,
     mut game: ResMut<Game>,
 ) {
     let Some(sim) = &mut game.sim else { return };
+    let picking = lemming_cam.picking();
     if selected.0 != Some(Skill::Turner) || mouse.just_pressed(MouseButton::Right) {
         pending.0 = None;
     }
     if pending.0.is_some_and(|i| !sim.can_assign(i, Skill::Turner)) {
         pending.0 = None;
     }
-    let Some(skill) = selected.0 else { return };
     let Ok(window) = windows.single() else { return };
     // Clicks on HUD buttons are not world clicks.
     if ui.iter().any(|i| *i != Interaction::None) {
@@ -487,7 +527,7 @@ fn assign_on_pointer(
     };
     let Some(point) = point else { return };
     let size = Vec2::new(window.width(), window.height());
-    if let Some(i) = pending.0.take() {
+    if let Some(i) = pending.0.take().filter(|_| !picking) {
         // Point to whichever side of the lemming, as seen on screen, the
         // click landed.
         let l = &sim.lemmings[i];
@@ -513,6 +553,13 @@ fn assign_on_pointer(
             best = Some((i, d));
         }
     }
+    if picking {
+        if let Some((i, _)) = best {
+            lemming_cam.pick(i);
+        }
+        return;
+    }
+    let Some(skill) = selected.0 else { return };
     if let Some((i, _)) = best {
         if skill == Skill::Turner {
             if sim.can_assign(i, skill) {

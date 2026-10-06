@@ -9,6 +9,7 @@
 
 mod codes;
 mod hud;
+mod lemming_cam;
 mod menu;
 mod music;
 mod title;
@@ -53,6 +54,8 @@ struct Options {
     /// Scripted skill assignments `(tick, lemming, skill id, turner side)`,
     /// from `--assign TICK:LEMMING:SKILL[:cw|acw]`.
     assign: Vec<(u64, usize, u8, Option<String>)>,
+    /// Lemming the virtual-lemming camera follows from the start (`--follow N`).
+    follow: Option<usize>,
 }
 
 fn parse_args() -> Options {
@@ -67,6 +70,7 @@ fn parse_args() -> Options {
         wait: 0.5,
         no_hud: false,
         assign: Vec::new(),
+        follow: None,
     };
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -80,6 +84,7 @@ fn parse_args() -> Options {
             "--horizon" => o.horizon = val().parse().expect("--horizon takes a fraction"),
             "--wait" => o.wait = val().parse().expect("--wait takes seconds"),
             "--no-hud" => o.no_hud = true,
+            "--follow" => o.follow = Some(val().parse().expect("--follow takes a lemming number")),
             "--assign" => {
                 let v = val();
                 let p: Vec<&str> = v.split(':').collect();
@@ -134,7 +139,7 @@ fn main() {
                     ..default()
                 }),
         )
-        .add_plugins((SceneRenderPlugin, hud::HudPlugin, menu::MenuPlugin, music::MusicPlugin, touch::TouchPlugin, title::TitlePlugin))
+        .add_plugins((SceneRenderPlugin, hud::HudPlugin, menu::MenuPlugin, music::MusicPlugin, touch::TouchPlugin, title::TitlePlugin, lemming_cam::LemmingCamPlugin))
         .insert_resource(ClearColor(Color::srgb(0.35, 0.55, 0.85)))
         .insert_resource(opts.clone())
         .insert_resource(Data(data))
@@ -348,9 +353,11 @@ fn camera_controls(
     info: Option<Res<LevelInfo>>,
     windows: Query<&Window>,
     mut scene_cam: ResMut<SceneCamera>,
+    lemming_cam: Res<lemming_cam::LemmingCam>,
     mut q: Query<&mut ViewCamera>,
 ) {
-    let dt = time.delta_secs();
+    // Riding along with a lemming: no manual movement.
+    let dt = if lemming_cam.following().is_some() { 0.0 } else { time.delta_secs() };
     for mut cam in &mut q {
         let presets = [KeyCode::Digit1, KeyCode::Digit2, KeyCode::Digit3, KeyCode::Digit4];
         if let Some(info) = &info {
@@ -363,7 +370,7 @@ fn camera_controls(
         let held = |a: KeyCode, b: KeyCode| (keys.pressed(a) || keys.pressed(b)) as i32 as f32;
         let turn = held(KeyCode::KeyE, KeyCode::KeyE) - held(KeyCode::KeyQ, KeyCode::KeyQ);
         cam.yaw += turn * 1.8 * dt;
-        if mouse.pressed(MouseButton::Right) {
+        if mouse.pressed(MouseButton::Right) && dt > 0.0 {
             cam.yaw += motion.delta.x * 0.005;
         }
         let fwd = cam.forward();

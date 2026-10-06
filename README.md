@@ -49,7 +49,9 @@ See `docs/spec/` for what has been verified and how.
 | Pause | P | II button |
 | Select skill | F1–F9, or click the skill bar | tap the skill bar |
 | Give skill to a lemming | click the lemming | tap the lemming |
-| Release rate | − / + | − / + buttons |
+| Turner | click the lemming, then click beside it on the side it should point to | tap, then tap beside it |
+| Ride along with a lemming | V or the face button, then click a lemming; V or Esc to return | face button, then tap a lemming |
+| Release rate | − / + (hold to repeat) | − / + buttons (hold to repeat) |
 | Nuke | Alt+Q, or the Nuke button | Nuke button |
 | Mute music | M | — |
 | Level select | Esc | — |

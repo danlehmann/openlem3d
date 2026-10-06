@@ -256,7 +256,7 @@ fn code_input(
     }
 }
 
-fn back_to_menu(keys: Res<ButtonInput<KeyCode>>, mut next: ResMut<NextState<AppState>>) {
+pub(crate) fn back_to_menu(keys: Res<ButtonInput<KeyCode>>, mut next: ResMut<NextState<AppState>>) {
     if keys.just_pressed(KeyCode::Escape) {
         next.set(AppState::Menu);
     }
