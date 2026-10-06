@@ -387,3 +387,47 @@ Findings from the screen-layout runs (`spec/ui-graphics.md`, "Screens")
   icons; holding the button about 300 ms worked every time.
 - **Attract mode.** About 125 s after (re)entering the main menu a demo
   level starts, whatever the mouse does; a click returns to the menu.
+
+## 7. Save states: skip the boot, intro and navigation
+
+DOSBox-X's own save states make a run start where it is needed (the main
+menu, a paused level, a code screen) instead of booting, skipping the intro
+and navigating there every time. No keys are typed: the scripts drive
+DOSBox-X's native menu bar with window messages, which works without focus
+and with the desktop locked.
+
+| Script | Purpose |
+|---|---|
+| `menu.ps1 -List` / `-Item <text>` | Lists DOSBox-X's menu commands, or invokes one by name (e.g. `Save state`). |
+| `state.ps1 -Save <name>` | Snapshots the running game to `temp/states/<name>.sav`. |
+| `state.ps1 -Load <name>` | Restores a snapshot into the running DOSBox-X. |
+| `state.ps1 -List` | Lists the saved states. |
+| `launch.ps1 -State <name>` | Launches DOSBox-X and restores the state once it is up. |
+
+`launch.ps1` always enables the menu bar (`showmenu = true`, outside the
+game's client area, so capture coordinates don't change) and points
+DOSBox-X at `temp/states/current.sav`; `state.ps1` copies named states in and
+out of that file.
+
+**Verified:** saving at the main menu and restoring it into a fresh DOSBox-X
+brings the menu back 9 s after launch (about 20 s of boot plus a scripted
+intro skip before). The restored screen matches the saved one (the button
+row at zero offset; the remaining difference is the animated backdrop and
+blinking faces).
+
+**Gotchas:**
+
+- A load sent in the first second after launch is ignored; `launch.ps1
+  -State` waits 6 s first.
+- States belong to this DOSBox-X build and configuration. After changing
+  either, make them again.
+- A state includes the game's state on disk only as far as DOSBox-X keeps it
+  in memory; the save file `LM3D.SAV` in `temp/dosbox_c` is not rolled back
+  by loading a state.
+- DOSBox-X's log (`[log] logfile = …` in an extra config) records
+  "Loading state from slot …" and "Loaded." for each load, which is the
+  quickest way to confirm a load happened.
+
+**Suggested library** (create on first use, name by content): `main-menu`,
+`code-screen`, and `<level-file>-paused` for levels used in comparisons, for
+example `level000-paused`.

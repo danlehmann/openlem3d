@@ -30,7 +30,10 @@ param(
     [switch]$SkipIntro,
     [int]$IntroDelay = 8,
     [switch]$Force,
-    [string[]]$ExtraConf = @()
+    [string[]]$ExtraConf = @(),
+    # Restore this named save state (state.ps1) once DOSBox-X is up; skips the
+    # boot and intro without any keyboard input.
+    [string]$State
 )
 . (Join-Path $PSScriptRoot 'Lem3dCommon.ps1')
 
@@ -56,6 +59,13 @@ Set-Content -Path $gen -Value $lines -Encoding ascii
 
 $base = Join-Path $PSScriptRoot 'lem3d.conf'
 $dbArgs = @('-conf', "`"$base`"", '-conf', "`"$gen`"")
+# Save states: the native menu bar (driven by menu.ps1) and a fixed save file
+# that state.ps1 copies named states into and out of.
+$stateDir = Join-Path $Lem3dRepo 'temp\states'
+New-Item -ItemType Directory -Force $stateDir | Out-Null
+$stateConf = Join-Path $stateDir 'states.conf'
+"[sdl]`r`nshowmenu = true`r`n[dosbox]`r`nsavefile = $(Join-Path $stateDir 'current.sav')`r`nsaveremark = false`r`nforceloadstate = true`r`n" | Out-File -Encoding ascii $stateConf
+$dbArgs += @('-conf', "`"$stateConf`"")
 foreach ($c in $ExtraConf) { $dbArgs += @('-conf', "`"$((Resolve-Path $c).Path)`"") }
 $dbArgs += '-nopromptfolder'
 $proc = Start-Process -FilePath $Lem3dDosbox -ArgumentList $dbArgs `
@@ -83,6 +93,11 @@ if ($SkipIntro) {
     # The confirmation can appear late; a final N closes it if it is up.
     & $send 'wait:1500' N 'wait:1000'
     $h = [Lem3dWin32]::FindMainWindow($proc.Id)
+}
+if ($State) {
+    # DOSBox-X must have finished starting before a state can be loaded.
+    Start-Sleep -Seconds 6
+    & (Join-Path $PSScriptRoot 'state.ps1') -Load $State | Out-Null
 }
 $r = [Lem3dWin32]::ClientRectOnScreen($h)
 Write-Output ("DOSBox-X running: pid {0}, client area {1}x{2} at ({3},{4})" -f $proc.Id, $r[2], $r[3], $r[0], $r[1])
