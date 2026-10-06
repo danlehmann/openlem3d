@@ -16,6 +16,8 @@ pub enum AppState {
     Code,
     /// Choosing a level.
     Menu,
+    /// The level's briefing, before it starts.
+    Briefing,
     Playing,
 }
 
@@ -172,7 +174,7 @@ fn menu_buttons(
             MenuButton::Level(n) => {
                 current.number = n;
                 current.loaded = None;
-                next.set(AppState::Playing);
+                next.set(AppState::Briefing);
             }
         }
     }
@@ -236,7 +238,7 @@ fn code_input(
                     current.number = n;
                     current.loaded = None;
                     entry.0.clear();
-                    next.set(AppState::Playing);
+                    next.set(AppState::Briefing);
                 }
                 None => {
                     message = Some(format!("Unknown code {}", entry.0));

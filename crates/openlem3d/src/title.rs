@@ -55,22 +55,23 @@ impl Plugin for TitlePlugin {
             )
             .add_systems(OnExit(AppState::Code), despawn::<ScreenRoot>)
             .add_systems(Update, (spawn_code, code_input, animate_slots).chain().run_if(in_state(AppState::Code)))
-            .add_systems(Update, (layout, scroll_backdrop).run_if(in_state(AppState::Title).or_else(in_state(AppState::Code))));
+            .add_systems(Update, scroll_backdrop.run_if(in_state(AppState::Title).or_else(in_state(AppState::Code))))
+            .add_systems(PostUpdate, layout.before(bevy::ui::UiSystems::Layout));
     }
 }
 
 /// A font as uploaded images plus each glyph's advance.
-struct Glyphs {
+pub(crate) struct Glyphs {
     first: u8,
     images: Vec<Handle<Image>>,
     advances: Vec<f32>,
-    size: Vec2,
+    pub(crate) size: Vec2,
     space: f32,
 }
 
 impl Glyphs {
     /// Glyph images with their x offsets for `text`, and the total width.
-    fn layout(&self, text: &str) -> (Vec<(f32, Handle<Image>)>, f32) {
+    pub(crate) fn layout(&self, text: &str) -> (Vec<(f32, Handle<Image>)>, f32) {
         let (mut x, mut out) = (0.0, Vec::new());
         // Characters are glyph codes (picture tiles go up to 198).
         for c in text.chars().map(|c| u8::try_from(c as u32).unwrap_or(b' ')) {
@@ -88,7 +89,7 @@ impl Glyphs {
 
 /// Menu graphics, uploaded once.
 #[derive(Resource)]
-struct Art {
+pub(crate) struct Art {
     backdrop: Option<Handle<Image>>,
     logo: Vec<Handle<Image>>,
     /// Play, Code, Options, rating, Exit.
@@ -101,7 +102,7 @@ struct Art {
     rating_labels: Vec<(Handle<Image>, Vec2)>,
     winder: Vec<Handle<Image>>,
     banner: Option<Glyphs>,
-    large: Option<Glyphs>,
+    pub(crate) large: Option<Glyphs>,
     letters: Vec<Handle<Image>>,
 }
 
@@ -235,9 +236,11 @@ fn rating_label(name: &str) -> IndexedImage {
 #[derive(Component)]
 struct ScreenRoot;
 
-/// The 320×200 canvas, scaled to fit the window and centred.
+/// A canvas of the given size in the original's pixels (320×200 for the
+/// title and code screens), scaled to fit the window and centred. One
+/// exists at a time.
 #[derive(Component)]
-struct Canvas;
+pub(crate) struct Canvas(pub(crate) Vec2);
 
 /// The backdrop's tiles, and the scroll speed of the current screen.
 #[derive(Component)]
@@ -245,9 +248,9 @@ struct Backdrop(f32);
 
 /// An element's rectangle in canvas pixels, relative to its parent.
 #[derive(Component, Clone, Copy)]
-struct At(Rect);
+pub(crate) struct At(pub(crate) Rect);
 
-fn at(x: f32, y: f32, w: f32, h: f32) -> At {
+pub(crate) fn at(x: f32, y: f32, w: f32, h: f32) -> At {
     At(Rect::new(x, y, x + w, y + h))
 }
 
@@ -297,7 +300,7 @@ fn despawn<T: Component>(mut commands: Commands, roots: Query<Entity, With<T>>) 
     }
 }
 
-fn image_at(image: Handle<Image>, rect: At) -> impl Bundle {
+pub(crate) fn image_at(image: Handle<Image>, rect: At) -> (ImageNode, At, Node) {
     (ImageNode::new(image), rect, Node { position_type: PositionType::Absolute, ..default() })
 }
 
@@ -319,7 +322,7 @@ fn spawn_screen(commands: &mut Commands, art: &Art, scroll: f32) -> Entity {
             commands.entity(backdrop).add_child(tile);
         }
     }
-    let canvas = commands.spawn((Canvas, Node { position_type: PositionType::Absolute, ..default() })).id();
+    let canvas = commands.spawn((Canvas(SCREEN), Node { position_type: PositionType::Absolute, ..default() })).id();
     commands.entity(root).add_child(canvas);
     canvas
 }
@@ -408,17 +411,18 @@ fn spawn_title(mut commands: Commands, art: Option<Res<Art>>, roots: Query<(), W
 /// the backdrop across the whole window.
 fn layout(
     windows: Query<&Window>,
-    mut canvases: Query<&mut Node, (With<Canvas>, Without<At>)>,
+    mut canvases: Query<(&Canvas, &mut Node), Without<At>>,
     mut items: Query<(&At, &mut Node), Without<Canvas>>,
 ) {
     let Ok(window) = windows.single() else { return };
+    let Some((size, _)) = canvases.iter().next().map(|(c, _)| (c.0, ())) else { return };
     let (w, h) = (window.width(), window.height());
-    let s = (w / SCREEN.x).min(h / SCREEN.y);
-    for mut node in &mut canvases {
-        node.left = px((w - SCREEN.x * s) / 2.0);
-        node.top = px((h - SCREEN.y * s) / 2.0);
-        node.width = px(SCREEN.x * s);
-        node.height = px(SCREEN.y * s);
+    let s = (w / size.x).min(h / size.y);
+    for (_, mut node) in &mut canvases {
+        node.left = px((w - size.x * s) / 2.0);
+        node.top = px((h - size.y * s) / 2.0);
+        node.width = px(size.x * s);
+        node.height = px(size.y * s);
     }
     for (a, mut node) in &mut items {
         node.left = px(a.0.min.x * s);
@@ -761,7 +765,7 @@ fn code_input(
     {
         current.number = n;
         current.loaded = None;
-        next.set(AppState::Playing);
+        next.set(AppState::Briefing);
     }
 }
 

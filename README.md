@@ -55,6 +55,7 @@ See `docs/spec/` for what has been verified and how.
 | Release rate | − / + (hold to repeat) | − / + buttons (hold to repeat) |
 | Nuke | Alt+Q, or click the bomb | tap the bomb |
 | Mute music | M | — |
+| Briefing | click or Space: play; Enter: preview; right click or Esc: back | tap: play |
 | Level select | Esc | — |
 
 ## Repository layout
