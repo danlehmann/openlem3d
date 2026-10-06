@@ -101,4 +101,9 @@ How we verified it:
 - **Sea texture, without the flag:** a 64-wide strip, probably 64×64
   animation frames (unverified).
 - **Land polygons:** drawn at the same height with the `LAND` texture. Shape
-  verified visually in `LEVEL.000`; texture scale unverified.
+  verified visually in `LEVEL.000`.
+  - **Texture scale:** with the level flag `0x0100` ("128×128 land"), one
+    128×128 texture spans 4 grid units. Verified visually: the circuit-board
+    floor of `LEVEL.065` and the grass of `LEVEL.000` match the original at
+    that scale; half of it was clearly too fine.
+  - **Without the flag:** 2 grid units (provisional).

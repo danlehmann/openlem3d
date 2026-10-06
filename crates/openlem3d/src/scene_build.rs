@@ -521,11 +521,11 @@ pub fn build(data: &mut GameData, n: u32) -> Result<BuiltLevel, l3d_formats::Err
         && !level.land_polygons.is_empty()
         && let Ok(land) = data.gfx("LAND", level.land_gfx)
     {
-        // LAND files are 128 wide; use the first texture. Texel density
-        // relative to the grid is unverified: 128 texels span 2 units when
-        // the "128×128" flag is set, else 1 unit.
+        // LAND files are 128 wide; use the first texture. With the
+        // "128×128" flag, 128 texels span 4 grid units (verified visually on
+        // Mayhem 6 and Fun 1); without it, 2 units (provisional).
         let first = &land[..(128 * 128).min(land.len())];
-        let mut tile = if flags & level_flags::LAND_128 != 0 { 2.0 } else { 1.0 };
+        let mut tile = if flags & level_flags::LAND_128 != 0 { 4.0 } else { 2.0 };
         if flags & level_flags::LAND_HALF_SCALE != 0 {
             tile /= 2.0;
         }
