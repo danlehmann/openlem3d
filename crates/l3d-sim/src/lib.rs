@@ -811,9 +811,26 @@ impl Simulation {
                     && (p[2] - o.pos[2]).abs() < BLOCK_RADIUS
                     && (p[1] - o.pos[1]).abs() < SUB / 2
             };
-            if near(next) && !near(l.pos) {
-                l.dir = o.turn_to.unwrap_or(l.dir.reverse());
-                return;
+            match o.turn_to {
+                // Blockers turn walkers back at arm's length.
+                None if near(next) && !near(l.pos) => {
+                    l.dir = l.dir.reverse();
+                    return;
+                }
+                // Turners send walkers off along the turner's own line: a
+                // walker turns once it is level with the turner, so it
+                // leaves on the path the turner stands on (provisional).
+                Some(to) if near(next) && to != l.dir => {
+                    let axis = if d[0] != 0 { 0 } else { 2 };
+                    let before = (o.pos[axis] - l.pos[axis]) * d[axis];
+                    let after = (o.pos[axis] - next[axis]) * d[axis];
+                    if before > 0 && after <= 0 {
+                        l.pos[axis] = o.pos[axis];
+                        l.dir = to;
+                        return;
+                    }
+                }
+                _ => {}
             }
         }
         let ahead = [next[0] + d[0] * REACH, next[2] + d[2] * REACH];
