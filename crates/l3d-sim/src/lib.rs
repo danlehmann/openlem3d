@@ -7,8 +7,8 @@
 pub mod world;
 
 use l3d_formats::blk::{BlockSet, flags};
-use l3d_formats::level::{BlockCell, Level, SIZE_X, SIZE_Y, SIZE_Z};
-pub use world::{Floor, SUB, World};
+use l3d_formats::level::{Level, SIZE_X, SIZE_Y, SIZE_Z};
+pub use world::{Brick, Floor, SUB, World};
 
 /// Simulation ticks per second (verified: 14 Hz, `docs/spec/behaviour.md`).
 pub const TICKS_PER_SECOND: u32 = 14;
@@ -56,6 +56,12 @@ const DIG_TICKS: u32 = 40;
 const BUILD_TICKS: u32 = 25;
 /// Bricks per builder (verified: 6).
 const BRICKS: u8 = 6;
+/// Each brick moves the builder this far forward and ¼ unit up (verified
+/// ±10%); bricks reach from [`BRICK_START`] to [`BRICK_END`] ahead of the
+/// feet, about 0.55 unit long (measured), so consecutive bricks overlap.
+const BRICK_RUN: i32 = SUB / 2;
+const BRICK_START: i32 = SUB / 8;
+const BRICK_END: i32 = SUB / 2 + SUB / 8 + SUB / 16;
 /// Ticks per stroke of a basher (verified, rough: 30–34) and of a miner
 /// (rough: about 3.5 s).
 const BASH_TICKS: u32 = 32;
@@ -636,30 +642,40 @@ impl Simulation {
             return;
         }
         let d = l.dir.delta();
-        let ahead = [l.pos[0] + d[0] * (SUB / 2 + REACH), l.pos[1], l.pos[2] + d[2] * (SUB / 2 + REACH)];
-        let cell = Self::cell_of(ahead);
-        // The brick's segment: the quarter just above the current feet height.
-        let seg = ((l.pos[1] - cell[1] * SUB) / (SUB / 4)).clamp(0, 3);
-        let under = self.world.block(Self::cell_of([l.pos[0], l.pos[1] - 1, l.pos[2]]));
-        let template = match under {
-            Some((b, _)) if b.id >= 9 => b,
-            _ => BlockCell { id: self.world.common_id, ..Default::default() },
+        let template = match self.world.block(Self::cell_of([l.pos[0], l.pos[1] - 1, l.pos[2]])) {
+            Some((b, _)) if b.id >= 9 => b.id,
+            _ => self.world.common_id,
         };
-        if self.world.solid([ahead[0], l.pos[1] + STEP_UP + 1, ahead[2]]) {
-            // Blocked by a wall: stop building and turn around.
-            l.dir = l.dir.reverse();
+        // A brick from just ahead of the feet to just past the next standing
+        // point, one segment thick, a unit wide (width unmeasured).
+        let along = |from: i32, to: i32, axis: usize| {
+            let (a, b) = (l.pos[axis] + d[axis] * from, l.pos[axis] + d[axis] * to);
+            if d[axis] == 0 { (l.pos[axis] - SUB / 2, l.pos[axis] + SUB / 2) } else { (a.min(b), a.max(b)) }
+        };
+        let next = [l.pos[0] + d[0] * BRICK_RUN, l.pos[1] + SUB / 4, l.pos[2] + d[2] * BRICK_RUN];
+        let head_blocked = [next[1] + 1, next[1] + HEAD_HEIGHT - 1].iter().any(|&y| self.world.solid([next[0], y, next[2]]));
+        // A brick that would run into terrain is cut short at it, filling
+        // the gap up to the wall; the builder then stops (provisional).
+        let mut end = BRICK_END;
+        let laid = loop {
+            let (x0, x1) = along(BRICK_START, end, 0);
+            let (z0, z1) = along(BRICK_START, end, 2);
+            let brick = world::Brick { min: [x0, l.pos[1], z0], max: [x1, l.pos[1] + SUB / 4, z1], id: template };
+            if !head_blocked && self.world.add_brick(brick) {
+                break Some(end);
+            }
+            end -= 1;
+            if end - BRICK_START < SUB / 8 {
+                break None;
+            }
+        };
+        if laid != Some(BRICK_END) || head_blocked {
             l.set_state(State::Walking);
             return;
-        }
-        self.world.add_segments(cell, 1 << seg, template);
-        // Walk onto the new brick.
-        l.pos[0] += d[0] * (SUB / 2);
-        l.pos[2] += d[2] * (SUB / 2);
-        if self.settle(l) {
-            l.state = State::Building { bricks_left: bricks_left - 1 };
-        }
+        }        // Climb onto the new brick.
+        l.pos = next;
+        l.state = State::Building { bricks_left: bricks_left - 1 };
     }
-
     /// Removes body-height terrain in the cell ahead and moves into the gap;
     /// stops when nothing is left to bash (provisional).
     fn bash(&mut self, l: &mut Lemming) {

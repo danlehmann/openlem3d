@@ -490,11 +490,50 @@ pub struct BuiltLevel {
 }
 
 /// Replaces the block geometry of `scene` with a mesh of the current grid.
-pub fn rebuild_blocks(scene: &SceneData, layer: usize, level: &Level, blocks: &BlockSet) -> SceneData {
+pub fn rebuild_blocks(scene: &SceneData, layer: usize, level: &Level, blocks: &BlockSet, bricks: &[l3d_sim::Brick]) -> SceneData {
     let mut out = scene.clone();
     let texture = out.layers[layer].texture.clone();
     out.layers[layer] = block_layer(&level_mesh::build(level, blocks), texture);
+    out.layers[layer + 1] = brick_layer(bricks);
     out
+}
+
+/// Builders' bricks as brown boxes. The original's bricks are thin and brown
+/// (`docs/spec/behaviour.md`); the texture is our own.
+fn brick_layer(bricks: &[l3d_sim::Brick]) -> SceneLayer {
+    const W: u32 = 16;
+    const H: u32 = 4;
+    let texels = (0..W * H)
+        .flat_map(|i| {
+            let (x, y) = (i % W, i / W);
+            // Mortar lines between two courses of staggered bricks.
+            let mortar = y % 2 == 1 || (x + if y < 2 { 0 } else { 4 }) % 8 == 7;
+            if mortar { [92, 52, 24, 255] } else { [156, 92, 44, 255] }
+        })
+        .collect();
+    let mut b = LayerBuilder::default();
+    let sub = l3d_sim::SUB as f32;
+    for brick in bricks {
+        let (lo, hi) = (brick.min.map(|v| v as f32 / sub), brick.max.map(|v| v as f32 / sub));
+        let p = |x: usize, y: usize, z: usize| [[lo[0], hi[0]][x], [lo[1], hi[1]][y], [lo[2], hi[2]][z]];
+        // Each face counter-clockwise from outside, with its brightness.
+        let faces = [
+            ([p(0, 1, 0), p(0, 1, 1), p(1, 1, 1), p(1, 1, 0)], 1.0),
+            ([p(0, 0, 0), p(1, 0, 0), p(1, 0, 1), p(0, 0, 1)], 0.5),
+            ([p(0, 0, 1), p(1, 0, 1), p(1, 1, 1), p(0, 1, 1)], 0.8),
+            ([p(1, 0, 0), p(0, 0, 0), p(0, 1, 0), p(1, 1, 0)], 0.8),
+            ([p(1, 0, 1), p(1, 0, 0), p(1, 1, 0), p(1, 1, 1)], 0.7),
+            ([p(0, 0, 0), p(0, 0, 1), p(0, 1, 1), p(0, 1, 0)], 0.7),
+        ];
+        for (corners, brightness) in faces {
+            let base = b.base();
+            for (c, uv) in corners.iter().zip([[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]]) {
+                Vertex::fixed(*c, uv, brightness, false).push(&mut b.vertices);
+            }
+            b.indices.extend([base, base + 1, base + 2, base, base + 2, base + 3]);
+        }
+    }
+    b.finish(RgbaImage { width: W, height: H, texels })
 }
 
 /// Builds everything drawn for level `n`.
@@ -549,6 +588,8 @@ pub fn build(data: &mut GameData, n: u32) -> Result<BuiltLevel, l3d_formats::Err
     }
     let block_layer_index = scene.layers.len();
     scene.layers.push(block_layer(&mesh, indexed_to_rgba(&tex, 64, &pal)));
+    // Builders' bricks, right after the blocks (see ebuild_blocks).
+    scene.layers.push(brick_layer(&[]));
     scene.layers.extend(object_layers(data, &level, &pal));
     scene.layers.extend(decal_layers(data, &level, &pal));
     scene.layers.extend(trap_layer(data, &level, &pal));

@@ -34,9 +34,29 @@ pub struct World {
     /// Cells whose block changed since the last [`World::take_changes`], with
     /// their new contents (segments 0 = removed).
     changes: Vec<([usize; 3], BlockCell)>,
+    /// Builders' bricks, which lie across cell boundaries.
+    pub bricks: Vec<Brick>,
+    /// Set when [World::bricks] changed since the last
+    /// [World::take_bricks_changed].
+    bricks_changed: bool,
     /// The level's most common ordinary block id (≥ 9), used for terrain
     /// that lemmings create where no block gives a better choice.
     pub common_id: u8,
+}
+
+/// A builder's brick: a box from `min` (inclusive) to `max` (exclusive)
+/// in sub-units, showing block `id`'s texture.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Brick {
+    pub min: [i32; 3],
+    pub max: [i32; 3],
+    pub id: u8,
+}
+
+impl Brick {
+    pub fn contains(&self, p: [i32; 3]) -> bool {
+        (0..3).all(|i| self.min[i] <= p[i] && p[i] < self.max[i])
+    }
 }
 
 /// A non-empty cell that blocks lemmings.
@@ -71,7 +91,15 @@ impl World {
             counts[c.block.id as usize] += 1;
         }
         let common_id = (9..64).max_by_key(|&i| (counts[i], std::cmp::Reverse(i))).unwrap_or(9) as u8;
-        World { cells, land, bottom_solid: level.flags & FLAG_BOTTOM_SOLID != 0, changes: Vec::new(), common_id }
+        World {
+            cells,
+            land,
+            bottom_solid: level.flags & FLAG_BOTTOM_SOLID != 0,
+            changes: Vec::new(),
+            bricks: Vec::new(),
+            bricks_changed: false,
+            common_id,
+        }
     }
 
     /// Removes the segments in `mask` from cell `c`. Steel blocks are
@@ -86,13 +114,15 @@ impl World {
     /// for ids 5–8 before rotation ([L3DEdit], unverified), turned with the
     /// block's rotation like its faces. Non-horizontal digging never breaks
     /// them (provisional).
+    /// Bricks overlapping the removed segments go too.
     pub fn remove_segments_towards(&mut self, c: [i32; 3], mask: u8, toward: Option<[i32; 3]>) -> bool {
-        let Some(mut cell) = self.cell(c[0], c[1], c[2]) else { return false };
+        let bricks_removed = self.remove_bricks(c, mask);
+        let Some(mut cell) = self.cell(c[0], c[1], c[2]) else { return bricks_removed };
         if cell.flags & flags::STEEL != 0 || cell.block.segments & mask == 0 {
-            return false;
+            return bricks_removed;
         }
         if (5..=8).contains(&cell.block.id) && toward != Some(one_way_direction(cell.block)) {
-            return false;
+            return bricks_removed;
         }
         cell.block.segments &= !mask;
         let i = index(c[0] as usize, c[1] as usize, c[2] as usize);
@@ -123,6 +153,42 @@ impl World {
         true
     }
 
+    /// Removes the bricks overlapping the segments in `mask` of cell `c`;
+    /// returns whether there were any.
+    fn remove_bricks(&mut self, c: [i32; 3], mask: u8) -> bool {
+        let before = self.bricks.len();
+        let quarter = SUB / 4;
+        self.bricks.retain(|b| {
+            !(0..4).any(|seg| {
+                let min = [c[0] * SUB, c[1] * SUB + seg * quarter, c[2] * SUB];
+                let max = [min[0] + SUB, min[1] + quarter, min[2] + SUB];
+                mask & (1 << seg) != 0 && (0..3).all(|i| b.min[i] < max[i] && min[i] < b.max[i])
+            })
+        });
+        let removed = self.bricks.len() != before;
+        self.bricks_changed |= removed;
+        removed
+    }
+
+    /// Adds a brick unless it would overlap solid terrain (sampled at its
+    /// corners and centre); returns whether it was added.
+    pub fn add_brick(&mut self, brick: Brick) -> bool {
+        let (lo, hi) = (brick.min, brick.max.map(|v| v - 1));
+        let mid = [0, 1, 2].map(|i| (lo[i] + hi[i]) / 2);
+        let samples = [[lo[0], mid[1], lo[2]], [hi[0], mid[1], lo[2]], [lo[0], mid[1], hi[2]], [hi[0], mid[1], hi[2]], mid];
+        if samples.iter().any(|&p| self.solid(p)) {
+            return false;
+        }
+        self.bricks.push(brick);
+        self.bricks_changed = true;
+        true
+    }
+
+    /// Whether the bricks changed since the last call.
+    pub fn take_bricks_changed(&mut self) -> bool {
+        std::mem::take(&mut self.bricks_changed)
+    }
+
     /// The solid block in cell `c`, with its flags.
     pub fn block(&self, c: [i32; 3]) -> Option<(BlockCell, u8)> {
         self.cell(c[0], c[1], c[2]).map(|s| (s.block, s.flags))
@@ -144,6 +210,9 @@ impl World {
 
     /// Whether the point (in sub-units) is inside solid block geometry.
     pub fn solid(&self, p: [i32; 3]) -> bool {
+        if self.bricks.iter().any(|b| b.contains(p)) {
+            return true;
+        }
         let c = p.map(|v| v.div_euclid(SUB));
         let Some(cell) = self.cell(c[0], c[1], c[2]) else { return false };
         let l = [0, 1, 2].map(|i| (p[i] - c[i] * SUB) as f32 / SUB as f32);

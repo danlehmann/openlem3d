@@ -134,11 +134,26 @@ fn two_unit_drop_survives_and_five_unit_drop_splats() {
 fn builder_lays_six_bricks() {
     let mut sim = open_level(1).skill(0, Skill::Builder, 1).sim();
     run(&mut sim, 30);
+    let start = sim.lemmings[0].pos;
     assert!(sim.assign(0, Skill::Builder));
-    sim.world.take_changes();
     run(&mut sim, 6 * 25 + 10);
-    let added = sim.world.take_changes().len();
-    assert_eq!(added, 6, "one terrain change per brick");
+    assert_eq!(sim.world.bricks.len(), 6);
+    // Each brick: ¼ unit up and ½ unit forward.
+    let end = sim.lemmings[0].pos;
+    assert_eq!(end[1] - start[1], 6 * SUB / 4);
+    let run_len = (end[0] - start[0]).abs() + (end[2] - start[2]).abs();
+    assert!((6 * SUB / 2..6 * SUB / 2 + SUB / 4).contains(&run_len), "ran {run_len}");
+}
+
+#[test]
+fn bashing_removes_bricks() {
+    let mut sim = open_level(1).sim();
+    let c = [20, 2, 20];
+    let b = l3d_sim::Brick { min: [c[0] * SUB + 10, c[1] * SUB, c[2] * SUB], max: [c[0] * SUB + 140, c[1] * SUB + SUB / 4, c[2] * SUB + SUB], id: 9 };
+    assert!(sim.world.add_brick(b));
+    assert!(sim.world.solid([c[0] * SUB + 20, c[1] * SUB + 10, c[2] * SUB + 128]));
+    assert!(sim.world.remove_segments(c, 0b0001));
+    assert!(sim.world.bricks.is_empty());
 }
 
 #[test]

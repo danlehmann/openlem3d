@@ -39,4 +39,19 @@ fn main() {
             break;
         }
     }
+    // Optional: the cells in a box at the end, DUMP=x0,x1,y0,y1,z0,z1.
+    if let Ok(s) = std::env::var("DUMP") {
+        let b: Vec<i32> = s.split(',').filter_map(|v| v.parse().ok()).collect();
+        for y in (b[2]..=b[3]).rev() {
+            for z in b[4]..=b[5] {
+                let row: String = (b[0]..=b[1])
+                    .map(|x| match sim.world.block([x, y, z]) {
+                        Some((c, _)) if c.segments != 0 => format!("{:x}", c.segments),
+                        _ => ".".into(),
+                    })
+                    .collect();
+                println!("y={y} z={z} x{}..: {row}", b[0]);
+            }
+        }
+    }
 }

@@ -50,6 +50,9 @@ struct Options {
     wait: f32,
     /// Hide all on-screen UI (for side-by-side comparisons with the original).
     no_hud: bool,
+    /// Scripted skill assignments `(tick, lemming, skill id, turner side)`,
+    /// from `--assign TICK:LEMMING:SKILL[:cw|acw]`.
+    assign: Vec<(u64, usize, u8, Option<String>)>,
 }
 
 fn parse_args() -> Options {
@@ -63,6 +66,7 @@ fn parse_args() -> Options {
         size: None,
         wait: 0.5,
         no_hud: false,
+        assign: Vec::new(),
     };
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -76,6 +80,12 @@ fn parse_args() -> Options {
             "--horizon" => o.horizon = val().parse().expect("--horizon takes a fraction"),
             "--wait" => o.wait = val().parse().expect("--wait takes seconds"),
             "--no-hud" => o.no_hud = true,
+            "--assign" => {
+                let v = val();
+                let p: Vec<&str> = v.split(':').collect();
+                let num = |i: usize| p.get(i).and_then(|s| s.parse().ok()).expect("--assign takes TICK:LEMMING:SKILL[:cw|acw]");
+                o.assign.push((num(0), num(1) as usize, num(2) as u8, p.get(3).map(|s| s.to_string())));
+            }
             "--size" => {
                 let v = val();
                 let (w, h) = v.split_once('x').expect("--size takes WxH");
@@ -235,21 +245,33 @@ pub struct Game {
     terrain: Option<(Level, BlockSet, usize)>,
 }
 
-fn step_simulation(keys: Res<ButtonInput<KeyCode>>, mut game: ResMut<Game>, mut scene: ResMut<SceneContent>) {
+fn step_simulation(keys: Res<ButtonInput<KeyCode>>, options: Res<Options>, mut game: ResMut<Game>, mut scene: ResMut<SceneContent>) {
     if keys.just_pressed(KeyCode::KeyP) {
         game.paused = !game.paused;
     }
     let Game { sim: Some(sim), paused: false, terrain, .. } = &mut *game else { return };
     sim.step();
+    for (tick, i, skill, side) in &options.assign {
+        if *tick == sim.tick
+            && let (Some(skill), Some(dir)) = (l3d_sim::Skill::from_id(*skill), sim.lemmings.get(*i).map(|l| l.dir))
+        {
+            match side.as_deref() {
+                Some("cw") => sim.assign_turner(*i, dir.clockwise()),
+                Some("acw") => sim.assign_turner(*i, dir.anticlockwise()),
+                _ => sim.assign(*i, skill),
+            };
+        }
+    }
     let changes = sim.world.take_changes();
-    if changes.is_empty() {
+    let bricks_changed = sim.world.take_bricks_changed();
+    if changes.is_empty() && !bricks_changed {
         return;
     }
     let (Some((level, blocks, layer)), Some(current)) = (terrain, &scene.data) else { return };
     for ([x, y, z], cell) in changes {
         level.set_block(x, y, z, cell);
     }
-    let rebuilt = scene_build::rebuild_blocks(current, *layer, level, blocks);
+    let rebuilt = scene_build::rebuild_blocks(current, *layer, level, blocks, &sim.world.bricks);
     scene.version += 1;
     scene.data = Some(Arc::new(rebuilt));
 }
