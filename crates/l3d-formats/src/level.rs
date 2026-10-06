@@ -244,6 +244,7 @@ mod tests {
 
     #[test]
     fn block_bits() {
+        #[allow(clippy::unusual_byte_groupings)] // grouped by field: id, shape, rotation, segments
         let c = BlockCell::from_raw(0b000101_0011_10_1100);
         assert_eq!(c, BlockCell { id: 5, shape: 3, rotation: 2, segments: 0b1100 });
     }

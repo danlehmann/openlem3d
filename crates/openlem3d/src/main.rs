@@ -180,11 +180,12 @@ fn main() {
         .insert_resource(Time::<Fixed>::from_hz(l3d_sim::TICKS_PER_SECOND as f64))
         .init_resource::<PresetIndex>()
         .add_systems(FixedUpdate, step_simulation.run_if(in_state(menu::AppState::Playing)))
+        .add_systems(OnEnter(menu::AppState::Briefing), |mut game: ResMut<Game>| game.replay = None)
         .add_systems(PostUpdate, update_lemming_sprites)
         .add_systems(Startup, spawn_camera)
         .add_systems(
             Update,
-            (switch_level, load_level, camera_controls).chain().run_if(in_state(menu::AppState::Playing)),
+            (switch_level, load_level, refresh_scenery, camera_controls).chain().run_if(in_state(menu::AppState::Playing)),
         )
         .run();
 }
@@ -296,6 +297,12 @@ fn spawn_camera(mut commands: Commands) {
     commands.spawn((Camera2d, Tonemapping::None, Msaa::Off, ViewCamera { pos: Vec3::new(16.0, 8.0, 16.0), yaw: 0.0 }));
 }
 
+/// Whether the level about to be played is starting afresh, rather than
+/// resuming after the options screen.
+pub fn fresh_level(current: Res<CurrentLevel>) -> bool {
+    current.loaded.is_none()
+}
+
 fn switch_level(keys: Res<ButtonInput<KeyCode>>, mut current: ResMut<CurrentLevel>) {
     if keys.just_pressed(KeyCode::BracketRight) {
         current.number = (current.number + 1) % 100;
@@ -316,6 +323,39 @@ pub struct Game {
     /// The level's block grid as currently shaped (destructible skills change
     /// it), its block dictionary, and the scene layer showing it.
     terrain: Option<(Level, BlockSet, usize)>,
+    /// The level restarted as a replay of an earlier attempt, until the
+    /// player takes over.
+    pub replay: Option<Replay>,
+}
+
+/// An earlier attempt's commands, fed back into a restarted level.
+pub struct Replay {
+    log: Vec<(u64, l3d_sim::Command)>,
+    /// Commands applied so far.
+    next: usize,
+    /// The length of the simulation's own log after the last command
+    /// applied; anything beyond it is the player acting.
+    logged: usize,
+}
+
+impl Replay {
+    pub fn new(log: Vec<(u64, l3d_sim::Command)>) -> Self {
+        Replay { log, next: 0, logged: 0 }
+    }
+
+    /// Applies the commands due before the simulation's next step. Returns
+    /// false once the player has acted on their own, which ends the replay.
+    fn feed(&mut self, sim: &mut l3d_sim::Simulation) -> bool {
+        if sim.log.len() != self.logged {
+            return false;
+        }
+        while let Some(&(_, c)) = self.log.get(self.next).filter(|(t, _)| *t <= sim.tick) {
+            sim.apply(c);
+            self.next += 1;
+        }
+        self.logged = sim.log.len();
+        true
+    }
 }
 
 /// Simulation ticks per tick while fast-forwarding (the original's speed-up
@@ -326,8 +366,11 @@ fn step_simulation(keys: Res<ButtonInput<KeyCode>>, options: Res<Options>, mut g
     if keys.just_pressed(KeyCode::KeyP) {
         game.paused = !game.paused;
     }
-    let Game { sim: Some(sim), paused: false, terrain, fast_forward, .. } = &mut *game else { return };
+    let Game { sim: Some(sim), paused: false, terrain, fast_forward, replay, .. } = &mut *game else { return };
     for _ in 0..if *fast_forward { FAST_FORWARD_TICKS } else { 1 } {
+        if replay.as_mut().is_some_and(|r| !r.feed(sim)) {
+            *replay = None;
+        }
         sim.step();
         for (tick, i, skill, side) in &options.assign {
             if *tick == sim.tick
@@ -529,4 +572,39 @@ fn hide_ui(opts: Res<Options>, mut roots: Query<&mut Visibility, (With<Node>, Wi
     for mut v in &mut roots {
         *v = Visibility::Hidden;
     }
+}
+
+/// Rebuilds the scenery when the land, sea or sky setting changes during a
+/// level (on the options screen), keeping the terrain as the lemmings left it.
+fn refresh_scenery(
+    settings: Res<settings::Settings>,
+    current: Res<CurrentLevel>,
+    mut data: ResMut<Data>,
+    mut scene: ResMut<SceneContent>,
+    mut game: ResMut<Game>,
+    mut shown: Local<Option<(u32, scene_build::Show)>>,
+) {
+    let Some(n) = current.loaded else { return };
+    let show = scene_build::Show { land: settings.land, sea: settings.sea, sky: settings.sky };
+    let was = shown.replace((n, show));
+    if was.is_none_or(|(m, s)| m != n || s == show) {
+        return;
+    }
+    let built = match scene_build::build(&mut data.0, n, show) {
+        Ok(b) => b,
+        Err(e) => {
+            error!("level {n}: {e}");
+            return;
+        }
+    };
+    let Game { sim, terrain, .. } = &mut *game;
+    let content = match (terrain.as_mut(), sim) {
+        (Some((level, blocks, layer)), Some(sim)) => {
+            *layer = built.block_layer;
+            scene_build::rebuild_blocks(&built.scene, built.block_layer, level, blocks, &sim.world.bricks)
+        }
+        _ => built.scene,
+    };
+    scene.version += 1;
+    scene.data = Some(Arc::new(content));
 }

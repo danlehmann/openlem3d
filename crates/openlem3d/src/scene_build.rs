@@ -574,7 +574,7 @@ fn brick_layer(bricks: &[l3d_sim::Brick]) -> SceneLayer {
 
 /// Which optional parts of the scene to draw (the options screen's Land,
 /// Sea and Sky).
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Show {
     pub land: bool,
     pub sea: bool,

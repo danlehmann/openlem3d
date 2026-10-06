@@ -513,6 +513,16 @@ consistent with thirds of a 308×168 view (estimated). Over a lemming the
 pointer becomes a bracket (cell 8, from the navigation document; not
 re-measured: no lemming was under the pointer in these runs).
 
+**Caption.** Hovering over a lemming names its state in large lettering at
+the bottom left ("Walker", "Sliding"; verified, from the navigation
+document; the other names and the position, above the arrow and face at
+about (3, 158), are ours). Esc restarts the level as a replay of the
+player's actions, showing "Replaying"; a click takes over ("Click to Play")
+(verified). Whether the two messages alternate or show together is
+unrecorded; we alternate them every 1.5 s. Our replay keeps the player's
+commands (skills, turner sides, release rate, nuke) with their ticks; any
+command of the player's own also ends it.
+
 **Video modes.** The options screen offers "Video Mode" 1 and 2 only (a
 left click toggles; a right click does nothing). Both run at 320×200 with
 the same panel layout (verified: identical placements of all panel sprites
@@ -521,6 +531,10 @@ this setup, although the CD has 640×480 versions of the scenes and intro
 slides; how the panel would look there is unknown.
 
 ### Configuration screen (F12)
+
+F12 opens it from the title screen and during a level (verified: "Camera
+keys, skill selection and the options screen still work while paused");
+Ours returns to where it was opened, and the level waits meanwhile.
 
 From one capture (estimated positions, in 320×200 pixels): a blue mottled
 backdrop; "Configuration" in a box at the top centre (x 112–207, y 4–20);

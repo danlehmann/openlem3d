@@ -263,9 +263,22 @@ fn menu_input(
         next.set(AppState::Briefing);
     }
 }
-pub(crate) fn back_to_menu(keys: Res<ButtonInput<KeyCode>>, current: Res<crate::CurrentLevel>, mut next: ResMut<NextState<AppState>>) {
-    if keys.just_pressed(KeyCode::Escape) {
+/// Esc restarts the level as a replay of the player's actions, as in the
+/// original; Esc during a replay leaves for the menu.
+pub(crate) fn back_to_menu(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut current: ResMut<crate::CurrentLevel>,
+    mut game: ResMut<crate::Game>,
+    mut next: ResMut<NextState<AppState>>,
+) {
+    if !keys.just_pressed(KeyCode::Escape) {
+        return;
+    }
+    if game.replay.is_some() {
         next.set(level_menu(current.number));
+    } else if let Some(sim) = &game.sim {
+        game.replay = Some(crate::Replay::new(sim.log.clone()));
+        current.loaded = None;
     }
 }
 

@@ -1,6 +1,6 @@
 //! The virtual-lemming camera: the view rides along behind one lemming at
 //! its eye level, turning as it turns, as the original's face icon does.
-//! Arm it with the face button or V, then click or tap a lemming. V again,
+//! Arm it with the face button, V or I, then click or tap a lemming. V or I again,
 //! Esc or a preset camera key (1–4) returns to the previous view, as does
 //! the lemming leaving play.
 
@@ -96,7 +96,7 @@ const FOLLOW_RATE: f32 = 10.0;
 fn toggle_keys(mut keys: ResMut<ButtonInput<KeyCode>>, mut cam: ResMut<LemmingCam>, mut views: Query<&mut ViewCamera>) {
     let Ok(mut view) = views.single_mut() else { return };
     let presets = [KeyCode::Digit1, KeyCode::Digit2, KeyCode::Digit3, KeyCode::Digit4];
-    if keys.just_pressed(KeyCode::KeyV) {
+    if keys.just_pressed(KeyCode::KeyV) || keys.just_pressed(KeyCode::KeyI) {
         cam.toggle(&mut view);
     } else if keys.just_pressed(KeyCode::Escape) && *cam != LemmingCam::Off {
         // Esc leaves the lemming view, not the level.

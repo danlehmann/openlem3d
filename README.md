@@ -51,15 +51,16 @@ See `docs/spec/` for what has been verified and how.
 | Select skill | F1–F9, or click a skill at the bottom | tap a skill |
 | Give skill to a lemming | click the lemming | tap the lemming |
 | Turner | click the lemming, then click beside it on the side it should point to | tap, then tap beside it |
-| Ride along with a lemming | V or the face, then click a lemming; V, Esc or the arrow to return | tap the face, then a lemming; the arrow returns |
+| Ride along with a lemming | V, I or the face, then click a lemming; V, I, Esc or the arrow to return | tap the face, then a lemming; the arrow returns |
 | Release rate | − / + (hold to repeat) | − / + buttons (hold to repeat) |
 | Nuke | Alt+Q, or click the bomb | tap the bomb |
 | Mute music and sounds | M | — |
-| Options | F12 or the Options button on the title | tap Options |
+| Options | F12 (also during a level, which waits) or the Options button on the title | tap Options |
 | Briefing | click or Space: play; Enter or click Preview: preview; right click, Esc or click Menu: back | tap to play, or tap Preview or Menu |
 | Results | click, Space or Enter: next level (or retry); right click or Esc: level list | tap; or tap Menu |
 | Level list | click a level; wheel, ↑/↓ or Page Up/Down to scroll; ←/→ change rating; Esc: title | tap a level; drag to scroll |
-| Back to the level list | Esc | — |
+| Replay your attempt | Esc restarts the level and replays what you did ("Replaying"); click to take over ("Click to Play") | tap to take over |
+| Back to the level list | Esc during a replay, or Menu on the results screen | nuke, then Menu |
 
 ## Repository layout
 

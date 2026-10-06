@@ -118,3 +118,36 @@ fn practice_solutions_still_work() {
     }
     assert!(failures.is_empty(), "{}", failures.join("; "));
 }
+
+/// Replaying a game's command log from the start reproduces it exactly.
+#[test]
+fn replaying_the_log_reproduces_the_game() {
+    let Some(dir) = data_dir() else {
+        eprintln!("game data not found; skipping");
+        return;
+    };
+    let mut data = GameData::open(&dir).expect("open game data");
+    let (level, blocks) = (data.level(98).expect("level"), data.blocks(98).expect("blocks"));
+    let mut played = Simulation::new(&level, &blocks);
+    for _ in 0..600 {
+        played.step();
+        match played.tick {
+            40 => played.adjust_release_rate(30),
+            343 => assert!(played.assign_turner(1, played.lemmings[1].dir.anticlockwise())),
+            500 => played.nuke(),
+            _ => {}
+        }
+    }
+    assert_eq!(played.log.len(), 3);
+    let mut replayed = Simulation::new(&level, &blocks);
+    let mut next = 0;
+    while replayed.tick < played.tick {
+        replayed.step();
+        while let Some(&(t, c)) = played.log.get(next).filter(|(t, _)| *t == replayed.tick) {
+            assert!(replayed.apply(c), "command at tick {t} rejected on replay");
+            next += 1;
+        }
+    }
+    assert_eq!(replayed.log, played.log);
+    assert_eq!((replayed.counts, fingerprint(&replayed)), (played.counts, fingerprint(&played)));
+}

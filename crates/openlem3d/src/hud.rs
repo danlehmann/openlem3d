@@ -20,7 +20,7 @@ impl Plugin for HudPlugin {
             .add_systems(Startup, spawn_turner_marker)
             .add_systems(
                 Update,
-                (skill_keys, nuke_key, assign_on_pointer)
+                (skill_keys, nuke_key, take_over, assign_on_pointer)
                     .chain()
                     .run_if(in_state(AppState::Playing)),
             )
@@ -60,6 +60,24 @@ fn skill_keys(keys: Res<ButtonInput<KeyCode>>, mut selected: ResMut<SelectedSkil
             selected.0 = Some(skill);
         }
     }
+}
+
+/// During a replay, a click or tap on the view hands control back to the
+/// player ("Click to Play"); the click itself does nothing else.
+fn take_over(
+    mut mouse: ResMut<ButtonInput<MouseButton>>,
+    touches: Res<Touches>,
+    ui: Query<&Interaction>,
+    settings: Res<crate::settings::Settings>,
+    mut game: ResMut<Game>,
+) {
+    let button = settings.action_button();
+    let clicked = mouse.just_pressed(button) || touches.iter_just_released().any(|t| t.distance().length() < crate::touch::TAP_SLOP);
+    if game.replay.is_none() || !clicked || ui.iter().any(|i| *i != Interaction::None) {
+        return;
+    }
+    game.replay = None;
+    mouse.clear_just_pressed(button);
 }
 
 /// Screen-space radius, in logical pixels per unit of distance-scaled size,

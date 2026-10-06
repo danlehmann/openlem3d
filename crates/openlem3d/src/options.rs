@@ -21,6 +21,8 @@ pub struct OptionsPlugin;
 impl Plugin for OptionsPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(Settings::load())
+            .init_resource::<OptionsFrom>()
+            .add_systems(Update, open_in_level.run_if(in_state(AppState::Playing)))
             .add_systems(Startup, (load_lights, apply_window).chain())
             .add_systems(Update, (spawn_options, options_input, show_lights).chain().run_if(in_state(AppState::Options)))
             .add_systems(Update, apply_window.run_if(resource_changed::<Settings>));
@@ -180,6 +182,7 @@ fn options_input(
     targets: Query<(&Interaction, &Target), Changed<Interaction>>,
     keys: Res<ButtonInput<KeyCode>>,
     mut settings: ResMut<Settings>,
+    mut from: ResMut<OptionsFrom>,
     mut next: ResMut<NextState<AppState>>,
 ) {
     for (i, t) in &targets {
@@ -197,13 +200,13 @@ fn options_input(
             Target::Default => *settings = Settings::default(),
             Target::Exit => {
                 settings.save();
-                next.set(AppState::Title);
+                next.set(std::mem::take(&mut from.0));
             }
         }
     }
     if keys.just_pressed(KeyCode::Escape) {
         settings.save();
-        next.set(AppState::Title);
+        next.set(std::mem::take(&mut from.0));
     }
 }
 
@@ -233,5 +236,17 @@ fn apply_window(settings: Res<Settings>, mut windows: Query<&mut Window>) {
         if w.mode != mode {
             w.mode = mode;
         }
+    }
+}
+
+/// The screen the options screen returns to: the title screen, or the level
+/// it was opened from (F12, as in the original).
+#[derive(Resource, Default)]
+pub struct OptionsFrom(pub AppState);
+
+fn open_in_level(keys: Res<ButtonInput<KeyCode>>, mut from: ResMut<OptionsFrom>, mut next: ResMut<NextState<AppState>>) {
+    if keys.just_pressed(KeyCode::F12) {
+        from.0 = AppState::Playing;
+        next.set(AppState::Options);
     }
 }

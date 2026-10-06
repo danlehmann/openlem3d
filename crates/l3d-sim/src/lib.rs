@@ -322,6 +322,16 @@ pub enum Event {
 }
 
 /// A stationary lemming that redirects walkers.
+/// Something the player did to a running level. With the tick it happened
+/// on (after that many steps), a list of these replays a game exactly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Command {
+    Assign { lemming: usize, skill: Skill },
+    Turner { lemming: usize, to: Dir },
+    ReleaseRate(i32),
+    Nuke,
+}
+
 #[derive(Debug, Clone, Copy)]
 struct Obstacle {
     pos: [i32; 3],
@@ -348,6 +358,8 @@ pub struct Simulation {
     /// Set once the player has nuked the level.
     pub nuked: bool,
     pub tick: u64,
+    /// Every accepted command so far, with the tick it was given on.
+    pub log: Vec<(u64, Command)>,
     /// Ticks until the next release.
     release_timer: u32,
     next_entrance: usize,
@@ -402,6 +414,7 @@ impl Simulation {
             time_left: (level.time_minutes as u32 * 60 + level.time_seconds as u32) * TICKS_PER_SECOND,
             nuked: false,
             tick: 0,
+            log: Vec::new(),
             release_timer: 0,
             next_entrance: 0,
             events: Vec::new(),
@@ -445,6 +458,14 @@ impl Simulation {
 
     /// Gives `skill` to lemming `i`; returns whether it was accepted.
     pub fn assign(&mut self, i: usize, skill: Skill) -> bool {
+        let ok = self.give(i, skill);
+        if ok {
+            self.log.push((self.tick, Command::Assign { lemming: i, skill }));
+        }
+        ok
+    }
+
+    fn give(&mut self, i: usize, skill: Skill) -> bool {
         if !self.can_assign(i, skill) {
             return false;
         }
@@ -470,11 +491,29 @@ impl Simulation {
     /// second click (`docs/spec/behaviour.md`, "A turner takes two clicks").
     pub fn assign_turner(&mut self, i: usize, to: Dir) -> bool {
         let Some(l) = self.lemmings.get(i) else { return false };
-        if to == l.dir || to == l.dir.reverse() || !self.assign(i, Skill::Turner) {
+        if to == l.dir || to == l.dir.reverse() || !self.give(i, Skill::Turner) {
             return false;
         }
         self.lemmings[i].state = State::Turning { to };
+        self.log.push((self.tick, Command::Turner { lemming: i, to }));
         true
+    }
+
+    /// Carries out a command; returns whether it was accepted.
+    pub fn apply(&mut self, c: Command) -> bool {
+        match c {
+            Command::Assign { lemming, skill } => self.assign(lemming, skill),
+            Command::Turner { lemming, to } => self.assign_turner(lemming, to),
+            Command::ReleaseRate(delta) => {
+                self.adjust_release_rate(delta);
+                true
+            }
+            Command::Nuke => {
+                let first = !self.nuked;
+                self.nuke();
+                first
+            }
+        }
     }
 
     /// Advances the simulation by one tick.
@@ -574,7 +613,11 @@ impl Simulation {
     /// Changes the release rate by `delta`, between the level's starting rate
     /// and 99.
     pub fn adjust_release_rate(&mut self, delta: i32) {
-        self.release_rate = (self.release_rate + delta).clamp(self.min_release_rate, 99);
+        let rate = (self.release_rate + delta).clamp(self.min_release_rate, 99);
+        if rate != self.release_rate {
+            self.log.push((self.tick, Command::ReleaseRate(rate - self.release_rate)));
+            self.release_rate = rate;
+        }
     }
 
     /// Stops further releases and gives every lemming in play a bomber fuse,
@@ -584,6 +627,7 @@ impl Simulation {
             return;
         }
         self.nuked = true;
+        self.log.push((self.tick, Command::Nuke));
         self.to_release = self.counts.released;
         let mut stagger = 0;
         for l in self.lemmings.iter_mut().filter(|l| !l.gone && !l.state.is_terminal()) {

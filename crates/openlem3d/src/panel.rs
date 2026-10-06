@@ -24,12 +24,12 @@ impl Plugin for PanelPlugin {
         app.add_systems(Startup, (load_art, spawn_panel).chain())
             .add_systems(
                 Update,
-                (layout, buttons, held_buttons, skill_keys_select, animate, glyph_texts)
+                (layout, buttons, held_buttons, skill_keys_select, animate, glyph_texts, caption)
                     .chain()
                     .run_if(in_state(AppState::Playing)),
             )
             .add_systems(Update, (show_in_play, show_minimap))
-            .add_systems(OnEnter(AppState::Playing), select_first_skill);
+            .add_systems(OnEnter(AppState::Playing), select_first_skill.run_if(crate::fresh_level));
     }
 }
 
@@ -267,6 +267,8 @@ fn spawn_panel(mut commands: Commands, art: Option<Res<Art>>, mut images: ResMut
     for (skill, (x, _)) in Skill::ALL.into_iter().zip(SKILL_BUTTONS) {
         text(&mut commands, false, x + 17.0, 188.0, Value::SkillCount(skill), 2);
     }
+    let c = commands.spawn((Caption::default(), Node { position_type: PositionType::Absolute, ..default() })).id();
+    commands.entity(root).add_child(c);
 }
 
 /// Window pixels per original pixel.
@@ -521,5 +523,83 @@ fn show_in_play(state: Res<State<AppState>>, opts: Res<crate::Options>, mut root
         if *vis != v {
             *vis = v;
         }
+    }
+}
+
+/// The line of large text at the bottom left, above the arrow and the face
+/// (position estimated): "Replaying" and "Click to Play" during a replay,
+/// otherwise the state of the lemming under the pointer, as in the original
+/// ("Walker", "Sliding").
+#[derive(Component, Default)]
+struct Caption(String);
+
+const CAPTION_AT: Vec2 = Vec2::new(3.0, 158.0);
+/// Seconds each replay message shows (estimated).
+const REPLAY_BLINK: f32 = 1.5;
+
+/// A lemming's state as the caption names it. "Walker" and "Sliding" are
+/// verified; the other names are ours.
+fn state_name(l: &l3d_sim::Lemming) -> Option<&'static str> {
+    use l3d_sim::State;
+    if l.fuse.is_some() && !l.state.is_terminal() {
+        return Some("Bomber");
+    }
+    Some(match l.state {
+        State::Walking if l.climber => "Climber",
+        State::Walking if l.floater => "Floater",
+        State::Walking => "Walker",
+        State::Sliding => "Sliding",
+        State::Falling { .. } => "Faller",
+        State::Floating => "Floater",
+        State::Climbing => "Climber",
+        State::Blocking => "Blocker",
+        State::Turning { .. } => "Turner",
+        State::Building { .. } => "Builder",
+        State::Bashing => "Basher",
+        State::Mining => "Miner",
+        State::Digging => "Digger",
+        _ => return None,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn caption(
+    mut commands: Commands,
+    art: Option<Res<crate::title::Art>>,
+    game: Res<Game>,
+    time: Res<Time>,
+    camera: Res<crate::scene_render::SceneCamera>,
+    windows: Query<&Window>,
+    ui: Query<&Interaction>,
+    mut captions: Query<(Entity, &mut Caption)>,
+) {
+    let Some(font) = art.as_ref().and_then(|a| a.large.as_ref()) else { return };
+    let Ok((entity, mut shown)) = captions.single_mut() else { return };
+    let text = if game.replay.is_some() {
+        if ((time.elapsed_secs() / REPLAY_BLINK) as u32).is_multiple_of(2) { "Replaying" } else { "Click to Play" }
+    } else {
+        (|| {
+            let window = windows.single().ok()?;
+            let point = window.cursor_position()?;
+            if ui.iter().any(|i| *i != Interaction::None) {
+                return None;
+            }
+            let sim = game.sim.as_ref()?;
+            let i = crate::hud::lemming_at(sim, &camera, Vec2::new(window.width(), window.height()), point)?;
+            state_name(&sim.lemmings[i])
+        })()
+        .unwrap_or("")
+    };
+    if shown.0 == text {
+        return;
+    }
+    shown.0 = text.to_string();
+    commands.entity(entity).despawn_children();
+    let (glyphs, _) = font.layout(text);
+    for (x, image) in glyphs {
+        let g = commands
+            .spawn((PanelPos { at: CAPTION_AT + Vec2::X * x, size: font.size }, ImageNode::new(image), Node { position_type: PositionType::Absolute, ..default() }, Pickable::IGNORE))
+            .id();
+        commands.entity(entity).add_child(g);
     }
 }

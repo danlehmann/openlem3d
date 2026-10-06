@@ -22,9 +22,13 @@ impl Plugin for SfxPlugin {
             .init_resource::<Sounds>()
             .add_systems(Update, (sim_events, watch_play).run_if(in_state(AppState::Playing)))
             .add_systems(Update, watch_rating.run_if(in_state(AppState::Title)))
-            .add_systems(OnEnter(AppState::Playing), |mut out: MessageWriter<Sfx>| {
-                out.write(Sfx("VOXFX/LETSGO1"));
-            })
+            .add_systems(
+                OnEnter(AppState::Playing),
+                (|mut out: MessageWriter<Sfx>| {
+                    out.write(Sfx("VOXFX/LETSGO1"));
+                })
+                .run_if(crate::fresh_level),
+            )
             .add_systems(PostUpdate, play);
     }
 }
