@@ -58,7 +58,8 @@ See `docs/spec/` for what has been verified and how.
 | Options | F12 or the Options button on the title | tap Options |
 | Briefing | click or Space: play; Enter or click Preview: preview; right click, Esc or click Menu: back | tap to play, or tap Preview or Menu |
 | Results | click, Space or Enter: next level (or retry); right click or Esc: level list | tap; or tap Menu |
-| Level select | Esc | — |
+| Level list | click a level; wheel, ↑/↓ or Page Up/Down to scroll; ←/→ change rating; Esc: title | tap a level; drag to scroll |
+| Back to the level list | Esc | — |
 
 ## Repository layout
 
