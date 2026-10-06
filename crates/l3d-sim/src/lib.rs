@@ -73,6 +73,7 @@ const DEATH_TICKS: u32 = 14;
 /// Block ids with hard-coded meaning (`docs/spec/blk.md`).
 const ENTRANCE_ID: u8 = 0;
 const EXIT_ID: u8 = 1;
+const SPLITTER_ID: u8 = 2;
 
 /// One of the four horizontal headings lemmings walk in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -281,6 +282,8 @@ pub struct Simulation {
     /// Ticks until the next release.
     release_timer: u32,
     next_entrance: usize,
+    /// Splitter cells, and whether the next walker through goes left.
+    splitters: Vec<([i32; 3], bool)>,
     /// Kill boundary `[min_x, min_z, max_x, max_z]` in cells.
     border: [i32; 4],
     ceiling: i32,
@@ -327,6 +330,11 @@ impl Simulation {
             tick: 0,
             release_timer: 0,
             next_entrance: 0,
+            splitters: level
+                .cells()
+                .filter(|(_, _, _, b, _)| b.id == SPLITTER_ID && !b.is_empty())
+                .map(|(x, y, z, _, _)| ([x as i32, y as i32, z as i32], true))
+                .collect(),
             // Stored Z first: [min z, min x, max z, max x] (docs/spec/level.md).
             border: [b[1] as i32, b[0] as i32, b[3] as i32, b[2] as i32],
             ceiling: level.ceiling_kill as i32,
@@ -805,6 +813,20 @@ impl Simulation {
         }
         let next = [l.pos[0] + d[0] * WALK_SPEED, l.pos[1], l.pos[2] + d[2] * WALK_SPEED];
         // Blockers and turners: walking into one redirects the walker.
+        // Splitters send walkers alternately left and right as they cross
+        // the cell centre ([L3DEdit]: block 2 where non-solid; which side
+        // comes first is unverified).
+        let here = Self::cell_of([l.pos[0], l.pos[1], l.pos[2]]);
+        if let Some(s) = self.splitters.iter_mut().find(|(c, _)| *c == here) {
+            let axis = if d[0] != 0 { 0 } else { 2 };
+            let centre = here[axis] * SUB + SUB / 2;
+            if (centre - l.pos[axis]) * d[axis] > 0 && (centre - next[axis]) * d[axis] <= 0 {
+                l.pos[axis] = centre;
+                l.dir = if s.1 { l.dir.anticlockwise() } else { l.dir.clockwise() };
+                s.1 = !s.1;
+                return;
+            }
+        }
         for o in obstacles {
             let near = |p: [i32; 3]| {
                 (p[0] - o.pos[0]).abs() < BLOCK_RADIUS
