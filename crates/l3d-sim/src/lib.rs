@@ -879,7 +879,8 @@ impl Simulation {
         let (ground, on_block) = self.world.surface_below(l.pos[0], l.pos[1] + STEP_UP, l.pos[2]);
         if ground >= l.pos[1] - STEP_DOWN {
             l.pos[1] = ground;
-            if !on_block && self.world.floor(l.pos[0], l.pos[2]) == Floor::Water {
+            let liquid = on_block && self.world.flags_at([l.pos[0], ground - 1, l.pos[2]]).is_some_and(|f| f & flags::LIQUID != 0);
+            if liquid || (!on_block && self.world.floor(l.pos[0], l.pos[2]) == Floor::Water) {
                 l.set_state(State::Drowning);
             }
         } else {
