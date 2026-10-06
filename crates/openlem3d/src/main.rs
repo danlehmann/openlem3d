@@ -7,6 +7,7 @@
 //! 1–4 preset cameras, P pause, [ / ] previous/next level, Esc level select,
 //! M mute music.
 
+mod codes;
 mod hud;
 mod menu;
 mod music;

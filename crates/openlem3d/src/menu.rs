@@ -28,7 +28,11 @@ impl Plugin for MenuPlugin {
             .add_systems(Startup, read_titles)
             .add_systems(Update, ensure_menu.run_if(in_state(AppState::Menu)))
             .add_systems(OnExit(AppState::Menu), despawn_menu)
-            .add_systems(Update, (menu_buttons, rebuild_on_rating_change).run_if(in_state(AppState::Menu)))
+            .init_resource::<CodeEntry>()
+            .add_systems(
+                Update,
+                (menu_buttons, rebuild_on_rating_change, code_input).run_if(in_state(AppState::Menu)),
+            )
             .add_systems(Update, back_to_menu.run_if(in_state(AppState::Playing)));
     }
 }
@@ -106,6 +110,7 @@ fn build_menu(commands: &mut Commands, titles: &Titles, rating: usize) {
         ))
         .with_children(|root| {
             root.spawn(text("openlem3d - choose a level".into(), 26.0));
+            root.spawn((text("Type a level code and press Enter".into(), 16.0), CodeText));
             root.spawn(Node { column_gap: px(6), ..default() }).with_children(|tabs| {
                 for (i, name) in RATINGS.iter().enumerate() {
                     tabs.spawn((
@@ -183,6 +188,67 @@ fn rebuild_on_rating_change(
         commands.entity(e).despawn();
     }
     build_menu(&mut commands, &titles, rating.0);
+}
+
+/// The level code being typed on the menu.
+#[derive(Resource, Default)]
+struct CodeEntry(String);
+
+/// The line showing the code being typed.
+#[derive(Component)]
+struct CodeText;
+
+/// Longest code accepted (the original's codes are short words).
+const MAX_CODE_LEN: usize = 12;
+
+/// Typing letters builds a code; Enter jumps to its level.
+fn code_input(
+    mut keys: MessageReader<bevy::input::keyboard::KeyboardInput>,
+    mut entry: ResMut<CodeEntry>,
+    mut texts: Query<&mut Text, With<CodeText>>,
+    mut current: ResMut<CurrentLevel>,
+    mut next: ResMut<NextState<AppState>>,
+) {
+    use bevy::input::keyboard::Key;
+    let mut message = None;
+    for k in keys.read() {
+        if !k.state.is_pressed() {
+            continue;
+        }
+        match &k.logical_key {
+            Key::Character(s) => {
+                for c in s.chars().filter(|c| c.is_ascii_alphanumeric()) {
+                    if entry.0.len() < MAX_CODE_LEN {
+                        entry.0.push(c.to_ascii_uppercase());
+                    }
+                }
+            }
+            Key::Backspace => {
+                entry.0.pop();
+            }
+            Key::Enter if !entry.0.is_empty() => match crate::codes::level_for_code(&entry.0) {
+                Some(n) => {
+                    current.number = n;
+                    current.loaded = None;
+                    entry.0.clear();
+                    next.set(AppState::Playing);
+                }
+                None => {
+                    message = Some(format!("Unknown code {}", entry.0));
+                    entry.0.clear();
+                }
+            },
+            _ => {}
+        }
+    }
+    if entry.is_changed() || message.is_some() {
+        let line = message.unwrap_or_else(|| {
+            if entry.0.is_empty() { "Type a level code and press Enter".into() } else { format!("Code: {}", entry.0) }
+        });
+        for mut t in &mut texts {
+            t.0 = line.clone();
+        }
+    }
 }
 
 fn back_to_menu(keys: Res<ButtonInput<KeyCode>>, mut next: ResMut<NextState<AppState>>) {
