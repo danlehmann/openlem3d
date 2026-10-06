@@ -194,6 +194,25 @@ fn tile_uv(src: FaceDir, p: [f32; 3]) -> [f32; 2] {
     }
 }
 
+/// The tiles shown on the front and back of a face. With the reverse-side
+/// modifier, texture values 0x08–0x13 select tiles 43–54 and the back shows
+/// the paired tile (43↔44, 45↔46, …); 0x14–0x16 show tile 0 ([L3DEdit];
+/// verified visually for the gantry in `LEVEL.050`).
+fn face_tiles(texture: u8, mods: u8) -> (u32, u32) {
+    if mods & modifiers::REVERSE_SIDE != 0 {
+        match texture {
+            0x08..=0x13 => {
+                let front = 43 + (texture - 0x08) as u32;
+                let back = if (front - 43) % 2 == 0 { front + 1 } else { front - 1 };
+                return (front, back);
+            }
+            0x14..=0x16 => return (0, 0),
+            _ => {}
+        }
+    }
+    (texture as u32, texture as u32)
+}
+
 /// Block ids with hard-coded invisible behaviour (see `docs/spec/blk.md`).
 const INVISIBLE_IDS: [u8; 2] = [3, 4];
 
@@ -346,14 +365,23 @@ pub fn build(level: &Level, blocks: &BlockSet) -> LevelMesh {
                 verts.reverse();
                 uvs.reverse();
             }
-            let tile = face.texture as f32;
-            let strip_uvs: Vec<[f32; 2]> =
-                uvs.iter().map(|[u, v]| [*u, (tile + v.clamp(0.0, 1.0)) / TILES as f32]).collect();
+            let (front, back) = face_tiles(face.texture, face.modifiers);
+            let strip = |tile: u32| -> Vec<[f32; 2]> {
+                uvs.iter().map(|[u, v]| [*u, (tile as f32 + v.clamp(0.0, 1.0)) / TILES as f32]).collect()
+            };
             let brightness = 1.0 - (face.shading.min(8) as f32) * 0.07;
             let transparent = face.modifiers & (modifiers::COLOR0_TRANSPARENT | modifiers::REVERSE_SIDE) != 0;
             let double = def.flags & flags::DOUBLE_SIDED != 0;
             let target = if transparent { &mut out.cutout } else { &mut out.opaque };
-            target.push_poly(&verts, &strip_uvs, brightness, double);
+            target.push_poly(&verts, &strip(front), brightness, false);
+            if double {
+                // The inside of a double-sided face: same polygon, opposite
+                // winding, possibly another tile.
+                let (mut rv, mut ru) = (verts.clone(), strip(back));
+                rv.reverse();
+                ru.reverse();
+                target.push_poly(&rv, &ru, brightness, false);
+            }
         }
     }
     out.unsupported_shapes = unsupported.into_iter().collect();
