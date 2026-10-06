@@ -158,6 +158,22 @@ fn rotate_dir(d: FaceDir, r: u8) -> FaceDir {
     d
 }
 
+/// Whether polygon `src` of `cell` is one of an entrance hatch's two flaps:
+/// the local ±X side faces of an entrance block (id 0).
+fn is_flap(cell: BlockCell, src: FaceDir) -> bool {
+    cell.id == 0 && cell.shape == 0 && matches!(src, FaceDir::PosX | FaceDir::NegX)
+}
+
+/// Swings a point of a hatch side face open: 135° outward about the face's
+/// bottom edge, so the flap hangs down and out at 45° (matches the original's
+/// open hatches; angle estimated from captures).
+fn open_flap(p: [f32; 3], src: FaceDir, y0: f32) -> [f32; 3] {
+    const S: f32 = std::f32::consts::FRAC_1_SQRT_2;
+    let h = p[1] - y0;
+    let x = if src == FaceDir::PosX { 1.0 + S * h } else { -S * h };
+    [x, y0 - S * h, p[2]]
+}
+
 /// The quarter turns actually applied to a cell: the stored rotation plus a
 /// per-shape correction to our base shapes. The outer-corner pieces (10, 11)
 /// need one extra quarter turn to match the original (verified visually on
@@ -320,7 +336,9 @@ pub fn build(level: &Level, blocks: &BlockSet) -> LevelMesh {
                 .verts
                 .iter()
                 .map(|v| {
-                    let ly = y0 + v[1] * (y1 - y0);
+                    // Faces show the part of their tile matching their height;
+                    // flaps show the bottom part, where the hatch art is.
+                    let ly = if is_flap(cell, p.src) { v[1] * (y1 - y0) } else { y0 + v[1] * (y1 - y0) };
                     tile_uv(p.src, [v[0], ly, v[2]])
                 })
                 .collect();
@@ -328,7 +346,11 @@ pub fn build(level: &Level, blocks: &BlockSet) -> LevelMesh {
                 .verts
                 .iter()
                 .map(|v| {
-                    let r = rotate_point([v[0], y0 + v[1] * (y1 - y0), v[2]], effective_rotation(cell.shape, cell.rotation));
+                    let mut lp = [v[0], y0 + v[1] * (y1 - y0), v[2]];
+                    if is_flap(cell, p.src) {
+                        lp = open_flap(lp, p.src, y0);
+                    }
+                    let r = rotate_point(lp, effective_rotation(cell.shape, cell.rotation));
                     [r[0] + origin[0], r[1] + origin[1], r[2] + origin[2]]
                 })
                 .collect();
@@ -342,7 +364,8 @@ pub fn build(level: &Level, blocks: &BlockSet) -> LevelMesh {
         };
         for (mut verts, mut uvs, p) in placed {
             // Faces on the cell boundary are hidden by an opaque neighbour.
-            if let Some(local) = p.on_face {
+            let flap = is_flap(cell, p.src);
+            if let Some(local) = p.on_face.filter(|_| !flap) {
                 let world = rotate_dir(local, effective_rotation(cell.shape, cell.rotation));
                 let on_boundary = match world {
                     FaceDir::PosY => y1 >= 1.0,
@@ -380,7 +403,7 @@ pub fn build(level: &Level, blocks: &BlockSet) -> LevelMesh {
             };
             let brightness = 1.0 - (face.shading.min(8) as f32) * 0.07;
             let transparent = face.modifiers & (modifiers::COLOR0_TRANSPARENT | modifiers::REVERSE_SIDE) != 0;
-            let double = def.flags & flags::DOUBLE_SIDED != 0;
+            let double = def.flags & flags::DOUBLE_SIDED != 0 || flap;
             let target = if transparent { &mut out.cutout } else { &mut out.opaque };
             target.push_poly(&verts, &strip(front), brightness, false);
             if double {
