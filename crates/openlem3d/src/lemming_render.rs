@@ -22,6 +22,10 @@ const LEMMING_TEXELS_PER_UNIT: f32 = 128.0;
 /// original's sprites change once per tick; `docs/spec/behaviour.md`).
 const TICKS_PER_FRAME: u32 = 1;
 
+/// The floater's umbrella cells.
+const UMBRELLA_FIRST: u32 = 336;
+const UMBRELLA_FRAMES: u32 = 8;
+
 /// Which way a lemming faces as seen by the camera, in eighths of a turn.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ViewAngle {
@@ -207,6 +211,15 @@ pub fn build(lemmings: &[Lemming], atlas_rows: u32, camera_yaw: f32) -> SceneSpr
         let rect = if mirror { [cx as f32 + size, cy as f32, -size, size] } else { [cx as f32, cy as f32, size, size] };
         let anchor = l.pos.map(|v| v as f32 / SUB as f32);
         b.sprite_scaled(anchor, rect, tex, 1, 0.0, LEMMING_TEXELS_PER_UNIT);
+        if l.state == State::Floating {
+            // The umbrella is stored apart (cells 336–343), its handle at the
+            // bottom of the cell, held by the floater's raised hand at the top
+            // of the floater's cell (frame order unverified).
+            let cell = UMBRELLA_FIRST + l.state_ticks % UMBRELLA_FRAMES;
+            let (cx, cy) = ((cell % ATLAS_COLUMNS) * LEMMING_CELL, (cell / ATLAS_COLUMNS) * LEMMING_CELL);
+            let top = [anchor[0], anchor[1] + size / LEMMING_TEXELS_PER_UNIT, anchor[2]];
+            b.sprite_scaled(top, [cx as f32, cy as f32, size, size], tex, 1, 0.0, LEMMING_TEXELS_PER_UNIT);
+        }
     }
     SceneSprites { vertices: b.vertices, indices: b.indices }
 }
