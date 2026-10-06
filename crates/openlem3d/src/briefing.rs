@@ -153,6 +153,7 @@ fn briefing_input(
     mouse: Res<ButtonInput<MouseButton>>,
     touches: Res<Touches>,
     mut preview: ResMut<Preview>,
+    current: Res<CurrentLevel>,
     mut next: ResMut<NextState<AppState>>,
 ) {
     let on = |c: Choice| choices.iter().any(|(i, k)| *i == Interaction::Pressed && *k == c);
@@ -164,7 +165,7 @@ fn briefing_input(
         || (touches.any_just_released() && !on_prompt)
         || keys.get_just_pressed().any(|k| !matches!(k, KeyCode::Escape | KeyCode::Enter | KeyCode::NumpadEnter));
     if back {
-        next.set(AppState::Menu);
+        next.set(crate::menu::level_menu(current.number));
     } else if show {
         preview.active = true;
         preview.started = false;

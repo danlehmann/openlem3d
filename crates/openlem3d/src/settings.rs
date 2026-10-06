@@ -22,6 +22,8 @@ pub struct Settings {
     pub music: u8,
     pub effects: u8,
     pub camera: u8,
+    /// Levels completed (file numbers), for the Practice menu's ticks.
+    pub completed: std::collections::BTreeSet<u32>,
 }
 
 /// Steps on each slider.
@@ -29,7 +31,7 @@ pub const SLIDER_STEPS: u8 = 10;
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { land: true, sea: true, sky: true, left_handed: false, fullscreen: false, music: 8, effects: 8, camera: 5 }
+        Settings { land: true, sea: true, sky: true, left_handed: false, fullscreen: false, music: 8, effects: 8, camera: 5, completed: Default::default() }
     }
 }
 
@@ -83,6 +85,7 @@ impl Settings {
                 "music" => s.music = level.unwrap_or(s.music),
                 "effects" => s.effects = level.unwrap_or(s.effects),
                 "camera" => s.camera = level.unwrap_or(s.camera),
+                "completed" => s.completed = v.split(',').filter_map(|n| n.trim().parse().ok()).collect(),
                 _ => {}
             }
         }
@@ -93,7 +96,7 @@ impl Settings {
         let Some(path) = Self::path() else { return };
         let on = |b: bool| if b { "on" } else { "off" };
         let text = format!(
-            "land = {}\nsea = {}\nsky = {}\nleft_handed = {}\nfullscreen = {}\nmusic = {}\neffects = {}\ncamera = {}\n",
+            "land = {}\nsea = {}\nsky = {}\nleft_handed = {}\nfullscreen = {}\nmusic = {}\neffects = {}\ncamera = {}\ncompleted = {}\n",
             on(self.land),
             on(self.sea),
             on(self.sky),
@@ -101,7 +104,8 @@ impl Settings {
             on(self.fullscreen),
             self.music,
             self.effects,
-            self.camera
+            self.camera,
+            self.completed.iter().map(u32::to_string).collect::<Vec<_>>().join(",")
         );
         if let Some(dir) = path.parent() {
             let _ = std::fs::create_dir_all(dir);

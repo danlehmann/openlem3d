@@ -48,6 +48,7 @@ fn level_over(
     current: Res<CurrentLevel>,
     mut next: ResMut<NextState<AppState>>,
     mut sfx: MessageWriter<crate::sfx::Sfx>,
+    mut settings: ResMut<crate::settings::Settings>,
 ) {
     let Some(sim) = &game.sim else { return };
     // Until the chosen level has loaded, the simulation is the last one's.
@@ -56,6 +57,9 @@ fn level_over(
     }
     let outcome = Outcome { level: current.number, saved: sim.counts.saved, total: sim.to_release.max(1), needed: game.save_requirement };
     sfx.write(crate::sfx::Sfx(if outcome.passed() { "VOXFX/CHEERS1" } else { "VOXFX/BOOS" }));
+    if outcome.passed() && settings.completed.insert(outcome.level) {
+        settings.save();
+    }
     commands.insert_resource(outcome);
     next.set(AppState::Results);
 }
@@ -167,7 +171,7 @@ fn results_input(
         || (touches.any_just_released() && !on_prompt)
         || keys.any_just_pressed([KeyCode::Space, KeyCode::Enter, KeyCode::NumpadEnter]);
     if menu {
-        next.set(AppState::Menu);
+        next.set(crate::menu::level_menu(o.level));
     } else if go {
         current.number = if o.passed() { (o.level + 1) % LEVELS } else { o.level };
         current.loaded = None;

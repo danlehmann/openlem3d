@@ -16,6 +16,8 @@ pub enum AppState {
     Code,
     /// The configuration screen.
     Options,
+    /// The Practice menu.
+    Practice,
     /// Choosing a level.
     Menu,
     /// The level's briefing, before it starts.
@@ -29,6 +31,8 @@ pub enum AppState {
 /// is `LEVEL.(20·r + n − 1)`.
 pub const RATINGS: [&str; 5] = ["Fun", "Tricky", "Taxing", "Mayhem", "Practice"];
 const LEVELS_PER_RATING: u32 = 20;
+/// The Practice rating's index in [`RATINGS`].
+pub const PRACTICE: usize = 4;
 
 pub struct MenuPlugin;
 
@@ -50,7 +54,7 @@ impl Plugin for MenuPlugin {
 
 /// Level titles by file number.
 #[derive(Resource)]
-struct Titles(Vec<String>);
+pub(crate) struct Titles(pub(crate) Vec<String>);
 
 /// The rating whose levels the menu lists.
 #[derive(Resource, Default)]
@@ -73,7 +77,7 @@ fn read_titles(mut commands: Commands, mut data: ResMut<Data>) {
 }
 
 /// Formats an all-caps title in title case ("THAT'S RIGHT" → "That's Right").
-fn title_case(s: &str) -> String {
+pub(crate) fn title_case(s: &str) -> String {
     s.split(' ')
         .map(|w| {
             let mut c = w.chars();
@@ -174,7 +178,12 @@ fn menu_buttons(
             continue;
         }
         match *button {
-            MenuButton::Rating(r) => rating.0 = r,
+            MenuButton::Rating(r) => {
+                rating.0 = r;
+                if r == PRACTICE {
+                    next.set(AppState::Practice);
+                }
+            }
             MenuButton::Level(n) => {
                 current.number = n;
                 current.loaded = None;
@@ -262,10 +271,15 @@ fn code_input(
     }
 }
 
-pub(crate) fn back_to_menu(keys: Res<ButtonInput<KeyCode>>, mut next: ResMut<NextState<AppState>>) {
+pub(crate) fn back_to_menu(keys: Res<ButtonInput<KeyCode>>, current: Res<crate::CurrentLevel>, mut next: ResMut<NextState<AppState>>) {
     if keys.just_pressed(KeyCode::Escape) {
-        next.set(AppState::Menu);
+        next.set(level_menu(current.number));
     }
+}
+
+/// The menu a level belongs to: Practice levels have their own.
+pub fn level_menu(level: u32) -> AppState {
+    if level >= PRACTICE as u32 * LEVELS_PER_RATING { AppState::Practice } else { AppState::Menu }
 }
 
 /// Esc on the level-select screen returns to the title screen.

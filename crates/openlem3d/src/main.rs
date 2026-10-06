@@ -13,6 +13,7 @@ mod hud;
 mod lemming_cam;
 mod panel;
 mod pointer;
+mod practice;
 mod menu;
 mod minimap;
 mod music;
@@ -64,12 +65,10 @@ pub struct Options {
     assign: Vec<(u64, usize, u8, Option<String>)>,
     /// Lemming the virtual-lemming camera follows from the start (`--follow N`).
     follow: Option<usize>,
-    /// Start on the level-code screen (`--code`).
-    code_screen: bool,
+    /// The screen to start on without `--level` (`--screen title|code|options|practice`).
+    screen: menu::AppState,
     /// With `--level`, start on that level's briefing (`--briefing`).
     briefing: bool,
-    /// Start on the configuration screen (`--options`).
-    options_screen: bool,
 }
 
 fn parse_args() -> Options {
@@ -85,9 +84,8 @@ fn parse_args() -> Options {
         no_hud: false,
         assign: Vec::new(),
         follow: None,
-        code_screen: false,
+        screen: menu::AppState::Title,
         briefing: false,
-        options_screen: false,
     };
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -101,9 +99,17 @@ fn parse_args() -> Options {
             "--horizon" => o.horizon = val().parse().expect("--horizon takes a fraction"),
             "--wait" => o.wait = val().parse().expect("--wait takes seconds"),
             "--no-hud" => o.no_hud = true,
-            "--code" => o.code_screen = true,
+            "--screen" => {
+                o.screen = match val().as_str() {
+                    "title" => menu::AppState::Title,
+                    "code" => menu::AppState::Code,
+                    "options" => menu::AppState::Options,
+                    "practice" => menu::AppState::Practice,
+                    "menu" => menu::AppState::Menu,
+                    s => panic!("--screen takes title, code, options, practice or menu, not {s}"),
+                }
+            }
             "--briefing" => o.briefing = true,
-            "--options" => o.options_screen = true,
             "--follow" => o.follow = Some(val().parse().expect("--follow takes a lemming number")),
             "--assign" => {
                 let v = val();
@@ -159,17 +165,15 @@ fn main() {
                     ..default()
                 }),
         )
-        .add_plugins((SceneRenderPlugin, hud::HudPlugin, menu::MenuPlugin, music::MusicPlugin, touch::TouchPlugin, title::TitlePlugin, lemming_cam::LemmingCamPlugin, panel::PanelPlugin, briefing::BriefingPlugin, minimap::MinimapPlugin, results::ResultsPlugin, pointer::PointerPlugin, sfx::SfxPlugin, options::OptionsPlugin))
+        .add_plugins((SceneRenderPlugin, hud::HudPlugin, menu::MenuPlugin, music::MusicPlugin, touch::TouchPlugin, title::TitlePlugin, lemming_cam::LemmingCamPlugin, panel::PanelPlugin, briefing::BriefingPlugin, minimap::MinimapPlugin, results::ResultsPlugin, pointer::PointerPlugin, sfx::SfxPlugin, options::OptionsPlugin, practice::PracticePlugin))
         .insert_resource(ClearColor(Color::srgb(0.35, 0.55, 0.85)))
         .insert_resource(opts.clone())
         .insert_resource(Data(data))
         .insert_resource(CurrentLevel { number: opts.level.unwrap_or(0), loaded: None })
-        .insert_state(match (opts.level, opts.code_screen) {
-            (Some(_), _) if opts.briefing => menu::AppState::Briefing,
-            (Some(_), _) => menu::AppState::Playing,
-            (None, true) => menu::AppState::Code,
-            (None, false) if opts.options_screen => menu::AppState::Options,
-            (None, false) => menu::AppState::Title,
+        .insert_state(match opts.level {
+            Some(_) if opts.briefing => menu::AppState::Briefing,
+            Some(_) => menu::AppState::Playing,
+            None => opts.screen,
         })
         .add_systems(Update, (screenshot_when_ready, hide_ui))
         .insert_resource(Game::default())
@@ -446,7 +450,7 @@ fn screenshot_when_ready(
     mut exit: MessageWriter<AppExit>,
 ) {
     let Some(path) = &opts.screenshot else { return };
-    if current.loaded.is_none() && !matches!(state.get(), menu::AppState::Menu | menu::AppState::Title | menu::AppState::Code | menu::AppState::Briefing | menu::AppState::Options) {
+    if current.loaded.is_none() && !matches!(state.get(), menu::AppState::Menu | menu::AppState::Title | menu::AppState::Code | menu::AppState::Briefing | menu::AppState::Options | menu::AppState::Practice) {
         return;
     }
     let before = elapsed.unwrap_or(-time.delta_secs());

@@ -57,7 +57,12 @@ impl Plugin for TitlePlugin {
             .add_systems(Update, (spawn_code, code_input, animate_slots).chain().run_if(in_state(AppState::Code)))
             .add_systems(
                 Update,
-                scroll_backdrop.run_if(in_state(AppState::Title).or_else(in_state(AppState::Code)).or_else(in_state(AppState::Options))),
+                scroll_backdrop.run_if(
+                    in_state(AppState::Title)
+                        .or_else(in_state(AppState::Code))
+                        .or_else(in_state(AppState::Options))
+                        .or_else(in_state(AppState::Practice)),
+                ),
             )
             .add_systems(OnExit(AppState::Options), despawn::<ScreenRoot>)
             .add_systems(PostUpdate, layout.before(bevy::ui::UiSystems::Layout));
@@ -300,7 +305,7 @@ const FACE_OFFSETS: [Vec2; 5] =
     [Vec2::new(26.0, 5.0), Vec2::new(21.0, 10.0), Vec2::new(17.0, 6.0), Vec2::new(25.0, 4.0), Vec2::new(24.0, 6.0)];
 const BUTTON_Y: f32 = 135.0;
 
-fn despawn<T: Component>(mut commands: Commands, roots: Query<Entity, With<T>>) {
+pub(crate) fn despawn<T: Component>(mut commands: Commands, roots: Query<Entity, With<T>>) {
     for e in &roots {
         commands.entity(e).despawn();
     }
@@ -662,7 +667,8 @@ fn title_input(
             sfx.write(crate::sfx::Sfx(v));
         }
         match b {
-            TitleButton::Play => next.set(AppState::Menu),
+            // Practice has its own menu.
+            TitleButton::Play => next.set(if rating.0 == crate::menu::PRACTICE { AppState::Practice } else { AppState::Menu }),
             TitleButton::Code => next.set(AppState::Code),
             TitleButton::Options => next.set(AppState::Options),
             TitleButton::Rating => rating.0 = (rating.0 + 1) % 5,

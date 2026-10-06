@@ -533,6 +533,20 @@ Save" in boxes at the bottom corners (y 180–195). The labels are the small
 7×8 font in capitals. Our screen keeps this layout with the settings that
 apply to it (Land, Sea, Sky, Left Handed, Fullscreen, CD Music, Effects,
 Camera).
+### Practice menu ("Select Item to Practice")
+
+From a capture (positions estimated, 320×200): the `BGRD` backdrop, the
+title in the large font at the top, and three rows of icons centred at
+y ≈ 53, 102 and 152. Row 1: the `MINILEMM` rest cells of blocker, turner,
+bomber, builder, basher, miner and digger. Row 2: climber and floater
+(`MINILEMM`), Hi-Light (the panel's lemming face), Claustrophobic (the
+panel's red down arrow), Deflector (`DEFLICON`), Mud (`PRACICON` soil) and
+One Way (`PRACICON` arrows). Row 3: Splitter (`PRACICON` stone table),
+Slippery (`PRACICON` lemming), Rope Slide, Catapults (the spring),
+Trampoline (the white disc), Teleporter (the red pad) and an `EXIT` sign.
+Completed items carry a green tick (`PRACICON` cell 39); the hovered
+item's name shows at the bottom in the large font ("Slippery Block" seen).
+`SAMPLIST.TXT` names a voice for each item.
 ## Open questions
 
 - `ICONS.RNC` bytes 43,648–48,120: the layout of the wooden panel pieces.
