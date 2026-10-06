@@ -99,7 +99,12 @@ How we verified it:
     visible tile grid.
   - Our density of 64 texels per grid unit is unverified.
 - **Sea texture, without the flag:** a 64-wide strip, probably 64×64
-  animation frames (unverified).
+  animation frames (unverified). We cycle them at 8 frames per second unless
+  the level flag `0x0010` ("sea not animated") is set.
+- **Sea drift:** the header's water speeds (`water_speed_x`, `_z`, values
+  −3 to 4, one level −33) are taken as texels per tick in X and Z, so the
+  sea texture slides slowly (unverified: not yet compared with the
+  original).
 - **Land polygons:** drawn at the same height with the `LAND` texture. Shape
   verified visually in `LEVEL.000`.
   - **Texture scale:** with the level flag `0x0100` ("128×128 land"), one

@@ -25,6 +25,9 @@ struct VIn {
     // right vector (x) and up (y). Zero for fixed geometry.
     @location(3) offset: vec2<f32>,
     // x: animation frame count (<= 1: static), y: uv distance between frames.
+    // A negative y marks a tiled surface (the sea): its frames are stacked
+    // in the texture, the frame is chosen inside each repeat, and `offset`
+    // is then a uv drift per second instead of a billboard offset.
     @location(4) anim: vec2<f32>,
 };
 
@@ -35,25 +38,38 @@ struct VOut {
     @builtin(position) clip: vec4<f32>,
     @location(0) uv: vec2<f32>,
     @location(1) params: vec2<f32>,
+    // For tiled surfaces: frame count and current frame; x = 0 otherwise.
+    @location(2) tile: vec2<f32>,
 };
 
 @vertex
 fn vs(v: VIn) -> VOut {
     var o: VOut;
-    let world = v.pos + u.right.xyz * v.offset.x + vec3(0.0, v.offset.y, 0.0);
-    o.clip = u.view_proj * vec4(world, 1.0);
     var frame = 0.0;
     if (v.anim.x > 1.0) {
         frame = floor(u.sky.w * ANIM_FPS) % v.anim.x;
     }
-    o.uv = v.uv + vec2(0.0, frame * v.anim.y);
     o.params = v.params;
+    if (v.anim.y < 0.0) {
+        o.clip = u.view_proj * vec4(v.pos, 1.0);
+        o.uv = v.uv + v.offset * u.sky.w;
+        o.tile = vec2(max(v.anim.x, 1.0), frame);
+        return o;
+    }
+    let world = v.pos + u.right.xyz * v.offset.x + vec3(0.0, v.offset.y, 0.0);
+    o.clip = u.view_proj * vec4(world, 1.0);
+    o.uv = v.uv + vec2(0.0, frame * v.anim.y);
+    o.tile = vec2(0.0, 0.0);
     return o;
 }
 
 @fragment
 fn fs(v: VOut) -> @location(0) vec4<f32> {
-    let c = textureSample(tex, samp, v.uv);
+    var uv = v.uv;
+    if (v.tile.x > 0.0) {
+        uv = vec2(uv.x, (fract(uv.y) + v.tile.y) / v.tile.x);
+    }
+    let c = textureSample(tex, samp, uv);
     if (v.params.y > 0.5 && c.a < 0.5) {
         discard;
     }

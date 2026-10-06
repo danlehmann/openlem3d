@@ -18,6 +18,7 @@ const SPRITE_TEXELS_PER_UNIT: f32 = 64.0;
 mod level_flags {
     pub const SEA_SOLID_COLOUR: u16 = 0x0001;
     pub const LAND_INVISIBLE: u16 = 0x0004;
+    pub const SEA_STILL: u16 = 0x0010;
     pub const SEA_128: u16 = 0x0020;
     pub const LAND_128: u16 = 0x0100;
     pub const SURROUND_SKY: u16 = 0x0200;
@@ -161,7 +162,9 @@ fn block_layer(mesh: &LevelMesh, texture: RgbaImage) -> SceneLayer {
 /// a single huge quad loses so much depth precision when rasterised that the
 /// sea showed through the land at some window sizes (seen at exactly
 /// 1280×720 on Adreno/DX12).
-fn plane_layer(y: f32, tile: f32, texture: RgbaImage) -> SceneLayer {
+/// `frames` stacked frames animate the texture and `drift` scrolls it (uv
+/// per second).
+fn plane_layer(y: f32, tile: f32, texture: RgbaImage, frames: u32, drift: [f32; 2]) -> SceneLayer {
     /// Size of the coarse tiles.
     const COARSE: f32 = 512.0;
     /// Size of the fine tiles used near the level.
@@ -173,7 +176,11 @@ fn plane_layer(y: f32, tile: f32, texture: RgbaImage) -> SceneLayer {
     let quad = |b: &mut LayerBuilder, x0: f32, z0: f32, size: f32| {
         let base = b.base();
         for (x, z) in [(x0, z0), (x0, z0 + size), (x0 + size, z0 + size), (x0 + size, z0)] {
-            Vertex::fixed([x, y, z], [x / tile, z / tile], 1.0, false).push(&mut b.vertices);
+            let mut v = Vertex::fixed([x, y, z], [x / tile, z / tile], 1.0, false);
+            // A tiled surface (see `scene.wgsl`): frames, and the drift.
+            v.anim = [frames as f32, -1.0];
+            v.offset = drift;
+            v.push(&mut b.vertices);
         }
         b.indices.extend([base, base + 1, base + 2, base, base + 2, base + 3]);
     };
@@ -591,14 +598,19 @@ pub fn build(data: &mut GameData, n: u32, show: Show) -> Result<BuiltLevel, l3d_
         && let Ok(sea) = data.gfx("SEA", level.sea_gfx)
     {
         // With the "128×128" flag the 16 KB file is one 128×128 texture;
-        // otherwise it is a 64-wide strip whose first 64×64 frame we use.
-        // Texel density matches block faces, 64 per grid unit (unverified).
-        let (img, tile) = if flags & level_flags::SEA_128 != 0 {
-            (indexed_to_rgba(&sea[..(128 * 128).min(sea.len())], 128, &pal), 2.0)
+        // otherwise it is a 64-wide strip of 64×64 frames, which animate
+        // unless the level says the sea is still. Texel density matches block
+        // faces, 64 per grid unit (unverified).
+        let (img, tile, size, frames) = if flags & level_flags::SEA_128 != 0 {
+            (indexed_to_rgba(&sea[..(128 * 128).min(sea.len())], 128, &pal), 2.0, 128.0, 1)
         } else {
-            (indexed_to_rgba(&sea[..(64 * 64).min(sea.len())], 64, &pal), 1.0)
+            let frames = if flags & level_flags::SEA_STILL != 0 { 1 } else { (sea.len() / (64 * 64)).max(1) as u32 };
+            (indexed_to_rgba(&sea[..(64 * 64 * frames as usize).min(sea.len())], 64, &pal), 1.0, 64.0, frames)
         };
-        scene.layers.push(plane_layer(GROUND_Y - 0.01, tile, img));
+        // The header's water speeds, read as texels per tick (unverified).
+        let per_second = l3d_sim::TICKS_PER_SECOND as f32 / size;
+        let drift = [level.water_speed_x as f32 * per_second, level.water_speed_z as f32 * per_second];
+        scene.layers.push(plane_layer(GROUND_Y - 0.01, tile, img, frames, drift));
     }
     if show.land
         && level.land_gfx != 0xFF
