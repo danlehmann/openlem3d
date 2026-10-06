@@ -219,7 +219,7 @@ block 4 under the trees by the Fun 2 exit). Testing it needs a later level code.
 | Bomber | A countdown 5…1 over the lemming's head, each digit for about 8 ticks (0.57 s). After about 10 more ticks the lemming swells and explodes, about 3.6 s after assignment. The blast left a hole roughly one cell long in the 1-unit path blocks. | **timing verified ±1 tick per digit**; blast shape rough (implemented: 50-tick fuse, 1-unit radius) |
 | Builder | Lays thin bricks, each about 0.55 unit long in the walking direction and about 0.28 unit higher than the last (¼ up per ½ forward within the measurement error), climbing onto each. One assignment laid **6 bricks**, one every **25 ± 1 ticks** (1.8 s). After the last brick the builder walked on off the end of the staircase and fell. A shrug was not seen. Brick width across the path is not measured. | **verified: count, timing, rise and run (±10%)** (implemented: 6 bricks, 25 ticks each, ¼ up and ½ forward. Bricks are free-standing slabs, not grid segments: 9/16 unit long, ¼ thick, 1 unit wide (width unmeasured). A brick that would run into terrain is cut short at it, and the builder stops; Practice "Builder" relies on the last brick meeting the platform edge) |
 | Basher | Bashing a 1-unit crate took about 2.1–2.4 s (30–34 ticks): cracks spread over the crate, then the lower ½ unit (two segments) of the whole cell vanished at once, leaving the top half hanging. Walkers then walked through the gap. The basher went back to walking after the crate. | **rough** (implemented: every 32 ticks removes the two segments from the feet up in the cell ahead) |
-| Miner | Removes a chunk about one cell long ahead of it at once after a crack animation, roughly every 3.5 s. The slope and depth per stroke could not be read from the views used. | **provisional; timing rough** (implemented: every 49 ticks, ¼ forward and ¼ down; shape provisional) |
+| Miner | Removes a chunk about one cell long ahead of it at once after a crack animation, roughly every 3.5 s. The slope and depth per stroke could not be read from the views used. | **provisional; timing rough** (implemented: every 49 ticks the miner moves ¼ forward and ¼ down (45°) after clearing the space its body needs there, from the new feet to ¾ unit up and from the feet to ½ unit ahead. It stops at steel, at a one-way block facing the other way, when nothing is left to remove, and at the level bottom; it falls if it breaks out into the open. **Open question:** Practice "Miner" has its "MINE HERE" sign near the hatch, but a 45° tunnel from there reaches the ground inside the tower) |
 | Digger | Removes the top ¼-unit segment of the **whole cell** under it at once, after a crack animation, about every 2.8 s (≈ 40 ticks, ±20%). It dug through a 1-unit block in about 8.4 s and then fell. | **rough** (implemented: one segment every 40 ticks) |
 | Climber | Climbs vertical walls at about 0.6 units/s, then walks over the top and drops off the far side like a walker (2-unit drops survived). Behaviour at a ceiling is untested. The skill is permanent: one climber climbed both walls on Practice "Climber". | **verified** (speed rough) |
 | Floater | Falls normally at first; the umbrella opened about 7 ticks (0.5 s) and about 1½ units into the fall. It then falls at **1/32 unit per tick** (0.45 units/s, the walking speed) and survived a 6¼-unit fall that kills non-floaters. | **float speed verified ±5%; survival verified for 6¼ units; opening point rough** (implemented: opens after 1½ units, then 1/32 unit per tick) |
@@ -271,6 +271,24 @@ from the preset camera to the lemmings' row.
   down. The canopy top then moved from y = 110 at 6.01 s to y = 300 at
   14.80 s: 21.6 px/s, 0.45 units/s, 0.032 unit per tick. The OUT counter
   dropped only at the regular deaths of the non-floaters that followed it.
+
+## Terrain and objects
+
+| Feature | Behaviour | Status |
+|---|---|---|
+| Deflector (shape 7) | A walker meeting the diagonal face turns a quarter, as if reflected, once its centre reaches the face; the square backs are ordinary walls. Practice "Deflector" is a square track with deflectors at the corners. | provisional (implemented) |
+| Splitter (block 2, non-solid) | Walkers crossing the cell's centre are sent alternately left and right [L3DEdit]. | provisional: which side comes first is unverified |
+| Liquid top (block flag  x04) | Walkers that step onto it drown, as well as lemmings that land on it (Practice "Mud"). | provisional (implemented) |
+| Slippery top (block flag  x40) | "Acts like ice" [L3DEdit]; the effect on lemmings is not known yet. | **not implemented** |
+| Killing traps (types 0, 1, 2, 6, 7) | Take a lemming that steps onto their cell, then stay busy for 2 s, letting others pass. | provisional (implemented) |
+| Teleporter (type 5) | A walker stepping onto one appears on its partner (same value; with more, the last two pair [L3DEdit]) and walks on in the same direction; it must step off before teleporting again. | provisional (implemented: instant) |
+| Rope slide (type 8) | A lemming reaching a sender (even value) rides in a straight line to its receiver (value + 1; the last of each value works [L3DEdit]), then walks on. | provisional (implemented: ⅛ unit per tick) |
+| Spring (type 4) | A walker stepping onto a sender is thrown in an arc onto its receiver and lands unhurt, walking on in its old direction. | provisional (implemented: 2 ticks per unit of distance, arc peak ¼ of it) |
+| Trampoline (type 3) | Fun 1 drops lemmings about 12 units onto one, which must send them on to the exit platform 9 units away. | **not implemented** (awaiting observation) |
+
+The interactive-object type of a level is its trap file number
+([L3DEdit]); the Practice levels "Rope Slide", "Catapults", "Trampoline"
+and "Teleporter" use 8, 4, 3 and 5, which agrees.
 
 ## Deaths
 
