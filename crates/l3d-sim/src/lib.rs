@@ -416,7 +416,7 @@ impl Simulation {
             Skill::Floater => l.floater = true,
             Skill::Bomber => l.fuse = Some(FUSE_TICKS),
             Skill::Blocker => l.set_state(State::Blocking),
-            // The turner's own left (the one verified case; see ssign_turner).
+            // The turner's own left (the one verified case; see `assign_turner`).
             Skill::Turner => l.set_state(State::Turning { to: l.dir.anticlockwise() }),
             Skill::Digger => l.set_state(State::Digging),
             Skill::Builder => l.set_state(State::Building { bricks_left: BRICKS }),
