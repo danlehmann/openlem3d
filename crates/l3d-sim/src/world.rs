@@ -77,8 +77,21 @@ impl World {
     /// Removes the segments in `mask` from cell `c`. Steel blocks are
     /// unaffected. Returns whether anything was removed.
     pub fn remove_segments(&mut self, c: [i32; 3], mask: u8) -> bool {
+        self.remove_segments_towards(c, mask, None)
+    }
+
+    /// Like [`World::remove_segments`], for a lemming digging horizontally in
+    /// direction `toward` (a unit step), or not horizontally (`None`). One-way
+    /// blocks (ids 5–8) give way only in their direction: +Z, +X, −Z, −X
+    /// for ids 5–8 before rotation ([L3DEdit], unverified), turned with the
+    /// block's rotation like its faces. Non-horizontal digging never breaks
+    /// them (provisional).
+    pub fn remove_segments_towards(&mut self, c: [i32; 3], mask: u8, toward: Option<[i32; 3]>) -> bool {
         let Some(mut cell) = self.cell(c[0], c[1], c[2]) else { return false };
         if cell.flags & flags::STEEL != 0 || cell.block.segments & mask == 0 {
+            return false;
+        }
+        if (5..=8).contains(&cell.block.id) && toward != Some(one_way_direction(cell.block)) {
             return false;
         }
         cell.block.segments &= !mask;
@@ -182,6 +195,23 @@ impl World {
         }
         (GROUND, false)
     }
+}
+
+/// The direction a one-way block (ids 5–8) can be dug through: +Z, +X, −Z,
+/// −X before rotation, each rotation step turning +X → −Z → −X → +Z (the
+/// renderer's block-rotation sense).
+fn one_way_direction(block: BlockCell) -> [i32; 3] {
+    let mut d = match block.id {
+        5 => [0, 0, 1],
+        6 => [1, 0, 0],
+        7 => [0, 0, -1],
+        _ => [-1, 0, 0],
+    };
+    for _ in 0..block.rotation % 4 {
+        // (x, z) → (z, −x): +X → −Z.
+        d = [d[2], 0, -d[0]];
+    }
+    d
 }
 
 fn index(x: usize, y: usize, z: usize) -> usize {

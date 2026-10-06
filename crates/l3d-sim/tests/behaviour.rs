@@ -140,3 +140,15 @@ fn builder_lays_six_bricks() {
     let added = sim.world.take_changes().len();
     assert_eq!(added, 6, "one terrain change per brick");
 }
+
+#[test]
+fn one_way_blocks_give_way_in_one_direction() {
+    // Block 6 is one-way towards +X before rotation; rotation 1 turns +X to −Z.
+    for (rotation, open, closed) in [(0, [1, 0, 0], [-1, 0, 0]), (1, [0, 0, -1], [0, 0, 1])] {
+        let mut sim = open_level(1).block(20, 2, 20, 6, rotation, 0xF).sim();
+        let c = [20, 2, 20];
+        assert!(!sim.world.remove_segments_towards(c, 0b0011, Some(closed)), "rotation {rotation}: closed side");
+        assert!(!sim.world.remove_segments_towards(c, 0b0011, None), "rotation {rotation}: digging down");
+        assert!(sim.world.remove_segments_towards(c, 0b0011, Some(open)), "rotation {rotation}: open side");
+    }
+}

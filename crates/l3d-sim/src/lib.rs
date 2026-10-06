@@ -665,7 +665,11 @@ impl Simulation {
                     l.set_state(State::Walking);
                     return;
                 }
-                self.world.remove_segments(cell, mask);
+                if !self.world.remove_segments_towards(cell, mask, Some(l.dir.delta())) {
+                    // A one-way block facing the other way.
+                    l.set_state(State::Walking);
+                    return;
+                }
                 l.pos[0] += d[0] * (SUB / 4);
                 l.pos[2] += d[2] * (SUB / 4);
                 self.settle(l);
@@ -688,7 +692,10 @@ impl Simulation {
         match self.world.block(cell) {
             Some((_, f)) if f & flags::STEEL != 0 => l.set_state(State::Walking),
             Some(_) => {
-                self.world.remove_segments(cell, mask);
+                if !self.world.remove_segments_towards(cell, mask, Some(l.dir.delta())) {
+                    l.set_state(State::Walking);
+                    return;
+                }
                 l.pos[0] += d[0] * (SUB / 4);
                 l.pos[2] += d[2] * (SUB / 4);
                 l.pos[1] -= SUB / 4;
