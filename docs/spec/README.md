@@ -23,6 +23,7 @@ under the clean-room rules in `../GROUNDRULES.md`. Facts carry a status:
 | [ui-graphics.md](ui-graphics.md) | Title logo, menu buttons, fonts, panel icons, sprite sheets, intro slides, scenes, bitmaps |
 | [behaviour.md](behaviour.md) | Lemming movement, release, exits, deaths (mostly provisional) |
 | [camera.md](camera.md) | Preset cameras, the no-pitch camera, the off-centre projection |
+| [open-questions.md](open-questions.md) | Provisional behaviour still to check against the original |
 
 ## Conventions
 

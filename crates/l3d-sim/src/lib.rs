@@ -708,9 +708,12 @@ impl Simulation {
         let len = (height * 4 / 5).clamp(2 * SUB, 12 * SUB);
         let d = l.dir.delta();
         let (x, z) = (l.pos[0] + d[0] * len, l.pos[2] + d[2] * len);
-        let (y, _) = self.world.surface_below(x, l.pos[1] + 2 * SUB, z);
+        // Land on whatever is highest under the flight's peak.
+        let (y, _) = self.world.surface_below(x, l.pos[1] + len / 2 + 3 * SUB, z);
         let ticks = ((len as f32 / SUB as f32) * TRAMPOLINE_TICKS_PER_UNIT) as u32;
-        l.set_state(State::Flying { from: l.pos, to: [x, y, z], ticks: ticks.max(8), peak: len / 2 });
+        // Clear a landing spot higher than the take-off.
+        let peak = (len / 2).max(y - l.pos[1] + SUB / 2);
+        l.set_state(State::Flying { from: l.pos, to: [x, y, z], ticks: ticks.max(8), peak });
         true
     }
 
