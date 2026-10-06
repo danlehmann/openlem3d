@@ -69,8 +69,9 @@ pub struct Options {
     screen: menu::AppState,
     /// With `--level`, start on that level's briefing (`--briefing`).
     briefing: bool,
-    /// Scripted presses `(seconds since start, key)`, from `--press SECONDS:KEY`.
-    press: Vec<(f32, String)>,
+    /// Scripted presses `(seconds since start, key, seconds held)`, from
+    /// `--press SECONDS:KEY[:HOLD]`.
+    press: Vec<(f32, String, f32)>,
 }
 
 fn parse_args() -> Options {
@@ -115,8 +116,9 @@ fn parse_args() -> Options {
             "--briefing" => o.briefing = true,
             "--press" => {
                 let v = val();
-                let (t, k) = v.split_once(':').expect("--press takes SECONDS:KEY");
-                o.press.push((t.parse().expect("--press seconds"), k.to_string()));
+                let p: Vec<&str> = v.split(':').collect();
+                let secs = |i: usize| p.get(i).map(|s| s.parse::<f32>().expect("--press takes SECONDS:KEY[:HOLD]"));
+                o.press.push((secs(0).expect("--press seconds"), p.get(1).expect("--press key").to_string(), secs(2).unwrap_or(0.0)));
             }
             "--follow" => o.follow = Some(val().parse().expect("--follow takes a lemming number")),
             "--assign" => {
@@ -619,32 +621,36 @@ fn refresh_scenery(
     scene.data = Some(Arc::new(content));
 }
 
-/// Presses the keys given with `--press SECONDS:KEY` at their times, each
-/// for one frame: key names as in Bevy's `KeyCode` (`Escape`, `F12`, `KeyP`,
-/// `Digit1`, …), or `Click` for the left mouse button.
+/// Presses the keys given with `--press SECONDS:KEY[:HOLD]` at their times,
+/// for HOLD seconds or one frame: key names as in Bevy's `KeyCode`
+/// (`Escape`, `F12`, `KeyW`, `Digit1`, …), or `Click` for the left mouse button.
 fn scripted_presses(
     opts: Res<Options>,
     time: Res<Time<Real>>,
     mut keys: ResMut<ButtonInput<KeyCode>>,
     mut mouse: ResMut<ButtonInput<MouseButton>>,
     mut done: Local<usize>,
-    mut held: Local<Vec<String>>,
+    mut held: Local<Vec<(String, f32)>>,
 ) {
-    for k in held.drain(..) {
-        match key_code(&k) {
+    let now = time.elapsed_secs();
+    held.retain(|(k, until)| {
+        if *until > now {
+            return true;
+        }
+        match key_code(k) {
             Some(code) => keys.release(code),
             None => mouse.release(MouseButton::Left),
         }
-    }
-    let now = time.elapsed_secs();
-    while let Some((t, k)) = opts.press.get(*done).filter(|(t, _)| *t <= now) {
+        false
+    });
+    while let Some((t, k, hold)) = opts.press.get(*done).filter(|(t, ..)| *t <= now) {
         info!("scripted press {k} at {t} s");
         match key_code(k) {
             Some(code) => keys.press(code),
             None if k == "Click" => mouse.press(MouseButton::Left),
             None => warn!("--press: unknown key {k}"),
         }
-        held.push(k.clone());
+        held.push((k.clone(), t + hold));
         *done += 1;
     }
 }
@@ -659,6 +665,14 @@ fn key_code(name: &str) -> Option<KeyCode> {
         "KeyV" => KeyCode::KeyV,
         "KeyI" => KeyCode::KeyI,
         "KeyM" => KeyCode::KeyM,
+        "KeyW" => KeyCode::KeyW,
+        "KeyA" => KeyCode::KeyA,
+        "KeyS" => KeyCode::KeyS,
+        "KeyD" => KeyCode::KeyD,
+        "KeyQ" => KeyCode::KeyQ,
+        "KeyE" => KeyCode::KeyE,
+        "KeyR" => KeyCode::KeyR,
+        "KeyF" => KeyCode::KeyF,
         "Digit1" => KeyCode::Digit1,
         "Digit2" => KeyCode::Digit2,
         "Digit3" => KeyCode::Digit3,

@@ -410,9 +410,25 @@ fn decal_layers(data: &mut GameData, level: &Level, pal: &Palette) -> Vec<SceneL
                 let (x0, z0, x1, z1) = (x as f32, z as f32, x as f32 + 1.0, z as f32 + 1.0);
                 match o.kind >> 4 {
                     side @ 0x7..=0xA => {
+                        // On the face between the cell and its neighbour on
+                        // that side, facing whichever of the two is open:
+                        // decals in an empty cell face into it (the 5×3
+                        // monitor screen on "Lemmings Inside" only reads left
+                        // to right that way), and one between two empty
+                        // cells shows on both sides.
                         let n = SIDE_NORMALS[(side - 0x7) as usize];
-                        let c = [cx + n[0] * (0.5 + DECAL_OFFSET), base_y, cz + n[1] * (0.5 + DECAL_OFFSET)];
-                        wall_b.vertical_quad(c, n, 1.0, 1.0, rect, wall_tex, 1.0);
+                        let solid = |dx: i32, dz: i32| {
+                            let (nx, nz) = (x as i32 + dx, z as i32 + dz);
+                            (0..SIZE_X as i32).contains(&nx) && (0..SIZE_Z as i32).contains(&nz) && !level.block(nx as usize, y, nz as usize).is_empty()
+                        };
+                        let (own, next) = (!block.is_empty(), solid(n[0] as i32, n[1] as i32));
+                        let face = |d: f32| [cx + n[0] * (0.5 + d), base_y, cz + n[1] * (0.5 + d)];
+                        if own || !next {
+                            wall_b.vertical_quad(face(DECAL_OFFSET), n, 1.0, 1.0, rect, wall_tex, 1.0);
+                        }
+                        if !own {
+                            wall_b.vertical_quad(face(-DECAL_OFFSET), [-n[0], -n[1]], 1.0, 1.0, rect, wall_tex, 1.0);
+                        }
                     }
                     0xB => {
                         // Underside; the image's bottom edge faces −X.

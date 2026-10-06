@@ -39,7 +39,7 @@ See `docs/spec/` for what has been verified and how.
    the numbering).
 
    For testing without touching the keyboard: `--size WxH`, `--camera 1-4`,
-   `--assign TICK:LEMMING:SKILL[:cw|acw]`, `--press SECONDS:KEY` (Bevy key
+   `--assign TICK:LEMMING:SKILL[:cw|acw]`, `--press SECONDS:KEY[:HOLD]` (Bevy key
    names such as `Escape`, `F12`, `KeyP`, or `Click`), and
    `--screenshot FILE --wait SECONDS`, which saves the window and quits.
 

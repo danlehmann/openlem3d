@@ -127,7 +127,7 @@ lemming would die on release. Read Z-first, all of them are inside.
 | `0x0080` | Whole level bottom is solid |
 | `0x0100` | Land texture 128×128; without it, 64×64 (consistent with the file sizes of every level's `LAND` file) |
 | `0x0200` | All-round sky (space levels); no sea |
-| `0x0400` | Wall decals show the game screen (the "Lemmings Inside" monitor effect) |
+| `0x0400` | Wall decals show the game screen (the "Lemmings Inside" monitor effect; [L3DEdit], unverified: the decals themselves hold a still of the game screen) |
 | `0x0800` | Land texture drawn at half scale |
 | `0x1000` | Minimap disabled |
 | `0x2000`, `0x4000` | Unknown |
@@ -197,6 +197,17 @@ Each cell is two bytes, `(kind, extra)`, in the same order as the block grid.
 (the first 64×64 slot in `OBJ.004`, which is object #5 counting from 1).
 [L3DEdit] covers placement and height rules, and the per-type behaviour of
 interactive objects, in detail.
+
+**Wall decals on cell sides** (high nibble 7–A: +X, −Z, −X, +Z) sit on the
+face between the cell and its neighbour on that side, facing whichever of
+the two is open. Across all levels, 55 side decals are in an empty cell with
+a solid neighbour, 51 in a solid cell with an empty neighbour, 10 between
+two solid cells and 15 (one column on `LEVEL.058`) between two empty cells,
+which we draw on both sides. Verified by the picture: on `LEVEL.007` ("Lemmings
+Inside") graphics 0–14 of `WALLS.008` form a 5×3 monitor screen (a bezel
+around a still of the game screen) in empty cells in front of the
+monitor's body, and they only read left to right facing into those cells.
+Whether level flag `0x0400` makes that screen live is unknown.
 
 Objects are not solid. Official levels put an invisible block 4 in the same
 cell where solidity is needed (verified for `LEVEL.001`).
