@@ -30,6 +30,8 @@ Each names where it shows up, so a run can go straight there.
   lemmings fall in and can't leave. Either that is the design or the
   orientation of half-height ramps is reversed.
 - **Highest step a walker climbs** (we use ¼ unit; ½ is untested).
+- **Sea drift and animation:** how fast the sea slides for the header's
+  water speeds, and its frame rate.
 
 ## Presentation
 
