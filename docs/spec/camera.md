@@ -116,3 +116,13 @@ How we verified it:
     picks its texture with the low 3 bits of its options byte.
   - **Flag `0x0800`:** halves the span. The Practice levels use 64×64 grass
     at 1 grid unit per texture.
+
+## Collision
+
+Blocks stop the camera unless their definition has the flag `0x80` ("not
+solid for the camera", [L3DEdit]); the original keeps Claustrophobic's camera
+inside its starting room (observed by the project owner). We test the
+cells within 0.2 units of the camera against the present segments and slide
+along blocks axis by axis (provisional). Of the 400 preset cameras only
+`LEVEL.062`'s camera 3 starts inside a block; a camera that starts
+blocked moves freely until it is clear.

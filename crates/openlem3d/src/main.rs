@@ -229,6 +229,37 @@ impl ViewCamera {
     }
 }
 
+/// Whether the camera at `p` would be inside a block that stops it: any
+/// non-empty cell within [`CAMERA_RADIUS`] whose present segments reach the
+/// camera's height, unless the block is flagged passable for the camera.
+fn camera_blocked(level: &Level, blocks: &BlockSet, p: Vec3) -> bool {
+    use l3d_formats::level::{SIZE_X, SIZE_Y, SIZE_Z};
+    let r = CAMERA_RADIUS;
+    for dx in [-r, r] {
+        for dy in [-r, r] {
+            for dz in [-r, r] {
+                let q = p + Vec3::new(dx, dy, dz);
+                let c = q.floor();
+                if c.x < 0.0 || c.y < 0.0 || c.z < 0.0 || c.x >= SIZE_X as f32 || c.y >= SIZE_Y as f32 || c.z >= SIZE_Z as f32 {
+                    continue;
+                }
+                let b = level.block(c.x as usize, c.y as usize, c.z as usize);
+                if b.is_empty() || blocks.defs.get(b.id as usize).is_some_and(|d| d.flags & l3d_formats::blk::flags::NON_SOLID_CAMERA != 0) {
+                    continue;
+                }
+                let seg = ((q.y - c.y) * 4.0) as u8;
+                if b.segments & (1 << seg.min(3)) != 0 {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+/// How close the camera may come to a block (grid units).
+const CAMERA_RADIUS: f32 = 0.2;
+
 /// Vertical field of view of the scene camera.
 const DEFAULT_FOV_Y: f32 = 51.0;
 
@@ -401,6 +432,8 @@ fn camera_controls(
     lemming_cam: Res<lemming_cam::LemmingCam>,
     mut preset: ResMut<PresetIndex>,
     settings: Res<settings::Settings>,
+    game: Res<Game>,
+    mut last_free: Local<Option<Vec3>>,
     mut q: Query<&mut ViewCamera>,
 ) {
     // Riding along with a lemming: no manual movement.
@@ -428,6 +461,29 @@ fn camera_controls(
             + right * (held(KeyCode::KeyD, KeyCode::ArrowRight) - held(KeyCode::KeyA, KeyCode::ArrowLeft))
             + Vec3::Y * (held(KeyCode::KeyR, KeyCode::PageUp) - held(KeyCode::KeyF, KeyCode::PageDown));
         cam.pos += mv * speed * dt;
+        // The camera can't enter blocks (unless they are marked passable for
+        // it); it slides along them. Preset jumps and the lemming view are
+        // exempt.
+        if let Some((level, blocks, _)) = &game.terrain {
+            let jumped = keys.any_just_pressed(presets) || lemming_cam.following().is_some();
+            if let Some(free) = *last_free
+                && !jumped
+                && camera_blocked(level, blocks, cam.pos)
+            {
+                let mut p = free;
+                for axis in 0..3 {
+                    let mut q = p;
+                    q[axis] = cam.pos[axis];
+                    if !camera_blocked(level, blocks, q) {
+                        p = q;
+                    }
+                }
+                cam.pos = p;
+            }
+            if !camera_blocked(level, blocks, cam.pos) {
+                *last_free = Some(cam.pos);
+            }
+        }
         let aspect = windows.iter().next().map_or(16.0 / 9.0, |w| w.width() / w.height().max(1.0));
         let view = Mat4::look_to_rh(cam.pos, cam.forward(), Vec3::Y);
         scene_cam.view_proj = projection(opts.fov_y, aspect, opts.horizon) * view;
