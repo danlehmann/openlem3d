@@ -371,3 +371,19 @@ Further findings from the code and camera runs **[verified]**:
   door" and exits. A CUE sheet whose data track is a 2048-byte-sector copy of
   the original data track (`MODE1/2048`) and whose audio tracks point into
   the original `.bin` is accepted (DOSBox-X reports its 23 audio tracks).
+
+Findings from the screen-layout runs (`spec/ui-graphics.md`, "Screens")
+**[verified]**:
+
+- **Game resolution.** Menus and levels run at 320×200. `shot.ps1` and
+  `burst.ps1` (print method, `output = surface`) capture a 720×540 client
+  area with the 640×480 picture at (40,30); `l3d-tool ui-find --screen
+  40,30,640,480 --game 320,200` maps a grab back to game pixels.
+- **Serial-mouse mapping at 320×200.** After homing, (X + 5.5)/2.1 counts
+  right and (Y + 6)/2.5125 counts down (X, Y in the 640×480 units used
+  above) put the pointer cell's top-left at about (0.4935·X − 4.7,
+  0.4135·Y − 7.5) in game pixels.
+- **Clicks need a hold.** Clicks held 120 ms were often missed on panel
+  icons; holding the button about 300 ms worked every time.
+- **Attract mode.** About 125 s after (re)entering the main menu a demo
+  level starts, whatever the mouse does; a click returns to the menu.

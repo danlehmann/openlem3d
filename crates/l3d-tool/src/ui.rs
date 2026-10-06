@@ -18,7 +18,7 @@ fn read(fs: &mut IsoFs, path: &str) -> Result<Vec<u8>> {
     Ok(rnc::unpack_if_packed(fs.read_path(path).with_context(|| format!("reading {path}"))?)?)
 }
 
-fn palette(fs: &mut IsoFs, path: &str) -> Result<Palette> {
+pub fn palette(fs: &mut IsoFs, path: &str) -> Result<Palette> {
     Ok(vga_palette(&read(fs, path)?)?)
 }
 
@@ -153,4 +153,138 @@ pub fn render(fs: &mut IsoFs, out: &Path, only: &[String], scale: usize) -> Resu
         }
     }
     Ok(())
+}
+
+/// Names of the sprite sets accepted by `l3d-tool ui-find`.
+pub const SETS: [&str; 19] = [
+    "logo", "buttons", "ratings", "faces", "title-font", "letters", "icons-small", "panel", "labels", "font-small",
+    "font-large", "minilemm", "bombnumb", "cogs", "mouse", "deflicon", "pracicon", "endlemms", "winder",
+];
+
+/// The sprite sheet whose file name, lower-cased and without extension, is
+/// `name`.
+fn sheet_named(name: &str) -> Option<sheets::Sheet> {
+    sheets::ALL.into_iter().find(|s| s.path.trim_start_matches("GFX/").split('.').next().is_some_and(|n| n.eq_ignore_ascii_case(name)))
+}
+
+/// The cells of sprite set `name` (see [`SETS`]), in file order: for
+/// `labels`, the umbrella followed by the three labels; for fonts, glyph `i`
+/// is character code `33 + i`. `raw:PATH:WIDTH` is the whole file PATH as
+/// one image WIDTH pixels wide.
+pub fn sprite_set(fs: &mut IsoFs, name: &str) -> Result<Vec<IndexedImage>> {
+    let icons = |fs: &mut IsoFs| -> Result<Icons> { Ok(Icons::parse(&read(fs, "GFX/ICONS.RNC")?)?) };
+    let menu = |fs: &mut IsoFs| -> Result<title::MenuArt> { Ok(title::MenuArt::parse(&read(fs, "GFX/TITLE.RNC")?)?) };
+    Ok(match name {
+        "logo" => title::decode_rle_cells(&read(fs, "GFX/TITLE.MHC")?, title::LOGO_WIDTH)?,
+        "buttons" => menu(fs)?.buttons,
+        "ratings" => menu(fs)?.ratings,
+        "faces" => menu(fs)?.faces,
+        "title-font" => l3d_formats::font::title_font(&read(fs, "GFX/TITLE.FNT")?)?.glyphs,
+        "letters" => title::LemmingLetters::parse(&read(fs, "GFX/LEMMINGS.FNT")?)?.frames,
+        "icons-small" => icons(fs)?.small,
+        "panel" => icons(fs)?.panel,
+        "labels" => {
+            let i = icons(fs)?;
+            std::iter::once(i.umbrella).chain(i.labels).collect()
+        }
+        "font-small" => icons(fs)?.small_font.glyphs,
+        "font-large" => icons(fs)?.large_font.glyphs,
+        _ if name.starts_with("raw:") => {
+            let (path, width) = name[4..].rsplit_once(':').context("expected raw:PATH:WIDTH")?;
+            let width: usize = width.parse().context("raw width")?;
+            anyhow::ensure!(width > 0, "raw width must be positive");
+            let data = read(fs, path)?;
+            let height = data.len() / width;
+            vec![IndexedImage::new(width, height, data[..width * height].to_vec())?]
+        }
+        _ => match sheet_named(name) {
+            Some(s) => s.cut(&read(fs, s.path)?)?,
+            None => anyhow::bail!("unknown sprite set {name}; expected one of {SETS:?} or raw:PATH:WIDTH"),
+        },
+    })
+}
+
+/// One placement of a sprite cell in a searched image.
+#[derive(Debug, Clone, Copy)]
+pub struct Placement {
+    pub cell: usize,
+    /// Top-left corner of the cell, in image pixels.
+    pub x: i32,
+    pub y: i32,
+    pub w: i32,
+    pub h: i32,
+    /// Opaque cell pixels whose colour differs from the image.
+    pub misses: usize,
+    /// Opaque (non-zero) pixels in the cell.
+    pub opaque: usize,
+}
+
+impl Placement {
+    fn miss_ratio(&self) -> f64 {
+        self.misses as f64 / self.opaque as f64
+    }
+
+    fn overlap(&self, o: &Placement) -> i32 {
+        let w = (self.x + self.w).min(o.x + o.w) - self.x.max(o.x);
+        let h = (self.y + self.h).min(o.y + o.h) - self.y.max(o.y);
+        w.max(0) * h.max(0)
+    }
+}
+
+/// Every placement of `cells` (index, image) inside `area` (X,Y,W,H of the
+/// RGB8 image `img`) at which at most `max_miss` of the cell's opaque pixels
+/// differ from the image by more than `tol` (summed absolute RGB
+/// difference). Cells with fewer than `min_opaque` opaque pixels are
+/// skipped. Placements are best first; of two that overlap by more than half
+/// the smaller one, only the better is kept.
+pub fn find(
+    img: &(u32, u32, Vec<u8>),
+    cells: &[(usize, IndexedImage)],
+    pal: &Palette,
+    area: [i32; 4],
+    tol: i32,
+    max_miss: f64,
+    min_opaque: usize,
+) -> Vec<Placement> {
+    let (iw, ih) = (img.0 as i32, img.1 as i32);
+    let [ax, ay, aw, ah] = area;
+    let (x0, y0, x1, y1) = (ax.max(0), ay.max(0), (ax + aw).min(iw), (ay + ah).min(ih));
+    let mut found = Vec::new();
+    for (k, cell) in cells {
+        let opaque: Vec<(i32, i32, [i32; 3])> = (0..cell.height)
+            .flat_map(|y| (0..cell.width).map(move |x| (x, y)))
+            .filter(|&(x, y)| cell.get(x, y) != 0)
+            .map(|(x, y)| (x as i32, y as i32, pal[cell.get(x, y) as usize].map(i32::from)))
+            .collect();
+        if opaque.len() < min_opaque.max(1) {
+            continue;
+        }
+        let limit = (max_miss * opaque.len() as f64).floor() as usize;
+        let (w, h) = (cell.width as i32, cell.height as i32);
+        for y in y0..=y1 - h {
+            for x in x0..=x1 - w {
+                let mut misses = 0;
+                for &(dx, dy, c) in &opaque {
+                    let i = (((y + dy) * iw + x + dx) * 3) as usize;
+                    if (0..3).map(|j| (img.2[i + j] as i32 - c[j]).abs()).sum::<i32>() > tol {
+                        misses += 1;
+                        if misses > limit {
+                            break;
+                        }
+                    }
+                }
+                if misses <= limit {
+                    found.push(Placement { cell: *k, x, y, w, h, misses, opaque: opaque.len() });
+                }
+            }
+        }
+    }
+    found.sort_by(|a, b| a.miss_ratio().total_cmp(&b.miss_ratio()).then(b.opaque.cmp(&a.opaque)));
+    let mut kept: Vec<Placement> = Vec::new();
+    for p in found {
+        if kept.iter().all(|q| 2 * p.overlap(q) <= (p.w * p.h).min(q.w * q.h)) {
+            kept.push(p);
+        }
+    }
+    kept
 }

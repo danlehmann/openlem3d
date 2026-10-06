@@ -231,6 +231,58 @@ enum Cmd {
         #[arg(long)]
         out: PathBuf,
     },
+    /// Find where cells of a user-interface sprite set appear in screenshots,
+    /// drawn 1:1 with palette index 0 transparent. Prints one line per
+    /// placement, best first, in game pixels.
+    UiFind {
+        /// Screenshots (PNG), each searched separately.
+        #[arg(required = true)]
+        shots: Vec<PathBuf>,
+        /// Sprite set: logo, buttons, ratings, faces, title-font, letters,
+        /// icons-small, panel, labels, font-small, font-large, minilemm,
+        /// bombnumb, cogs, mouse, deflicon, pracicon, endlemms, winder; or
+        /// raw:PATH:WIDTH for a whole headerless file as one image.
+        #[arg(long)]
+        set: String,
+        /// Cells to try, as FIRST..END. Defaults to all cells.
+        #[arg(long)]
+        cells: Option<String>,
+        /// Area to search, as X,Y,W,H in game pixels. Defaults to the whole
+        /// game screen.
+        #[arg(long)]
+        rect: Option<String>,
+        /// The game screen inside the screenshot, as X,Y,W,H. Defaults to the
+        /// whole screenshot.
+        #[arg(long)]
+        screen: Option<String>,
+        /// The game's resolution, as W,H. The screen area is resampled
+        /// (nearest neighbour) to it before searching, so a 320×200 mode shown
+        /// at 640×480 is searched at 320×200. Defaults to the screen size.
+        #[arg(long)]
+        game: Option<String>,
+        /// Palette file on the disc.
+        #[arg(long, default_value = "GFX/LM3D.PAL")]
+        palette: String,
+        /// Largest summed absolute RGB difference at which a pixel matches.
+        #[arg(long, default_value_t = 12)]
+        tol: i32,
+        /// Largest fraction of a cell's opaque pixels that may mismatch.
+        #[arg(long, default_value_t = 0.05)]
+        max_miss: f64,
+        /// Cells with fewer opaque pixels are skipped.
+        #[arg(long, default_value_t = 12)]
+        min_opaque: usize,
+        /// Mirror the cells left to right before searching.
+        #[arg(long)]
+        mirrored: bool,
+        /// Also write the resampled game screen of each screenshot to this
+        /// directory, under the screenshot's file name.
+        #[arg(long)]
+        save: Option<PathBuf>,
+        /// Most placements printed per screenshot.
+        #[arg(long, default_value_t = 40)]
+        top: usize,
+    },
     /// Render a raw 8-bit indexed image file from the disc to PNG.
     Png {
         path: String,
@@ -985,6 +1037,47 @@ fn main() -> Result<()> {
             anyhow::ensure!(*scale > 0, "scale must be at least 1");
             ui::render(&mut open_fs(&disc)?, out, parts, *scale)?;
         }
+        Cmd::UiFind { shots, set, cells, rect, screen, game, palette, tol, max_miss, min_opaque, mirrored, save, top } => {
+            let mut fs = open_fs(&disc)?;
+            let all = ui::sprite_set(&mut fs, set)?;
+            let pal = ui::palette(&mut fs, palette)?;
+            let chosen: Vec<_> = cell_range(cells.as_deref(), all.len())?
+                .map(|k| {
+                    let c = &all[k];
+                    let px = match mirrored {
+                        true => c.pixels.chunks(c.width).flat_map(|r| r.iter().rev()).copied().collect(),
+                        false => c.pixels.clone(),
+                    };
+                    Ok((k, l3d_formats::image::IndexedImage::new(c.width, c.height, px)?))
+                })
+                .collect::<Result<_>>()?;
+            let game = game.as_deref().map(parse_size).transpose()?;
+            for shot in shots {
+                let img = read_rgb(shot)?;
+                let [sx, sy, sw, sh] = match screen {
+                    Some(s) => parse_rect(s)?,
+                    None => [0, 0, img.0 as i32, img.1 as i32],
+                };
+                let (gw, gh) = game.unwrap_or((sw, sh));
+                let mut px = Vec::with_capacity((gw * gh * 3) as usize);
+                for y in 0..gh {
+                    for x in 0..gw {
+                        // The screenshot pixel at the centre of game pixel (x, y).
+                        let (u, v) = (sx + (2 * x + 1) * sw / (2 * gw), sy + (2 * y + 1) * sh / (2 * gh));
+                        px.extend_from_slice(&crop_rgb(&img, [u, v, 1, 1]));
+                    }
+                }
+                let resampled = (gw as u32, gh as u32, px);
+                if let Some(dir) = save {
+                    write_rgb_png(&dir.join(shot.file_name().context("screenshot path")?), resampled.0, &resampled.2)?;
+                }
+                let area = rect.as_deref().map(parse_rect).transpose()?.unwrap_or([0, 0, gw, gh]);
+                println!("{}", shot.display());
+                for p in ui::find(&resampled, &chosen, &pal, area, *tol, *max_miss, *min_opaque).iter().take(*top) {
+                    println!("  cell {:3} at ({},{}) {}x{}: {}/{} opaque pixels differ", p.cell, p.x, p.y, p.w, p.h, p.misses, p.opaque);
+                }
+            }
+        }
         Cmd::Png { path, width, palette, skip, out } => {
             let mut fs = open_fs(&disc)?;
             let pal = load_palette(&mut fs, palette)?;
@@ -1005,4 +1098,12 @@ fn id_char(id: u8) -> char {
         36..=61 => (b'A' + id - 36) as char,
         _ => '*',
     }
+}
+
+/// Parses W,H.
+fn parse_size(s: &str) -> Result<(i32, i32)> {
+    s.split_once(',')
+        .and_then(|(w, h)| Some((w.trim().parse().ok()?, h.trim().parse().ok()?)))
+        .filter(|&(w, h)| w > 0 && h > 0)
+        .context("size must be W,H with W, H > 0")
 }

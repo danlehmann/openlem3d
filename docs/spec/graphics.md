@@ -34,7 +34,7 @@ preview screens.
 | `ANIMOBJ` | 64 | 64×256: four 64×64 animation frames? | Unverified |
 | `SEA` | 64? | 16,384 bytes: 128×128 or 64×256? | Unverified |
 | `TRAPS` | 64 | 64×512: animation frames | Unverified |
-| `BGRD` | 320 | 320×48 | Unverified |
+| `BGRD` | 320 | 320×48: the scrolling backdrop of the title and code screens, palette `LM3D.PAL` | Verified in the running game ([ui-graphics.md](ui-graphics.md#title-screen-main-menu)) |
 
 ## `OBJ` packing (verified)
 
