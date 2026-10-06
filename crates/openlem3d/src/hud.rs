@@ -85,6 +85,23 @@ fn lemming_centre(l: &l3d_sim::Lemming) -> Vec3 {
     Vec3::from_array(l.pos.map(|v| v as f32 / SUB as f32)) + Vec3::Y * 0.2
 }
 
+/// The lemming nearest a screen point (logical pixels), if one is close
+/// enough to click.
+pub fn lemming_at(sim: &l3d_sim::Simulation, camera: &SceneCamera, size: Vec2, point: Vec2) -> Option<usize> {
+    let mut best: Option<(usize, f32)> = None;
+    for (i, l) in sim.lemmings.iter().enumerate() {
+        if l.gone {
+            continue;
+        }
+        let Some((screen, px_per_unit)) = to_screen(camera, size, lemming_centre(l)) else { continue };
+        let d = screen.distance(point);
+        if d < PICK_RADIUS_UNITS * px_per_unit.max(20.0) && best.is_none_or(|(_, bd)| d < bd) {
+            best = Some((i, d));
+        }
+    }
+    best.map(|(i, _)| i)
+}
+
 /// The lemming a first turner click picked; the next click picks the side it
 /// points to, as in the original.
 #[derive(Resource, Default)]
@@ -144,25 +161,15 @@ fn assign_on_pointer(
         sim.assign_turner(i, if side(acw) >= side(cw) { acw } else { cw });
         return;
     }
-    let mut best: Option<(usize, f32)> = None;
-    for (i, l) in sim.lemmings.iter().enumerate() {
-        if l.gone {
-            continue;
-        }
-        let Some((screen, px_per_unit)) = to_screen(&camera, size, lemming_centre(l)) else { continue };
-        let d = screen.distance(point);
-        if d < PICK_RADIUS_UNITS * px_per_unit.max(20.0) && best.is_none_or(|(_, bd)| d < bd) {
-            best = Some((i, d));
-        }
-    }
+    let best = lemming_at(sim, &camera, size, point);
     if picking {
-        if let Some((i, _)) = best {
+        if let Some(i) = best {
             lemming_cam.pick(i);
         }
         return;
     }
     let Some(skill) = selected.0 else { return };
-    if let Some((i, _)) = best {
+    if let Some(i) = best {
         if skill == Skill::Turner {
             if sim.can_assign(i, skill) {
                 pending.0 = Some(i);
