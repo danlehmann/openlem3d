@@ -19,6 +19,8 @@ pub enum AppState {
     /// The level's briefing, before it starts.
     Briefing,
     Playing,
+    /// The end-of-level screen.
+    Results,
 }
 
 /// The difficulty ratings in file order; level `n` (1-based) of rating `r`

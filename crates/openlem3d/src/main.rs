@@ -19,6 +19,7 @@ mod title;
 mod touch;
 mod lemming_render;
 mod level_mesh;
+mod results;
 mod scene_build;
 mod scene_render;
 
@@ -150,7 +151,7 @@ fn main() {
                     ..default()
                 }),
         )
-        .add_plugins((SceneRenderPlugin, hud::HudPlugin, menu::MenuPlugin, music::MusicPlugin, touch::TouchPlugin, title::TitlePlugin, lemming_cam::LemmingCamPlugin, panel::PanelPlugin, briefing::BriefingPlugin, minimap::MinimapPlugin))
+        .add_plugins((SceneRenderPlugin, hud::HudPlugin, menu::MenuPlugin, music::MusicPlugin, touch::TouchPlugin, title::TitlePlugin, lemming_cam::LemmingCamPlugin, panel::PanelPlugin, briefing::BriefingPlugin, minimap::MinimapPlugin, results::ResultsPlugin))
         .insert_resource(ClearColor(Color::srgb(0.35, 0.55, 0.85)))
         .insert_resource(opts.clone())
         .insert_resource(Data(data))

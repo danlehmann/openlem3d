@@ -56,6 +56,7 @@ See `docs/spec/` for what has been verified and how.
 | Nuke | Alt+Q, or click the bomb | tap the bomb |
 | Mute music | M | — |
 | Briefing | click or Space: play; Enter or click Preview: preview; right click, Esc or click Menu: back | tap to play, or tap Preview or Menu |
+| Results | click, Space or Enter: next level (or retry); right click or Esc: level list | tap; or tap Menu |
 | Level select | Esc | — |
 
 ## Repository layout

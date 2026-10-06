@@ -1,5 +1,5 @@
 //! Assigning skills by clicking or tapping a lemming, the turner's second
-//! click, bomber countdowns and the end-of-level result. The skill panel
+//! click and bomber countdowns. The skill panel
 //! itself is in `panel`. Works with mouse, keyboard and touch.
 
 use bevy::prelude::*;
@@ -17,41 +17,20 @@ impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SelectedSkill>()
             .init_resource::<PendingTurner>()
-            .add_systems(Startup, (spawn_hud, spawn_turner_marker))
+            .add_systems(Startup, spawn_turner_marker)
             .add_systems(
                 Update,
-                (skill_keys, nuke_key, result_panel, bomber_countdown, assign_on_pointer)
+                (skill_keys, nuke_key, bomber_countdown, assign_on_pointer)
                     .chain()
                     .run_if(in_state(AppState::Playing)),
             )
-            .add_systems(Update, (show_in_play, place_turner_marker));
-    }
-}
-
-/// Shows the HUD only while a level is being played.
-fn show_in_play(state: Res<State<AppState>>, mut roots: Query<&mut Visibility, With<HudRoot>>) {
-    if !state.is_changed() {
-        return;
-    }
-    let v = if *state.get() == AppState::Playing { Visibility::Inherited } else { Visibility::Hidden };
-    for mut vis in &mut roots {
-        *vis = v;
+            .add_systems(Update, place_turner_marker);
     }
 }
 
 /// The skill the next click or tap assigns.
 #[derive(Resource, Default)]
 pub struct SelectedSkill(pub Option<Skill>);
-
-/// Marks the top-level HUD nodes, hidden outside play.
-#[derive(Component)]
-struct HudRoot;
-
-/// The end-of-level panel and its text.
-#[derive(Component)]
-struct ResultPanel;
-#[derive(Component)]
-struct ResultText;
 
 /// A countdown digit floating over a bomber.
 #[derive(Component)]
@@ -114,50 +93,6 @@ fn nuke_key(keys: Res<ButtonInput<KeyCode>>, mut game: ResMut<Game>) {
         && let Some(sim) = &mut game.sim
     {
         sim.nuke();
-    }
-}
-
-fn spawn_hud(mut commands: Commands) {
-    commands.spawn((
-        ResultPanel,
-        HudRoot,
-        Node {
-            position_type: PositionType::Absolute,
-            top: percent(30),
-            left: percent(25),
-            width: percent(50),
-            padding: UiRect::all(px(16)),
-            justify_content: JustifyContent::Center,
-            ..default()
-        },
-        BackgroundColor(Color::srgba(0.05, 0.05, 0.12, 0.9)),
-        Visibility::Hidden,
-        children![(
-            Text::new(""),
-            TextFont { font_size: FontSize::Px(22.0), ..default() },
-            TextLayout::justify(Justify::Center),
-            ResultText,
-        )],
-    ));
-}
-
-/// Shows the result panel once the level is over.
-fn result_panel(
-    game: Res<Game>,
-    mut panel: Query<&mut Visibility, With<ResultPanel>>,
-    mut text: Query<&mut Text, With<ResultText>>,
-) {
-    let Some(sim) = &game.sim else { return };
-    let done = sim.finished();
-    for mut v in &mut panel {
-        *v = if done { Visibility::Inherited } else { Visibility::Hidden };
-    }
-    if done {
-        let saved = sim.counts.saved;
-        let verdict = if saved >= game.save_requirement { "Level complete!" } else { "Not enough lemmings saved." };
-        for mut t in &mut text {
-            t.0 = format!("{verdict}\nSaved {saved}, needed {}\n\nEsc: choose a level", game.save_requirement);
-        }
     }
 }
 

@@ -45,9 +45,9 @@ struct BriefingRoot;
 
 /// A theme's picture and its four prompt cells, uploaded.
 #[derive(Clone)]
-struct ScenePics {
-    picture: Handle<Image>,
-    prompts: Vec<Handle<Image>>,
+pub(crate) struct ScenePics {
+    pub(crate) picture: Handle<Image>,
+    pub(crate) prompts: Vec<Handle<Image>>,
 }
 
 fn upload(img: &IndexedImage, pal: &l3d_formats::gamedata::Palette, images: &mut Assets<Image>) -> Handle<Image> {
@@ -63,7 +63,7 @@ fn upload(img: &IndexedImage, pal: &l3d_formats::gamedata::Palette, images: &mut
 }
 
 /// Loads `SCENEnnn.SVG` (640×480) with its palette.
-fn load_scene(data: &mut Data, theme: u8, images: &mut Assets<Image>) -> Option<ScenePics> {
+pub(crate) fn load_scene(data: &mut Data, theme: u8, images: &mut Assets<Image>) -> Option<ScenePics> {
     let d = &mut data.0;
     let scene = screen::scene(&d.read(&format!("GFX/SCENE{theme:03}.SVG")).ok()?, screen::HIGH_RES).ok()?;
     let pal = d.palette(&format!("GFX/SCENE{theme:03}.SVP")).ok()?;
