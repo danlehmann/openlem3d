@@ -158,6 +158,15 @@ fn rotate_dir(d: FaceDir, r: u8) -> FaceDir {
     d
 }
 
+/// The quarter turns actually applied to a cell: the stored rotation plus a
+/// per-shape correction to our base shapes. The outer-corner pieces (10, 11)
+/// need one extra quarter turn to match the original (verified visually on
+/// the pyramids of `LEVEL.029`).
+pub fn effective_rotation(shape: u8, rotation: u8) -> u8 {
+    let correction = if matches!(shape, 10 | 11) { 1 } else { 0 };
+    (rotation + correction) % 4
+}
+
 /// Rotates a local point about the cell's vertical centre line, matching
 /// [`rotate_dir`].
 fn rotate_point(p: [f32; 3], r: u8) -> [f32; 3] {
@@ -203,7 +212,7 @@ fn face_tiles(texture: u8, mods: u8) -> (u32, u32) {
         match texture {
             0x08..=0x13 => {
                 let front = 43 + (texture - 0x08) as u32;
-                let back = if (front - 43) % 2 == 0 { front + 1 } else { front - 1 };
+                let back = if (front - 43).is_multiple_of(2) { front + 1 } else { front - 1 };
                 return (front, back);
             }
             0x14..=0x16 => return (0, 0),
@@ -319,7 +328,7 @@ pub fn build(level: &Level, blocks: &BlockSet) -> LevelMesh {
                 .verts
                 .iter()
                 .map(|v| {
-                    let r = rotate_point([v[0], y0 + v[1] * (y1 - y0), v[2]], cell.rotation);
+                    let r = rotate_point([v[0], y0 + v[1] * (y1 - y0), v[2]], effective_rotation(cell.shape, cell.rotation));
                     [r[0] + origin[0], r[1] + origin[1], r[2] + origin[2]]
                 })
                 .collect();
@@ -334,7 +343,7 @@ pub fn build(level: &Level, blocks: &BlockSet) -> LevelMesh {
         for (mut verts, mut uvs, p) in placed {
             // Faces on the cell boundary are hidden by an opaque neighbour.
             if let Some(local) = p.on_face {
-                let world = rotate_dir(local, cell.rotation);
+                let world = rotate_dir(local, effective_rotation(cell.shape, cell.rotation));
                 let on_boundary = match world {
                     FaceDir::PosY => y1 >= 1.0,
                     FaceDir::NegY => y0 <= 0.0,

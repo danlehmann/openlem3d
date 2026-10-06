@@ -225,7 +225,10 @@ pub fn inside_shape(block: BlockCell, l: [f32; 3]) -> bool {
     if l[1] < lo || l[1] >= hi {
         return false;
     }
-    let [x, y, z] = to_shape_space(l, block.rotation);
+    // Outer-corner pieces (10, 11) carry one extra quarter turn, matching the
+    // renderer (`level_mesh::effective_rotation`).
+    let rotation = (block.rotation + if matches!(block.shape, 10 | 11) { 1 } else { 0 }) % 4;
+    let [x, y, z] = to_shape_space(l, rotation);
     let t = (y - lo) / (hi - lo); // height within the block, 0..1
     // Square pyramid profile: 1 at the centre column, 0 at the edges.
     let cone = 1.0 - 2.0 * (x - 0.5).abs().max((z - 0.5).abs());
