@@ -56,6 +56,13 @@ The directory must contain one `.cue` file. The file names can be anything.
 
 ## Gameplay decisions
 
+- **Never force the player to watch anything.** Intros, title animations,
+  briefings, result screens and transitions are all skippable at once by any
+  key, click or tap. Menus accept input from their very first frame, and
+  animations play alongside input instead of gating it. Slow original
+  sequences (such as the title animation) are kept for the look, but never
+  as waiting time.
+
 - **All levels are unlocked from the start.** A level-select screen gives
   direct access to every level.
 - **Level codes still work.** Entering an original level code jumps to the
