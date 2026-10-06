@@ -299,6 +299,7 @@ fn buttons(
     mut views: Query<&mut ViewCamera>,
     cameras: Option<Res<LevelInfo>>,
     mut preset: ResMut<PresetIndex>,
+    mut sfx: MessageWriter<crate::sfx::Sfx>,
 ) {
     for (interaction, action) in &pressed {
         if *interaction != Interaction::Pressed {
@@ -312,7 +313,12 @@ fn buttons(
                     selected.0 = Some(s);
                 }
             }
-            Action::Nuke => sim.nuke(),
+            Action::Nuke => {
+                if !sim.nuked {
+                    sfx.write(crate::sfx::Sfx("VOXFX/GEDDON1"));
+                }
+                sim.nuke();
+            }
             Action::FastForward => game.fast_forward = !game.fast_forward,
             Action::Pause => game.paused = !game.paused,
             Action::Camera => {

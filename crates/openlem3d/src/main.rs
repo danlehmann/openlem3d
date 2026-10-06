@@ -23,6 +23,7 @@ mod level_mesh;
 mod results;
 mod scene_build;
 mod scene_render;
+mod sfx;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -152,7 +153,7 @@ fn main() {
                     ..default()
                 }),
         )
-        .add_plugins((SceneRenderPlugin, hud::HudPlugin, menu::MenuPlugin, music::MusicPlugin, touch::TouchPlugin, title::TitlePlugin, lemming_cam::LemmingCamPlugin, panel::PanelPlugin, briefing::BriefingPlugin, minimap::MinimapPlugin, results::ResultsPlugin, pointer::PointerPlugin))
+        .add_plugins((SceneRenderPlugin, hud::HudPlugin, menu::MenuPlugin, music::MusicPlugin, touch::TouchPlugin, title::TitlePlugin, lemming_cam::LemmingCamPlugin, panel::PanelPlugin, briefing::BriefingPlugin, minimap::MinimapPlugin, results::ResultsPlugin, pointer::PointerPlugin, sfx::SfxPlugin))
         .insert_resource(ClearColor(Color::srgb(0.35, 0.55, 0.85)))
         .insert_resource(opts.clone())
         .insert_resource(Data(data))

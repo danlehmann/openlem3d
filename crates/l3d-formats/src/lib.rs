@@ -15,6 +15,7 @@ pub mod mhc;
 pub mod rnc;
 pub mod screen;
 pub mod sheets;
+pub mod sound;
 pub mod title;
 
 #[derive(Debug, thiserror::Error)]

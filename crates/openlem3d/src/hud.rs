@@ -121,6 +121,7 @@ fn assign_on_pointer(
     mut pending: ResMut<PendingTurner>,
     mut lemming_cam: ResMut<LemmingCam>,
     mut game: ResMut<Game>,
+    mut sfx: MessageWriter<crate::sfx::Sfx>,
 ) {
     let Some(sim) = &mut game.sim else { return };
     let picking = lemming_cam.picking();
@@ -158,7 +159,8 @@ fn assign_on_pointer(
             tip.map_or(f32::MIN, |(tip, _)| (tip - at).normalize_or_zero().dot((point - at).normalize_or_zero()))
         };
         let (acw, cw) = (l.dir.anticlockwise(), l.dir.clockwise());
-        sim.assign_turner(i, if side(acw) >= side(cw) { acw } else { cw });
+        let ok = sim.assign_turner(i, if side(acw) >= side(cw) { acw } else { cw });
+        sfx.write(crate::sfx::Sfx(if ok { "VOXFX/OK2" } else { "VOXFX/UH_UH1" }));
         return;
     }
     let best = lemming_at(sim, &camera, size, point);
@@ -173,9 +175,12 @@ fn assign_on_pointer(
         if skill == Skill::Turner {
             if sim.can_assign(i, skill) {
                 pending.0 = Some(i);
+            } else {
+                sfx.write(crate::sfx::Sfx("VOXFX/UH_UH1"));
             }
         } else {
-            sim.assign(i, skill);
+            let ok = sim.assign(i, skill);
+            sfx.write(crate::sfx::Sfx(if ok { "VOXFX/OK2" } else { "VOXFX/UH_UH1" }));
         }
     }
 }

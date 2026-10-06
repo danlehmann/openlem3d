@@ -188,6 +188,7 @@ const ORBIT_RADIUS: f32 = 14.0;
 const ORBIT_HEIGHT: f32 = 4.0;
 const ORBIT_SPEED: f32 = 0.35;
 
+#[allow(clippy::too_many_arguments)]
 fn preview(
     time: Res<Time>,
     keys: Res<ButtonInput<KeyCode>>,

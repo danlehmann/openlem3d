@@ -285,6 +285,27 @@ pub struct Counts {
     pub dead: u32,
 }
 
+/// Something a lemming did that the player hears (`docs/spec/sound.md`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Event {
+    Exited,
+    Drowned,
+    Splatted,
+    Exploded,
+    Zapped,
+    Trapped,
+    Climbed,
+    UmbrellaOpened,
+    Bounced,
+    Catapulted,
+    Teleported,
+    Brick,
+    BuilderDone,
+    Dug,
+    Bashed,
+    Mined,
+}
+
 /// A stationary lemming that redirects walkers.
 #[derive(Debug, Clone, Copy)]
 struct Obstacle {
@@ -317,6 +338,8 @@ pub struct Simulation {
     next_entrance: usize,
     /// Splitter cells, and whether the next walker through goes left.
     splitters: Vec<([i32; 3], bool)>,
+    /// Events since the last [`Simulation::take_events`].
+    events: Vec<Event>,
     /// The level's interactive objects and what they all are.
     pub object_kind: Option<objects::ObjectKind>,
     pub objects: Vec<objects::Object>,
@@ -366,6 +389,7 @@ impl Simulation {
             tick: 0,
             release_timer: 0,
             next_entrance: 0,
+            events: Vec::new(),
             object_kind: objects::level_objects(level).map(|(k, _)| k),
             objects: objects::level_objects(level).map(|(_, o)| o).unwrap_or_default(),
             splitters: level
@@ -485,9 +509,52 @@ impl Simulation {
             if !self.lemmings[i].gone {
                 let mut l = self.lemmings[i].clone();
                 self.update(&mut l, &obstacles);
+                let before = &self.lemmings[i];
+                if let Some(e) = self.event_for(before, &l) {
+                    self.events.push(e);
+                }
                 self.lemmings[i] = l;
             }
         }
+    }
+
+    /// What a lemming's update did that a player would hear.
+    fn event_for(&self, before: &Lemming, after: &Lemming) -> Option<Event> {
+        use objects::ObjectKind;
+        let (b, a) = (before.state, after.state);
+        let changed = std::mem::discriminant(&a) != std::mem::discriminant(&b) || after.state_ticks == 0;
+        if !before.teleported && after.teleported {
+            return Some(Event::Teleported);
+        }
+        if changed {
+            return match a {
+                State::Exiting => Some(Event::Exited),
+                State::Drowning => Some(Event::Drowned),
+                State::Splatting => Some(Event::Splatted),
+                State::Exploding => Some(Event::Exploded),
+                State::Zapped => Some(Event::Zapped),
+                State::Trapped => Some(Event::Trapped),
+                State::Climbing => Some(Event::Climbed),
+                State::Floating => Some(Event::UmbrellaOpened),
+                State::Flying { .. } if self.object_kind == Some(ObjectKind::Trampoline) => Some(Event::Bounced),
+                State::Flying { .. } => Some(Event::Catapulted),
+                State::Walking if matches!(b, State::Building { .. }) => Some(Event::BuilderDone),
+                _ => None,
+            };
+        }
+        let on = |n: u32| after.state_ticks.is_multiple_of(n);
+        match a {
+            State::Building { bricks_left } if matches!(b, State::Building { bricks_left: was } if was > bricks_left) => Some(Event::Brick),
+            State::Digging if on(DIG_TICKS) => Some(Event::Dug),
+            State::Bashing if on(BASH_TICKS) => Some(Event::Bashed),
+            State::Mining if on(MINE_TICKS) => Some(Event::Mined),
+            _ => None,
+        }
+    }
+
+    /// Drains the events since the last call.
+    pub fn take_events(&mut self) -> Vec<Event> {
+        std::mem::take(&mut self.events)
     }
 
     /// Changes the release rate by `delta`, between the level's starting rate

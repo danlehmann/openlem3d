@@ -273,34 +273,28 @@ fn block_top(y: usize, block: BlockCell) -> Option<f32> {
     (block.segments != 0).then(|| y as f32 + (8 - block.segments.leading_zeros()) as f32 / 4.0)
 }
 
-/// Interactive objects (`0x60`–`0x67`) from the level's `TRAPS` sheet of
-/// 64×64 frames. Trampolines are flat top-down pads on their block; other
-/// types are side-view sprites. Placement follows [L3DEdit] (unverified);
-/// objects show their first frame until the simulation animates them.
+/// Trampoline pads (`0x60`–`0x67` on a trampoline level) from the level's
+/// `TRAPS` sheet of 64×64 frames, flat on top of their block ([L3DEdit],
+/// unverified). Other interactive objects are sprites drawn each frame with
+/// the lemmings (`lemming_render`), so they can animate.
 fn trap_layer(data: &mut GameData, level: &Level, pal: &Palette) -> Option<SceneLayer> {
-    let kind = level.trap_type;
-    let traps = (kind != 0xFF).then(|| data.gfx("TRAPS", kind).ok()).flatten()?;
+    if level.trap_type != TRAP_TRAMPOLINE {
+        return None;
+    }
+    let traps = data.gfx("TRAPS", level.trap_type).ok()?;
     let tex = [64.0, (traps.len() / 64) as f32];
     let mut b = LayerBuilder::default();
     for (x, y, z, block, o) in level.cells() {
         if !(0x60..=0x67).contains(&o.kind) {
             continue;
         }
-        let top = block_top(y, block);
-        match kind {
-            TRAP_TRAMPOLINE => {
-                // Pads need a block to lie on ([L3DEdit]).
-                let Some(top) = top else { continue };
-                // Red pads use frames 0–3, blue pads frames 4–7.
-                let frame = if o.kind >= 0x64 { 4.0 } else { 0.0 };
-                let y = top + DECAL_OFFSET;
-                let (x0, z0, x1, z1) = (x as f32, z as f32, x as f32 + 1.0, z as f32 + 1.0);
-                b.quad([[x0, y, z1], [x1, y, z1], [x1, y, z0], [x0, y, z0]], [0.0, frame * 64.0, 64.0, 64.0], tex, 1.0);
-            }
-            // Other objects are sprites drawn each frame with the lemmings
-            // (`lemming_render`), so they can animate.
-            _ => {}
-        }
+        // Pads need a block to lie on ([L3DEdit]).
+        let Some(top) = block_top(y, block) else { continue };
+        // Red pads use frames 0–3, blue pads frames 4–7.
+        let frame = if o.kind >= 0x64 { 4.0 } else { 0.0 };
+        let y = top + DECAL_OFFSET;
+        let (x0, z0, x1, z1) = (x as f32, z as f32, x as f32 + 1.0, z as f32 + 1.0);
+        b.quad([[x0, y, z1], [x1, y, z1], [x1, y, z0], [x0, y, z0]], [0.0, frame * 64.0, 64.0, 64.0], tex, 1.0);
     }
     (!b.indices.is_empty()).then(|| b.finish(indexed_to_rgba(&traps, 64, pal)))
 }

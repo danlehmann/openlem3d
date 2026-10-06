@@ -626,6 +626,7 @@ fn title_input(
     mut next: ResMut<NextState<AppState>>,
     mut muted: ResMut<crate::music::MusicMuted>,
     mut exit: MessageWriter<AppExit>,
+    mut sfx: MessageWriter<crate::sfx::Sfx>,
 ) {
     let mut pressed: Vec<TitleButton> =
         buttons.iter().filter(|(i, _)| **i == Interaction::Pressed).map(|(_, b)| *b).collect();
@@ -644,6 +645,16 @@ fn title_input(
         rating.0 = (rating.0 + 4) % 5;
     }
     for b in pressed {
+        let voice = match b {
+            TitleButton::Play => Some("VOXFX/PLAY"),
+            TitleButton::Code => Some("VOXFX/CODE"),
+            TitleButton::Options => Some("VOXFX/OPTIONS"),
+            TitleButton::Exit => Some("VOXFX/BYEBYE1"),
+            TitleButton::Rating => None,
+        };
+        if let Some(v) = voice {
+            sfx.write(crate::sfx::Sfx(v));
+        }
         match b {
             TitleButton::Play => next.set(AppState::Menu),
             TitleButton::Code => next.set(AppState::Code),
@@ -715,6 +726,7 @@ fn code_input(
     mut code: ResMut<CodeText>,
     mut current: ResMut<CurrentLevel>,
     mut next: ResMut<NextState<AppState>>,
+    mut sfx: MessageWriter<crate::sfx::Sfx>,
 ) {
     use bevy::input::keyboard::Key;
     let now = time.elapsed_secs();
@@ -732,6 +744,7 @@ fn code_input(
                 for c in s.chars().filter(|c| c.is_ascii_alphabetic()) {
                     if code.letters.len() < MAX_CODE_LEN {
                         code.letters.push((c.to_ascii_uppercase() as u8, now));
+                        sfx.write(crate::sfx::Sfx("VOXFX/HUP3"));
                     }
                 }
             }
@@ -746,10 +759,14 @@ fn code_input(
             Key::Enter => {
                 let text: String = code.letters.iter().map(|(c, _)| *c as char).collect();
                 match crate::codes::level_for_code(&text) {
-                    Some(n) => code.accepted = Some((now, n)),
+                    Some(n) => {
+                        code.accepted = Some((now, n));
+                        sfx.write(crate::sfx::Sfx("SPOTFX/POSITIVE"));
+                    }
                     None => {
                         // An unknown code: the letters drop back into rows
                         // (the original returns to the title instead).
+                        sfx.write(crate::sfx::Sfx("SPOTFX/NEGATIVE"));
                         let letters = std::mem::take(&mut code.letters);
                         for (slot, (c, _)) in letters.into_iter().enumerate() {
                             code.erasing.push((slot, c, now));

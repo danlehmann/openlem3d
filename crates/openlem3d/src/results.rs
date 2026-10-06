@@ -42,13 +42,21 @@ const TEXT_SCALE: f32 = 1.5;
 const LEVELS: u32 = 100;
 
 /// Moves to the results once the level is over.
-fn level_over(mut commands: Commands, game: Res<Game>, current: Res<CurrentLevel>, mut next: ResMut<NextState<AppState>>) {
+fn level_over(
+    mut commands: Commands,
+    game: Res<Game>,
+    current: Res<CurrentLevel>,
+    mut next: ResMut<NextState<AppState>>,
+    mut sfx: MessageWriter<crate::sfx::Sfx>,
+) {
     let Some(sim) = &game.sim else { return };
     // Until the chosen level has loaded, the simulation is the last one's.
     if current.loaded != Some(current.number) || !sim.finished() || game.terrain.is_none() {
         return;
     }
-    commands.insert_resource(Outcome { level: current.number, saved: sim.counts.saved, total: sim.to_release.max(1), needed: game.save_requirement });
+    let outcome = Outcome { level: current.number, saved: sim.counts.saved, total: sim.to_release.max(1), needed: game.save_requirement };
+    sfx.write(crate::sfx::Sfx(if outcome.passed() { "VOXFX/CHEERS1" } else { "VOXFX/BOOS" }));
+    commands.insert_resource(outcome);
     next.set(AppState::Results);
 }
 
