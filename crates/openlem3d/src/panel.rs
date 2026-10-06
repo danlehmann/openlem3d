@@ -28,7 +28,7 @@ impl Plugin for PanelPlugin {
                     .chain()
                     .run_if(in_state(AppState::Playing)),
             )
-            .add_systems(Update, show_in_play)
+            .add_systems(Update, (show_in_play, show_minimap))
             .add_systems(OnEnter(AppState::Playing), select_first_skill);
     }
 }
@@ -196,7 +196,7 @@ enum Animated {
     Face,
 }
 
-fn spawn_panel(mut commands: Commands, art: Option<Res<Art>>) {
+fn spawn_panel(mut commands: Commands, art: Option<Res<Art>>, mut images: ResMut<Assets<Image>>) {
     let Some(art) = art else { return };
     let root = commands
         .spawn((PanelRoot, Node { position_type: PositionType::Absolute, width: percent(100), height: percent(100), ..default() }, Pickable::IGNORE))
@@ -214,6 +214,20 @@ fn spawn_panel(mut commands: Commands, art: Option<Res<Art>>) {
     };
     let icon24 = Vec2::splat(24.0);
     let p = |i: usize| art.panel[i].clone();
+    // The minimap and its frame (the map image arrives with the level).
+    let frame = images.add(crate::minimap::frame_image());
+    item(&mut commands, Vec2::ZERO, Vec2::splat(70.0), frame, None, None);
+    let map = commands
+        .spawn((
+            PanelPos { at: Vec2::splat(3.0), size: Vec2::splat(64.0) },
+            ImageNode::default(),
+            Node { position_type: PositionType::Absolute, ..default() },
+            Button,
+            crate::minimap::MinimapView,
+            Visibility::Hidden,
+        ))
+        .id();
+    commands.entity(root).add_child(map);
     // Right-hand column.
     item(&mut commands, Vec2::new(260.0, 0.0), Vec2::new(32.0, 16.0), art.labels[0].clone(), None, None);
     item(&mut commands, Vec2::new(260.0, 16.0), Vec2::new(32.0, 16.0), art.labels[1].clone(), None, None);
@@ -477,6 +491,20 @@ fn glyph_texts(
                 }
                 None => *vis = Visibility::Hidden,
             }
+        }
+    }
+}
+
+/// Shows the level's minimap image, unless the level hides its minimap.
+fn show_minimap(map: Option<Res<crate::minimap::Minimap>>, mut views: Query<(&mut ImageNode, &mut Visibility), With<crate::minimap::MinimapView>>) {
+    let Some(map) = map else { return };
+    for (mut node, mut vis) in &mut views {
+        if node.image != map.image {
+            node.image = map.image.clone();
+        }
+        let v = if map.shown { Visibility::Inherited } else { Visibility::Hidden };
+        if *vis != v {
+            *vis = v;
         }
     }
 }
