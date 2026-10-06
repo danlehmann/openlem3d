@@ -47,6 +47,8 @@ struct Options {
     size: Option<(u32, u32)>,
     /// Seconds after loading before `--screenshot` captures.
     wait: f32,
+    /// Hide all on-screen UI (for side-by-side comparisons with the original).
+    no_hud: bool,
 }
 
 fn parse_args() -> Options {
@@ -59,6 +61,7 @@ fn parse_args() -> Options {
         horizon: DEFAULT_HORIZON,
         size: None,
         wait: 0.5,
+        no_hud: false,
     };
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -71,6 +74,7 @@ fn parse_args() -> Options {
             "--fov" => o.fov_y = val().parse().expect("--fov takes degrees"),
             "--horizon" => o.horizon = val().parse().expect("--horizon takes a fraction"),
             "--wait" => o.wait = val().parse().expect("--wait takes seconds"),
+            "--no-hud" => o.no_hud = true,
             "--size" => {
                 let v = val();
                 let (w, h) = v.split_once('x').expect("--size takes WxH");
@@ -125,7 +129,7 @@ fn main() {
         .insert_resource(Data(data))
         .insert_resource(CurrentLevel { number: opts.level.unwrap_or(0), loaded: None })
         .insert_state(if opts.level.is_some() { menu::AppState::Playing } else { menu::AppState::Menu })
-        .add_systems(Update, screenshot_when_ready)
+        .add_systems(Update, (screenshot_when_ready, hide_ui))
         .insert_resource(Game::default())
         .insert_resource(Time::<Fixed>::from_hz(l3d_sim::TICKS_PER_SECOND as f64))
         .add_systems(FixedUpdate, step_simulation.run_if(in_state(menu::AppState::Playing)))
@@ -380,5 +384,15 @@ fn screenshot_when_ready(
     }
     if now >= shot_at + 0.5 {
         exit.write(AppExit::Success);
+    }
+}
+
+/// With `--no-hud`, hides every top-level UI node.
+fn hide_ui(opts: Res<Options>, mut roots: Query<&mut Visibility, (With<Node>, Without<ChildOf>)>) {
+    if !opts.no_hud {
+        return;
+    }
+    for mut v in &mut roots {
+        *v = Visibility::Hidden;
     }
 }
