@@ -38,6 +38,11 @@ See `docs/spec/` for what has been verified and how.
    `--level N` starts a level directly (0–99; see `docs/spec/level.md` for
    the numbering).
 
+   For testing without touching the keyboard: `--size WxH`, `--camera 1-4`,
+   `--assign TICK:LEMMING:SKILL[:cw|acw]`, `--press SECONDS:KEY` (Bevy key
+   names such as `Escape`, `F12`, `KeyP`, or `Click`), and
+   `--screenshot FILE --wait SECONDS`, which saves the window and quits.
+
 ## Controls
 
 | Action | Keyboard / mouse | Touch |

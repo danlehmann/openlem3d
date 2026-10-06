@@ -69,6 +69,8 @@ pub struct Options {
     screen: menu::AppState,
     /// With `--level`, start on that level's briefing (`--briefing`).
     briefing: bool,
+    /// Scripted presses `(seconds since start, key)`, from `--press SECONDS:KEY`.
+    press: Vec<(f32, String)>,
 }
 
 fn parse_args() -> Options {
@@ -86,6 +88,7 @@ fn parse_args() -> Options {
         follow: None,
         screen: menu::AppState::Title,
         briefing: false,
+        press: Vec::new(),
     };
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -110,6 +113,11 @@ fn parse_args() -> Options {
                 }
             }
             "--briefing" => o.briefing = true,
+            "--press" => {
+                let v = val();
+                let (t, k) = v.split_once(':').expect("--press takes SECONDS:KEY");
+                o.press.push((t.parse().expect("--press seconds"), k.to_string()));
+            }
             "--follow" => o.follow = Some(val().parse().expect("--follow takes a lemming number")),
             "--assign" => {
                 let v = val();
@@ -176,6 +184,7 @@ fn main() {
             None => opts.screen,
         })
         .add_systems(Update, (screenshot_when_ready, hide_ui))
+        .add_systems(PreUpdate, scripted_presses.after(bevy::input::InputSystems))
         .insert_resource(Game::default())
         .insert_resource(Time::<Fixed>::from_hz(l3d_sim::TICKS_PER_SECOND as f64))
         .init_resource::<PresetIndex>()
@@ -374,6 +383,7 @@ fn step_simulation(keys: Res<ButtonInput<KeyCode>>, options: Res<Options>, mut g
         sim.step();
         for (tick, i, skill, side) in &options.assign {
             if *tick == sim.tick
+                && replay.is_none()
                 && let (Some(skill), Some(dir)) = (l3d_sim::Skill::from_id(*skill), sim.lemmings.get(*i).map(|l| l.dir))
             {
                 match side.as_deref() {
@@ -607,4 +617,52 @@ fn refresh_scenery(
     };
     scene.version += 1;
     scene.data = Some(Arc::new(content));
+}
+
+/// Presses the keys given with `--press SECONDS:KEY` at their times, each
+/// for one frame: key names as in Bevy's `KeyCode` (`Escape`, `F12`, `KeyP`,
+/// `Digit1`, …), or `Click` for the left mouse button.
+fn scripted_presses(
+    opts: Res<Options>,
+    time: Res<Time<Real>>,
+    mut keys: ResMut<ButtonInput<KeyCode>>,
+    mut mouse: ResMut<ButtonInput<MouseButton>>,
+    mut done: Local<usize>,
+    mut held: Local<Vec<String>>,
+) {
+    for k in held.drain(..) {
+        match key_code(&k) {
+            Some(code) => keys.release(code),
+            None => mouse.release(MouseButton::Left),
+        }
+    }
+    let now = time.elapsed_secs();
+    while let Some((t, k)) = opts.press.get(*done).filter(|(t, _)| *t <= now) {
+        info!("scripted press {k} at {t} s");
+        match key_code(k) {
+            Some(code) => keys.press(code),
+            None if k == "Click" => mouse.press(MouseButton::Left),
+            None => warn!("--press: unknown key {k}"),
+        }
+        held.push(k.clone());
+        *done += 1;
+    }
+}
+
+fn key_code(name: &str) -> Option<KeyCode> {
+    Some(match name {
+        "Escape" => KeyCode::Escape,
+        "Enter" => KeyCode::Enter,
+        "Space" => KeyCode::Space,
+        "F12" => KeyCode::F12,
+        "KeyP" => KeyCode::KeyP,
+        "KeyV" => KeyCode::KeyV,
+        "KeyI" => KeyCode::KeyI,
+        "KeyM" => KeyCode::KeyM,
+        "Digit1" => KeyCode::Digit1,
+        "Digit2" => KeyCode::Digit2,
+        "Digit3" => KeyCode::Digit3,
+        "Digit4" => KeyCode::Digit4,
+        _ => return None,
+    })
 }
