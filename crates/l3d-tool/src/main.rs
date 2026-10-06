@@ -7,6 +7,8 @@ use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use l3d_formats::{blk::BlockSet, disc::Disc, iso9660::IsoFs, level::Level, rnc};
 
+mod ui;
+
 #[derive(Parser)]
 struct Cli {
     /// Directory containing the CD image (.cue + .bin). Defaults to
@@ -214,6 +216,20 @@ enum Cmd {
         /// Number of best matches to print.
         #[arg(long, default_value_t = 10)]
         top: usize,
+    },
+    /// Render the user-interface graphics (title screen, fonts, panel icons,
+    /// sprite sheets, intro slides, scenes, bitmaps) as PNG contact sheets.
+    /// See docs/spec/ui-graphics.md.
+    Ui {
+        /// Parts to render (title-mhc, title-menu, title-font, lemmings-font,
+        /// icons, sheets, loading, intro, scene, bmps). Defaults to all.
+        parts: Vec<String>,
+        /// Integer upscaling factor for sprite sheets.
+        #[arg(long, default_value_t = 2)]
+        scale: usize,
+        /// Output directory.
+        #[arg(long)]
+        out: PathBuf,
     },
     /// Render a raw 8-bit indexed image file from the disc to PNG.
     Png {
@@ -964,6 +980,10 @@ fn main() -> Result<()> {
                     println!("  cell {i:3}{m:9} at {x:4},{y:4} size {w:3}x{h:3}: mean abs diff {:.1}", f.score);
                 }
             }
+        }
+        Cmd::Ui { parts, scale, out } => {
+            anyhow::ensure!(*scale > 0, "scale must be at least 1");
+            ui::render(&mut open_fs(&disc)?, out, parts, *scale)?;
         }
         Cmd::Png { path, width, palette, skip, out } => {
             let mut fs = open_fs(&disc)?;

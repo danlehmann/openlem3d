@@ -5,11 +5,17 @@
 pub mod blk;
 pub mod cue;
 pub mod disc;
+pub mod font;
 pub mod gamedata;
+pub mod icons;
+pub mod image;
 pub mod iso9660;
 pub mod level;
 pub mod mhc;
 pub mod rnc;
+pub mod screen;
+pub mod sheets;
+pub mod title;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {

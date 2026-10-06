@@ -22,8 +22,7 @@ pub fn locate_data_dir(explicit: Option<&Path>) -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(DEFAULT_DATA_DIR))
 }
 
-/// A 256-colour palette with components scaled to 8 bits.
-pub type Palette = [[u8; 3]; 256];
+pub use crate::image::Palette;
 
 /// The mounted CD image.
 pub struct GameData {
@@ -59,13 +58,6 @@ impl GameData {
 
     /// Reads a 6-bit VGA palette file.
     pub fn palette(&mut self, path: &str) -> Result<Palette, Error> {
-        let raw = self.read(path)?;
-        if raw.len() != 768 {
-            return Err(Error::Format(format!("palette {path} is {} bytes", raw.len())));
-        }
-        Ok(std::array::from_fn(|i| std::array::from_fn(|c| {
-            let v = raw[i * 3 + c] & 0x3F;
-            (v << 2) | (v >> 4)
-        })))
+        crate::image::vga_palette(&self.read(path)?).map_err(|e| Error::Format(format!("{path}: {e}")))
     }
 }
