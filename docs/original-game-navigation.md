@@ -343,3 +343,25 @@ fast-forward (590,143); results screen "Next Level"/"Retry" (60,450) and
 "Menu" (600,450); main-menu cards Play (65,400), Code (190,400),
 Options (320,400), rating card (455,400, a click steps the rating forward).
 Clicking the nuke icon (540,143) worked only sometimes.
+
+Further findings from the code and camera runs **[verified]**:
+
+- **Mouse clicks skip the intro.** Left clicks every 2 s at a harmless spot
+  such as (366,232) reach the main menu in about 22 s, with no keys needed.
+  A click on the Code card (190,400) then opens the code screen.
+- **AUTOTYPE pacing.** With `-p 0.5`, each key or `,` took about 0.8–0.9 s
+  of real time, and the start of the script drifted by up to about 10 s
+  between runs. Key scripts that must hit a particular screen therefore need
+  slack, and the mouse side should synchronise on what is on screen: for
+  example, poll screenshots until the briefing appears (bright "Continue"
+  text around (90–170, 430–445)), then shift all later timings by the
+  measured offset. The briefing waits for its click, so a late click is safe.
+- **Camera views.** P (pause) and the camera keys 1–4, typed by AUTOTYPE,
+  work while the level runs or is paused. The camera icon shows the current
+  camera number in white near (513,200); grouping polled frames by that
+  digit separates the four views.
+- **CD check.** A host folder mounted as the CD (`MOUNT D dir -t cdrom`) is
+  rejected: the game prints "Please insert 3D Lemmings CD in drive and close
+  door" and exits. A CUE sheet whose data track is a 2048-byte-sector copy of
+  the original data track (`MODE1/2048`) and whose audio tracks point into
+  the original `.bin` is accepted (DOSBox-X reports its 23 audio tracks).

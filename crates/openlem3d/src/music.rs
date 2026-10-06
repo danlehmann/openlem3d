@@ -1,8 +1,7 @@
 //! Level music from the CD-audio tracks of the user's disc.
 //!
-//! The mapping from a level's theme and music index to a track is
-//! PROVISIONAL (see `docs/spec/disc.md`); it still has to be observed in the
-//! original game.
+//! A level's theme and music index select the track. Every pair that the
+//! 100 levels use was observed in the original game (`docs/spec/disc.md`).
 
 use std::sync::Arc;
 
@@ -29,23 +28,45 @@ impl Plugin for MusicPlugin {
 /// CD tracks observed in the original for (theme, music index) pairs
 /// (`docs/spec/disc.md`, "Level music").
 const OBSERVED_TRACKS: &[((u8, u8), u8)] = &[
+    ((1, 0), 13),
+    ((1, 1), 22),
     ((1, 2), 13),
+    ((2, 0), 8),
+    ((2, 1), 19),
+    ((2, 2), 8),
+    ((3, 0), 4),
+    ((3, 1), 15),
+    ((3, 2), 4),
+    ((4, 0), 14),
     ((4, 1), 23),
     ((4, 2), 14),
+    ((5, 0), 10),
+    ((5, 1), 21),
+    ((5, 2), 10),
+    ((6, 0), 7),
+    ((6, 1), 18),
+    ((6, 2), 7),
     ((7, 0), 5),
+    ((7, 1), 16),
+    ((7, 2), 5),
     ((8, 0), 9),
     ((8, 1), 20),
     ((8, 2), 9),
+    ((9, 0), 6),
+    ((9, 1), 17),
+    ((9, 2), 6),
+    ((10, 0), 11),
     ((10, 1), 12),
+    ((10, 2), 11),
 ];
 
 /// The CD track for a level's theme and music index: the observed track,
-/// or a placeholder for pairs not yet observed.
+/// or a placeholder for pairs that no original level uses.
 pub fn track_for(theme: u8, music: u8) -> u8 {
     if let Some(&(_, track)) = OBSERVED_TRACKS.iter().find(|(k, _)| *k == (theme, music)) {
         return track;
     }
-    // Placeholder (unverified): spread unobserved pairs over the audio tracks.
+    // Placeholder for pairs outside the observed table.
     let theme = theme.clamp(1, 10);
     2 + ((theme - 1) * 2 + (music & 1)) % 23
 }
