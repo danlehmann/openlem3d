@@ -415,7 +415,7 @@ identical placements in both video modes).
 
 | Element | Graphic (`ICONS.RNC` unless noted) | Position | Status |
 |---|---|---|---|
-| Minimap | frame drawn; map 64×64 | outer (0, 0)–(70, 70); map at (3, 3) | verified (pixel rows) |
+| Minimap | frame drawn; map 64×64 | outer (0, 0)–(70, 70); map at (3, 3) | verified (pixel rows). Content (by eye, four captures): a top-down map, two pixels per cell, X to the right and Z downwards; sea in its colour (blue, or red on a lava level), land green, blocks in their colours, the exit red, the hatch orange, lemmings as white dots and a yellow dot for the camera. Our implementation colours blocks by their top texture (a stone path shows grey where the original shows brown) |
 | Corner marks | 3×3 red squares | (0, 0), (317, 0), (0, 197) | estimated (pixel rows) |
 | "IN" label | labels cell 1 (32×16) | (260, 0) | verified (match) |
 | "OUT" label | labels cell 2 | (260, 16) | verified (match) |
