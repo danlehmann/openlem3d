@@ -834,6 +834,27 @@ impl Simulation {
             }
         }
         let ahead = [next[0] + d[0] * REACH, next[2] + d[2] * REACH];
+        // Deflectors: a walker meeting the diagonal face of a 45° wall turns a
+        // quarter, as if reflected, once its centre reaches the face
+        // (provisional). Their square backs are ordinary walls.
+        let body = l.pos[1] + SUB / 8;
+        let facing = |n: [i32; 2]| d[0] * n[0] + d[2] * n[1] < 0;
+        if let Some(n) = self.world.deflector_normal([ahead[0], body, ahead[1]]).filter(|&n| facing(n)) {
+            if self.world.deflector_normal([next[0], body, next[2]]).is_some() {
+                let k = d[0] * n[0] + d[2] * n[1];
+                let out = [d[0] - k * n[0], d[2] - k * n[1]];
+                l.dir = match out {
+                    [1, 0] => Dir::PosX,
+                    [-1, 0] => Dir::NegX,
+                    [0, 1] => Dir::PosZ,
+                    _ => Dir::NegZ,
+                };
+                return;
+            }
+            l.pos[0] = next[0];
+            l.pos[2] = next[2];
+            return;
+        }
         // The surface where the feet will be after this step: a step up of
         // more than STEP_UP there is a wall. (Probing further ahead would
         // read a 45° ramp as a wall.)

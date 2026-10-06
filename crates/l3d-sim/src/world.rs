@@ -219,6 +219,24 @@ impl World {
         inside_shape(cell.block, l)
     }
 
+    /// For a point inside a 45° deflector wall (shape 7): the outward normal
+    /// of its diagonal face, as `[x, z]` signs (each ±1).
+    pub fn deflector_normal(&self, p: [i32; 3]) -> Option<[i32; 2]> {
+        const DEFLECTOR: u8 = 7;
+        let c = p.map(|v| v.div_euclid(SUB));
+        let cell = self.cell(c[0], c[1], c[2])?;
+        if cell.block.shape != DEFLECTOR || !self.solid(p) {
+            return None;
+        }
+        // The diagonal that has solid on one side of the centre and open
+        // space on the other, whatever the rotation.
+        let ly = (p[1] - c[1] * SUB) as f32 / SUB as f32;
+        [[1, 1], [1, -1], [-1, 1], [-1, -1]].into_iter().find(|n| {
+            let at = |s: f32| [0.5 + s * n[0] as f32, ly, 0.5 + s * n[1] as f32];
+            !inside_shape(cell.block, at(0.3)) && inside_shape(cell.block, at(-0.3))
+        })
+    }
+
     /// The block whose geometry contains the point, if any.
     pub fn block_at(&self, p: [i32; 3]) -> Option<BlockCell> {
         let c = p.map(|v| v.div_euclid(SUB));
