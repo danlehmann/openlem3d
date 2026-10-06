@@ -8,7 +8,7 @@ pub mod world;
 
 use l3d_formats::blk::{BlockSet, flags};
 use l3d_formats::level::{Level, SIZE_X, SIZE_Y, SIZE_Z};
-pub use world::{Brick, Floor, SUB, World};
+pub use world::{Brick, Floor, GROUND, SUB, World};
 
 /// Simulation ticks per second (verified: 14 Hz, `docs/spec/behaviour.md`).
 pub const TICKS_PER_SECOND: u32 = 14;
@@ -715,26 +715,52 @@ impl Simulation {
             return;
         }
         let d = l.dir.delta();
-        let ahead = [l.pos[0] + d[0] * (SUB / 2), l.pos[1] - 1, l.pos[2] + d[2] * (SUB / 2)];
-        let cell = Self::cell_of(ahead);
-        let seg = ((ahead[1] - cell[1] * SUB) / (SUB / 4)).clamp(0, 3);
-        let mask = (0xFu8 << seg) & 0xF;
-        match self.world.block(cell) {
-            Some((_, f)) if f & flags::STEEL != 0 => l.set_state(State::Walking),
-            Some(_) => {
-                if !self.world.remove_segments_towards(cell, mask, Some(l.dir.delta())) {
+        // One swing moves the miner a quarter unit forward and down (45°),
+        // clearing the space its body needs there: from the new feet up to
+        // above head height, from the feet to past the walker's reach.
+        let feet = l.pos[1] - SUB / 4;
+        if feet < GROUND {
+            // The level bottom can't be mined.
+            l.set_state(State::Walking);
+            return;
+        }
+        let (y0, y1) = (feet, feet + HEAD_HEIGHT + STEP_UP);
+        let (h0, h1) = (0, SUB / 4 + REACH + WALK_SPEED);
+        let mut removed = false;
+        for along in (h0..=h1).step_by((SUB / 8) as usize) {
+            let p = [l.pos[0] + d[0] * along, l.pos[2] + d[2] * along];
+            let mut cells: Vec<([i32; 3], u8)> = Vec::new();
+            for y in (y0..y1).step_by((SUB / 4) as usize) {
+                let c = Self::cell_of([p[0], y, p[1]]);
+                let seg = (y - c[1] * SUB) / (SUB / 4);
+                match cells.iter_mut().find(|(k, _)| *k == c) {
+                    Some((_, m)) => *m |= 1 << seg,
+                    None => cells.push((c, 1 << seg)),
+                }
+            }
+            for (c, mask) in cells {
+                let Some((b, f)) = self.world.block(c) else { continue };
+                if b.segments & mask == 0 {
+                    continue;
+                }
+                if f & flags::STEEL != 0 || !self.world.remove_segments_towards(c, mask, Some(d)) {
+                    // Steel, or a one-way block facing the other way.
                     l.set_state(State::Walking);
                     return;
                 }
-                l.pos[0] += d[0] * (SUB / 4);
-                l.pos[2] += d[2] * (SUB / 4);
-                l.pos[1] -= SUB / 4;
-                self.settle(l);
+                removed = true;
             }
-            None => l.set_state(State::Walking),
         }
+        if !removed && self.world.solid([l.pos[0], l.pos[1] - 1, l.pos[2]]) {
+            // Nothing left to mine but ground ahead: walk on.
+            l.set_state(State::Walking);
+            return;
+        }
+        l.pos[0] += d[0] * (SUB / 4);
+        l.pos[2] += d[2] * (SUB / 4);
+        // Stand on whatever is left below; out in the open, fall.
+        self.settle(l);
     }
-
     fn dig(&mut self, l: &mut Lemming) {
         if !l.state_ticks.is_multiple_of(DIG_TICKS) {
             return;
