@@ -11,13 +11,15 @@ use std::f32::consts::{FRAC_PI_4, TAU};
 use l3d_sim::objects::ObjectKind;
 use l3d_sim::{SUB, Simulation, State};
 
-use crate::scene_build::{ATLAS_COLUMNS, BOMBNUMB_ATLAS_FIRST, LEMMING_CELL, LayerBuilder, TRAP_ATLAS_CELLS, TRAP_ATLAS_FIRST};
+use crate::scene_build::{ATLAS_COLUMNS, BOMBNUMB_ATLAS_FIRST, LEMMING_CELL, LayerBuilder, TRAP_ATLAS_CELLS, TRAP_ATLAS_FIRST, TRAP_FRAME};
 use crate::scene_render::SceneSprites;
 
-/// Texels per world unit for lemming cells: a 64-texel cell spans half a
-/// grid unit (estimated from relative sizes in the original's camera 1 view of
-/// Fun 1; unverified).
-const LEMMING_TEXELS_PER_UNIT: f32 = 128.0;
+/// Texels per world unit for lemming cells: a cell spans half a grid unit
+/// (estimated from relative sizes in the original's camera 1 view of Fun 1;
+/// unverified).
+const LEMMING_TEXELS_PER_UNIT: f32 = LEMMING_CELL as f32 * 2.0;
+/// The countdown digits (32 texels) stand a quarter unit tall.
+const DIGIT_TEXELS_PER_UNIT: f32 = 128.0;
 
 /// Simulation ticks per animation frame: one, at 14 ticks per second (the
 /// original's sprites change once per tick; `docs/spec/behaviour.md`).
@@ -229,7 +231,7 @@ fn objects(b: &mut LayerBuilder, sim: &Simulation, tex: [f32; 2]) {
         let cell = TRAP_ATLAS_FIRST + frame;
         let (cx, cy) = ((cell % ATLAS_COLUMNS) * LEMMING_CELL, (cell / ATLAS_COLUMNS) * LEMMING_CELL);
         let anchor = [o.cell[0] as f32 + 0.5, o.surface as f32 / SUB as f32, o.cell[2] as f32 + 0.5];
-        let size = LEMMING_CELL as f32;
+        let size = TRAP_FRAME as f32;
         b.sprite_scaled(anchor, [cx as f32, cy as f32, size, size], tex, 1, 0.0, TRAP_TEXELS_PER_UNIT);
     }
 }
@@ -282,7 +284,7 @@ pub fn build(sim: &Simulation, atlas_rows: u32, camera_yaw: f32) -> SceneSprites
                 let cell = BOMBNUMB_ATLAS_FIRST + digit - 1;
                 let (cx, cy) = ((cell % ATLAS_COLUMNS) * LEMMING_CELL, (cell / ATLAS_COLUMNS) * LEMMING_CELL);
                 let over = [anchor[0], anchor[1] + size / LEMMING_TEXELS_PER_UNIT, anchor[2]];
-                b.sprite_scaled(over, [cx as f32, cy as f32, 32.0, 32.0], tex, 1, 0.0, LEMMING_TEXELS_PER_UNIT);
+                b.sprite_scaled(over, [cx as f32, cy as f32, 32.0, 32.0], tex, 1, 0.0, DIGIT_TEXELS_PER_UNIT);
             }
         }
         if l.state == State::Floating {

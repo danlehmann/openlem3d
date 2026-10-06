@@ -456,14 +456,20 @@ pub const ATLAS_ROWS: u32 = (BOMBNUMB_ATLAS_FIRST + 8).div_ceil(ATLAS_COLUMNS);
 /// Cells per row in the lemming atlas.
 pub const ATLAS_COLUMNS: u32 = 32;
 /// Size of one lemming cell in `LEMM.MHC`.
-pub const LEMMING_CELL: u32 = 64;
+pub const LEMMING_CELL: u32 = 128;
+/// Size of a `TRAPS` frame.
+pub const TRAP_FRAME: u32 = 64;
 
 /// All `LEMM.MHC` cells packed into one texture, [`ATLAS_COLUMNS`] per row
 /// (cell `i` at column `i % ATLAS_COLUMNS`, row `i / ATLAS_COLUMNS`), then
 /// the level's `TRAPS` frames from [`TRAP_ATLAS_FIRST`].
 fn lemming_atlas(data: &mut GameData, pal: &Palette, traps: Option<&[u8]>) -> Result<RgbaImage, l3d_formats::Error> {
-    let raw = data.read("LEMM/LEMM.MHC")?;
-    let mhc = l3d_formats::mhc::MhcFile::parse(&raw, LEMMING_CELL as usize)?;
+    // The 128-pixel sprites; the 64-pixel set (same cells) doubled if missing.
+    let (raw, scale) = match data.read("LEMM/LEMM128.MHC") {
+        Ok(raw) => (raw, 1),
+        Err(_) => (data.read("LEMM/LEMM.MHC")?, 2),
+    };
+    let mhc = l3d_formats::mhc::MhcFile::parse(&raw, (LEMMING_CELL / scale) as usize)?;
     let n = mhc.entries.len() as u32;
     let (w, h) = (ATLAS_COLUMNS * LEMMING_CELL, ATLAS_ROWS * LEMMING_CELL);
     let mut pixels = vec![0u8; (w * h) as usize];
@@ -478,11 +484,18 @@ fn lemming_atlas(data: &mut GameData, pal: &Palette, traps: Option<&[u8]>) -> Re
     };
     let mut put = |i: u32, cell: &[u8]| put_sized(i, cell, LEMMING_CELL);
     for i in 0..n {
-        put(i, &mhc.cell(i as usize)?.pixels);
+        let cell = mhc.cell(i as usize)?;
+        if scale == 1 {
+            put(i, &cell.pixels);
+        } else {
+            let s = cell.size;
+            let doubled: Vec<u8> = (0..s * 2).flat_map(|y| (0..s * 2).map(move |x| (x, y))).map(|(x, y)| cell.pixels[(y / 2) * s + x / 2]).collect();
+            put(i, &doubled);
+        }
     }
-    let frame = (LEMMING_CELL * LEMMING_CELL) as usize;
+    let frame = (TRAP_FRAME * TRAP_FRAME) as usize;
     for (k, f) in traps.unwrap_or_default().chunks_exact(frame).take(TRAP_ATLAS_CELLS as usize).enumerate() {
-        put(TRAP_ATLAS_FIRST + k as u32, f);
+        put_sized(TRAP_ATLAS_FIRST + k as u32, f, TRAP_FRAME);
     }
     let sheet = &l3d_formats::sheets::BOMBNUMB;
     if let Ok(digits) = data.read(sheet.path).and_then(|raw| sheet.cut(&raw)) {
