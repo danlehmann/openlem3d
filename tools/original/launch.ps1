@@ -19,6 +19,8 @@ Extra wait after the window appears (lets the game reach its first screen).
 
 .PARAMETER SkipIntro
 Skips the intro videos and ends on the main menu (about 20 s in total).
+Types keys through the foreground window, so it focuses DOSBox-X first;
+without it, launch.ps1 never focuses the window.
 
 .PARAMETER ExtraConf
 Further DOSBox-X config files, loaded after the generated one (for example a
@@ -81,8 +83,11 @@ while ((Get-Date) -lt $deadline) {
 }
 if ($h -eq [IntPtr]::Zero) { throw 'DOSBox-X window did not appear within 20 s.' }
 if ($WaitSeconds -gt 0) { Start-Sleep -Seconds $WaitSeconds }
-[Lem3dWin32]::Focus($h) | Out-Null
 if ($SkipIntro) {
+    # Only the keyboard intro skip needs the window in front; everything else
+    # (screenshots, menu.ps1, state.ps1, AUTOTYPE, the serial mouse) works
+    # without focus, so the user's foreground window is left alone.
+    [Lem3dWin32]::Focus($h) | Out-Null
     # Esc skips from any intro clip to the main menu, but is ignored while the
     # game loads and between clips. On the menu itself Esc opens a quit
     # confirmation, which N dismisses (N is harmless elsewhere). So: repeat

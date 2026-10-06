@@ -385,6 +385,16 @@ Findings from the screen-layout runs (`spec/ui-graphics.md`, "Screens")
   0.4135·Y − 7.5) in game pixels.
 - **Clicks need a hold.** Clicks held 120 ms were often missed on panel
   icons; holding the button about 300 ms worked every time.
+- **No focus needed.** `launch.ps1` brings DOSBox-X to the front only with
+  `-SkipIntro`, which types keys. Without it the window is never focused,
+  so this setup runs next to someone else using the desktop.
+- **Assigning skills to lemmings failed with the serial mouse** (Practice
+  "Slippery", turner). Panel clicks work. Over a lemming the pointer turns
+  into the bracket and the state name shows ("Walker", "Sliding"). But
+  clicking never put a turner's first-click arrow over the lemming, and the
+  skill count did not drop. Tried: 120 ms and 300 ms holds when the bracket
+  shows, and frame-exact presses using Pause emulation. **[verified failure,
+  cause unknown]**
 - **Attract mode.** About 125 s after (re)entering the main menu a demo
   level starts, whatever the mouse does; a click returns to the menu.
 
@@ -427,6 +437,19 @@ blinking faces).
 - DOSBox-X's log (`[log] logfile = …` in an extra config) records
   "Loading state from slot …" and "Loaded." for each load, which is the
   quickest way to confirm a load happened.
+
+- **Only main-menu states reload reliably.** With the serial-mouse setup
+  (§6: `surface`, null-modem serial, CTMOUSE), states saved on the Practice
+  grid, on a briefing or inside a level (about 2 MB each) were written but
+  silently not restored: the log shows "Loading state from slot 1" with no
+  "Loaded.", and the screen does not change. This happened both in the
+  running DOSBox-X and in a fresh one. A main-menu state (about 1.2 MB)
+  restores every time. Cause unknown. **[verified]** Workaround: restore the
+  main-menu state, then click through to the level (about 8 s).
+- **Pause emulation.** `menu.ps1 -Item 'Pause emulation'` toggles DOSBox-X's
+  pause without focus. `shot.ps1 -Method print` still grabs the frozen
+  frame. Serial-mouse packets sent during the pause are queued and applied
+  on resume. **[verified]**
 
 **Suggested library** (create on first use, name by content): `main-menu`,
 `code-screen`, and `<level-file>-paused` for levels used in comparisons, for

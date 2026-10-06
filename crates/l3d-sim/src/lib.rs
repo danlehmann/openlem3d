@@ -73,11 +73,20 @@ const DEATH_TICKS: u32 = 14;
 /// How long a killing trap stays busy after taking a lemming (provisional).
 const TRAP_BUSY_TICKS: u32 = 28;
 /// Rope-slide speed, sub-units per tick (unmeasured).
-const ROPE_SPEED: i32 = SUB / 8;
-/// Spring flights: ticks per unit of horizontal distance, and peak height as
-/// a fraction of it (both unmeasured).
-const SPRING_TICKS_PER_UNIT: f32 = 2.0;
-const SPRING_ARC: f32 = 0.25;
+const ROPE_SPEED: i32 = 35;
+/// Ticks a lemming hangs from the rope's handle before sliding (observed:
+/// about 0.6 s; with [`ROPE_SPEED`], Practice "Rope Slide" takes about
+/// 6.35 s from grab to release, as observed).
+const ROPE_GRAB_TICKS: u32 = 8;
+/// Spring flights: ticks per unit of horizontal distance (observed: about
+/// 1.6 s for 16 units in Practice "Catapults"), and peak height as a
+/// fraction of the distance (unmeasured).
+const SPRING_TICKS_PER_UNIT: f32 = 1.4;
+const SPRING_ARC: f32 = 0.3;
+/// Trampoline bounces: ticks per unit of distance (unmeasured).
+const TRAMPOLINE_TICKS_PER_UNIT: f32 = 2.0;
+/// Speed on slippery blocks, sub-units per tick.
+const ICE_SPEED: i32 = WALK_SPEED * 3;
 
 /// Block ids with hard-coded meaning (`docs/spec/blk.md`).
 const ENTRANCE_ID: u8 = 0;
@@ -216,11 +225,16 @@ pub enum State {
     Zapped,
     /// Caught by a trap; the trap's own animation shows the death.
     Trapped,
-    /// Riding a rope slide towards its far end (feet position, sub-units).
-    Sliding { to: [i32; 3] },
-    /// Thrown by a spring from `from` to `to` (feet positions) over
-    /// `ticks` ticks.
-    Flying { from: [i32; 3], to: [i32; 3], ticks: u32 },
+    /// Hanging from a rope slide, riding towards its far end (feet
+    /// position, sub-units).
+    OnRope { to: [i32; 3] },
+    /// Walking on a slippery block: faster, and no skill that needs a
+    /// standing lemming can be given (the original shows "Sliding").
+    Sliding,
+    /// Thrown through the air by a spring or trampoline from `from` to
+    /// `to` (feet positions) over `ticks` ticks, rising `peak`
+    /// sub-units above the straight line at mid-flight.
+    Flying { from: [i32; 3], to: [i32; 3], ticks: u32, peak: i32 },
 }
 
 impl State {
@@ -548,13 +562,15 @@ impl Simulation {
             }
             State::Falling { from_y } => self.fall(l, from_y),
             State::Floating => self.float(l),
-            State::Walking => self.walk(l, obstacles),
+            State::Walking | State::Sliding => self.walk(l, obstacles),
             State::Climbing => self.climb(l),
             State::Digging => self.dig(l),
             State::Building { bricks_left } => self.build(l, bricks_left),
             State::Bashing => self.bash(l),
             State::Mining => self.mine(l),
-            State::Sliding { to } => {
+            // The lemming first hangs on the handle for a moment (observed).
+            State::OnRope { .. } if l.state_ticks <= ROPE_GRAB_TICKS => {}
+            State::OnRope { to } => {
                 let d = [0, 1, 2].map(|i| to[i] - l.pos[i]);
                 let len = ((d[0] as i64).pow(2) + (d[1] as i64).pow(2) + (d[2] as i64).pow(2)).isqrt() as i32;
                 if len <= ROPE_SPEED {
@@ -567,16 +583,18 @@ impl Simulation {
                     }
                 }
             }
-            State::Flying { from, to, ticks } => {
+            State::Flying { from, to, ticks, peak } => {
                 let f = (l.state_ticks as f32 / ticks as f32).min(1.0);
                 let lerp = |i: usize| from[i] + ((to[i] - from[i]) as f32 * f) as i32;
-                let span = ((to[0] - from[0]) as f32).hypot((to[2] - from[2]) as f32);
-                let arc = (span * SPRING_ARC * 4.0 * f * (1.0 - f)) as i32;
+                let arc = (peak as f32 * 4.0 * f * (1.0 - f)) as i32;
                 l.pos = [lerp(0), lerp(1) + arc, lerp(2)];
                 if f >= 1.0 {
                     l.pos = to;
                     l.set_state(State::Walking);
-                    self.settle(l);
+                    // Another trampoline keeps the bounce going.
+                    if !self.bounce(l, peak + (from[1] - to[1]).max(0)) {
+                        self.settle(l);
+                    }
                 }
             }
             State::Blocking | State::Turning { .. } => {
@@ -614,7 +632,7 @@ impl Simulation {
     /// other object with the same value; with more, the last two pair up
     /// [L3DEdit]) and walks on in the same direction (provisional: instant).
     fn teleport(&mut self, l: &mut Lemming) {
-        if self.object_kind != Some(objects::ObjectKind::Teleporter) || l.state != State::Walking {
+        if self.object_kind != Some(objects::ObjectKind::Teleporter) || !matches!(l.state, State::Walking | State::Sliding) {
             return;
         }
         let Some(here) = self.objects.iter().position(|o| o.touches(l.pos)) else {
@@ -642,7 +660,7 @@ impl Simulation {
     /// works [L3DEdit]. Provisional: a straight line at [`ROPE_SPEED`],
     /// then it walks on in its old direction.
     fn board_rope_slide(&mut self, l: &mut Lemming) {
-        if self.object_kind != Some(objects::ObjectKind::RopeSlide) || !matches!(l.state, State::Walking | State::Falling { .. }) {
+        if self.object_kind != Some(objects::ObjectKind::RopeSlide) || !matches!(l.state, State::Walking | State::Sliding | State::Falling { .. }) {
             return;
         }
         let last = |v: u8| self.objects.iter().rposition(|o| o.value == v);
@@ -653,7 +671,7 @@ impl Simulation {
         }
         let Some(receiver) = last(value + 1) else { return };
         let o = self.objects[receiver];
-        l.set_state(State::Sliding { to: [o.cell[0] * SUB + SUB / 2, o.surface, o.cell[2] * SUB + SUB / 2] });
+        l.set_state(State::OnRope { to: [o.cell[0] * SUB + SUB / 2, o.surface, o.cell[2] * SUB + SUB / 2] });
     }
 
     /// Springs: a walker stepping onto a sender (an even value) is thrown in
@@ -661,7 +679,7 @@ impl Simulation {
     /// works [L3DEdit]) and lands unhurt, walking on in its old direction.
     /// Flight time and arc height are unmeasured.
     fn spring(&mut self, l: &mut Lemming) {
-        if self.object_kind != Some(objects::ObjectKind::Spring) || l.state != State::Walking {
+        if self.object_kind != Some(objects::ObjectKind::Spring) || !matches!(l.state, State::Walking | State::Sliding) {
             return;
         }
         let last = |v: u8| self.objects.iter().rposition(|o| o.value == v);
@@ -672,7 +690,28 @@ impl Simulation {
         let to = [o.cell[0] * SUB + SUB / 2, o.surface, o.cell[2] * SUB + SUB / 2];
         let span = ((to[0] - l.pos[0]) as f32).hypot((to[2] - l.pos[2]) as f32) / SUB as f32;
         let ticks = ((span * SPRING_TICKS_PER_UNIT) as u32).max(8);
-        l.set_state(State::Flying { from: l.pos, to, ticks });
+        let peak = (span * SPRING_ARC * SUB as f32) as i32;
+        l.set_state(State::Flying { from: l.pos, to, ticks, peak });
+    }
+
+    /// Trampolines (provisional; the original was only seen bouncing
+    /// lemmings along a row of pads): a lemming arriving on a pad from a
+    /// drop of `height` sub-units is thrown forward in an arc, further the
+    /// higher it came from, and lands unhurt. Fun 1 drops lemmings about 12
+    /// units onto one, which must carry them about 10 units to the exit.
+    /// Returns whether it bounced.
+    fn bounce(&mut self, l: &mut Lemming, height: i32) -> bool {
+        if self.object_kind != Some(objects::ObjectKind::Trampoline) || !self.objects.iter().any(|o| o.touches(l.pos)) {
+            return false;
+        }
+        let height = height.max(SUB);
+        let len = (height * 4 / 5).clamp(2 * SUB, 12 * SUB);
+        let d = l.dir.delta();
+        let (x, z) = (l.pos[0] + d[0] * len, l.pos[2] + d[2] * len);
+        let (y, _) = self.world.surface_below(x, l.pos[1] + 2 * SUB, z);
+        let ticks = ((len as f32 / SUB as f32) * TRAMPOLINE_TICKS_PER_UNIT) as u32;
+        l.set_state(State::Flying { from: l.pos, to: [x, y, z], ticks: ticks.max(8), peak: len / 2 });
+        true
     }
 
     /// Ends a bomber: removes non-steel terrain around it.
@@ -702,6 +741,9 @@ impl Simulation {
 
     /// Lands a lemming on whatever is at its feet.
     fn land(&mut self, l: &mut Lemming, on_block: bool, fell: i32) {
+        if self.bounce(l, fell) {
+            return;
+        }
         let ground_flags = if on_block { self.world.flags_at([l.pos[0], l.pos[1] - 1, l.pos[2]]) } else { None };
         let liquid = ground_flags.is_some_and(|f| f & flags::LIQUID != 0);
         let water = !on_block && self.world.floor(l.pos[0], l.pos[2]) == Floor::Water;
@@ -938,7 +980,9 @@ impl Simulation {
         // +Z face, rotated with the block).
         // Probe as far ahead as the wall check below (one step plus REACH), so a
         // doorway is recognised before the walker would bounce off it.
-        let reach = REACH + WALK_SPEED;
+        // On ice lemmings move about 3× as fast (observed: 3.1 ± 0.3).
+        let speed = if l.state == State::Sliding { ICE_SPEED } else { WALK_SPEED };
+        let reach = REACH + speed;
         let probe = [l.pos[0] + d[0] * reach, l.pos[1] + SUB / 8, l.pos[2] + d[2] * reach];
         if let Some(b) = self.world.block_at(probe)
             && b.id == EXIT_ID
@@ -952,7 +996,7 @@ impl Simulation {
                 return;
             }
         }
-        let next = [l.pos[0] + d[0] * WALK_SPEED, l.pos[1], l.pos[2] + d[2] * WALK_SPEED];
+        let next = [l.pos[0] + d[0] * speed, l.pos[1], l.pos[2] + d[2] * speed];
         // Blockers and turners: walking into one redirects the walker.
         // Splitters send walkers alternately left and right as they cross
         // the cell centre ([L3DEdit]: block 2 where non-solid; which side
@@ -1042,9 +1086,14 @@ impl Simulation {
         let (ground, on_block) = self.world.surface_below(l.pos[0], l.pos[1] + STEP_UP, l.pos[2]);
         if ground >= l.pos[1] - STEP_DOWN {
             l.pos[1] = ground;
-            let liquid = on_block && self.world.flags_at([l.pos[0], ground - 1, l.pos[2]]).is_some_and(|f| f & flags::LIQUID != 0);
+            let ground_flags = if on_block { self.world.flags_at([l.pos[0], ground - 1, l.pos[2]]) } else { None };
+            let liquid = ground_flags.is_some_and(|f| f & flags::LIQUID != 0);
             if liquid || (!on_block && self.world.floor(l.pos[0], l.pos[2]) == Floor::Water) {
                 l.set_state(State::Drowning);
+            } else if !self.bounce(l, 0) {
+                // Slippery tops make walkers slide; leaving them, they walk.
+                let slippery = ground_flags.is_some_and(|f| f & flags::SLIPPERY != 0);
+                l.state = if slippery { State::Sliding } else { State::Walking };
             }
         } else {
             let from = l.pos[1];
