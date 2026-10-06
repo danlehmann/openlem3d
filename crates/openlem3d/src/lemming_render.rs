@@ -22,6 +22,9 @@ const LEMMING_TEXELS_PER_UNIT: f32 = 128.0;
 /// original's sprites change once per tick; `docs/spec/behaviour.md`).
 const TICKS_PER_FRAME: u32 = 1;
 
+/// Ticks a bomber spends swelling before the blast.
+const SWELL_TICKS: u32 = 10;
+
 /// Ticks of each builder cycle spent stepping up onto the new brick.
 const BUILDER_STEP_TICKS: u32 = 6;
 
@@ -105,6 +108,8 @@ enum Angles {
     Five,
     /// Eight blocks going round the lemming from the front (asymmetric poses).
     Eight,
+    /// One block, the same from every side (smoke, sparks).
+    One,
 }
 
 /// The order in which an action's frames are shown, one per step.
@@ -153,7 +158,9 @@ fn anim_for(state: State) -> Anim {
         State::Digging => anim(161, 8, Five),
         State::Bashing => anim(201, 8, Five),
         State::Mining => anim(241, 6, Five),
-        State::Exploding => once(271, 5, Five),
+        // The puff of smoke left by the blast; the swelling before it is
+        // drawn from the fuse (see `build`).
+        State::Exploding => once(534, 4, One),
         State::Floating => anim(296, 5, Eight),
         // No rope pose found yet; the falling cycle stands in.
         // Arms spread on ice (observed); the blocker's pose is the nearest.
@@ -179,6 +186,7 @@ fn cell_for(a: Anim, view: ViewAngle, ticks: u32) -> (u32, bool) {
     };
     let (block, mirror) = match a.angles {
         Angles::Eight => (view.round_index(), false),
+        Angles::One => (0, false),
         Angles::Five => {
             let r = view.round_index();
             // Round positions 1–3 (the right) mirror the stored left-hand
@@ -218,6 +226,12 @@ pub fn build(lemmings: &[Lemming], atlas_rows: u32, camera_yaw: f32) -> SceneSpr
                     let laying = (c - BUILDER_STEP_TICKS) * 5 / (l3d_sim::BUILD_TICKS - BUILDER_STEP_TICKS);
                     cell_for(once(344, 5, Angles::Five), view, laying)
                 }
+            }
+            // A bomber swells over the last ticks of its fuse (observed:
+            // about 10 ticks after the last countdown digit).
+            _ if l.fuse.is_some_and(|f| f <= SWELL_TICKS) && !l.state.is_terminal() => {
+                let swelled = SWELL_TICKS - l.fuse.unwrap_or(0);
+                cell_for(once(271, 5, Angles::Five), view, swelled * 5 / SWELL_TICKS)
             }
             _ => cell_for(anim_for(l.state), view, l.state_ticks),
         };
