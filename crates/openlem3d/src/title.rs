@@ -230,8 +230,9 @@ fn spawn_title(mut commands: Commands, art: Option<Res<Art>>, roots: Query<(), W
                             ImageNode::default(),
                             Node {
                                 position_type: PositionType::Absolute,
-                                left: px(16.0 * s),
-                                top: px(36.0 * s),
+                                // Measured: sign at (207,153), rating button at (192,135).
+                                left: px(15.0 * s),
+                                top: px(18.0 * s),
                                 width: px(32.0 * s),
                                 height: px(32.0 * s),
                                 ..default()

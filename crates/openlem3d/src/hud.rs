@@ -17,7 +17,7 @@ impl Plugin for HudPlugin {
             .add_systems(Startup, spawn_hud)
             .add_systems(
                 Update,
-                (skill_buttons, skill_keys, controls, update_labels, result_panel, bomber_countdown, assign_on_pointer)
+                (skill_buttons, skill_keys, controls, update_labels, animate_skill_icons, result_panel, bomber_countdown, assign_on_pointer)
                     .chain()
                     .run_if(in_state(AppState::Playing)),
             )
@@ -25,24 +25,25 @@ impl Plugin for HudPlugin {
     }
 }
 
-/// The `LEMM.MHC` cell shown on each skill button: the first front-view
-/// frame of the skill's action (`docs/spec/lemmings.md`), in [`Skill::ALL`]
-/// order. The original's dedicated panel icons (`GFX/ICONS.RNC`) are not
-/// decoded yet.
-const SKILL_ICON_CELLS: [usize; 9] = [86, 30, 271, 344, 201, 241, 161, 538, 296];
+/// The `LEMM.MHC` cells animated on each skill button: the front-view block
+/// of the skill's action (first cell, frame count; `docs/spec/lemmings.md`),
+/// in [`Skill::ALL`] order. The selected skill animates; the others show
+/// their first frame, as in the original.
+const SKILL_ICON_FRAMES: [(usize, usize); 9] =
+    [(86, 7), (30, 7), (271, 5), (344, 5), (201, 8), (241, 6), (161, 8), (538, 5), (296, 5)];
+/// Skill icon animation speed: one frame per simulation tick.
+const ICON_FPS: f32 = l3d_sim::TICKS_PER_SECOND as f32;
 
 /// Cuts the skill-button icons from the user's `LEMM.MHC`. Returns `None`
 /// when the file can't be read; the buttons then show text only.
-fn skill_icons(data: &mut crate::Data, images: &mut Assets<Image>) -> Option<Vec<Handle<Image>>> {
+fn skill_icons(data: &mut crate::Data, images: &mut Assets<Image>) -> Option<Vec<Vec<Handle<Image>>>> {
     use bevy::asset::RenderAssetUsages;
     use bevy::image::ImageSampler;
     use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
     let pal = data.0.palette("GFX/LM3D.PAL").ok()?;
     let raw = data.0.read("LEMM/LEMM.MHC").ok()?;
     let mhc = l3d_formats::mhc::MhcFile::parse(&raw, 64).ok()?;
-    SKILL_ICON_CELLS
-        .iter()
-        .map(|&i| {
+    let mut cell_image = |i: usize| -> Option<Handle<Image>> {
             let cell = mhc.cell(i).ok()?;
             let rgba: Vec<u8> = cell
                 .pixels
@@ -61,8 +62,8 @@ fn skill_icons(data: &mut crate::Data, images: &mut Assets<Image>) -> Option<Vec
             );
             img.sampler = ImageSampler::nearest();
             Some(images.add(img))
-        })
-        .collect()
+    };
+    SKILL_ICON_FRAMES.iter().map(|&(first, n)| (first..first + n).map(&mut cell_image).collect()).collect()
 }
 
 /// Shows the HUD only while a level is being played.
@@ -98,6 +99,9 @@ const BUTTON_SELECTED: Color = Color::srgba(0.8, 0.2, 0.1, 0.9);
 
 fn spawn_hud(mut commands: Commands, mut data: ResMut<crate::Data>, mut images: ResMut<Assets<Image>>) {
     let icons = skill_icons(&mut data, &mut images);
+    if let Some(frames) = &icons {
+        commands.insert_resource(SkillIconFrames(frames.clone()));
+    }
     commands.spawn((
         Text::new(""),
         TextFont { font_size: FontSize::Px(18.0), ..default() },
@@ -146,7 +150,8 @@ fn spawn_hud(mut commands: Commands, mut data: ResMut<crate::Data>, mut images: 
                 .with_children(|b| {
                     if let Some(icons) = &icons {
                         b.spawn((
-                            ImageNode::new(icons[skill as usize].clone()),
+                            SkillIcon(skill),
+                            ImageNode::new(icons[skill as usize][0].clone()),
                             Node { width: px(48), height: px(48), ..default() },
                         ));
                     }
@@ -189,7 +194,7 @@ fn spawn_hud(mut commands: Commands, mut data: ResMut<crate::Data>, mut images: 
 }
 
 /// Release-rate and nuke buttons.
-#[derive(Component, Clone, Copy)]
+#[derive(Component, Clone, Copy, PartialEq, Eq)]
 enum Control {
     Slower,
     Faster,
@@ -204,29 +209,75 @@ struct ResultText;
 
 /// Applies a control: from its button or its key (− / + for the release
 /// rate, Alt+Q to nuke as in the original).
+/// The image node of a skill button's icon.
+#[derive(Component)]
+struct SkillIcon(Skill);
+
+/// Animates the selected skill's icon; the others show their first frame.
+fn animate_skill_icons(
+    selected: Res<SelectedSkill>,
+    time: Res<Time>,
+    frames: Option<Res<SkillIconFrames>>,
+    mut icons: Query<(&SkillIcon, &mut ImageNode)>,
+) {
+    let Some(frames) = frames else { return };
+    let step = (time.elapsed_secs() * ICON_FPS) as usize;
+    for (icon, mut node) in &mut icons {
+        let list = &frames.0[icon.0 as usize];
+        let frame = if selected.0 == Some(icon.0) { step % list.len() } else { 0 };
+        if node.image != list[frame] {
+            node.image = list[frame].clone();
+        }
+    }
+}
+
+/// The animation frames of each skill button's icon, in [`Skill::ALL`] order.
+#[derive(Resource)]
+struct SkillIconFrames(Vec<Vec<Handle<Image>>>);
+
+/// Holding − or + (button or key) repeats after this delay, at this rate.
+const REPEAT_DELAY: f32 = 0.35;
+const REPEAT_PER_SECOND: f32 = 20.0;
+
+/// Applies a control: from its button or its key (− / + for the release
+/// rate, Alt+Q to nuke as in the original). − and + repeat while held.
 fn controls(
-    buttons: Query<(&Interaction, &Control), Changed<Interaction>>,
+    buttons: Query<(&Interaction, &Control)>,
     keys: Res<ButtonInput<KeyCode>>,
+    time: Res<Time>,
+    mut held: Local<Option<(Control, f32)>>,
     mut game: ResMut<Game>,
 ) {
-    let mut actions: Vec<Control> =
-        buttons.iter().filter(|(i, _)| **i == Interaction::Pressed).map(|(_, c)| *c).collect();
-    if keys.just_pressed(KeyCode::Minus) || keys.just_pressed(KeyCode::NumpadSubtract) {
-        actions.push(Control::Slower);
-    }
-    if keys.just_pressed(KeyCode::Equal) || keys.just_pressed(KeyCode::NumpadAdd) {
-        actions.push(Control::Faster);
-    }
-    if keys.pressed(KeyCode::AltLeft) && keys.just_pressed(KeyCode::KeyQ) {
-        actions.push(Control::Nuke);
-    }
+    let pressed = |c: Control| buttons.iter().any(|(i, b)| *i == Interaction::Pressed && *b == c);
+    let slower = pressed(Control::Slower) || keys.pressed(KeyCode::Minus) || keys.pressed(KeyCode::NumpadSubtract);
+    let faster = pressed(Control::Faster) || keys.pressed(KeyCode::Equal) || keys.pressed(KeyCode::NumpadAdd);
+    let current = if slower { Some(Control::Slower) } else if faster { Some(Control::Faster) } else { None };
     let Some(sim) = &mut game.sim else { return };
-    for a in actions {
-        match a {
-            Control::Slower => sim.adjust_release_rate(-1),
-            Control::Faster => sim.adjust_release_rate(1),
-            Control::Nuke => sim.nuke(),
+    let step = |sim: &mut l3d_sim::Simulation, c: Control| match c {
+        Control::Slower => sim.adjust_release_rate(-1),
+        Control::Faster => sim.adjust_release_rate(1),
+        Control::Nuke => {}
+    };
+    match (current, *held) {
+        (Some(c), Some((h, since))) if c == h => {
+            // Still held: repeat once the delay has passed.
+            let t = since + time.delta_secs();
+            let before = ((since - REPEAT_DELAY).max(0.0) * REPEAT_PER_SECOND) as u32;
+            let after = ((t - REPEAT_DELAY).max(0.0) * REPEAT_PER_SECOND) as u32;
+            for _ in before..after {
+                step(sim, c);
+            }
+            *held = Some((c, t));
         }
+        (Some(c), _) => {
+            step(sim, c);
+            *held = Some((c, 0.0));
+        }
+        (None, _) => *held = None,
+    }
+    let nuke_button = buttons.iter().any(|(i, b)| *i == Interaction::Pressed && *b == Control::Nuke);
+    if nuke_button || (keys.pressed(KeyCode::AltLeft) && keys.just_pressed(KeyCode::KeyQ)) {
+        sim.nuke();
     }
 }
 
