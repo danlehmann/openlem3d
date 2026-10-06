@@ -134,7 +134,15 @@ fn follow(
     let feet = Vec3::from_array(l.pos.map(|v| v as f32 / SUB as f32));
     let yaw = l.dir.yaw();
     let forward = Vec3::new(-yaw.cos(), 0.0, -yaw.sin());
-    let target = feet - forward * EYE_BEHIND + Vec3::Y * EYE_HEIGHT;
+    // Behind the lemming, but no further back than the nearest wall.
+    let eye = |behind: f32| feet - forward * behind + Vec3::Y * EYE_HEIGHT;
+    let mut behind = EYE_BEHIND;
+    if let Some((level, blocks, _)) = &game.terrain {
+        while behind > 0.2 && crate::camera_blocked(level, blocks, eye(behind)) {
+            behind -= 0.1;
+        }
+    }
+    let target = eye(behind);
     let k = 1.0 - (-FOLLOW_RATE * time.delta_secs()).exp();
     // Turn the short way round.
     let turn = (yaw - view.yaw + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
