@@ -533,6 +533,16 @@ Save" in boxes at the bottom corners (y 180–195). The labels are the small
 7×8 font in capitals. Our screen keeps this layout with the settings that
 apply to it (Land, Sea, Sky, Left Handed, Fullscreen, CD Music, Effects,
 Camera).
+### Level list ("Select Fun Level To Play")
+
+From a capture (positions estimated, 320×200): the `BGRD` backdrop; the
+title in the white large font at the top centre; the panel's IN label and
+clock at the top right (x ≈ 247 and 291, y ≈ 19); and one row per unlocked
+level in the large font tinted red: the number right-aligned, the title
+from about x = 30, and under the IN and clock icons the best result
+("0" and "0:00" for a level not yet played). Rows are about 14 pixels
+apart from y ≈ 42. Only unlocked levels are listed in the original; ours
+lists all twenty and scrolls.
 ### Practice menu ("Select Item to Practice")
 
 From a capture (positions estimated, 320×200): the `BGRD` backdrop, the

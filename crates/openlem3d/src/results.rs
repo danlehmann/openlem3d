@@ -57,7 +57,8 @@ fn level_over(
     }
     let outcome = Outcome { level: current.number, saved: sim.counts.saved, total: sim.to_release.max(1), needed: game.save_requirement };
     sfx.write(crate::sfx::Sfx(if outcome.passed() { "VOXFX/CHEERS1" } else { "VOXFX/BOOS" }));
-    if outcome.passed() && settings.completed.insert(outcome.level) {
+    let seconds_left = sim.time_left / l3d_sim::TICKS_PER_SECOND;
+    if settings.record(outcome.level, outcome.saved, seconds_left, outcome.passed()) {
         settings.save();
     }
     commands.insert_resource(outcome);

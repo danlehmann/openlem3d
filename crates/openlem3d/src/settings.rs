@@ -24,6 +24,9 @@ pub struct Settings {
     pub camera: u8,
     /// Levels completed (file numbers), for the Practice menu's ticks.
     pub completed: std::collections::BTreeSet<u32>,
+    /// Best result per level (file number): lemmings saved, and seconds left
+    /// on the clock when it was completed (0 if never).
+    pub best: std::collections::BTreeMap<u32, (u32, u32)>,
 }
 
 /// Steps on each slider.
@@ -31,11 +34,22 @@ pub const SLIDER_STEPS: u8 = 10;
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { land: true, sea: true, sky: true, left_handed: false, fullscreen: false, music: 8, effects: 8, camera: 5, completed: Default::default() }
+        Settings { land: true, sea: true, sky: true, left_handed: false, fullscreen: false, music: 8, effects: 8, camera: 5, completed: Default::default(), best: Default::default() }
     }
 }
 
 impl Settings {
+    /// Records a finished level; returns whether anything improved.
+    pub fn record(&mut self, level: u32, saved: u32, seconds_left: u32, passed: bool) -> bool {
+        let old = self.best.get(&level).copied().unwrap_or((0, 0));
+        let new = (old.0.max(saved), if passed { old.1.max(seconds_left) } else { old.1 });
+        let completed = passed && self.completed.insert(level);
+        if new != old {
+            self.best.insert(level, new);
+        }
+        completed || new != old
+    }
+
     /// Music volume as a linear factor.
     pub fn music_volume(&self) -> f32 {
         0.75 * self.music as f32 / SLIDER_STEPS as f32
@@ -86,6 +100,16 @@ impl Settings {
                 "effects" => s.effects = level.unwrap_or(s.effects),
                 "camera" => s.camera = level.unwrap_or(s.camera),
                 "completed" => s.completed = v.split(',').filter_map(|n| n.trim().parse().ok()).collect(),
+                // best = level:saved:seconds, …
+                "best" => {
+                    s.best = v
+                        .split(',')
+                        .filter_map(|e| {
+                            let p: Vec<u32> = e.split(':').filter_map(|n| n.trim().parse().ok()).collect();
+                            (p.len() == 3).then(|| (p[0], (p[1], p[2])))
+                        })
+                        .collect()
+                }
                 _ => {}
             }
         }
@@ -96,7 +120,7 @@ impl Settings {
         let Some(path) = Self::path() else { return };
         let on = |b: bool| if b { "on" } else { "off" };
         let text = format!(
-            "land = {}\nsea = {}\nsky = {}\nleft_handed = {}\nfullscreen = {}\nmusic = {}\neffects = {}\ncamera = {}\ncompleted = {}\n",
+            "land = {}\nsea = {}\nsky = {}\nleft_handed = {}\nfullscreen = {}\nmusic = {}\neffects = {}\ncamera = {}\ncompleted = {}\nbest = {}\n",
             on(self.land),
             on(self.sea),
             on(self.sky),
@@ -105,7 +129,8 @@ impl Settings {
             self.music,
             self.effects,
             self.camera,
-            self.completed.iter().map(u32::to_string).collect::<Vec<_>>().join(",")
+            self.completed.iter().map(u32::to_string).collect::<Vec<_>>().join(","),
+            self.best.iter().map(|(l, (s, t))| format!("{l}:{s}:{t}")).collect::<Vec<_>>().join(",")
         );
         if let Some(dir) = path.parent() {
             let _ = std::fs::create_dir_all(dir);

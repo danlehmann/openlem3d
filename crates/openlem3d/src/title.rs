@@ -61,7 +61,8 @@ impl Plugin for TitlePlugin {
                     in_state(AppState::Title)
                         .or_else(in_state(AppState::Code))
                         .or_else(in_state(AppState::Options))
-                        .or_else(in_state(AppState::Practice)),
+                        .or_else(in_state(AppState::Practice))
+                        .or_else(in_state(AppState::Menu)),
                 ),
             )
             .add_systems(OnExit(AppState::Options), despawn::<ScreenRoot>)
