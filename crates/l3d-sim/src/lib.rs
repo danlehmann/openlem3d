@@ -34,7 +34,9 @@ const STEP_UP: i32 = SUB / 4;
 const STEP_DOWN: i32 = SUB / 4;
 /// Falls longer than this splat (bracketed: 2 units survive, 4¼ splat).
 const SPLAT_HEIGHT: i32 = 4 * SUB;
-/// Height checked for headroom when walking (provisional).
+/// Clearance a walker needs above the surface it walks onto: openings exactly
+/// this high (half-height gaps under a lintel) are passable (verified: the
+/// half-unit doorways of Practice "Claustrophobic", `LEVEL.090`).
 const HEAD_HEIGHT: i32 = SUB / 2;
 /// How far ahead of its centre a walker probes for walls.
 const REACH: i32 = SUB / 4;
@@ -731,7 +733,10 @@ impl Simulation {
         let d = l.dir.delta();
         // Exits: walking into an exit block through its doorway (the block's
         // +Z face, rotated with the block).
-        let probe = [l.pos[0] + d[0] * REACH, l.pos[1] + SUB / 8, l.pos[2] + d[2] * REACH];
+        // Probe as far ahead as the wall check below (one step plus REACH), so a
+        // doorway is recognised before the walker would bounce off it.
+        let reach = REACH + WALK_SPEED;
+        let probe = [l.pos[0] + d[0] * reach, l.pos[1] + SUB / 8, l.pos[2] + d[2] * reach];
         if let Some(b) = self.world.block_at(probe)
             && b.id == EXIT_ID
         {
@@ -758,11 +763,17 @@ impl Simulation {
             }
         }
         let ahead = [next[0] + d[0] * REACH, next[2] + d[2] * REACH];
-        // Wall: no headroom ahead, or the surface ahead is more than a step up.
-        let (surface, _) = self.world.surface_below(ahead[0], l.pos[1] + STEP_UP + 1, ahead[1]);
+        // The surface where the feet will be after this step: a step up of
+        // more than STEP_UP there is a wall. (Probing further ahead would
+        // read a 45° ramp as a wall.)
+        let (surface, _) = self.world.surface_below(next[0], l.pos[1] + STEP_UP + 1, next[2]);
+        // Body clearance ahead: solid at step height above that surface is a
+        // wall (a ramp rises at most REACH over the probe distance, which stays
+        // below this), and a ceiling lower than the walker's head blocks too.
+        let wall = |w: &World, y: i32| w.solid([ahead[0], y, ahead[1]]);
         let blocked = surface > l.pos[1] + STEP_UP
-            || self.world.solid([ahead[0], surface + HEAD_HEIGHT, ahead[1]])
-            || self.world.solid([ahead[0], l.pos[1] + STEP_UP + 1, ahead[1]]);
+            || wall(&self.world, surface + STEP_UP + 2)
+            || wall(&self.world, surface + HEAD_HEIGHT - 1);
         if blocked {
             if l.climber && self.world.solid([ahead[0], l.pos[1] + STEP_UP + 1, ahead[1]]) {
                 l.set_state(State::Climbing);
