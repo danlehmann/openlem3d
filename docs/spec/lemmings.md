@@ -84,7 +84,7 @@ else is **guessed** from the contact sheet's appearance.
 | 0–29 | Walker | 5 × 6 (A0 0–5, A1 6–11, A2 12–17, A3 18–23, A4 24–29) | **Verified.** A4: lemming-cam burst (camera behind a walker) ranked 24, 25, 26, 27, 28, 29 in that cyclic order (mean diff 18–20). A2: a side-on walker ranked cell 12 best (diff 14.8, next other range 20.4). A0: walkers coming towards the camera ranked cells 2–5 best (weaker, 34–35, because lemmings overlapped). A1/A3: matched 13–23 (plain and mirrored) on lemmings walking at an angle. |
 | 30–85 | Turner (pointing with one arm; head turns) | 8 × 7 (30–36, 37–43, 44–50, 51–57, 58–64, 65–71, 72–78, 79–85) | **Partly verified.** A turner seen side-on in Fun 1 ranked only cells from 72–78 (diff ≈ 31) over a 3 s burst, cycling through them. The block order (front, front ¾, side, rear ¾, back, rear ¾, side, front ¾, going round the lemming) is guessed from the sheet. Pairs 30–57 and 58–85 are near-mirrors (diff 30–45), not exact copies, because the pointing arm changes sides. |
 | 86–120 | Blocker (arms out, head turns left and right) | 5 × 7 | Guessed. The pose matches the blocker skill icon. |
-| 121–160 | Falling (arms up, tumbling head over heels) | 5 × 8 | Guessed. A lemming falling through a dug hole in Mayhem 1 was too small to rank reliably. Could instead be the long fall before a splat. |
+| 121–160 | Tumbling head over heels, arms up | 5 × 8 | Guessed. **Not** the fall from a hatch (see 399–423): those falls ranked these cells clearly worse (mean diff 34–37 against 25–29 with a uniform-scale search). Might be a long fall (not yet observed) or something else. |
 | 161–200 | Digger (crouched, scooping with one arm) | 5 × 8 | **Verified by eye**: a digger in Mayhem 1 showed this crouched scooping pose (side view, 177–192), then fell through the hole. Too small for a reliable `mhc-match` ranking. |
 | 201–240 | Basher (a mallet in each hand) | 5 × 8 | Guessed. |
 | 241–270 | Miner (pickaxe, swinging down and forward) | 5 × 6 | Guessed. |
@@ -93,7 +93,8 @@ else is **guessed** from the contact sheet's appearance.
 | 336–343 | Umbrella canopy (drawn above the floater) | 8 × 1, or 1 × 8 opening frames | Guessed. |
 | 344–368 | Builder laying a brick | 5 × 5 | **Verified by eye**: a builder in Mayhem 1 raised a brick with the sack on its back, as in 349–363. |
 | 369–398 | Drowning (sinking, arms up) | 5 × 6 | **Verified by eye**: a lemming that fell through a dug hole into water in Mayhem 1 showed only the head and raised arms above the water, as in these cells. |
-| 399–428 | Arms out, legs dangling: probably falling, or the start of a splat | 5 × 6 | Guessed. |
+| 399–423 | **Falling** (arms out, legs dangling) | 5 × 5 (A0 399–403, A1 404–408, A2 409–413, A3 414–418, A4 419–423) | **Verified** for A0 and A4, see "Falling" below. A1–A3 follow the block layout but were not seen in game. |
+| 424–428 | Feet up, seen from above or below | 5 × 1, or 1 × 5 | Guessed. |
 | 429–443 | Lying on the back, feet up: probably splat | 5 × 3 | Guessed. |
 | 444–473 | Builder walking between bricks (sack on the back) | 5 × 6 | **Verified by eye**: the Mayhem 1 builder walked between bricks with this sack (side view, as in 450–461). |
 | 474–488 | Builder out of bricks (shrug) | 5 × 3 | Guessed. |
@@ -109,6 +110,52 @@ countdown digits (they are drawn above the lemming in game, so probably not
 in this file), and the "inflated lemmings flying" seen after a nuke, which
 looks like the swollen 271–295 frames moving through the air rather than
 separate cells.
+
+### Falling (verified from the front and the back)
+
+A lemming falling from a hatch uses cells **399–423**, five blocks of five
+frames, and shows one cell per tick:
+
+- **Order:** a ping-pong over the five frames that starts in the middle:
+  frames 2, 3, 4, 3, 2, 1, 0, 1, … of the block (back view: 421, 422, 423,
+  422, 421, 420, 419, …).
+- **Mirroring:** every cell is drawn **mirrored**, in both the front and the
+  back view, where walkers use their cells as stored. Within a block, frame
+  0 is close to frame 4 mirrored and frame 1 to frame 3 mirrored (mean diff
+  17 and 32–36), but frame 2 is not symmetric, and the mirrored copies ranked
+  clearly better (frame 2: 19 against 33+ from the front, 20 against 24 from
+  the back; frame 3 mirrored against frame 1 plain: 18–20 against 20–24).
+- **First ticks:** the first tick below the hatch already shows frame 2. No
+  other pose appears at the start of a fall.
+- **Long falls:** not observed. The falls measured lasted 6–8 ticks (about
+  1–1.5 units). Whether longer falls switch to another pose (121–160?) is
+  open.
+- **Side and three-quarter views** (A1–A3) were not captured. We assume
+  they follow the same rule: the block chosen as usual, then mirrored once
+  more.
+- **Landing:** after these short falls, no landing or stunned pose was
+  noticed by eye; the lemming walked on.
+
+How we verified it (DOSBox-X, input only through `AUTOTYPE` and the serial
+mouse, captures at about 60 per second, so each tick appears in about four
+consecutive captures):
+
+- **Back view:** Mayhem 6 (`LEVEL.065`, code `TASTEVIN`), camera 1, which
+  stands 4 units behind the hatch and faces the release direction. Falling
+  lemmings were 40×60 px at 640×480. The first lemming released, tick by
+  tick: 421m (mean diff 20.0, next 22.7), 422m (18.4, next 20.4), 423m/419
+  (16.8, a tie, as the two cells are mirror images), 422m (22.0), 421m
+  (22.1), 420m (17.4, next 422 at 19.4). From the fourth tick on, the next
+  lemming overlaps its head, so those scores are weaker.
+- **Front view:** Practice `LEVEL.090` (hatch (21,2,8)), camera 1, 3 units
+  in front of the hatch and facing it. Falling lemmings were 50×75 px. One
+  lemming, tick by tick: 401m (19.0, next other cell 24.7), 402m (19.7, next
+  24.1), 399/403m (17.5/17.7), 402m (19.1, next 23.8), 401m (15.7, next
+  26.5), then it reached the ground.
+- Rankings used `mhc-match` with the sprite's tight bounding box (found with
+  `img-blobs --background` on a frame without the lemming), over all 568
+  cells. With a uniform `--scale` search instead, the original's narrower
+  robe made every candidate score 25–38 and the ranking unreliable.
 
 ### Playback rate
 
@@ -127,6 +174,9 @@ better measurement (for example a frame counter in a long recording).
    cells (plain and mirrored) at every position and scale inside the
    rectangle. Matches are reliable when the sprite is at least about 80
    screen pixels tall (in the 1280×960 capture); smaller sprites rank
-   unrelated cells, so those were judged by eye instead.
+   unrelated cells, so those were judged by eye instead. When the sprite
+   is isolated, passing its tight bounding box (without `--scale`) ranks
+   more sharply, because each cell is stretched to the sprite's own aspect
+   ratio.
 4. `l3d-tool mhc-mirrors` lists, for each cell, the other cell closest to
    its mirror image.

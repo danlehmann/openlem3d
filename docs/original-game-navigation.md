@@ -360,6 +360,12 @@ Further findings from the code and camera runs **[verified]**:
   work while the level runs or is paused. The camera icon shows the current
   camera number in white near (513,200); grouping polled frames by that
   digit separates the four views.
+- **Camera moves by AUTOTYPE.** Taps of `kp_8` (AUTOTYPE key name) move
+  the camera forward even while paused: 8 taps took Mayhem 6's camera 1
+  more than 4 units forward. Taps of `a` turn the view in large steps.
+  Taps of `kp_4` and `kp_6` had no visible effect. `AUTOTYPE -list` prints
+  the key names. A `-w` of 50 typed nothing; 30 works, so pad longer
+  delays with `,`.
 - **CD check.** A host folder mounted as the CD (`MOUNT D dir -t cdrom`) is
   rejected: the game prints "Please insert 3D Lemmings CD in drive and close
   door" and exits. A CUE sheet whose data track is a 2048-byte-sector copy of

@@ -86,23 +86,38 @@ enum Angles {
     Eight,
 }
 
+/// The order in which an action's frames are shown, one per step.
+#[derive(Clone, Copy)]
+enum Playback {
+    /// Frames 0, 1, … in a loop.
+    Loop,
+    /// Frames 0, 1, …, then the last frame held.
+    Once,
+    /// The listed frame indices in a loop, every cell drawn mirrored relative
+    /// to its angle block's usual orientation.
+    MirroredCycle(&'static [u32]),
+}
+
 /// One action's animation: `frames` cells per angle block starting at `first`.
 #[derive(Clone, Copy)]
 struct Anim {
     first: u32,
     frames: u32,
     angles: Angles,
-    /// Hold the last frame instead of looping.
-    once: bool,
+    playback: Playback,
 }
 
 const fn anim(first: u32, frames: u32, angles: Angles) -> Anim {
-    Anim { first, frames, angles, once: false }
+    Anim { first, frames, angles, playback: Playback::Loop }
 }
 
 const fn once(first: u32, frames: u32, angles: Angles) -> Anim {
-    Anim { first, frames, angles, once: true }
+    Anim { first, frames, angles, playback: Playback::Once }
 }
+
+/// Falling frame order: a ping-pong over the five frames, starting in the
+/// middle.
+const FALL_CYCLE: &[u32] = &[2, 3, 4, 3, 2, 1, 0, 1];
 
 /// The animation for a state (cell ranges from `docs/spec/lemmings.md`).
 fn anim_for(state: State) -> Anim {
@@ -113,7 +128,7 @@ fn anim_for(state: State) -> Anim {
         State::Exiting => anim(0, 6, Five),
         State::Turning => anim(30, 7, Eight),
         State::Blocking => anim(86, 7, Five),
-        State::Falling { .. } => anim(121, 8, Five),
+        State::Falling { .. } => Anim { first: 399, frames: 5, angles: Five, playback: Playback::MirroredCycle(FALL_CYCLE) },
         State::Digging => anim(161, 8, Five),
         State::Bashing => anim(201, 8, Five),
         State::Mining => anim(241, 6, Five),
@@ -130,7 +145,11 @@ fn anim_for(state: State) -> Anim {
 /// The atlas cell and mirroring for an animation at a view angle and time.
 fn cell_for(a: Anim, view: ViewAngle, ticks: u32) -> (u32, bool) {
     let step = ticks / TICKS_PER_FRAME;
-    let frame = if a.once { step.min(a.frames - 1) } else { step % a.frames };
+    let (frame, flip) = match a.playback {
+        Playback::Loop => (step % a.frames, false),
+        Playback::Once => (step.min(a.frames - 1), false),
+        Playback::MirroredCycle(cycle) => (cycle[step as usize % cycle.len()], true),
+    };
     let (block, mirror) = match a.angles {
         Angles::Eight => (view.round_index(), false),
         Angles::Five => {
@@ -139,7 +158,7 @@ fn cell_for(a: Anim, view: ViewAngle, ticks: u32) -> (u32, bool) {
             if r <= 4 { (r, false) } else { (8 - r, true) }
         }
     };
-    (a.first + block * a.frames + frame, mirror)
+    (a.first + block * a.frames + frame, mirror != flip)
 }
 
 /// Builds this frame's lemming sprites for a camera facing `camera_yaw`.
@@ -182,5 +201,17 @@ mod tests {
         assert_eq!(cell_for(walk, ViewAngle::Left, 0), (12, true));
         assert_eq!(cell_for(walk, ViewAngle::Back, 2 * TICKS_PER_FRAME), (26, false));
         assert_eq!(cell_for(walk, ViewAngle::FrontLeft, 0), (6, true));
+    }
+
+    #[test]
+    fn faller_cells() {
+        let fall = anim_for(State::Falling { from_y: 0 });
+        let back: Vec<_> = (0..8).map(|t| cell_for(fall, ViewAngle::Back, t * TICKS_PER_FRAME)).collect();
+        let want = [421, 422, 423, 422, 421, 420, 419, 420];
+        assert_eq!(back, want.map(|c| (c, true)));
+        assert_eq!(cell_for(fall, ViewAngle::Front, 0), (401, true));
+        assert_eq!(cell_for(fall, ViewAngle::Front, 8 * TICKS_PER_FRAME), (401, true));
+        // Left-hand angles: mirrored block, mirrored again.
+        assert_eq!(cell_for(fall, ViewAngle::Left, 0), (411, false));
     }
 }
