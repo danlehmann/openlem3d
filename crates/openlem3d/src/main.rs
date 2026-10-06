@@ -22,7 +22,9 @@ mod lemming_render;
 mod level_mesh;
 mod results;
 mod scene_build;
+mod options;
 mod scene_render;
+mod settings;
 mod sfx;
 
 use std::path::PathBuf;
@@ -66,6 +68,8 @@ pub struct Options {
     code_screen: bool,
     /// With `--level`, start on that level's briefing (`--briefing`).
     briefing: bool,
+    /// Start on the configuration screen (`--options`).
+    options_screen: bool,
 }
 
 fn parse_args() -> Options {
@@ -83,6 +87,7 @@ fn parse_args() -> Options {
         follow: None,
         code_screen: false,
         briefing: false,
+        options_screen: false,
     };
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -98,6 +103,7 @@ fn parse_args() -> Options {
             "--no-hud" => o.no_hud = true,
             "--code" => o.code_screen = true,
             "--briefing" => o.briefing = true,
+            "--options" => o.options_screen = true,
             "--follow" => o.follow = Some(val().parse().expect("--follow takes a lemming number")),
             "--assign" => {
                 let v = val();
@@ -153,7 +159,7 @@ fn main() {
                     ..default()
                 }),
         )
-        .add_plugins((SceneRenderPlugin, hud::HudPlugin, menu::MenuPlugin, music::MusicPlugin, touch::TouchPlugin, title::TitlePlugin, lemming_cam::LemmingCamPlugin, panel::PanelPlugin, briefing::BriefingPlugin, minimap::MinimapPlugin, results::ResultsPlugin, pointer::PointerPlugin, sfx::SfxPlugin))
+        .add_plugins((SceneRenderPlugin, hud::HudPlugin, menu::MenuPlugin, music::MusicPlugin, touch::TouchPlugin, title::TitlePlugin, lemming_cam::LemmingCamPlugin, panel::PanelPlugin, briefing::BriefingPlugin, minimap::MinimapPlugin, results::ResultsPlugin, pointer::PointerPlugin, sfx::SfxPlugin, options::OptionsPlugin))
         .insert_resource(ClearColor(Color::srgb(0.35, 0.55, 0.85)))
         .insert_resource(opts.clone())
         .insert_resource(Data(data))
@@ -162,6 +168,7 @@ fn main() {
             (Some(_), _) if opts.briefing => menu::AppState::Briefing,
             (Some(_), _) => menu::AppState::Playing,
             (None, true) => menu::AppState::Code,
+            (None, false) if opts.options_screen => menu::AppState::Options,
             (None, false) => menu::AppState::Title,
         })
         .add_systems(Update, (screenshot_when_ready, hide_ui))
@@ -331,7 +338,7 @@ fn load_level(
     opts: Res<Options>,
     mut scene: ResMut<SceneContent>,
     mut game: ResMut<Game>,
-    (mut sources, music, muted): (ResMut<Assets<bevy::audio::AudioSource>>, music::MusicQuery, Res<music::MusicMuted>),
+    (mut sources, music, muted, settings): (ResMut<Assets<bevy::audio::AudioSource>>, music::MusicQuery, Res<music::MusicMuted>, Res<settings::Settings>),
     mut cams: Query<&mut ViewCamera>,
     mut windows: Query<&mut Window>,
 ) {
@@ -340,7 +347,7 @@ fn load_level(
     }
     let n = current.number;
     current.loaded = Some(n);
-    let scene_build::BuiltLevel { level, blocks, scene: content, mesh, block_layer } = match scene_build::build(&mut data.0, n) {
+    let scene_build::BuiltLevel { level, blocks, scene: content, mesh, block_layer } = match scene_build::build(&mut data.0, n, scene_build::Show { land: settings.land, sea: settings.sea, sky: settings.sky }) {
         Ok(v) => v,
         Err(e) => {
             error!("level {n}: {e}");
@@ -373,7 +380,7 @@ fn load_level(
     game.sim = Some(l3d_sim::Simulation::new(&level, &blocks));
     game.save_requirement = level.save_requirement as u32;
     let track = music::track_for(level.theme, level.music);
-    music::play_track(&mut commands, &mut sources, &music::current(&music), &data.0.disc, track, muted.0);
+    music::play_track(&mut commands, &mut sources, &music::current(&music), &data.0.disc, track, music::volume(&muted, &settings));
     game.terrain = Some((level, blocks, block_layer));
 }
 
@@ -389,6 +396,7 @@ fn camera_controls(
     mut scene_cam: ResMut<SceneCamera>,
     lemming_cam: Res<lemming_cam::LemmingCam>,
     mut preset: ResMut<PresetIndex>,
+    settings: Res<settings::Settings>,
     mut q: Query<&mut ViewCamera>,
 ) {
     // Riding along with a lemming: no manual movement.
@@ -406,12 +414,12 @@ fn camera_controls(
         let held = |a: KeyCode, b: KeyCode| (keys.pressed(a) || keys.pressed(b)) as i32 as f32;
         let turn = held(KeyCode::KeyE, KeyCode::KeyE) - held(KeyCode::KeyQ, KeyCode::KeyQ);
         cam.yaw += turn * 1.8 * dt;
-        if mouse.pressed(MouseButton::Right) && dt > 0.0 {
+        if mouse.pressed(settings.turn_button()) && dt > 0.0 {
             cam.yaw += motion.delta.x * 0.005;
         }
         let fwd = cam.forward();
         let right = Vec3::new(-fwd.z, 0.0, fwd.x);
-        let speed = if keys.pressed(KeyCode::ShiftLeft) { 16.0 } else { 6.0 };
+        let speed = if keys.pressed(KeyCode::ShiftLeft) { 16.0 } else { 6.0 } * settings.camera_factor();
         let mv = fwd * (held(KeyCode::KeyW, KeyCode::ArrowUp) - held(KeyCode::KeyS, KeyCode::ArrowDown))
             + right * (held(KeyCode::KeyD, KeyCode::ArrowRight) - held(KeyCode::KeyA, KeyCode::ArrowLeft))
             + Vec3::Y * (held(KeyCode::KeyR, KeyCode::PageUp) - held(KeyCode::KeyF, KeyCode::PageDown));
@@ -438,7 +446,7 @@ fn screenshot_when_ready(
     mut exit: MessageWriter<AppExit>,
 ) {
     let Some(path) = &opts.screenshot else { return };
-    if current.loaded.is_none() && !matches!(state.get(), menu::AppState::Menu | menu::AppState::Title | menu::AppState::Code | menu::AppState::Briefing) {
+    if current.loaded.is_none() && !matches!(state.get(), menu::AppState::Menu | menu::AppState::Title | menu::AppState::Code | menu::AppState::Briefing | menu::AppState::Options) {
         return;
     }
     let before = elapsed.unwrap_or(-time.delta_secs());

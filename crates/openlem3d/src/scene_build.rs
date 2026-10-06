@@ -563,8 +563,17 @@ fn brick_layer(bricks: &[l3d_sim::Brick]) -> SceneLayer {
     b.finish(RgbaImage { width: W, height: H, texels })
 }
 
+/// Which optional parts of the scene to draw (the options screen's Land,
+/// Sea and Sky).
+#[derive(Clone, Copy)]
+pub struct Show {
+    pub land: bool,
+    pub sea: bool,
+    pub sky: bool,
+}
+
 /// Builds everything drawn for level `n`.
-pub fn build(data: &mut GameData, n: u32) -> Result<BuiltLevel, l3d_formats::Error> {
+pub fn build(data: &mut GameData, n: u32, show: Show) -> Result<BuiltLevel, l3d_formats::Error> {
     let level = data.level(n)?;
     let blocks = data.blocks(n)?;
     let pal = data.palette("GFX/LM3D.PAL")?;
@@ -575,7 +584,8 @@ pub fn build(data: &mut GameData, n: u32) -> Result<BuiltLevel, l3d_formats::Err
     let flags = level.flags;
     let surround = flags & level_flags::SURROUND_SKY != 0;
 
-    if level.sea_gfx != 0xFF
+    if show.sea
+        && level.sea_gfx != 0xFF
         && !surround
         && flags & level_flags::SEA_SOLID_COLOUR == 0
         && let Ok(sea) = data.gfx("SEA", level.sea_gfx)
@@ -590,7 +600,8 @@ pub fn build(data: &mut GameData, n: u32) -> Result<BuiltLevel, l3d_formats::Err
         };
         scene.layers.push(plane_layer(GROUND_Y - 0.01, tile, img));
     }
-    if level.land_gfx != 0xFF
+    if show.land
+        && level.land_gfx != 0xFF
         && flags & level_flags::LAND_INVISIBLE == 0
         && !level.land_polygons.is_empty()
         && let Ok(land) = data.gfx("LAND", level.land_gfx)
@@ -624,7 +635,8 @@ pub fn build(data: &mut GameData, n: u32) -> Result<BuiltLevel, l3d_formats::Err
     let traps = (level.trap_type != 0xFF).then(|| data.gfx("TRAPS", level.trap_type).ok()).flatten();
     scene.sprite_atlas = lemming_atlas(data, &pal, traps.as_deref()).ok();
 
-    if level.sky_gfx != 0xFF
+    if show.sky
+        && level.sky_gfx != 0xFF
         && let Ok(sky) = data.gfx("SKY", level.sky_gfx)
     {
         match sky.len() {

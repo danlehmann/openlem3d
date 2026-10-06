@@ -519,6 +519,20 @@ in Fun 1 in mode 1 and level 2 in mode 2). No 640×480 mode was offered by
 this setup, although the CD has 640×480 versions of the scenes and intro
 slides; how the panel would look there is unknown.
 
+### Configuration screen (F12)
+
+From one capture (estimated positions, in 320×200 pixels): a blue mottled
+backdrop; "Configuration" in a box at the top centre (x 112–207, y 4–20);
+two rows of four boxes 80 pixels wide at y 37–51 and 69–83 (Textures,
+Land, Sea, Sky; Replays, CD Anims, Left Handed, Video Mode 2), each with a
+light at its right end (the small font's yellow code 35 for on, red code
+36 for off); three rows of sliders of ten lights at y ≈ 101, 117 and 133
+(CD Music, Music, Effects on the left, lights from x 64; Window, Mouse,
+Camera on the right, lights from x 224); and "Default Config" and "Exit and
+Save" in boxes at the bottom corners (y 180–195). The labels are the small
+7×8 font in capitals. Our screen keeps this layout with the settings that
+apply to it (Land, Sea, Sky, Left Handed, Fullscreen, CD Music, Effects,
+Camera).
 ## Open questions
 
 - `ICONS.RNC` bytes 43,648–48,120: the layout of the wooden panel pieces.

@@ -60,11 +60,12 @@ fn play(
     mut data: ResMut<Data>,
     mut sources: ResMut<Assets<AudioSource>>,
     muted: Res<crate::music::MusicMuted>,
+    settings: Res<crate::settings::Settings>,
 ) {
     // The same sample asked for twice in a frame plays once.
     let mut played: Vec<&'static str> = Vec::new();
     for Sfx(name) in requests.read() {
-        if muted.0 || played.contains(name) {
+        if muted.0 || settings.effects == 0 || played.contains(name) {
             continue;
         }
         played.push(name);
@@ -73,7 +74,7 @@ fn play(
             (!sample.data.is_empty()).then(|| sources.add(AudioSource { bytes: Arc::from(sample.to_wav()) }))
         });
         if let Some(h) = handle {
-            commands.spawn((AudioPlayer::new(h.clone()), PlaybackSettings::DESPAWN.with_volume(Volume::Linear(VOLUME))));
+            commands.spawn((AudioPlayer::new(h.clone()), PlaybackSettings::DESPAWN.with_volume(Volume::Linear(VOLUME * settings.effects_volume()))));
         }
     }
 }

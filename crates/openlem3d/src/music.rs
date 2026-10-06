@@ -93,8 +93,9 @@ fn wav_bytes(samples: &[i16]) -> Vec<u8> {
     out
 }
 
-/// Replaces the playing music with CD track `track` (1-based), looping.
-pub fn play_track(commands: &mut Commands, sources: &mut Assets<AudioSource>, existing: &[Entity], disc: &Disc, track: u8, muted: bool) {
+/// Replaces the playing music with CD track `track` (1-based), looping at
+/// `volume` (linear).
+pub fn play_track(commands: &mut Commands, sources: &mut Assets<AudioSource>, existing: &[Entity], disc: &Disc, track: u8, volume: f32) {
     for e in existing {
         commands.entity(*e).despawn();
     }
@@ -110,8 +111,7 @@ pub fn play_track(commands: &mut Commands, sources: &mut Assets<AudioSource>, ex
         }
     };
     let handle = sources.add(AudioSource { bytes: Arc::from(wav_bytes(&samples)) });
-    let volume = if muted { Volume::SILENT } else { Volume::Linear(0.6) };
-    commands.spawn((AudioPlayer::new(handle), PlaybackSettings::LOOP.with_volume(volume), LevelMusic));
+    commands.spawn((AudioPlayer::new(handle), PlaybackSettings::LOOP.with_volume(Volume::Linear(volume)), LevelMusic));
     info!("playing CD track {track}");
 }
 
@@ -122,15 +122,24 @@ pub fn current(q: &Query<Entity, With<LevelMusic>>) -> Vec<Entity> {
 
 pub type MusicQuery<'w, 's> = Query<'w, 's, Entity, With<LevelMusic>>;
 
+/// The music volume: the setting, or silence while muted.
+pub fn volume(muted: &MusicMuted, settings: &crate::settings::Settings) -> f32 {
+    if muted.0 { 0.0 } else { settings.music_volume() }
+}
+
+/// M mutes; the playing music follows the mute and the volume setting.
 fn toggle_mute(
     keys: Res<ButtonInput<KeyCode>>,
+    settings: Res<crate::settings::Settings>,
     mut muted: ResMut<MusicMuted>,
     mut sinks: Query<&mut AudioSink, With<LevelMusic>>,
 ) {
     if keys.just_pressed(KeyCode::KeyM) {
         muted.0 = !muted.0;
+    }
+    if muted.is_changed() || settings.is_changed() {
         for mut sink in &mut sinks {
-            sink.set_volume(if muted.0 { Volume::SILENT } else { Volume::Linear(0.6) });
+            sink.set_volume(Volume::Linear(volume(&muted, &settings)));
         }
     }
 }

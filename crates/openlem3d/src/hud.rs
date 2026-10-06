@@ -122,10 +122,11 @@ fn assign_on_pointer(
     mut lemming_cam: ResMut<LemmingCam>,
     mut game: ResMut<Game>,
     mut sfx: MessageWriter<crate::sfx::Sfx>,
+    settings: Res<crate::settings::Settings>,
 ) {
     let Some(sim) = &mut game.sim else { return };
     let picking = lemming_cam.picking();
-    if selected.0 != Some(Skill::Turner) || mouse.just_pressed(MouseButton::Right) {
+    if selected.0 != Some(Skill::Turner) || mouse.just_pressed(settings.turn_button()) {
         pending.0 = None;
     }
     if pending.0.is_some_and(|i| !sim.can_assign(i, Skill::Turner)) {
@@ -136,7 +137,7 @@ fn assign_on_pointer(
     if ui.iter().any(|i| *i != Interaction::None) {
         return;
     }
-    let point = if mouse.just_pressed(MouseButton::Left) {
+    let point = if mouse.just_pressed(settings.action_button()) {
         window.cursor_position()
     } else {
         // A tap is a touch released without having been dragged.

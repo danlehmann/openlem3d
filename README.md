@@ -54,7 +54,8 @@ See `docs/spec/` for what has been verified and how.
 | Ride along with a lemming | V or the face, then click a lemming; V, Esc or the arrow to return | tap the face, then a lemming; the arrow returns |
 | Release rate | − / + (hold to repeat) | − / + buttons (hold to repeat) |
 | Nuke | Alt+Q, or click the bomb | tap the bomb |
-| Mute music | M | — |
+| Mute music and sounds | M | — |
+| Options | F12 or the Options button on the title | tap Options |
 | Briefing | click or Space: play; Enter or click Preview: preview; right click, Esc or click Menu: back | tap to play, or tap Preview or Menu |
 | Results | click, Space or Enter: next level (or retry); right click or Esc: level list | tap; or tap Menu |
 | Level select | Esc | — |

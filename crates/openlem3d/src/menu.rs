@@ -14,6 +14,8 @@ pub enum AppState {
     Title,
     /// Entering a level code.
     Code,
+    /// The configuration screen.
+    Options,
     /// Choosing a level.
     Menu,
     /// The level's briefing, before it starts.

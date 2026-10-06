@@ -55,7 +55,11 @@ impl Plugin for TitlePlugin {
             )
             .add_systems(OnExit(AppState::Code), despawn::<ScreenRoot>)
             .add_systems(Update, (spawn_code, code_input, animate_slots).chain().run_if(in_state(AppState::Code)))
-            .add_systems(Update, scroll_backdrop.run_if(in_state(AppState::Title).or_else(in_state(AppState::Code))))
+            .add_systems(
+                Update,
+                scroll_backdrop.run_if(in_state(AppState::Title).or_else(in_state(AppState::Code)).or_else(in_state(AppState::Options))),
+            )
+            .add_systems(OnExit(AppState::Options), despawn::<ScreenRoot>)
             .add_systems(PostUpdate, layout.before(bevy::ui::UiSystems::Layout));
     }
 }
@@ -125,12 +129,14 @@ fn advance(g: &IndexedImage) -> f32 {
     last.map_or(0.0, |x| x as f32)
 }
 
-fn glyphs(f: &Font, pal: &Palette, space: f32, images: &mut Assets<Image>) -> Glyphs {
+/// `gap` is added to each glyph's advance: 0 for the italic fonts, whose
+/// glyphs overlap by a pixel, 1 for the upright small font.
+pub(crate) fn glyphs(f: &Font, pal: &Palette, space: f32, gap: f32, images: &mut Assets<Image>) -> Glyphs {
     Glyphs {
         first: f.first,
         images: f.glyphs.iter().map(|g| images.add(to_image(g, pal, true))).collect(),
         // Picture tiles (codes 123 and up in TITLE.FNT) join edge to edge.
-        advances: f.glyphs.iter().enumerate().map(|(i, g)| if f.first as usize + i >= 123 { g.width as f32 } else { advance(g) }).collect(),
+        advances: f.glyphs.iter().enumerate().map(|(i, g)| if f.first as usize + i >= 123 { g.width as f32 } else { advance(g) + gap }).collect(),
         size: Vec2::new(f.glyph_width as f32, f.glyph_height as f32),
         space,
     }
@@ -176,8 +182,8 @@ fn load_art(mut commands: Commands, mut data: ResMut<Data>, mut images: ResMut<A
         .and_then(|raw| title::LemmingLetters::parse(&raw).ok())
         .map(|l| l.frames.iter().map(|f| add(f, true)).collect())
         .unwrap_or_default();
-    let banner = d.read("GFX/TITLE.FNT").ok().and_then(|raw| title_font(&raw).ok()).map(|f| glyphs(&f, &pal, 5.0, &mut images));
-    let large = d.read("GFX/ICONS.RNC").ok().and_then(|raw| Icons::parse(&raw).ok()).map(|i| glyphs(&i.large_font, &pal, 5.0, &mut images));
+    let banner = d.read("GFX/TITLE.FNT").ok().and_then(|raw| title_font(&raw).ok()).map(|f| glyphs(&f, &pal, 5.0, 0.0, &mut images));
+    let large = d.read("GFX/ICONS.RNC").ok().and_then(|raw| Icons::parse(&raw).ok()).map(|i| glyphs(&i.large_font, &pal, 5.0, 0.0, &mut images));
     commands.insert_resource(Art { backdrop, logo, buttons, faces, ratings, rating_labels, winder, banner, large, letters });
 }
 
@@ -234,7 +240,7 @@ fn rating_label(name: &str) -> IndexedImage {
 
 /// Root of the title and code screens.
 #[derive(Component)]
-struct ScreenRoot;
+pub(crate) struct ScreenRoot;
 
 /// A canvas of the given size in the original's pixels (320×200 for the
 /// title and code screens), scaled to fit the window and centred. One
@@ -304,8 +310,9 @@ pub(crate) fn image_at(image: Handle<Image>, rect: At) -> (ImageNode, At, Node) 
     (ImageNode::new(image), rect, Node { position_type: PositionType::Absolute, ..default() })
 }
 
-/// Spawns the root, the backdrop and the canvas; returns the canvas.
-fn spawn_screen(commands: &mut Commands, art: &Art, scroll: f32) -> Entity {
+/// Spawns the root, the backdrop (tinted by `tint`) and the canvas; returns
+/// the canvas.
+pub(crate) fn spawn_screen(commands: &mut Commands, art: &Art, scroll: f32, tint: Color) -> Entity {
     let root = commands
         .spawn((
             ScreenRoot,
@@ -318,7 +325,7 @@ fn spawn_screen(commands: &mut Commands, art: &Art, scroll: f32) -> Entity {
     if let Some(bg) = &art.backdrop {
         // Enough tiles to cover any window at the canvas scale.
         for _ in 0..(3 * 8) {
-            let tile = commands.spawn((ImageNode::new(bg.clone()), Node { position_type: PositionType::Absolute, ..default() })).id();
+            let tile = commands.spawn((ImageNode::new(bg.clone()).with_color(tint), Node { position_type: PositionType::Absolute, ..default() })).id();
             commands.entity(backdrop).add_child(tile);
         }
     }
@@ -350,7 +357,7 @@ fn spawn_title(mut commands: Commands, art: Option<Res<Art>>, roots: Query<(), W
     if !roots.is_empty() {
         return;
     }
-    let canvas = spawn_screen(&mut commands, &art, TITLE_SCROLL);
+    let canvas = spawn_screen(&mut commands, &art, TITLE_SCROLL, Color::WHITE);
     let child = |commands: &mut Commands, b: &mut dyn FnMut(&mut Commands) -> Entity| {
         let e = b(commands);
         commands.entity(canvas).add_child(e);
@@ -624,7 +631,6 @@ fn title_input(
     buttons: Query<(&Interaction, &TitleButton), Changed<Interaction>>,
     mut rating: ResMut<MenuRating>,
     mut next: ResMut<NextState<AppState>>,
-    mut muted: ResMut<crate::music::MusicMuted>,
     mut exit: MessageWriter<AppExit>,
     mut sfx: MessageWriter<crate::sfx::Sfx>,
 ) {
@@ -658,8 +664,7 @@ fn title_input(
         match b {
             TitleButton::Play => next.set(AppState::Menu),
             TitleButton::Code => next.set(AppState::Code),
-            // Options are not designed yet; toggling music is a stand-in.
-            TitleButton::Options => muted.0 = !muted.0,
+            TitleButton::Options => next.set(AppState::Options),
             TitleButton::Rating => rating.0 = (rating.0 + 1) % 5,
             TitleButton::Exit => {
                 exit.write(AppExit::Success);
@@ -707,7 +712,7 @@ fn spawn_code(mut commands: Commands, art: Option<Res<Art>>, roots: Query<(), Wi
         return;
     }
     *code = CodeText::default();
-    let canvas = spawn_screen(&mut commands, &art, CODE_SCROLL);
+    let canvas = spawn_screen(&mut commands, &art, CODE_SCROLL, Color::WHITE);
     if let Some(font) = &art.large {
         centred_line(&mut commands, canvas, font, "Enter Password", 60.0, Plain);
         centred_line(&mut commands, canvas, font, "Password Correct", 140.0, (CorrectText, Visibility::Hidden));
