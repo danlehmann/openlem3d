@@ -233,6 +233,9 @@ pub struct Lemming {
     pub fuse: Option<u32>,
     /// Set once the lemming has left play (saved or dead).
     pub gone: bool,
+    /// Standing on the teleporter it arrived on; it must step off before
+    /// another teleport.
+    pub teleported: bool,
 }
 
 impl Lemming {
@@ -430,6 +433,7 @@ impl Simulation {
                     floater: false,
                     fuse: None,
                     gone: false,
+                    teleported: false,
                 });
                 self.counts.released += 1;
                 // The countdown includes the releasing tick: the next release
@@ -552,6 +556,7 @@ impl Simulation {
             l.set_state(State::Zapped);
         }
         self.spring_traps(l);
+        self.teleport(l);
     }
 
     /// Killing traps take a lemming that steps on them, then are busy for a
@@ -565,6 +570,33 @@ impl Simulation {
             l.fuse = None;
             l.set_state(State::Trapped);
         }
+    }
+
+    /// Teleporters: a walker stepping onto one appears on its partner (the
+    /// other object with the same value; with more, the last two pair up
+    /// [L3DEdit]) and walks on in the same direction (provisional: instant).
+    fn teleport(&mut self, l: &mut Lemming) {
+        if self.object_kind != Some(objects::ObjectKind::Teleporter) || l.state != State::Walking {
+            return;
+        }
+        let Some(here) = self.objects.iter().position(|o| o.touches(l.pos)) else {
+            l.teleported = false;
+            return;
+        };
+        if l.teleported {
+            return;
+        }
+        let value = self.objects[here].value;
+        let pair: Vec<usize> = self.objects.iter().enumerate().filter(|(_, o)| o.value == value).map(|(i, _)| i).collect();
+        let [.., a, b] = pair[..] else { return };
+        let to = match here {
+            h if h == a => b,
+            h if h == b => a,
+            _ => return,
+        };
+        let o = self.objects[to];
+        l.pos = [o.cell[0] * SUB + SUB / 2, o.surface, o.cell[2] * SUB + SUB / 2];
+        l.teleported = true;
     }
 
     /// Ends a bomber: removes non-steel terrain around it.
