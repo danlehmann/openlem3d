@@ -10,6 +10,7 @@
 mod codes;
 mod hud;
 mod lemming_cam;
+mod panel;
 mod menu;
 mod music;
 mod title;
@@ -35,7 +36,7 @@ use scene_render::{SceneCamera, SceneContent, SceneRenderPlugin};
 
 /// Command-line options.
 #[derive(Resource, Clone)]
-struct Options {
+pub struct Options {
     data: Option<PathBuf>,
     /// Level to start in directly; the level-select screen otherwise.
     level: Option<u32>,
@@ -139,7 +140,7 @@ fn main() {
                     ..default()
                 }),
         )
-        .add_plugins((SceneRenderPlugin, hud::HudPlugin, menu::MenuPlugin, music::MusicPlugin, touch::TouchPlugin, title::TitlePlugin, lemming_cam::LemmingCamPlugin))
+        .add_plugins((SceneRenderPlugin, hud::HudPlugin, menu::MenuPlugin, music::MusicPlugin, touch::TouchPlugin, title::TitlePlugin, lemming_cam::LemmingCamPlugin, panel::PanelPlugin))
         .insert_resource(ClearColor(Color::srgb(0.35, 0.55, 0.85)))
         .insert_resource(opts.clone())
         .insert_resource(Data(data))
@@ -148,6 +149,7 @@ fn main() {
         .add_systems(Update, (screenshot_when_ready, hide_ui))
         .insert_resource(Game::default())
         .insert_resource(Time::<Fixed>::from_hz(l3d_sim::TICKS_PER_SECOND as f64))
+        .init_resource::<PresetIndex>()
         .add_systems(FixedUpdate, step_simulation.run_if(in_state(menu::AppState::Playing)))
         .add_systems(PostUpdate, update_lemming_sprites)
         .add_systems(Startup, spawn_camera)
@@ -167,6 +169,10 @@ pub struct CurrentLevel {
     number: u32,
     loaded: Option<u32>,
 }
+
+/// The preset camera last chosen (0–3).
+#[derive(Resource, Default)]
+pub struct PresetIndex(pub usize);
 
 /// The current level's preset cameras.
 #[derive(Resource)]
@@ -244,27 +250,35 @@ fn switch_level(keys: Res<ButtonInput<KeyCode>>, mut current: ResMut<CurrentLeve
 pub struct Game {
     pub sim: Option<l3d_sim::Simulation>,
     pub paused: bool,
+    /// Fast-forward: several simulation ticks per tick.
+    pub fast_forward: bool,
     pub save_requirement: u32,
     /// The level's block grid as currently shaped (destructible skills change
     /// it), its block dictionary, and the scene layer showing it.
     terrain: Option<(Level, BlockSet, usize)>,
 }
 
+/// Simulation ticks per tick while fast-forwarding (the original's speed-up
+/// is unmeasured).
+const FAST_FORWARD_TICKS: u32 = 3;
+
 fn step_simulation(keys: Res<ButtonInput<KeyCode>>, options: Res<Options>, mut game: ResMut<Game>, mut scene: ResMut<SceneContent>) {
     if keys.just_pressed(KeyCode::KeyP) {
         game.paused = !game.paused;
     }
-    let Game { sim: Some(sim), paused: false, terrain, .. } = &mut *game else { return };
-    sim.step();
-    for (tick, i, skill, side) in &options.assign {
-        if *tick == sim.tick
-            && let (Some(skill), Some(dir)) = (l3d_sim::Skill::from_id(*skill), sim.lemmings.get(*i).map(|l| l.dir))
-        {
-            match side.as_deref() {
-                Some("cw") => sim.assign_turner(*i, dir.clockwise()),
-                Some("acw") => sim.assign_turner(*i, dir.anticlockwise()),
-                _ => sim.assign(*i, skill),
-            };
+    let Game { sim: Some(sim), paused: false, terrain, fast_forward, .. } = &mut *game else { return };
+    for _ in 0..if *fast_forward { FAST_FORWARD_TICKS } else { 1 } {
+        sim.step();
+        for (tick, i, skill, side) in &options.assign {
+            if *tick == sim.tick
+                && let (Some(skill), Some(dir)) = (l3d_sim::Skill::from_id(*skill), sim.lemmings.get(*i).map(|l| l.dir))
+            {
+                match side.as_deref() {
+                    Some("cw") => sim.assign_turner(*i, dir.clockwise()),
+                    Some("acw") => sim.assign_turner(*i, dir.anticlockwise()),
+                    _ => sim.assign(*i, skill),
+                };
+            }
         }
     }
     let changes = sim.world.take_changes();
@@ -332,6 +346,9 @@ fn load_level(
     scene.version += 1;
     scene.data = Some(Arc::new(content));
     let preset = opts.camera.filter(|c| (1..=4).contains(c)).unwrap_or(1) - 1;
+    commands.insert_resource(PresetIndex(preset));
+    game.fast_forward = false;
+    game.paused = false;
     for mut cam in &mut cams {
         cam.set_preset(&level.cameras[preset]);
     }
@@ -354,6 +371,7 @@ fn camera_controls(
     windows: Query<&Window>,
     mut scene_cam: ResMut<SceneCamera>,
     lemming_cam: Res<lemming_cam::LemmingCam>,
+    mut preset: ResMut<PresetIndex>,
     mut q: Query<&mut ViewCamera>,
 ) {
     // Riding along with a lemming: no manual movement.
@@ -364,6 +382,7 @@ fn camera_controls(
             for (i, k) in presets.iter().enumerate() {
                 if keys.just_pressed(*k) {
                     cam.set_preset(&info.cameras[i]);
+                    preset.0 = i;
                 }
             }
         }

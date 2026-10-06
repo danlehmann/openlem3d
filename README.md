@@ -43,16 +43,17 @@ See `docs/spec/` for what has been verified and how.
 | Action | Keyboard / mouse | Touch |
 |---|---|---|
 | Move | W A S D or the arrow keys | one-finger drag (up/down) |
-| Turn | Q / E, or right-drag | one-finger drag (left/right) |
+| Turn | Q / E, right-drag, or hold the turn arrows | one-finger drag (left/right), or hold the turn arrows |
 | Up / down | R / F | two-finger drag |
-| Preset cameras | 1–4 | buttons 1–4 |
-| Pause | P | II button |
-| Select skill | F1–F9, or click the skill bar | tap the skill bar |
+| Preset cameras | 1–4, or click the camera to cycle | tap the camera to cycle |
+| Pause | P, or click the paws | tap the paws |
+| Fast-forward | click the ▶ icon | tap the ▶ icon |
+| Select skill | F1–F9, or click a skill at the bottom | tap a skill |
 | Give skill to a lemming | click the lemming | tap the lemming |
 | Turner | click the lemming, then click beside it on the side it should point to | tap, then tap beside it |
-| Ride along with a lemming | V or the face button, then click a lemming; V or Esc to return | face button, then tap a lemming |
+| Ride along with a lemming | V or the face, then click a lemming; V, Esc or the arrow to return | tap the face, then a lemming; the arrow returns |
 | Release rate | − / + (hold to repeat) | − / + buttons (hold to repeat) |
-| Nuke | Alt+Q, or the Nuke button | Nuke button |
+| Nuke | Alt+Q, or click the bomb | tap the bomb |
 | Mute music | M | — |
 | Level select | Esc | — |
 
