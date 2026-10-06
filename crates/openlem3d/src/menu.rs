@@ -9,7 +9,12 @@ use crate::{CurrentLevel, Data};
 /// Whether the player is choosing a level or playing one.
 #[derive(States, Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum AppState {
+    /// The title screen (main menu).
     #[default]
+    Title,
+    /// Entering a level code.
+    Code,
+    /// Choosing a level.
     Menu,
     Playing,
 }
@@ -31,7 +36,7 @@ impl Plugin for MenuPlugin {
             .init_resource::<CodeEntry>()
             .add_systems(
                 Update,
-                (menu_buttons, rebuild_on_rating_change, code_input).run_if(in_state(AppState::Menu)),
+                (menu_buttons, rebuild_on_rating_change, code_input, menu_to_title).run_if(in_state(AppState::Menu)),
             )
             .add_systems(Update, back_to_menu.run_if(in_state(AppState::Playing)));
     }
@@ -43,7 +48,7 @@ struct Titles(Vec<String>);
 
 /// The rating whose levels the menu lists.
 #[derive(Resource, Default)]
-struct MenuRating(usize);
+pub struct MenuRating(pub usize);
 
 #[derive(Component)]
 struct MenuRoot;
@@ -254,5 +259,12 @@ fn code_input(
 fn back_to_menu(keys: Res<ButtonInput<KeyCode>>, mut next: ResMut<NextState<AppState>>) {
     if keys.just_pressed(KeyCode::Escape) {
         next.set(AppState::Menu);
+    }
+}
+
+/// Esc on the level-select screen returns to the title screen.
+fn menu_to_title(keys: Res<ButtonInput<KeyCode>>, mut next: ResMut<NextState<AppState>>) {
+    if keys.just_pressed(KeyCode::Escape) {
+        next.set(AppState::Title);
     }
 }

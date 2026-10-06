@@ -11,6 +11,7 @@ mod codes;
 mod hud;
 mod menu;
 mod music;
+mod title;
 mod touch;
 mod lemming_render;
 mod level_mesh;
@@ -123,12 +124,12 @@ fn main() {
                     ..default()
                 }),
         )
-        .add_plugins((SceneRenderPlugin, hud::HudPlugin, menu::MenuPlugin, music::MusicPlugin, touch::TouchPlugin))
+        .add_plugins((SceneRenderPlugin, hud::HudPlugin, menu::MenuPlugin, music::MusicPlugin, touch::TouchPlugin, title::TitlePlugin))
         .insert_resource(ClearColor(Color::srgb(0.35, 0.55, 0.85)))
         .insert_resource(opts.clone())
         .insert_resource(Data(data))
         .insert_resource(CurrentLevel { number: opts.level.unwrap_or(0), loaded: None })
-        .insert_state(if opts.level.is_some() { menu::AppState::Playing } else { menu::AppState::Menu })
+        .insert_state(if opts.level.is_some() { menu::AppState::Playing } else { menu::AppState::Title })
         .add_systems(Update, (screenshot_when_ready, hide_ui))
         .insert_resource(Game::default())
         .insert_resource(Time::<Fixed>::from_hz(l3d_sim::TICKS_PER_SECOND as f64))
@@ -372,7 +373,7 @@ fn screenshot_when_ready(
     mut exit: MessageWriter<AppExit>,
 ) {
     let Some(path) = &opts.screenshot else { return };
-    if current.loaded.is_none() && *state.get() != menu::AppState::Menu {
+    if current.loaded.is_none() && !matches!(state.get(), menu::AppState::Menu | menu::AppState::Title | menu::AppState::Code) {
         return;
     }
     let before = elapsed.unwrap_or(-time.delta_secs());
