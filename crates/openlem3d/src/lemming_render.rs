@@ -22,6 +22,9 @@ const LEMMING_TEXELS_PER_UNIT: f32 = 128.0;
 /// original's sprites change once per tick; `docs/spec/behaviour.md`).
 const TICKS_PER_FRAME: u32 = 1;
 
+/// Ticks of each builder cycle spent stepping up onto the new brick.
+const BUILDER_STEP_TICKS: u32 = 6;
+
 /// The floater's umbrella cells.
 const UMBRELLA_FIRST: u32 = 336;
 const UMBRELLA_FRAMES: u32 = 8;
@@ -203,6 +206,18 @@ pub fn build(lemmings: &[Lemming], atlas_rows: u32, camera_yaw: f32) -> SceneSpr
             State::Turning { to } if to == l.dir.clockwise() => {
                 let (cell, mirror) = cell_for(anim_for(l.state), view.mirrored(), l.state_ticks);
                 (cell, !mirror)
+            }
+            // Each brick: a few steps up with the sack (444–473), then the
+            // laying motion spread over the rest of the 25-tick cycle
+            // (provisional split).
+            State::Building { .. } => {
+                let c = l.state_ticks % l3d_sim::BUILD_TICKS;
+                if c < BUILDER_STEP_TICKS {
+                    cell_for(anim(444, 6, Angles::Five), view, c)
+                } else {
+                    let laying = (c - BUILDER_STEP_TICKS) * 5 / (l3d_sim::BUILD_TICKS - BUILDER_STEP_TICKS);
+                    cell_for(once(344, 5, Angles::Five), view, laying)
+                }
             }
             _ => cell_for(anim_for(l.state), view, l.state_ticks),
         };

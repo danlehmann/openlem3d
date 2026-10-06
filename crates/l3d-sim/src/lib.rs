@@ -54,7 +54,7 @@ const BLAST_RADIUS: i32 = SUB;
 /// Ticks per segment dug (verified, rough: about 40 ±20%).
 const DIG_TICKS: u32 = 40;
 /// Ticks per brick laid by a builder (verified: 25 ± 1).
-const BUILD_TICKS: u32 = 25;
+pub const BUILD_TICKS: u32 = 25;
 /// Bricks per builder (verified: 6).
 const BRICKS: u8 = 6;
 /// Each brick moves the builder this far forward and ¼ unit up (verified
