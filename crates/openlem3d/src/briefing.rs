@@ -127,6 +127,18 @@ fn spawn_briefing(
     text(&mut commands, "Continue", 61.0, LABEL_Y, false);
     text(&mut commands, "Preview", 342.0, LABEL_Y, false);
     text(&mut commands, "Menu", 561.0, LABEL_Y, false);
+    // Clicking or tapping a prompt picks it; anywhere else continues.
+    for (choice, x, w) in [(Choice::Preview, 268.0, 150.0), (Choice::Menu, 522.0, 110.0)] {
+        let e = commands.spawn((choice, Button, at(x, PROMPT_Y, w, 32.0), Node { position_type: PositionType::Absolute, ..default() })).id();
+        commands.entity(canvas).add_child(e);
+    }
+}
+
+/// A clickable prompt.
+#[derive(Component, Clone, Copy, PartialEq, Eq)]
+enum Choice {
+    Preview,
+    Menu,
 }
 
 fn despawn_briefing(mut commands: Commands, roots: Query<Entity, With<BriefingRoot>>) {
@@ -136,17 +148,20 @@ fn despawn_briefing(mut commands: Commands, roots: Query<Entity, With<BriefingRo
 }
 
 fn briefing_input(
+    choices: Query<(&Interaction, &Choice)>,
     keys: Res<ButtonInput<KeyCode>>,
     mouse: Res<ButtonInput<MouseButton>>,
     touches: Res<Touches>,
     mut preview: ResMut<Preview>,
     mut next: ResMut<NextState<AppState>>,
 ) {
-    let back = mouse.just_pressed(MouseButton::Right) || keys.just_pressed(KeyCode::Escape);
-    let show = keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::NumpadEnter);
-    let go = mouse.just_pressed(MouseButton::Left)
+    let on = |c: Choice| choices.iter().any(|(i, k)| *i == Interaction::Pressed && *k == c);
+    let on_prompt = choices.iter().any(|(i, _)| *i != Interaction::None);
+    let back = mouse.just_pressed(MouseButton::Right) || keys.just_pressed(KeyCode::Escape) || on(Choice::Menu);
+    let show = keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::NumpadEnter) || on(Choice::Preview);
+    let go = (mouse.just_pressed(MouseButton::Left) && !on_prompt)
         || keys.just_pressed(KeyCode::Space)
-        || touches.any_just_released()
+        || (touches.any_just_released() && !on_prompt)
         || keys.get_just_pressed().any(|k| !matches!(k, KeyCode::Escape | KeyCode::Enter | KeyCode::NumpadEnter));
     if back {
         next.set(AppState::Menu);
