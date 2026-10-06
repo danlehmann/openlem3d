@@ -92,9 +92,9 @@ impl ViewAngle {
 /// How an action's cells are arranged by viewing angle.
 #[derive(Clone, Copy)]
 enum Angles {
-    /// Five blocks, front to back; the left-hand angles mirror the
-    /// three-quarter and side blocks. The stored side views are assumed to
-    /// face screen-right (unverified).
+    /// Five blocks, front to back round the lemming's left: the stored side
+    /// view faces screen-left (verified by eye on the walker, cells 12–17,
+    /// and the ¾ views 6–11 and 18–23); the right-hand angles mirror them.
     Five,
     /// Eight blocks going round the lemming from the front (asymmetric poses).
     Eight,
@@ -174,8 +174,13 @@ fn cell_for(a: Anim, view: ViewAngle, ticks: u32) -> (u32, bool) {
         Angles::Eight => (view.round_index(), false),
         Angles::Five => {
             let r = view.round_index();
-            // Round positions 5–7 mirror 3–1.
-            if r <= 4 { (r, false) } else { (8 - r, true) }
+            // Round positions 1–3 (the right) mirror the stored left-hand
+            // views 7–5.
+            match r {
+                0 | 4 => (r, false),
+                1..=3 => (r, true),
+                _ => (8 - r, false),
+            }
         }
     };
     (a.first + block * a.frames + frame, mirror != flip)
@@ -226,10 +231,10 @@ mod tests {
     fn walker_cells() {
         let walk = anim_for(State::Walking);
         assert_eq!(cell_for(walk, ViewAngle::Front, 0), (0, false));
-        assert_eq!(cell_for(walk, ViewAngle::Right, 0), (12, false));
-        assert_eq!(cell_for(walk, ViewAngle::Left, 0), (12, true));
+        assert_eq!(cell_for(walk, ViewAngle::Right, 0), (12, true));
+        assert_eq!(cell_for(walk, ViewAngle::Left, 0), (12, false));
         assert_eq!(cell_for(walk, ViewAngle::Back, 2 * TICKS_PER_FRAME), (26, false));
-        assert_eq!(cell_for(walk, ViewAngle::FrontLeft, 0), (6, true));
+        assert_eq!(cell_for(walk, ViewAngle::FrontLeft, 0), (6, false));
     }
 
     #[test]
@@ -241,6 +246,6 @@ mod tests {
         assert_eq!(cell_for(fall, ViewAngle::Front, 0), (401, true));
         assert_eq!(cell_for(fall, ViewAngle::Front, 8 * TICKS_PER_FRAME), (401, true));
         // Left-hand angles: mirrored block, mirrored again.
-        assert_eq!(cell_for(fall, ViewAngle::Left, 0), (411, false));
+        assert_eq!(cell_for(fall, ViewAngle::Left, 0), (411, true));
     }
 }

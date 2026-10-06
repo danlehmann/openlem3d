@@ -57,7 +57,11 @@ action, the blocks run from front to back:
 
 Five rendered angles cover 8 headings: the three headings on the other side
 (the other three-quarter views and the other profile) are the A1–A3 cells
-drawn mirrored left to right. **Verified** for walkers: lemmings seen from
+drawn mirrored left to right. The stored A1–A3 cells go round the lemming's
+**left**: the A2 profile faces screen-left (nose to the left), so a lemming
+walking to the screen's right is drawn with A2 mirrored. Verified by eye on
+walker cells 12–17 (and the three-quarter cells 6–11 and 18–23); drawing
+them the other way round made walkers move backwards. **Verified** for walkers: lemmings seen from
 the side and from behind match both plain and mirrored cells (for example
 cells 15 and 18 mirrored, and 24 mirrored, in different captures), and no other
 cell range holds additional walker angles. Front and back views need no
