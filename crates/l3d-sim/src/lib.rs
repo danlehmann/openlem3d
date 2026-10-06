@@ -71,7 +71,7 @@ const MINE_TICKS: u32 = 49;
 const EXIT_TICKS: u32 = 11;
 const DEATH_TICKS: u32 = 14;
 /// How long a killing trap stays busy after taking a lemming (provisional).
-const TRAP_BUSY_TICKS: u32 = 28;
+pub const TRAP_BUSY_TICKS: u32 = 28;
 /// Rope-slide speed, sub-units per tick (unmeasured).
 const ROPE_SPEED: i32 = 35;
 /// Ticks a lemming hangs from the rope's handle before sliding (observed:

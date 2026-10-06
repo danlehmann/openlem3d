@@ -8,9 +8,10 @@
 
 use std::f32::consts::{FRAC_PI_4, TAU};
 
-use l3d_sim::{Lemming, SUB, State};
+use l3d_sim::objects::ObjectKind;
+use l3d_sim::{SUB, Simulation, State};
 
-use crate::scene_build::{ATLAS_COLUMNS, LEMMING_CELL, LayerBuilder};
+use crate::scene_build::{ATLAS_COLUMNS, LEMMING_CELL, LayerBuilder, TRAP_ATLAS_CELLS, TRAP_ATLAS_FIRST};
 use crate::scene_render::SceneSprites;
 
 /// Texels per world unit for lemming cells: a 64-texel cell spans half a
@@ -201,10 +202,44 @@ fn cell_for(a: Anim, view: ViewAngle, ticks: u32) -> (u32, bool) {
     (a.first + block * a.frames + frame, mirror != flip)
 }
 
+/// Interactive objects other than trampolines (`TRAPS` frames, one unit
+/// tall). Bear traps and squashers rest on frame 0 and play frames 1–7
+/// while busy; the weird trap rests on its last (empty) frame and plays
+/// from 0; flame-blowers and lasers show only while firing. Springs and
+/// teleporters show frame 0. Which frames are idle is read off the sheets;
+/// timings are provisional.
+fn objects(b: &mut LayerBuilder, sim: &Simulation, tex: [f32; 2]) {
+    const TRAP_TEXELS_PER_UNIT: f32 = 64.0;
+    let Some(kind) = sim.object_kind else { return };
+    let last = TRAP_ATLAS_CELLS - 1;
+    for o in &sim.objects {
+        let firing = o.busy > 0;
+        // Progress through the busy time, 0 → frames − 1.
+        let step = |frames: u32| ((l3d_sim::TRAP_BUSY_TICKS - o.busy) * frames / l3d_sim::TRAP_BUSY_TICKS).min(frames - 1);
+        let frame = match kind {
+            // Trampolines are pads in the static scene; rope-slide ends are not
+            // drawn at all ([L3DEdit]).
+            ObjectKind::Trampoline | ObjectKind::RopeSlide => continue,
+            ObjectKind::BearTrap | ObjectKind::Squasher => if firing { 1 + step(last) } else { 0 },
+            ObjectKind::WeirdTrap => if firing { step(TRAP_ATLAS_CELLS) } else { last },
+            ObjectKind::FlameBlower | ObjectKind::Laser if !firing => continue,
+            ObjectKind::FlameBlower | ObjectKind::Laser => o.busy % 4,
+            ObjectKind::Spring | ObjectKind::Teleporter => 0,
+        };
+        let cell = TRAP_ATLAS_FIRST + frame;
+        let (cx, cy) = ((cell % ATLAS_COLUMNS) * LEMMING_CELL, (cell / ATLAS_COLUMNS) * LEMMING_CELL);
+        let anchor = [o.cell[0] as f32 + 0.5, o.surface as f32 / SUB as f32, o.cell[2] as f32 + 0.5];
+        let size = LEMMING_CELL as f32;
+        b.sprite_scaled(anchor, [cx as f32, cy as f32, size, size], tex, 1, 0.0, TRAP_TEXELS_PER_UNIT);
+    }
+}
+
 /// Builds this frame's lemming sprites for a camera facing `camera_yaw`.
-pub fn build(lemmings: &[Lemming], atlas_rows: u32, camera_yaw: f32) -> SceneSprites {
+pub fn build(sim: &Simulation, atlas_rows: u32, camera_yaw: f32) -> SceneSprites {
+    let lemmings = &sim.lemmings;
     let mut b = LayerBuilder::default();
     let tex = [(ATLAS_COLUMNS * LEMMING_CELL) as f32, (atlas_rows * LEMMING_CELL) as f32];
+    objects(&mut b, sim, tex);
     // Trapped lemmings are shown by the trap's own animation.
     for l in lemmings.iter().filter(|l| !l.gone && l.state != State::Trapped) {
         let view = ViewAngle::from_yaws(l.dir.yaw(), camera_yaw);

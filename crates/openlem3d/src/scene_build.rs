@@ -267,8 +267,6 @@ fn object_base_y(y: usize, block: BlockCell) -> f32 {
 
 /// Interactive-object type values (header `0x114`, [L3DEdit]).
 const TRAP_TRAMPOLINE: u8 = 3;
-const TRAP_SPRING: u8 = 4;
-const TRAP_TELEPORTER: u8 = 5;
 
 /// Height of the top of the block in a cell, if the cell holds one.
 fn block_top(y: usize, block: BlockCell) -> Option<f32> {
@@ -288,23 +286,20 @@ fn trap_layer(data: &mut GameData, level: &Level, pal: &Palette) -> Option<Scene
         if !(0x60..=0x67).contains(&o.kind) {
             continue;
         }
-        let (cx, cz) = (x as f32 + 0.5, z as f32 + 0.5);
         let top = block_top(y, block);
         match kind {
-            TRAP_TRAMPOLINE | TRAP_SPRING | TRAP_TELEPORTER => {
-                // These need a block to stand on ([L3DEdit]).
+            TRAP_TRAMPOLINE => {
+                // Pads need a block to lie on ([L3DEdit]).
                 let Some(top) = top else { continue };
-                if kind == TRAP_TRAMPOLINE {
-                    // Red pads use frames 0–3, blue pads frames 4–7.
-                    let frame = if o.kind >= 0x64 { 4.0 } else { 0.0 };
-                    let y = top + DECAL_OFFSET;
-                    let (x0, z0, x1, z1) = (x as f32, z as f32, x as f32 + 1.0, z as f32 + 1.0);
-                    b.quad([[x0, y, z1], [x1, y, z1], [x1, y, z0], [x0, y, z0]], [0.0, frame * 64.0, 64.0, 64.0], tex, 1.0);
-                } else {
-                    b.sprite([cx, top, cz], [0.0, 0.0, 64.0, 64.0], tex, 1, 0.0);
-                }
+                // Red pads use frames 0–3, blue pads frames 4–7.
+                let frame = if o.kind >= 0x64 { 4.0 } else { 0.0 };
+                let y = top + DECAL_OFFSET;
+                let (x0, z0, x1, z1) = (x as f32, z as f32, x as f32 + 1.0, z as f32 + 1.0);
+                b.quad([[x0, y, z1], [x1, y, z1], [x1, y, z0], [x0, y, z0]], [0.0, frame * 64.0, 64.0, 64.0], tex, 1.0);
             }
-            _ => b.sprite([cx, top.unwrap_or(y as f32), cz], [0.0, 0.0, 64.0, 64.0], tex, 1, 0.0),
+            // Other objects are sprites drawn each frame with the lemmings
+            // (`lemming_render`), so they can animate.
+            _ => {}
         }
     }
     (!b.indices.is_empty()).then(|| b.finish(indexed_to_rgba(&traps, 64, pal)))
@@ -454,27 +449,41 @@ fn decal_layers(data: &mut GameData, level: &Level, pal: &Palette) -> Vec<SceneL
     layers
 }
 
+/// The first atlas cell holding the level's `TRAPS` frames (64×64 each),
+/// after the lemming cells; [`TRAP_ATLAS_CELLS`] are reserved.
+pub const TRAP_ATLAS_FIRST: u32 = (l3d_formats::mhc::MANIFEST_ENTRIES as u32).div_ceil(ATLAS_COLUMNS) * ATLAS_COLUMNS;
+pub const TRAP_ATLAS_CELLS: u32 = 8;
+/// Rows in the sprite atlas.
+pub const ATLAS_ROWS: u32 = (TRAP_ATLAS_FIRST + TRAP_ATLAS_CELLS).div_ceil(ATLAS_COLUMNS);
+
 /// Cells per row in the lemming atlas.
 pub const ATLAS_COLUMNS: u32 = 32;
 /// Size of one lemming cell in `LEMM.MHC`.
 pub const LEMMING_CELL: u32 = 64;
 
-/// All `LEMM.MHC` cells packed into one texture, [`ATLAS_COLUMNS`] per row;
-/// cell `i` is at column `i % ATLAS_COLUMNS`, row `i / ATLAS_COLUMNS`.
-fn lemming_atlas(data: &mut GameData, pal: &Palette) -> Result<RgbaImage, l3d_formats::Error> {
+/// All `LEMM.MHC` cells packed into one texture, [`ATLAS_COLUMNS`] per row
+/// (cell `i` at column `i % ATLAS_COLUMNS`, row `i / ATLAS_COLUMNS`), then
+/// the level's `TRAPS` frames from [`TRAP_ATLAS_FIRST`].
+fn lemming_atlas(data: &mut GameData, pal: &Palette, traps: Option<&[u8]>) -> Result<RgbaImage, l3d_formats::Error> {
     let raw = data.read("LEMM/LEMM.MHC")?;
     let mhc = l3d_formats::mhc::MhcFile::parse(&raw, LEMMING_CELL as usize)?;
     let n = mhc.entries.len() as u32;
-    let (w, h) = (ATLAS_COLUMNS * LEMMING_CELL, n.div_ceil(ATLAS_COLUMNS) * LEMMING_CELL);
+    let (w, h) = (ATLAS_COLUMNS * LEMMING_CELL, ATLAS_ROWS * LEMMING_CELL);
     let mut pixels = vec![0u8; (w * h) as usize];
-    for i in 0..n {
-        let cell = mhc.cell(i as usize)?;
+    let mut put = |i: u32, cell: &[u8]| {
         let (ox, oy) = ((i % ATLAS_COLUMNS) * LEMMING_CELL, (i / ATLAS_COLUMNS) * LEMMING_CELL);
         for y in 0..LEMMING_CELL {
             let dst = ((oy + y) * w + ox) as usize;
             let src = (y * LEMMING_CELL) as usize;
-            pixels[dst..dst + LEMMING_CELL as usize].copy_from_slice(&cell.pixels[src..src + LEMMING_CELL as usize]);
+            pixels[dst..dst + LEMMING_CELL as usize].copy_from_slice(&cell[src..src + LEMMING_CELL as usize]);
         }
+    };
+    for i in 0..n {
+        put(i, &mhc.cell(i as usize)?.pixels);
+    }
+    let frame = (LEMMING_CELL * LEMMING_CELL) as usize;
+    for (k, f) in traps.unwrap_or_default().chunks_exact(frame).take(TRAP_ATLAS_CELLS as usize).enumerate() {
+        put(TRAP_ATLAS_FIRST + k as u32, f);
     }
     Ok(indexed_to_rgba(&pixels, w, pal))
 }
@@ -594,7 +603,8 @@ pub fn build(data: &mut GameData, n: u32) -> Result<BuiltLevel, l3d_formats::Err
     scene.layers.extend(decal_layers(data, &level, &pal));
     scene.layers.extend(trap_layer(data, &level, &pal));
 
-    scene.sprite_atlas = lemming_atlas(data, &pal).ok();
+    let traps = (level.trap_type != 0xFF).then(|| data.gfx("TRAPS", level.trap_type).ok()).flatten();
+    scene.sprite_atlas = lemming_atlas(data, &pal, traps.as_deref()).ok();
 
     if level.sky_gfx != 0xFF
         && let Ok(sky) = data.gfx("SKY", level.sky_gfx)

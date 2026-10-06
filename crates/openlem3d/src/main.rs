@@ -310,8 +310,7 @@ fn update_lemming_sprites(
 ) {
     let Some(sim) = &game.sim else { return };
     let yaw = cams.iter().next().map_or(0.0, |c| c.yaw);
-    let rows = (l3d_formats::mhc::MANIFEST_ENTRIES as u32).div_ceil(scene_build::ATLAS_COLUMNS);
-    *sprites = lemming_render::build(&sim.lemmings, rows, yaw);
+    *sprites = lemming_render::build(sim, scene_build::ATLAS_ROWS, yaw);
 }
 
 #[allow(clippy::too_many_arguments)] // Bevy system parameters
