@@ -392,7 +392,9 @@ impl Simulation {
                     gone: false,
                 });
                 self.counts.released += 1;
-                self.release_timer = self.release_interval();
+                // The countdown includes the releasing tick: the next release
+                // comes `release_interval` ticks after this one.
+                self.release_timer = self.release_interval() - 1;
             } else {
                 self.release_timer -= 1;
             }
