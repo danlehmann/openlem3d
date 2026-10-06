@@ -793,7 +793,7 @@ impl Simulation {
             let ticks = 2 * from_drop / BOUNCE_GRAVITY;
             (from_drop, (height * 4 / 5 / ticks.max(1)).max(BOUNCE_VX))
         } else {
-            (from_drop.max(BOUNCE_FIRST_VY).min(BOUNCE_MAX_VY), BOUNCE_VX)
+            (from_drop.clamp(BOUNCE_FIRST_VY, BOUNCE_MAX_VY), BOUNCE_VX)
         };
         l.set_state(State::Bouncing { vy, vx });
         true
