@@ -75,8 +75,17 @@ How we verified it:
   moved about 20 pixels. With a focal length of about 500 pixels, that
   corresponds to roughly 1900–2050 screen pixels per turn, consistent with
   2 × 1024.
-- **Not yet checked:** the 200×320 star-field skies used by levels with the
-  "surround sky" flag.
+- **All-round skies** (64,000-byte `SKY` files, used by levels with the
+  "surround sky" flag, `0x0200`):
+  - **Stored rotated (verified from the data):** 320 rows of 200 pixels, each
+    stored row being one screen column. Read 320 wide, the file shows
+    stripes. Read 200 wide, it is a coherent image whose top and bottom rows
+    join seamlessly (mean difference 3.1, against 2.1 between neighbouring
+    rows) while its left and right edges don't (89). Transposed, it is a
+    320×200 panorama that wraps horizontally.
+  - **Display (provisional):** we stretch it over the full screen height and
+    pan it like the 1024×64 skies. Its scale and pan rate in the original are
+    unchecked. Tiling the untransposed image showed visible seams (Fun 3).
 
 ## Ground (partly verified)
 

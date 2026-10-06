@@ -81,9 +81,10 @@ fn fs_sky(v: SkyOut) -> @location(0) vec4<f32> {
     let dims = vec2<f32>(textureDimensions(tex));
     let col = u.sky.x + v.clip.x / (2.0 * u.sky.z);
     if (u.right.w > 0.5) {
-        // All-round sky: tile at 2× scale over the whole screen (provisional).
-        let tiled = vec2(col, v.clip.y / (2.0 * u.sky.z)) / dims;
-        return vec4(textureSampleLevel(tex, samp, tiled, 0.0).rgb, 1.0);
+        // All-round sky: a horizontally wrapping panorama stretched over the
+        // full screen height (provisional).
+        let full = vec2(col / dims.x, clamp(v.clip.y / (480.0 * u.sky.z), 0.0, 0.999));
+        return vec4(textureSampleLevel(tex, samp, full, 0.0).rgb, 1.0);
     }
     let row = clamp(v.clip.y / u.sky.y, 0.0, 1.0) * dims.y;
     let uv = vec2(col / dims.x, min(row, dims.y - 0.5) / dims.y);

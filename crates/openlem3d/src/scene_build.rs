@@ -545,10 +545,15 @@ pub fn build(data: &mut GameData, n: u32) -> Result<BuiltLevel, l3d_formats::Err
         match sky.len() {
             // 1024×64 panorama above the horizon (verified).
             65536 => scene.sky = Some(indexed_to_rgba(&sky, 1024, &pal)),
-            // 200×320 all-round sky; drawn tiled over the whole screen
-            // (placement and panning provisional).
+            // All-round sky stored as 320 rows of 200 pixels: each stored row
+            // is one screen column, so the image is transposed into a
+            // 320×200 panorama that wraps horizontally (its stored top and
+            // bottom rows join seamlessly; its sides don't). Verified from
+            // the data; how the original scales and pans it is provisional.
             64000 => {
-                scene.sky = Some(indexed_to_rgba(&sky, 200, &pal));
+                let src = &sky;
+                let transposed: Vec<u8> = (0..200).flat_map(|y| (0..320).map(move |x| src[x * 200 + y])).collect();
+                scene.sky = Some(indexed_to_rgba(&transposed, 320, &pal));
                 scene.sky_surround = true;
             }
             _ => {}
