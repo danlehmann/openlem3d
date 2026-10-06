@@ -395,6 +395,15 @@ Findings from the screen-layout runs (`spec/ui-graphics.md`, "Screens")
   skill count did not drop. Tried: 120 ms and 300 ms holds when the bracket
   shows, and frame-exact presses using Pause emulation. **[verified failure,
   cause unknown]**
+- **Level demos without focus.** Each Practice briefing offers "Enter =
+  Demo", which replays a recorded solution, including its camera moves
+  ("Demo" shows at the bottom left of the panel). The demo ends with a nuke
+  and returns to the briefing. Recipe: launch with `-State <main-menu
+  state>` and put `AUTOTYPE -w 30 -p 0.5 enter` before `L3D` in `-Run`.
+  The queued key survives the state load. Then use the serial mouse to
+  reach the briefing (Play, then the item; it is up about 17 s after
+  launch), and the Enter fires at about 33 s. **[verified]** for five
+  Practice levels.
 - **Attract mode.** About 125 s after (re)entering the main menu a demo
   level starts, whatever the mouse does; a click returns to the menu.
 

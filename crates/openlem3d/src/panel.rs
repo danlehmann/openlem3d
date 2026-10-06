@@ -447,9 +447,9 @@ fn animate(
 fn value_string(v: Value, game: &Game, preset: usize) -> String {
     let Some(sim) = &game.sim else { return String::new() };
     match v {
-        // Lemmings still to be saved: the original shows the level's
-        // requirement before any are saved (meaning estimated).
-        Value::In => game.save_requirement.saturating_sub(sim.counts.saved).to_string(),
+        // Counts down the lemmings still needed, then counts those saved
+        // beyond that (observed in the original's demos).
+        Value::In => game.save_requirement.abs_diff(sim.counts.saved).to_string(),
         Value::Out => sim.out().to_string(),
         Value::Time => {
             let secs = sim.time_left / l3d_sim::TICKS_PER_SECOND;

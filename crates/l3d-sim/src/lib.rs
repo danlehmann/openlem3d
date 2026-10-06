@@ -83,8 +83,20 @@ const ROPE_GRAB_TICKS: u32 = 8;
 /// fraction of the distance (unmeasured).
 const SPRING_TICKS_PER_UNIT: f32 = 1.4;
 const SPRING_ARC: f32 = 0.3;
-/// Trampoline bounces: ticks per unit of distance (unmeasured).
-const TRAMPOLINE_TICKS_PER_UNIT: f32 = 2.0;
+/// Trampoline flight, per tick and sub-units, from the original's Practice
+/// "Trampoline" demo: gravity (about 8.5 units/s²), forward speed (1.48
+/// units/s), the first hop's take-off speed (peaking 1.5 units up), the
+/// growth per bounce (the second hop peaked about 2.4 units up) and the
+/// strongest bounce (peaking 7.5 units above a pad). The last two were
+/// chosen within the measurements so that, as in the demo, every lemming
+/// lands on that level's floating cube and the demo's one turner saves 18.
+const BOUNCE_GRAVITY: i32 = 11;
+const BOUNCE_VX: i32 = 27;
+const BOUNCE_FIRST_VY: i32 = 92;
+const BOUNCE_GAIN: f32 = 1.32;
+const BOUNCE_MAX_VY: i32 = 205;
+/// Drops onto a trampoline longer than this (sub-units) are thrown far.
+const BIG_DROP: i32 = 8 * SUB;
 /// Speed on slippery blocks, sub-units per tick.
 const ICE_SPEED: i32 = WALK_SPEED * 3;
 
@@ -231,7 +243,10 @@ pub enum State {
     /// Walking on a slippery block: faster, and no skill that needs a
     /// standing lemming can be given (the original shows "Sliding").
     Sliding,
-    /// Thrown through the air by a spring or trampoline from `from` to
+    /// Bouncing on trampolines: rising (or falling, if negative) at `vy`
+    /// sub-units per tick while moving forward.
+    Bouncing { vy: i32, vx: i32 },
+    /// Thrown through the air by a spring from `from` to
     /// `to` (feet positions) over `ticks` ticks, rising `peak`
     /// sub-units above the straight line at mid-flight.
     Flying { from: [i32; 3], to: [i32; 3], ticks: u32, peak: i32 },
@@ -395,7 +410,7 @@ impl Simulation {
             splitters: level
                 .cells()
                 .filter(|(_, _, _, b, _)| b.id == SPLITTER_ID && !b.is_empty())
-                .map(|(x, y, z, _, _)| ([x as i32, y as i32, z as i32], true))
+                .map(|(x, y, z, _, _)| ([x as i32, y as i32, z as i32], false))
                 .collect(),
             // Stored Z first: [min z, min x, max z, max x] (docs/spec/level.md).
             border: [b[1] as i32, b[0] as i32, b[3] as i32, b[2] as i32],
@@ -520,7 +535,6 @@ impl Simulation {
 
     /// What a lemming's update did that a player would hear.
     fn event_for(&self, before: &Lemming, after: &Lemming) -> Option<Event> {
-        use objects::ObjectKind;
         let (b, a) = (before.state, after.state);
         let changed = std::mem::discriminant(&a) != std::mem::discriminant(&b) || after.state_ticks == 0;
         if !before.teleported && after.teleported {
@@ -536,7 +550,7 @@ impl Simulation {
                 State::Trapped => Some(Event::Trapped),
                 State::Climbing => Some(Event::Climbed),
                 State::Floating => Some(Event::UmbrellaOpened),
-                State::Flying { .. } if self.object_kind == Some(ObjectKind::Trampoline) => Some(Event::Bounced),
+                State::Bouncing { .. } => Some(Event::Bounced),
                 State::Flying { .. } => Some(Event::Catapulted),
                 State::Walking if matches!(b, State::Building { .. }) => Some(Event::BuilderDone),
                 _ => None,
@@ -630,6 +644,7 @@ impl Simulation {
             State::Falling { from_y } => self.fall(l, from_y),
             State::Floating => self.float(l),
             State::Walking | State::Sliding => self.walk(l, obstacles),
+            State::Bouncing { vy, vx } => self.fly(l, vy, vx),
             State::Climbing => self.climb(l),
             State::Digging => self.dig(l),
             State::Building { bricks_left } => self.build(l, bricks_left),
@@ -658,10 +673,7 @@ impl Simulation {
                 if f >= 1.0 {
                     l.pos = to;
                     l.set_state(State::Walking);
-                    // Another trampoline keeps the bounce going.
-                    if !self.bounce(l, peak + (from[1] - to[1]).max(0)) {
-                        self.settle(l);
-                    }
+                    self.settle(l);
                 }
             }
             State::Blocking | State::Turning { .. } => {
@@ -761,29 +773,87 @@ impl Simulation {
         l.set_state(State::Flying { from: l.pos, to, ticks, peak });
     }
 
-    /// Trampolines (provisional; the original was only seen bouncing
-    /// lemmings along a row of pads): a lemming arriving on a pad from a
-    /// drop of `height` sub-units is thrown forward in an arc, further the
-    /// higher it came from, and lands unhurt. Fun 1 drops lemmings about 12
-    /// units onto one, which must carry them about 10 units to the exit.
+    /// Trampolines: a lemming arriving on a pad is thrown up and forward and
+    /// flies ballistically ([`Simulation::fly`]); each bounce is stronger
+    /// than the last, and a drop onto a pad bounces back as high as it fell.
+    /// Measured from the original's Practice "Trampoline" demo: forward
+    /// speed about 1.47 units/s, first hop peaking about 1.5 units up
+    /// (1.2 s), the second about 2.4 (1.45 s), gravity about 8.5 units/s².
     /// Returns whether it bounced.
     fn bounce(&mut self, l: &mut Lemming, height: i32) -> bool {
         if self.object_kind != Some(objects::ObjectKind::Trampoline) || !self.objects.iter().any(|o| o.touches(l.pos)) {
             return false;
         }
-        let height = height.max(SUB);
-        let len = (height * 4 / 5).clamp(2 * SUB, 12 * SUB);
-        let d = l.dir.delta();
-        let (x, z) = (l.pos[0] + d[0] * len, l.pos[2] + d[2] * len);
-        // Land on whatever is highest under the flight's peak.
-        let (y, _) = self.world.surface_below(x, l.pos[1] + len / 2 + 3 * SUB, z);
-        let ticks = ((len as f32 / SUB as f32) * TRAMPOLINE_TICKS_PER_UNIT) as u32;
-        // Clear a landing spot higher than the take-off.
-        let peak = (len / 2).max(y - l.pos[1] + SUB / 2);
-        l.set_state(State::Flying { from: l.pos, to: [x, y, z], ticks: ticks.max(8), peak });
+        let from_drop = ((2 * BOUNCE_GRAVITY * height.max(0)) as f32).sqrt() as i32;
+        let (vy, vx) = if height > BIG_DROP {
+            // A long drop throws the lemming back as high as it fell and
+            // forward about 0.8 of that (provisional: Fun 1 drops lemmings 12
+            // units onto a trampoline that must carry them about 10 units to
+            // the exit; the demo hints that stronger bounces move faster).
+            let ticks = 2 * from_drop / BOUNCE_GRAVITY;
+            (from_drop, (height * 4 / 5 / ticks.max(1)).max(BOUNCE_VX))
+        } else {
+            (from_drop.max(BOUNCE_FIRST_VY).min(BOUNCE_MAX_VY), BOUNCE_VX)
+        };
+        l.set_state(State::Bouncing { vy, vx });
         true
     }
 
+    /// One tick of a bouncing lemming: forward at a steady speed, up or down
+    /// under gravity. Walls turn it back and deflectors turn it aside in the
+    /// air; on a pad it bounces again, higher; elsewhere it lands unhurt.
+    fn fly(&mut self, l: &mut Lemming, vy: i32, vx: i32) {
+        let d = l.dir.delta();
+        let next = [l.pos[0] + d[0] * vx, l.pos[1] + vy, l.pos[2] + d[2] * vx];
+        let body = next[1] + SUB / 8;
+        if let Some(n) = self.world.deflector_normal([next[0], body, next[2]]).filter(|n| d[0] * n[0] + d[2] * n[1] < 0) {
+            let k = d[0] * n[0] + d[2] * n[1];
+            l.dir = match [d[0] - k * n[0], d[2] - k * n[1]] {
+                [1, 0] => Dir::PosX,
+                [-1, 0] => Dir::NegX,
+                [0, 1] => Dir::PosZ,
+                _ => Dir::NegZ,
+            };
+            l.state = State::Bouncing { vy: vy - BOUNCE_GRAVITY, vx };
+            return;
+        }
+        let wall = |w: &World, y: i32| w.solid([next[0], y, next[2]]) && !w.solid([l.pos[0], y, l.pos[2]]);
+        if vy >= 0 && (wall(&self.world, body) || wall(&self.world, next[1] + HEAD_HEIGHT - 1)) {
+            l.dir = l.dir.reverse();
+            l.state = State::Bouncing { vy: vy - BOUNCE_GRAVITY, vx };
+            return;
+        }
+        if vy < 0 {
+            let (ground, on_block) = self.world.surface_below(next[0], l.pos[1] + STEP_UP, next[2]);
+            // Terrain at body height ahead (a slope's side) turns it back.
+            if self.world.solid([next[0], ground + STEP_UP + 1, next[2]]) || ground > l.pos[1] + STEP_UP {
+                l.dir = l.dir.reverse();
+                l.state = State::Bouncing { vy: vy - BOUNCE_GRAVITY, vx };
+                return;
+            }
+            if ground >= next[1] {
+                l.pos = [next[0], ground, next[2]];
+                if self.object_kind == Some(objects::ObjectKind::Trampoline) && self.objects.iter().any(|o| o.touches(l.pos)) {
+                    let up = ((-vy) as f32 * BOUNCE_GAIN) as i32;
+                    l.set_state(State::Bouncing { vy: up.min(BOUNCE_MAX_VY), vx: BOUNCE_VX });
+                } else {
+                    self.land(l, on_block, 0);
+                }
+                return;
+            }
+            if wall(&self.world, body) {
+                l.dir = l.dir.reverse();
+                l.state = State::Bouncing { vy: vy - BOUNCE_GRAVITY, vx };
+                return;
+            }
+        } else if self.world.solid([next[0], next[1] + HEAD_HEIGHT, next[2]]) {
+            // A ceiling stops the rise.
+            l.state = State::Bouncing { vy: 0, vx };
+            return;
+        }
+        l.pos = next;
+        l.state = State::Bouncing { vy: vy - BOUNCE_GRAVITY, vx };
+    }
     /// Ends a bomber: removes non-steel terrain around it.
     fn explode(&mut self, l: &mut Lemming) {
         let centre = [l.pos[0], l.pos[1] + SUB / 4, l.pos[2]];
@@ -1069,8 +1139,10 @@ impl Simulation {
         let next = [l.pos[0] + d[0] * speed, l.pos[1], l.pos[2] + d[2] * speed];
         // Blockers and turners: walking into one redirects the walker.
         // Splitters send walkers alternately left and right as they cross
-        // the cell centre ([L3DEdit]: block 2 where non-solid; which side
-        // comes first is unverified).
+        // the cell centre ([L3DEdit]: block 2 where non-solid). The first goes
+        // right: in the original's demo of Practice "Splitter" the first
+        // lemming seen went to its right and the next to its left (weak:
+        // maybe not the very first).
         let here = Self::cell_of([l.pos[0], l.pos[1], l.pos[2]]);
         if let Some(s) = self.splitters.iter_mut().find(|(c, _)| *c == here) {
             let axis = if d[0] != 0 { 0 } else { 2 };

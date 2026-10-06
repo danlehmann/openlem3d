@@ -444,9 +444,10 @@ x = 299. The time is M:SS; the colon is the 4-px-wide `:` glyph, e.g.
 "3:53" has digits at 281, 292, 299 (colon at 288, estimated). The left
 rate number is the minimum release rate and the right one the current
 rate (both 80 at the start of level 2; only the right one changes).
-OUT counted up (4 → 59) while the hatch released lemmings; IN stayed at
-the level's value (79 in Fun 1, 70 in level 2) while no lemming had been
-saved, so its exact meaning is still open (estimated).
+OUT counted up (4 → 59) while the hatch released lemmings; IN shows the
+level's requirement before any lemming is saved (79 in Fun 1, 70 in level
+2), counts down to 0 as lemmings are saved, then counts those saved beyond
+the requirement (observed in the Practice demos).
 
 **Skill buttons.** Order and cells (rest cell = shown when not selected):
 
@@ -562,7 +563,7 @@ item's name shows at the bottom in the large font ("Slippery Block" seen).
 - `ICONS.RNC` bytes 43,648–48,120: the layout of the wooden panel pieces.
 - The selected-skill animations of the bomber, builder, basher, miner,
   climber and floater (only blocker, turner and digger were observed).
-- The meaning of the in-level IN counter; the pointer over a lemming; the
+- The pointer over a lemming; the
   nuke icon's animation; what the umbrella icon and the corner marks are.
 - Where the rating label lettering (3×5 capitals) comes from.
 - When the game shows the scenes, the intro slides at each resolution, and
