@@ -3,7 +3,7 @@
 
 use l3d_formats::blk::BlockSet;
 use l3d_formats::gamedata::{GameData, Palette};
-use l3d_formats::level::{BlockCell, Level, SIZE_X, SIZE_Z};
+use l3d_formats::level::{BlockCell, LandVertex, Level, SIZE_X, SIZE_Z};
 
 use crate::level_mesh::{self, LevelMesh};
 use crate::scene_render::{RgbaImage, SceneData, SceneLayer, VERTEX_FLOATS};
@@ -198,10 +198,18 @@ fn plane_layer(y: f32, tile: f32, texture: RgbaImage) -> SceneLayer {
     b.finish(texture)
 }
 
-/// The level's land polygons at ground height.
-fn land_layer(level: &Level, texture: RgbaImage, tile: f32) -> SceneLayer {
+/// Which texture of a multi-texture `LAND` file a polygon shows: the low
+/// three bits of its options byte. Unverified: inferred from LEMLAB and The
+/// Catacombs, whose polygons use 1 with two-texture files, while every
+/// single-texture level uses 0.
+fn land_texture(poly: &[LandVertex]) -> usize {
+    poly.first().map_or(0, |v| (v.options & 7) as usize)
+}
+
+/// Land polygons at ground height.
+fn land_layer(polygons: &[&Vec<LandVertex>], texture: RgbaImage, tile: f32) -> SceneLayer {
     let mut b = LayerBuilder::default();
-    for poly in &level.land_polygons {
+    for poly in polygons {
         if poly.len() < 3 {
             continue;
         }
@@ -521,15 +529,23 @@ pub fn build(data: &mut GameData, n: u32) -> Result<BuiltLevel, l3d_formats::Err
         && !level.land_polygons.is_empty()
         && let Ok(land) = data.gfx("LAND", level.land_gfx)
     {
-        // LAND files are 128 wide; use the first texture. With the
-        // "128×128" flag, 128 texels span 4 grid units (verified visually on
-        // Mayhem 6 and Fun 1); without it, 2 units (provisional).
-        let first = &land[..(128 * 128).min(land.len())];
-        let mut tile = if flags & level_flags::LAND_128 != 0 { 4.0 } else { 2.0 };
+        // With the "128" flag the file is one 128×128 texture spanning 4 grid
+        // units (verified visually on Mayhem 6 and Fun 1); without it, a strip
+        // of 64×64 textures, each spanning 2 units, chosen per polygon
+        // (`docs/spec/graphics.md`).
+        let (size, mut tile) = if flags & level_flags::LAND_128 != 0 { (128, 4.0) } else { (64, 2.0) };
         if flags & level_flags::LAND_HALF_SCALE != 0 {
             tile /= 2.0;
         }
-        scene.layers.push(land_layer(&level, indexed_to_rgba(first, 128, &pal), tile));
+        let count = (land.len() / (size * size)).max(1);
+        for index in 0..count {
+            let polys: Vec<_> = level.land_polygons.iter().filter(|p| land_texture(p) % count == index).collect();
+            if polys.is_empty() {
+                continue;
+            }
+            let pixels = &land[index * size * size..((index + 1) * size * size).min(land.len())];
+            scene.layers.push(land_layer(&polys, indexed_to_rgba(pixels, size as u32, &pal), tile));
+        }
     }
     let block_layer_index = scene.layers.len();
     scene.layers.push(block_layer(&mesh, indexed_to_rgba(&tex, 64, &pal)));

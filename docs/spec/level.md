@@ -125,7 +125,7 @@ lemming would die on release. Read Z-first, all of them are inside.
 | `0x0020` | Sea texture 128×128 |
 | `0x0040` | Preview camera static |
 | `0x0080` | Whole level bottom is solid |
-| `0x0100` | Land texture 128×128 |
+| `0x0100` | Land texture 128×128; without it, 64×64 (consistent with the file sizes of every level's `LAND` file) |
 | `0x0200` | All-round sky (space levels); no sea |
 | `0x0400` | Wall decals show the game screen (the "Lemmings Inside" monitor effect) |
 | `0x0800` | Land texture drawn at half scale |

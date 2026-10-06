@@ -106,4 +106,8 @@ How we verified it:
     128×128 texture spans 4 grid units. Verified visually: the circuit-board
     floor of `LEVEL.065` and the grass of `LEVEL.000` match the original at
     that scale; half of it was clearly too fine.
-  - **Without the flag:** 2 grid units (provisional).
+  - **Without the flag:** the file is a strip of 64×64 textures, each
+    spanning 2 grid units (the same texel density; provisional). Each polygon
+    picks its texture with the low 3 bits of its options byte.
+  - **Flag `0x0800`:** halves the span. The Practice levels use 64×64 grass
+    at 1 grid unit per texture.

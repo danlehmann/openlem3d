@@ -27,7 +27,7 @@ preview screens.
 | `TEXTURE` | 64 | 100 tiles of 64×64; tile `n` is rows `64n … 64n+63` | Verified: dimensions render coherently. The face-to-tile mapping is to be checked in the viewer. |
 | `SKY` | 1024 | 1024×64 horizontal panorama (65,536-byte files) | Verified with `SKY.004` |
 | `SKY` (64,000 bytes) | 200 | 200×320 star field, used by all-round space skies | Verified with `SKY.002` |
-| `LAND` | 128 | 128×128 per texture; 32 KB files hold two textures, `LAND.038` (8 KB) holds a half one | 128×128 verified with `LAND.004` |
+| `LAND` | 128 or 64 | 16 KB files are one 128×128 texture. The 32 KB files (`002`, `011`, `015`) and `LAND.038` (8 KB) are strips of 64×64 textures, padded with black: `002` and `011` hold two, `015` one, `038` two | Verified by rendering every file. Levels set flag `0x0100` exactly when their land file is a 16 KB one (checked for all levels with land polygons) |
 | `OBJ` | 64 | 20 sprites, packed as described below | Verified with `OBJ.004` |
 | `SIGNS` | 64 | 16 graphics: 8 × 64×32, then 8 × 64×64 [L3DEdit] | Unverified |
 | `WALLS` | 64 | 16 × 64×64 [L3DEdit] | Unverified |
