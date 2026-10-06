@@ -3,7 +3,12 @@
 //! here (see `docs/spec/level.md`, "Level codes").
 
 /// Verified codes and the level file number each opens.
-pub const LEVEL_CODES: &[(&str, u32)] = &[];
+pub const LEVEL_CODES: &[(&str, u32)] = &[
+    // Fun 2 "That's Right" (shown after completing Fun 1).
+    ("BLIMBING", 1),
+    // Fun 3 "The Bean Machine" (shown after completing Fun 2).
+    ("FANAGALO", 2),
+];
 
 /// The level a code opens, if it is a known code (case-insensitive).
 pub fn level_for_code(code: &str) -> Option<u32> {

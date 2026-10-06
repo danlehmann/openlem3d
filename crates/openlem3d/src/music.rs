@@ -26,11 +26,28 @@ impl Plugin for MusicPlugin {
     }
 }
 
-/// Provisional track choice: two tracks per theme (1–10) starting at track
-/// 2, picking the second for odd music indices.
+/// CD tracks observed in the original for (theme, music index) pairs
+/// (`docs/spec/disc.md`, "Level music").
+const OBSERVED_TRACKS: &[((u8, u8), u8)] = &[
+    ((1, 2), 13),
+    ((4, 1), 23),
+    ((4, 2), 14),
+    ((7, 0), 5),
+    ((8, 0), 9),
+    ((8, 1), 20),
+    ((8, 2), 9),
+    ((10, 1), 12),
+];
+
+/// The CD track for a level's theme and music index: the observed track,
+/// or a placeholder for pairs not yet observed.
 pub fn track_for(theme: u8, music: u8) -> u8 {
+    if let Some(&(_, track)) = OBSERVED_TRACKS.iter().find(|(k, _)| *k == (theme, music)) {
+        return track;
+    }
+    // Placeholder (unverified): spread unobserved pairs over the audio tracks.
     let theme = theme.clamp(1, 10);
-    2 + (theme - 1) * 2 + (music & 1)
+    2 + ((theme - 1) * 2 + (music & 1)) % 23
 }
 
 /// Wraps 44.1 kHz 16-bit stereo PCM in a RIFF/WAVE header.
