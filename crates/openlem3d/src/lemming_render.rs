@@ -11,7 +11,7 @@ use std::f32::consts::{FRAC_PI_4, TAU};
 use l3d_sim::objects::ObjectKind;
 use l3d_sim::{SUB, Simulation, State};
 
-use crate::scene_build::{ATLAS_COLUMNS, LEMMING_CELL, LayerBuilder, TRAP_ATLAS_CELLS, TRAP_ATLAS_FIRST};
+use crate::scene_build::{ATLAS_COLUMNS, BOMBNUMB_ATLAS_FIRST, LEMMING_CELL, LayerBuilder, TRAP_ATLAS_CELLS, TRAP_ATLAS_FIRST};
 use crate::scene_render::SceneSprites;
 
 /// Texels per world unit for lemming cells: a 64-texel cell spans half a
@@ -275,6 +275,16 @@ pub fn build(sim: &Simulation, atlas_rows: u32, camera_yaw: f32) -> SceneSprites
         let rect = if mirror { [cx as f32 + size, cy as f32, -size, size] } else { [cx as f32, cy as f32, size, size] };
         let anchor = l.pos.map(|v| v as f32 / SUB as f32);
         b.sprite_scaled(anchor, rect, tex, 1, 0.0, LEMMING_TEXELS_PER_UNIT);
+        // The bomber's countdown, 5…1, over its head (`BOMBNUMB` digits).
+        if let Some(fuse) = l.fuse.filter(|_| !l.state.is_terminal()) {
+            let digit = 5u32.saturating_sub((l3d_sim::FUSE_TICKS - fuse) / l3d_sim::FUSE_DIGIT_TICKS);
+            if digit > 0 {
+                let cell = BOMBNUMB_ATLAS_FIRST + digit - 1;
+                let (cx, cy) = ((cell % ATLAS_COLUMNS) * LEMMING_CELL, (cell / ATLAS_COLUMNS) * LEMMING_CELL);
+                let over = [anchor[0], anchor[1] + size / LEMMING_TEXELS_PER_UNIT, anchor[2]];
+                b.sprite_scaled(over, [cx as f32, cy as f32, 32.0, 32.0], tex, 1, 0.0, LEMMING_TEXELS_PER_UNIT);
+            }
+        }
         if l.state == State::Floating {
             // The umbrella is stored apart (cells 336–343), its handle at the
             // bottom of the cell, held by the floater's raised hand at the top

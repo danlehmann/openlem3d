@@ -1,5 +1,5 @@
 //! Assigning skills by clicking or tapping a lemming, the turner's second
-//! click and bomber countdowns. The skill panel
+//! click. The skill panel
 //! itself is in `panel`. Works with mouse, keyboard and touch.
 
 use bevy::prelude::*;
@@ -20,7 +20,7 @@ impl Plugin for HudPlugin {
             .add_systems(Startup, spawn_turner_marker)
             .add_systems(
                 Update,
-                (skill_keys, nuke_key, bomber_countdown, assign_on_pointer)
+                (skill_keys, nuke_key, assign_on_pointer)
                     .chain()
                     .run_if(in_state(AppState::Playing)),
             )
@@ -31,61 +31,6 @@ impl Plugin for HudPlugin {
 /// The skill the next click or tap assigns.
 #[derive(Resource, Default)]
 pub struct SelectedSkill(pub Option<Skill>);
-
-/// A countdown digit floating over a bomber.
-#[derive(Component)]
-struct CountdownDigit;
-
-/// Draws a bomber's countdown (5…1, one digit per 8 ticks) above its head,
-/// as the original does.
-fn bomber_countdown(
-    mut commands: Commands,
-    game: Res<Game>,
-    camera: Res<SceneCamera>,
-    windows: Query<&Window>,
-    mut digits: Query<(Entity, &mut Text, &mut Node), With<CountdownDigit>>,
-) {
-    let (Some(sim), Ok(window)) = (&game.sim, windows.single()) else { return };
-    let size = Vec2::new(window.width(), window.height());
-    let mut wanted: Vec<(Vec2, u32)> = Vec::new();
-    for l in sim.lemmings.iter().filter(|l| !l.gone && !l.state.is_terminal()) {
-        let Some(fuse) = l.fuse else { continue };
-        let elapsed = l3d_sim::FUSE_TICKS - fuse;
-        let digit = 5u32.saturating_sub(elapsed / l3d_sim::FUSE_DIGIT_TICKS);
-        if digit == 0 {
-            continue;
-        }
-        let head = Vec3::from_array(l.pos.map(|v| v as f32 / SUB as f32)) + Vec3::Y * 0.6;
-        let clip = camera.view_proj * head.extend(1.0);
-        if clip.w <= 0.0 {
-            continue;
-        }
-        let ndc = clip.truncate() / clip.w;
-        wanted.push((Vec2::new((ndc.x + 1.0) / 2.0 * size.x, (1.0 - ndc.y) / 2.0 * size.y), digit));
-    }
-    let mut existing = digits.iter_mut();
-    for (pos, digit) in &wanted {
-        let (left, top) = (px(pos.x - 6.0), px(pos.y - 12.0));
-        match existing.next() {
-            Some((_, mut text, mut node)) => {
-                text.0 = digit.to_string();
-                node.left = left;
-                node.top = top;
-            }
-            None => {
-                commands.spawn((
-                    CountdownDigit,
-                    Text::new(digit.to_string()),
-                    TextFont { font_size: FontSize::Px(20.0), ..default() },
-                    Node { position_type: PositionType::Absolute, left, top, ..default() },
-                ));
-            }
-        }
-    }
-    for (e, ..) in existing {
-        commands.entity(e).despawn();
-    }
-}
 
 /// Alt+Q nukes, as in the original.
 fn nuke_key(keys: Res<ButtonInput<KeyCode>>, mut game: ResMut<Game>) {
