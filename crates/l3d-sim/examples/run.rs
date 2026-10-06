@@ -1,7 +1,8 @@
 //! Headless run of a level:
 //! `cargo run -p l3d-sim --example run -- LEVEL [SECONDS] [TICK:LEMMING:SKILL ...]`.
 //! Prints the counters once per simulated second and each lemming's fate.
-//! Each `TICK:LEMMING:SKILL` assigns a skill (id 0–8, panel order) at a tick;`n//! a turner takes a fourth part, `cw` or `acw`, for the side it points to.
+//! Each `TICK:LEMMING:SKILL` assigns a skill (id 0–8, panel order) at a tick;
+//! a turner takes a fourth part, `cw` or `acw`, for the side it points to.
 
 use l3d_formats::gamedata::{GameData, locate_data_dir};
 use l3d_sim::{SUB, Simulation, Skill, State, TICKS_PER_SECOND};

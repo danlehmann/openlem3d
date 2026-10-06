@@ -806,7 +806,7 @@ impl Simulation {
         let d = l.dir.delta();
         let next = [l.pos[0] + d[0] * vx, l.pos[1] + vy, l.pos[2] + d[2] * vx];
         let body = next[1] + SUB / 8;
-        if let Some(n) = self.world.deflector_normal([next[0], body, next[2]]).filter(|n| d[0] * n[0] + d[2] * n[1] < 0) {
+        if let Some(n) = self.deflector_across(next[0], next[1], next[2]).filter(|n| d[0] * n[0] + d[2] * n[1] < 0) {
             let k = d[0] * n[0] + d[2] * n[1];
             l.dir = match [d[0] - k * n[0], d[2] - k * n[1]] {
                 [1, 0] => Dir::PosX,
@@ -1114,6 +1114,13 @@ impl Simulation {
         }
     }
 
+    /// The outward normal of a deflector face crossing the body of a lemming
+    /// standing at `(x, feet, z)`, anywhere from its feet to its head (a
+    /// deflector may hang above the floor).
+    fn deflector_across(&self, x: i32, feet: i32, z: i32) -> Option<[i32; 2]> {
+        [SUB / 8, HEAD_HEIGHT / 2, HEAD_HEIGHT - 1].into_iter().find_map(|h| self.world.deflector_normal([x, feet + h, z]))
+    }
+
     fn walk(&mut self, l: &mut Lemming, obstacles: &[Obstacle]) {
         let d = l.dir.delta();
         // Exits: walking into an exit block through its doorway (the block's
@@ -1186,10 +1193,9 @@ impl Simulation {
         // Deflectors: a walker meeting the diagonal face of a 45° wall turns a
         // quarter, as if reflected, once its centre reaches the face
         // (provisional). Their square backs are ordinary walls.
-        let body = l.pos[1] + SUB / 8;
         let facing = |n: [i32; 2]| d[0] * n[0] + d[2] * n[1] < 0;
-        if let Some(n) = self.world.deflector_normal([ahead[0], body, ahead[1]]).filter(|&n| facing(n)) {
-            if self.world.deflector_normal([next[0], body, next[2]]).is_some() {
+        if let Some(n) = self.deflector_across(ahead[0], l.pos[1], ahead[1]).filter(|&n| facing(n)) {
+            if self.deflector_across(next[0], l.pos[1], next[2]).is_some() {
                 let k = d[0] * n[0] + d[2] * n[1];
                 let out = [d[0] - k * n[0], d[2] - k * n[1]];
                 l.dir = match out {

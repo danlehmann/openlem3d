@@ -13,13 +13,15 @@ Each names where it shows up, so a run can go straight there.
 - **Teleporter.** The delay (Practice "Teleporter", `LEVEL.099`).
 - **Turned walkers.** Whether walkers turn at a turner's arm's length or on
   its line (we use its line; Practice "Claustrophobic" needs that).
-- **Half-height deflectors.** "Team Work" (`LEVEL.051`): our lemmings land
-  under a deflector hanging ¼ unit above the floor, hit their heads in one
-  direction and a wall in the other, and freeze.
+- **Hanging deflectors.** "Team Work" (`LEVEL.051`) has a deflector hanging
+  ¼ unit above the floor. We let a deflector turn a walker wherever it
+  crosses the body, feet to head; before that, walkers passed under it, hit
+  their heads and froze. Check that the original turns them there.
 - **Ramp slot on "All Around the Watchtower"** (`LEVEL.027`): two half-height
   ramps peak either side of a one-cell slot (16, 1, 6) 0.75 units deep; our
-  lemmings fall in and can't leave. Either that is the design or the
-  orientation of half-height ramps is reversed.
+  lemmings fall in and can't leave. Probably the design: with our ramp
+  orientation the half-height ramps continue the full ramps below them
+  seamlessly, while the reverse leaves a 1.5-unit drop at z = 8.
 - **Highest step a walker climbs** (we use ¼ unit; ½ is untested).
 - **Sea drift and animation:** how fast the sea slides for the header's
   water speeds, and its frame rate.
