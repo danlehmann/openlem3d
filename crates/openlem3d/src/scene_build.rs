@@ -156,14 +156,45 @@ fn block_layer(mesh: &LevelMesh, texture: RgbaImage) -> SceneLayer {
 
 /// A large horizontal quad at `y` textured with `tile` world units per
 /// texture repeat. Wound counter-clockwise seen from above.
+///
+/// The plane is split into tiles, small near the level and large far away:
+/// a single huge quad loses so much depth precision when rasterised that the
+/// sea showed through the land at some window sizes (seen at exactly
+/// 1280×720 on Adreno/DX12).
 fn plane_layer(y: f32, tile: f32, texture: RgbaImage) -> SceneLayer {
-    let (lo_x, hi_x) = (-SEA_MARGIN, SIZE_X as f32 + SEA_MARGIN);
-    let (lo_z, hi_z) = (-SEA_MARGIN, SIZE_Z as f32 + SEA_MARGIN);
+    /// Size of the coarse tiles.
+    const COARSE: f32 = 512.0;
+    /// Size of the fine tiles used near the level.
+    const FINE: f32 = 16.0;
+    /// The region around the grid that gets fine tiles.
+    const NEAR: f32 = 64.0;
+    let near = (-NEAR, SIZE_X.max(SIZE_Z) as f32 + NEAR);
     let mut b = LayerBuilder::default();
-    for (x, z) in [(lo_x, lo_z), (lo_x, hi_z), (hi_x, hi_z), (hi_x, lo_z)] {
-        Vertex::fixed([x, y, z], [x / tile, z / tile], 1.0, false).push(&mut b.vertices);
+    let quad = |b: &mut LayerBuilder, x0: f32, z0: f32, size: f32| {
+        let base = b.base();
+        for (x, z) in [(x0, z0), (x0, z0 + size), (x0 + size, z0 + size), (x0 + size, z0)] {
+            Vertex::fixed([x, y, z], [x / tile, z / tile], 1.0, false).push(&mut b.vertices);
+        }
+        b.indices.extend([base, base + 1, base + 2, base, base + 2, base + 3]);
+    };
+    let start = -(SEA_MARGIN / COARSE).floor() * COARSE;
+    let steps = ((SEA_MARGIN * 2.0 + SIZE_X.max(SIZE_Z) as f32) / COARSE).ceil() as i32 + 1;
+    for i in 0..steps {
+        for j in 0..steps {
+            let (x0, z0) = (start + i as f32 * COARSE, start + j as f32 * COARSE);
+            let overlaps_near = x0 < near.1 && x0 + COARSE > near.0 && z0 < near.1 && z0 + COARSE > near.0;
+            if overlaps_near {
+                let n = (COARSE / FINE) as i32;
+                for fi in 0..n {
+                    for fj in 0..n {
+                        quad(&mut b, x0 + fi as f32 * FINE, z0 + fj as f32 * FINE, FINE);
+                    }
+                }
+            } else {
+                quad(&mut b, x0, z0, COARSE);
+            }
+        }
     }
-    b.indices = vec![0, 1, 2, 0, 2, 3];
     b.finish(texture)
 }
 
