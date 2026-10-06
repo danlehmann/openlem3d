@@ -72,6 +72,8 @@ const EXIT_TICKS: u32 = 11;
 const DEATH_TICKS: u32 = 14;
 /// How long a killing trap stays busy after taking a lemming (provisional).
 const TRAP_BUSY_TICKS: u32 = 28;
+/// Rope-slide speed, sub-units per tick (unmeasured).
+const ROPE_SPEED: i32 = SUB / 8;
 
 /// Block ids with hard-coded meaning (`docs/spec/blk.md`).
 const ENTRANCE_ID: u8 = 0;
@@ -210,6 +212,8 @@ pub enum State {
     Zapped,
     /// Caught by a trap; the trap's own animation shows the death.
     Trapped,
+    /// Riding a rope slide towards its far end (feet position, sub-units).
+    Sliding { to: [i32; 3] },
 }
 
 impl State {
@@ -543,6 +547,19 @@ impl Simulation {
             State::Building { bricks_left } => self.build(l, bricks_left),
             State::Bashing => self.bash(l),
             State::Mining => self.mine(l),
+            State::Sliding { to } => {
+                let d = [0, 1, 2].map(|i| to[i] - l.pos[i]);
+                let len = ((d[0] as i64).pow(2) + (d[1] as i64).pow(2) + (d[2] as i64).pow(2)).isqrt() as i32;
+                if len <= ROPE_SPEED {
+                    l.pos = to;
+                    l.set_state(State::Walking);
+                    self.settle(l);
+                } else {
+                    for i in 0..3 {
+                        l.pos[i] += d[i] * ROPE_SPEED / len;
+                    }
+                }
+            }
             State::Blocking | State::Turning { .. } => {
                 // Standing still; fall if the ground disappears.
                 let (ground, _) = self.world.surface_below(l.pos[0], l.pos[1], l.pos[2]);
@@ -557,6 +574,7 @@ impl Simulation {
         }
         self.spring_traps(l);
         self.teleport(l);
+        self.board_rope_slide(l);
     }
 
     /// Killing traps take a lemming that steps on them, then are busy for a
@@ -597,6 +615,25 @@ impl Simulation {
         let o = self.objects[to];
         l.pos = [o.cell[0] * SUB + SUB / 2, o.surface, o.cell[2] * SUB + SUB / 2];
         l.teleported = true;
+    }
+
+    /// Rope slides: a lemming reaching a sender (an even value) rides to its
+    /// receiver (the next value up); with several of a value only the last
+    /// works [L3DEdit]. Provisional: a straight line at [`ROPE_SPEED`],
+    /// then it walks on in its old direction.
+    fn board_rope_slide(&mut self, l: &mut Lemming) {
+        if self.object_kind != Some(objects::ObjectKind::RopeSlide) || !matches!(l.state, State::Walking | State::Falling { .. }) {
+            return;
+        }
+        let last = |v: u8| self.objects.iter().rposition(|o| o.value == v);
+        let Some(sender) = self.objects.iter().position(|o| o.value % 2 == 0 && o.touches(l.pos)) else { return };
+        let value = self.objects[sender].value;
+        if last(value) != Some(sender) {
+            return;
+        }
+        let Some(receiver) = last(value + 1) else { return };
+        let o = self.objects[receiver];
+        l.set_state(State::Sliding { to: [o.cell[0] * SUB + SUB / 2, o.surface, o.cell[2] * SUB + SUB / 2] });
     }
 
     /// Ends a bomber: removes non-steel terrain around it.
