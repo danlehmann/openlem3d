@@ -149,7 +149,7 @@ fn anim_for(state: State) -> Anim {
         State::Exploding => once(271, 5, Five),
         State::Floating => anim(296, 5, Eight),
         // No rope pose found yet; the falling cycle stands in.
-        State::Sliding { .. } => Anim { first: 399, frames: 5, angles: Five, playback: Playback::MirroredCycle(FALL_CYCLE) },
+        State::Sliding { .. } | State::Flying { .. } => Anim { first: 399, frames: 5, angles: Five, playback: Playback::MirroredCycle(FALL_CYCLE) },
         State::Building { .. } => anim(344, 5, Five),
         State::Drowning => once(369, 6, Five),
         State::Splatting => once(429, 3, Five),

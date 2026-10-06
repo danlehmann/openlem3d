@@ -74,6 +74,10 @@ const DEATH_TICKS: u32 = 14;
 const TRAP_BUSY_TICKS: u32 = 28;
 /// Rope-slide speed, sub-units per tick (unmeasured).
 const ROPE_SPEED: i32 = SUB / 8;
+/// Spring flights: ticks per unit of horizontal distance, and peak height as
+/// a fraction of it (both unmeasured).
+const SPRING_TICKS_PER_UNIT: f32 = 2.0;
+const SPRING_ARC: f32 = 0.25;
 
 /// Block ids with hard-coded meaning (`docs/spec/blk.md`).
 const ENTRANCE_ID: u8 = 0;
@@ -214,6 +218,9 @@ pub enum State {
     Trapped,
     /// Riding a rope slide towards its far end (feet position, sub-units).
     Sliding { to: [i32; 3] },
+    /// Thrown by a spring from `from` to `to` (feet positions) over
+    /// `ticks` ticks.
+    Flying { from: [i32; 3], to: [i32; 3], ticks: u32 },
 }
 
 impl State {
@@ -560,6 +567,18 @@ impl Simulation {
                     }
                 }
             }
+            State::Flying { from, to, ticks } => {
+                let f = (l.state_ticks as f32 / ticks as f32).min(1.0);
+                let lerp = |i: usize| from[i] + ((to[i] - from[i]) as f32 * f) as i32;
+                let span = ((to[0] - from[0]) as f32).hypot((to[2] - from[2]) as f32);
+                let arc = (span * SPRING_ARC * 4.0 * f * (1.0 - f)) as i32;
+                l.pos = [lerp(0), lerp(1) + arc, lerp(2)];
+                if f >= 1.0 {
+                    l.pos = to;
+                    l.set_state(State::Walking);
+                    self.settle(l);
+                }
+            }
             State::Blocking | State::Turning { .. } => {
                 // Standing still; fall if the ground disappears.
                 let (ground, _) = self.world.surface_below(l.pos[0], l.pos[1], l.pos[2]);
@@ -575,6 +594,7 @@ impl Simulation {
         self.spring_traps(l);
         self.teleport(l);
         self.board_rope_slide(l);
+        self.spring(l);
     }
 
     /// Killing traps take a lemming that steps on them, then are busy for a
@@ -634,6 +654,25 @@ impl Simulation {
         let Some(receiver) = last(value + 1) else { return };
         let o = self.objects[receiver];
         l.set_state(State::Sliding { to: [o.cell[0] * SUB + SUB / 2, o.surface, o.cell[2] * SUB + SUB / 2] });
+    }
+
+    /// Springs: a walker stepping onto a sender (an even value) is thrown in
+    /// an arc onto its receiver (the next value up; the last of each value
+    /// works [L3DEdit]) and lands unhurt, walking on in its old direction.
+    /// Flight time and arc height are unmeasured.
+    fn spring(&mut self, l: &mut Lemming) {
+        if self.object_kind != Some(objects::ObjectKind::Spring) || l.state != State::Walking {
+            return;
+        }
+        let last = |v: u8| self.objects.iter().rposition(|o| o.value == v);
+        let Some(sender) = self.objects.iter().position(|o| o.value % 2 == 0 && o.touches(l.pos)) else { return };
+        let value = self.objects[sender].value;
+        let (Some(receiver), true) = (last(value + 1), last(value) == Some(sender)) else { return };
+        let o = self.objects[receiver];
+        let to = [o.cell[0] * SUB + SUB / 2, o.surface, o.cell[2] * SUB + SUB / 2];
+        let span = ((to[0] - l.pos[0]) as f32).hypot((to[2] - l.pos[2]) as f32) / SUB as f32;
+        let ticks = ((span * SPRING_TICKS_PER_UNIT) as u32).max(8);
+        l.set_state(State::Flying { from: l.pos, to, ticks });
     }
 
     /// Ends a bomber: removes non-steel terrain around it.
