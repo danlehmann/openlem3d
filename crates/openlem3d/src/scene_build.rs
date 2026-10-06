@@ -148,7 +148,9 @@ fn block_layer(mesh: &LevelMesh, texture: RgbaImage) -> SceneLayer {
     for (part, cutout) in [(&mesh.opaque, false), (&mesh.cutout, true)] {
         let base = b.base();
         for i in 0..part.positions.len() {
-            Vertex::fixed(part.positions[i], part.uvs[i], part.colors[i][0], cutout).push(&mut b.vertices);
+            let mut v = Vertex::fixed(part.positions[i], part.uvs[i], part.colors[i][0], cutout);
+            v.anim = part.anims[i];
+            v.push(&mut b.vertices);
         }
         b.indices.extend(part.indices.iter().map(|i| i + base));
     }

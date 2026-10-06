@@ -18,6 +18,9 @@ pub struct MeshData {
     pub normals: Vec<[f32; 3]>,
     pub uvs: Vec<[f32; 2]>,
     pub colors: Vec<[f32; 4]>,
+    /// Per-vertex texture animation: frame count (negative for a
+    /// ping-pong) and the uv step between frames; `[1, 0]` when still.
+    pub anims: Vec<[f32; 2]>,
     pub indices: Vec<u32>,
 }
 
@@ -223,6 +226,36 @@ fn tile_uv(src: FaceDir, p: [f32; 3]) -> [f32; 2] {
 /// modifier, texture values 0x08–0x13 select tiles 43–54 and the back shows
 /// the paired tile (43↔44, 45↔46, …); 0x14–0x16 show tile 0 ([L3DEdit];
 /// verified visually for the gantry in `LEVEL.050`).
+/// A face's texture animation: the first tile and the frame count,
+/// negative for a ping-pong. Modifiers 0x10 and 0x20 ping-pong over the face's
+/// tile and the next 4 or 3; 0x40 loops a run chosen by the tile value
+/// ([L3DEdit] BLK notes, from testing in the original; unverified here).
+/// Frame rate unknown.
+fn face_animation(texture: u8, mods: u8) -> Option<(u32, i32)> {
+    if mods == 0xFF {
+        return None;
+    }
+    if mods & modifiers::ANIMATE_4 != 0 {
+        return Some((texture as u32, -4));
+    }
+    if mods & modifiers::ANIMATE_5 != 0 {
+        return Some((texture as u32, -5));
+    }
+    if mods & modifiers::ANIMATE_SPECIAL != 0 {
+        return match texture {
+            0 => Some((12, 4)),
+            1 => Some((16, 4)),
+            2 => Some((0, 8)),
+            3 => Some((28, 4)),
+            4 => Some((32, 4)),
+            5 => Some((36, 4)),
+            6 => Some((0, 4)),
+            _ => None,
+        };
+    }
+    None
+}
+
 fn face_tiles(texture: u8, mods: u8) -> (u32, u32) {
     if mods & modifiers::REVERSE_SIDE != 0 {
         match texture {
@@ -280,7 +313,7 @@ impl Grid<'_> {
 }
 
 impl MeshData {
-    fn push_poly(&mut self, verts: &[[f32; 3]], uvs: &[[f32; 2]], brightness: f32, both_sides: bool) {
+    fn push_poly(&mut self, verts: &[[f32; 3]], uvs: &[[f32; 2]], brightness: f32, both_sides: bool, anim: [f32; 2]) {
         let n = {
             let (a, b, c) = (verts[0], verts[1], verts[2]);
             let u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
@@ -298,6 +331,7 @@ impl MeshData {
                 self.normals.push(normal);
                 self.uvs.push(*uv);
                 self.colors.push(color);
+                self.anims.push(anim);
             }
             for i in 1..verts.len() as u32 - 1 {
                 if side == 0 {
@@ -397,7 +431,14 @@ pub fn build(level: &Level, blocks: &BlockSet) -> LevelMesh {
                 verts.reverse();
                 uvs.reverse();
             }
-            let (front, back) = face_tiles(face.texture, face.modifiers);
+            let (mut front, mut back) = face_tiles(face.texture, face.modifiers);
+            let anim = match face_animation(face.texture, face.modifiers) {
+                Some((first, frames)) => {
+                    (front, back) = (first, first);
+                    [frames as f32, 1.0 / TILES as f32]
+                }
+                None => [1.0, 0.0],
+            };
             let strip = |tile: u32| -> Vec<[f32; 2]> {
                 uvs.iter().map(|[u, v]| [*u, (tile as f32 + v.clamp(0.0, 1.0)) / TILES as f32]).collect()
             };
@@ -405,14 +446,14 @@ pub fn build(level: &Level, blocks: &BlockSet) -> LevelMesh {
             let transparent = face.modifiers & (modifiers::COLOR0_TRANSPARENT | modifiers::REVERSE_SIDE) != 0;
             let double = def.flags & flags::DOUBLE_SIDED != 0 || flap;
             let target = if transparent { &mut out.cutout } else { &mut out.opaque };
-            target.push_poly(&verts, &strip(front), brightness, false);
+            target.push_poly(&verts, &strip(front), brightness, false, anim);
             if double {
                 // The inside of a double-sided face: same polygon, opposite
                 // winding, possibly another tile.
                 let (mut rv, mut ru) = (verts.clone(), strip(back));
                 rv.reverse();
                 ru.reverse();
-                target.push_poly(&rv, &ru, brightness, false);
+                target.push_poly(&rv, &ru, brightness, false, anim);
             }
         }
     }

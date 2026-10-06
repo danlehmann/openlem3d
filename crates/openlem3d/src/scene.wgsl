@@ -24,7 +24,8 @@ struct VIn {
     // Billboard corner offset from `pos`, in world units along the camera
     // right vector (x) and up (y). Zero for fixed geometry.
     @location(3) offset: vec2<f32>,
-    // x: animation frame count (<= 1: static), y: uv distance between frames.
+    // x: animation frame count (<= 1: static; negative: ping-pong over
+    // that many frames), y: uv distance between frames.
     // A negative y marks a tiled surface (the sea): its frames are stacked
     // in the texture, the frame is chosen inside each repeat, and `offset`
     // is then a uv drift per second instead of a billboard offset.
@@ -46,8 +47,14 @@ struct VOut {
 fn vs(v: VIn) -> VOut {
     var o: VOut;
     var frame = 0.0;
+    let step = floor(u.sky.w * ANIM_FPS);
     if (v.anim.x > 1.0) {
-        frame = floor(u.sky.w * ANIM_FPS) % v.anim.x;
+        frame = step % v.anim.x;
+    } else if (v.anim.x < -1.0) {
+        // Ping-pong: 0, 1, …, n − 1, n − 2, …, 1.
+        let n = -v.anim.x;
+        let s = step % (2.0 * n - 2.0);
+        frame = select(2.0 * n - 2.0 - s, s, s < n);
     }
     o.params = v.params;
     if (v.anim.y < 0.0) {

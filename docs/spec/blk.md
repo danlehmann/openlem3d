@@ -72,7 +72,7 @@ Every file is exactly 1,408 bytes: 64 definitions × 22 bytes, uncompressed.
 | `0x08` | Reverse side uses a neighbouring tile and is always transparent (special texture rules) |
 | `0x10` | Ping-pong animation over this tile and the next 4 |
 | `0x20` | Ping-pong animation over this tile and the next 3 |
-| `0x40` | Special looping animations, keyed by the tile index (see [L3DEdit] for the table) |
+| `0x40` | Special looping animations, keyed by the tile index (see [L3DEdit] for the table: tile 0 → four frames from tile 12, 1 → four from 16, 2 → eight from 0, 3 → four from 28, 4 → four from 32, 5 → four from 36, 6 → four from 0). Used in official levels with tiles 0–5 only. Verified by eye: on "The Bean Machine" (`LEVEL.002`) the blocks at (12–13, 5–6, 12) form a "Jelly Belly" panel only with this mapping; drawn as stored they show a plain chocolate tile |
 | `0x80` | Palette index 0 is transparent |
 
 ## Special block ids (partly verified)
