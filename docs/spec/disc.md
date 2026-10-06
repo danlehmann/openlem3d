@@ -136,4 +136,4 @@ decompresses with valid CRCs (`l3d-tool rnc-check`: 150/150).
 | `ANIM/*` | 11 | Large files, probably FMV cutscenes. |
 | `BMPS/800BMPS/*.BMP`, `BMPS/1024BMPS/*.BMP` | 10 + 10 | Per-theme backdrops for high-resolution modes. |
 | `SOUND/**` | 331 | Sound effects and sound-card music, several driver variants (e.g. `SOUND/AWE/`). |
-| `REPLAYS/REP.nnn`, `REPLAYS/REPLAY.nnn` | 24 | RNC-compressed demo replays, mostly 64,802 bytes unpacked. |
+| `REPLAYS/REP.nnn`, `REPLAYS/REPLAY.nnn` | 24 | RNC-compressed demo replays, mostly 64,802 bytes unpacked. `REPLAY.080`–`099` are the Practice levels' demos (their briefings offer "Enter = Demo"). Unpacked, `REPLAY.080` starts with the 16-bit value 80, then 10,800 records of 6 bytes holding small signed values (01, 02, FF, FE): apparently recorded input, such as mouse movement and buttons, about 36 records per second over the 5-minute level (inferred, not decoded). |
