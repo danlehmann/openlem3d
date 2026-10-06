@@ -562,8 +562,8 @@ impl Simulation {
                     l.set_state(State::Walking);
                     self.settle(l);
                 } else {
-                    for i in 0..3 {
-                        l.pos[i] += d[i] * ROPE_SPEED / len;
+                    for (p, d) in l.pos.iter_mut().zip(d) {
+                        *p += d * ROPE_SPEED / len;
                     }
                 }
             }
