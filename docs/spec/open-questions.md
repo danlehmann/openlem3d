@@ -17,8 +17,9 @@ Each names where it shows up, so a run can go straight there.
 - **Turner pose.** In the same demo the turner was seen side on, facing the
   walkers coming towards it, one arm straight out along its facing, while
   the walkers turned to its own left (one view; medium confidence). Ours
-  keeps the turner's heading and holds out the arm on the side it sends
-  walkers, which reads correctly from the other views.
+  draws the turner turned round to face the way it came (the walkers
+  behind it), holding out the arm on the side it sends them; kept facing
+  its walking direction, turners showed their backs on "Take a Dive".
 - **Hanging deflectors.** "Team Work" (`LEVEL.051`) has a deflector hanging
   ¼ unit above the floor. We let a deflector turn a walker wherever it
   crosses the body, feet to head; before that, walkers passed under it, hit

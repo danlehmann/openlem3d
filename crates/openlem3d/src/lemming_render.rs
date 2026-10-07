@@ -344,13 +344,20 @@ pub fn build(sim: &Simulation, atlas_rows: u32, camera_yaw: f32, doors: &[Door])
     }
     // Trapped lemmings are shown by the trap's own animation.
     for l in lemmings.iter().filter(|l| !l.gone && l.state != State::Trapped) {
-        let view = ViewAngle::from_yaws(l.dir.yaw(), camera_yaw);
+        // A turner stands facing the walkers coming up behind it, the way it
+        // came (seen in the original's "Turner" demo; drawn the other way,
+        // turners showed their backs to the cameras of "Take a Dive").
+        let facing = match l.state {
+            State::Turning { .. } => l.dir.reverse(),
+            _ => l.dir,
+        };
+        let view = ViewAngle::from_yaws(facing.yaw(), camera_yaw);
         let (cell, mirror) = match l.state {
             // The stored turner points to its right (cells 30–36, seen from
             // the front, hold out the lemming's right arm); one pointing
             // left is its mirror image. The reverse showed turners pointing
             // away from where they sent walkers.
-            State::Turning { to } if to == l.dir.anticlockwise() => {
+            State::Turning { to } if to == facing.anticlockwise() => {
                 let (cell, mirror) = cell_for(anim_for(l.state), view.mirrored(), l.state_ticks);
                 (cell, !mirror)
             }
