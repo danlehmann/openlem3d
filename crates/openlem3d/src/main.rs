@@ -66,6 +66,12 @@ pub struct Options {
     assign: Vec<(u64, usize, u8, Option<String>)>,
     /// Lemming the virtual-lemming camera follows from the start (`--follow N`).
     follow: Option<usize>,
+    /// Play the level's stored solution as a replay of player input, so it
+    /// ends on the results screen like a real attempt (`--solve`).
+    solve: bool,
+    /// Run game time as fast as the machine allows (`--turbo`), for scripted
+    /// runs: `--wait` and `--press` count game time, so they mean the same.
+    turbo: bool,
     /// The screen to start on without `--level` (`--screen title|code|options|practice`).
     screen: menu::AppState,
     /// With `--level`, start on that level's briefing (`--briefing`).
@@ -88,6 +94,8 @@ fn parse_args() -> Options {
         no_hud: false,
         assign: Vec::new(),
         follow: None,
+        solve: false,
+        turbo: false,
         screen: menu::AppState::Title,
         briefing: false,
         press: Vec::new(),
@@ -121,6 +129,8 @@ fn parse_args() -> Options {
                 let secs = |i: usize| p.get(i).map(|s| s.parse::<f32>().expect("--press takes SECONDS:KEY[:HOLD]"));
                 o.press.push((secs(0).expect("--press seconds"), p.get(1).expect("--press key").to_string(), secs(2).unwrap_or(0.0)));
             }
+            "--solve" => o.solve = true,
+            "--turbo" => o.turbo = true,
             "--follow" => o.follow = Some(val().parse().expect("--follow takes a lemming number")),
             "--assign" => {
                 let v = val();
@@ -163,6 +173,7 @@ fn main() {
                 .set(WindowPlugin {
                     primary_window: Some(Window {
                         title: "openlem3d".into(),
+                        present_mode: if opts.turbo { bevy::window::PresentMode::AutoNoVsync } else { default() },
                         resolution: match opts.size {
                             Some((w, h)) => bevy::window::WindowResolution::new(w, h).with_scale_factor_override(1.0),
                             None => default(),
@@ -195,7 +206,7 @@ fn main() {
         .add_systems(FixedUpdate, step_simulation.run_if(in_state(menu::AppState::Playing)))
         .add_systems(OnEnter(menu::AppState::Briefing), |mut game: ResMut<Game>| game.replay = None)
         .add_systems(PostUpdate, update_lemming_sprites)
-        .add_systems(Startup, spawn_camera)
+        .add_systems(Startup, (spawn_camera, turbo))
         .add_systems(
             Update,
             (switch_level, load_level, refresh_scenery, camera_controls).chain().run_if(in_state(menu::AppState::Playing)),
@@ -501,6 +512,11 @@ fn load_level(
     }
     commands.insert_resource(LevelInfo { cameras: level.cameras });
     game.sim = Some(l3d_sim::Simulation::new(&level, &blocks));
+    if opts.solve
+        && let Some(log) = l3d_sim::demos::demo(n, &level, &blocks)
+    {
+        game.replay = Some(Replay::new(log));
+    }
     game.doors = lemming_render::doors(&level, &blocks);
     game.save_requirement = level.save_requirement as u32;
     let track = music::track_for(level.theme, level.music);
@@ -636,6 +652,7 @@ fn screenshot_when_ready(
     state: Res<State<menu::AppState>>,
     time: Res<Time>,
     mut elapsed: Local<Option<f32>>,
+    mut frames_since_shot: Local<Option<u32>>,
     mut exit: MessageWriter<AppExit>,
 ) {
     let Some(path) = &opts.screenshot else { return };
@@ -648,9 +665,15 @@ fn screenshot_when_ready(
     let shot_at = opts.wait.max(0.5);
     if before < shot_at && now >= shot_at {
         commands.spawn(Screenshot::primary_window()).observe(save_to_disk(path.clone()));
+        *frames_since_shot = Some(0);
     }
-    if now >= shot_at + 0.5 {
-        exit.write(AppExit::Success);
+    // Quit a few frames after the shot, once it is saved (counted in frames,
+    // not game time, which `--turbo` races through).
+    if let Some(f) = frames_since_shot.as_mut() {
+        *f += 1;
+        if *f > 30 {
+            exit.write(AppExit::Success);
+        }
     }
 }
 
@@ -704,7 +727,7 @@ fn refresh_scenery(
 /// (`Escape`, `F12`, `KeyW`, `Digit1`, …), or `Click` for the left mouse button.
 fn scripted_presses(
     opts: Res<Options>,
-    time: Res<Time<Real>>,
+    time: Res<Time<Virtual>>,
     mut keys: ResMut<ButtonInput<KeyCode>>,
     mut mouse: ResMut<ButtonInput<MouseButton>>,
     mut done: Local<usize>,
@@ -772,4 +795,14 @@ const WHEEL_STEP: f32 = 0.25;
 /// The cell `[column, row]` of the 3×3 grid over the view that `p` is in.
 pub fn pointer_region(p: Vec2, size: Vec2) -> [usize; 2] {
     [((p.x / size.x * 3.0) as usize).min(2), ((p.y / size.y * 3.0) as usize).min(2)]
+}
+
+/// With `--turbo`, game time runs up to a thousand times real time, up to
+/// ten seconds of it per frame: the simulation steps as fast as the machine
+/// allows (rendering only now and then).
+fn turbo(opts: Res<Options>, mut time: ResMut<Time<Virtual>>) {
+    if opts.turbo {
+        time.set_max_delta(std::time::Duration::from_secs(10));
+        time.set_relative_speed(1000.0);
+    }
 }

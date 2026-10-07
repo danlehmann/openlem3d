@@ -62,6 +62,10 @@ extracting.
    `--assign TICK:LEMMING:SKILL[:cw|acw]`, `--press SECONDS:KEY[:HOLD]` (Bevy key
    names such as `Escape`, `F12`, `KeyP`, or `Click`), and
    `--screenshot FILE --wait SECONDS`, which saves the window and quits.
+   `--solve` plays the level's stored solution (Practice levels and Fun 1)
+   as a replay, ending on the results screen; `--turbo` runs game time as
+   fast as the machine allows (`--wait` and `--press` count game time).
+   Run turbo instances one at a time.
 
 ## Controls
 
