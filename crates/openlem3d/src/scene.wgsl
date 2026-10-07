@@ -10,6 +10,9 @@ struct Uniforms {
     // Camera right vector (xyz); billboards are spanned by it and +Y.
     // w: 1 for an all-round tiled sky, 0 for a panorama above the horizon.
     right: vec4<f32>,
+    // x: camera roll in radians (anticlockwise on screen), y: the
+    // framebuffer x of the screen centre; the sky turns about (y, sky.y).
+    view: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> u: Uniforms;
@@ -104,14 +107,22 @@ fn vs_sky(@builtin(vertex_index) i: u32) -> SkyOut {
 @fragment
 fn fs_sky(v: SkyOut) -> @location(0) vec4<f32> {
     let dims = vec2<f32>(textureDimensions(tex));
-    let col = u.sky.x + v.clip.x / (2.0 * u.sky.z);
+    // Undo the camera roll: the point of the unrolled sky that lands here.
+    // In framebuffer coordinates (y down) the anticlockwise roll's inverse is
+    // the standard rotation matrix by the same angle.
+    let pivot = vec2(u.view.y, u.sky.y);
+    let d = v.clip.xy - pivot;
+    let c = cos(u.view.x);
+    let s = sin(u.view.x);
+    let p = pivot + vec2(c * d.x - s * d.y, s * d.x + c * d.y);
+    let col = u.sky.x + p.x / (2.0 * u.sky.z);
     if (u.right.w > 0.5) {
         // All-round sky: a horizontally wrapping panorama stretched over the
         // full screen height (provisional).
-        let full = vec2(col / dims.x, clamp(v.clip.y / (480.0 * u.sky.z), 0.0, 0.999));
+        let full = vec2(col / dims.x, clamp(p.y / (480.0 * u.sky.z), 0.0, 0.999));
         return vec4(textureSampleLevel(tex, samp, full, 0.0).rgb, 1.0);
     }
-    let row = clamp(v.clip.y / u.sky.y, 0.0, 1.0) * dims.y;
+    let row = clamp(p.y / u.sky.y, 0.0, 1.0) * dims.y;
     let uv = vec2(col / dims.x, min(row, dims.y - 0.5) / dims.y);
     return vec4(textureSampleLevel(tex, samp, uv, 0.0).rgb, 1.0);
 }

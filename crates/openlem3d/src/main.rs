@@ -230,6 +230,9 @@ struct ViewCamera {
     /// Facing in radians; 0 faces −X, π/2 faces −Z (the original's rotation
     /// steps, see `docs/spec/level.md`).
     yaw: f32,
+    /// Roll in radians about the view direction, turning the picture
+    /// anticlockwise; 0 except in the lemming view.
+    roll: f32,
 }
 
 impl ViewCamera {
@@ -294,6 +297,22 @@ fn projection(fov_y_deg: f32, aspect: f32, horizon: f32) -> Mat4 {
     p
 }
 
+/// Clip-space rotation by `roll` (anticlockwise on screen) about the
+/// horizon's centre, the point the off-centre projection puts eye level at;
+/// `aspect` keeps the rotation true on a non-square screen.
+fn roll_about_horizon(roll: f32, aspect: f32, horizon: f32) -> Mat4 {
+    if roll == 0.0 {
+        return Mat4::IDENTITY;
+    }
+    let shift = 1.0 - 2.0 * horizon;
+    // Clip-space translations scale with w, so they move NDC points as wanted.
+    Mat4::from_translation(Vec3::Y * shift)
+        * Mat4::from_scale(Vec3::new(1.0 / aspect, 1.0, 1.0))
+        * Mat4::from_rotation_z(roll)
+        * Mat4::from_scale(Vec3::new(aspect, 1.0, 1.0))
+        * Mat4::from_translation(Vec3::Y * -shift)
+}
+
 /// Sky texel column at the left edge of a 640-wide screen for a camera
 /// facing `yaw`. The 1024-texel panorama spans one full turn and each texel
 /// covers two screen pixels; facing +Z (yaw 3π/2) puts column 928 at the
@@ -307,7 +326,7 @@ fn sky_left_column(yaw: f32) -> f32 {
 fn spawn_camera(mut commands: Commands) {
     // A 2D camera drives the frame; the scene renderer draws the 3D level
     // into its target before sprites and UI.
-    commands.spawn((Camera2d, Tonemapping::None, Msaa::Off, ViewCamera { pos: Vec3::new(16.0, 8.0, 16.0), yaw: 0.0 }));
+    commands.spawn((Camera2d, Tonemapping::None, Msaa::Off, ViewCamera { pos: Vec3::new(16.0, 8.0, 16.0), yaw: 0.0, roll: 0.0 }));
 }
 
 /// Whether the level about to be played is starting afresh, rather than
@@ -595,7 +614,8 @@ fn camera_controls(
         }
         let aspect = windows.iter().next().map_or(16.0 / 9.0, |w| w.width() / w.height().max(1.0));
         let view = Mat4::look_to_rh(cam.pos, cam.forward(), Vec3::Y);
-        scene_cam.view_proj = projection(opts.fov_y, aspect, opts.horizon) * view;
+        scene_cam.view_proj = roll_about_horizon(cam.roll, aspect, opts.horizon) * projection(opts.fov_y, aspect, opts.horizon) * view;
+        scene_cam.roll = cam.roll;
         scene_cam.horizon = opts.horizon;
         scene_cam.time = time.elapsed_secs();
         scene_cam.sky_column = sky_left_column(cam.yaw);

@@ -39,6 +39,12 @@ vertical, walking showed no bob beyond 1–3 px, and turns snapped without
 roll. Not covered: the horizon was hidden while the lemming climbed a steep
 path, and no fall, float, bounce, slide or climb was seen in the lemming
 view.
+The project owner sees a slight roll while the lemming walks in the
+original (below what the bursts above resolved). Ours rolls the whole
+camera, sky included, about 1.5° to each side once per walk cycle (6
+ticks) while the followed lemming walks, easing back to level otherwise;
+the original's 2D sky does not turn with it, a renderer quirk we do not
+keep. Preset cameras never roll.
 
 ## Projection (verified, fitted)
 

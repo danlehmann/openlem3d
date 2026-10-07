@@ -83,6 +83,9 @@ pub struct SceneCamera {
     pub time: f32,
     /// Camera right vector; billboards face the camera along it.
     pub right: Vec3,
+    /// Roll in radians (anticlockwise on screen) already in `view_proj`;
+    /// the sky is turned by it too.
+    pub roll: f32,
 }
 
 pub struct SceneRenderPlugin;
@@ -110,7 +113,7 @@ impl Plugin for SceneRenderPlugin {
 }
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
-const UNIFORM_SIZE: u64 = 96;
+const UNIFORM_SIZE: u64 = 112;
 
 /// GPU resources of the scene renderer.
 #[derive(Resource)]
@@ -353,6 +356,7 @@ fn prepare_scene(
     uniforms.extend([camera.sky_column - extra / 2.0, camera.horizon * h as f32, scale, camera.time]);
     let surround = content.data.as_ref().is_some_and(|d| d.sky_surround);
     uniforms.extend([camera.right.x, camera.right.y, camera.right.z, if surround { 1.0 } else { 0.0 }]);
+    uniforms.extend([camera.roll, w as f32 / 2.0, 0.0, 0.0]);
     queue.write_buffer(&gpu.uniforms, 0, &f32_bytes(&uniforms));
     upload_sprites(device, &queue, &mut gpu, &sprites);
     if gpu.version == Some(content.version) {

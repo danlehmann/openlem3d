@@ -57,6 +57,7 @@ impl LemmingCam {
         if let Some((pos, yaw)) = self.saved() {
             view.pos = pos;
             view.yaw = yaw;
+            view.roll = 0.0;
         }
         *self = LemmingCam::Off;
     }
@@ -92,6 +93,13 @@ const EYE_BEHIND: f32 = 1.4;
 const EYE_HEIGHT: f32 = 0.65;
 /// How quickly the camera catches up with the lemming (per second).
 const FOLLOW_RATE: f32 = 10.0;
+/// The walking sway: peak roll in degrees, and seconds per swing left and
+/// back, one walk cycle (6 ticks; ours, after the owner's observation that
+/// the original rolls a little while the lemming walks).
+const SWAY_ROLL: f32 = 1.5;
+const SWAY_PERIOD: f32 = 6.0 / l3d_sim::TICKS_PER_SECOND as f32;
+/// How quickly the roll follows the sway, per second.
+const ROLL_RATE: f32 = 12.0;
 
 pub(crate) fn toggle_keys(mut keys: ResMut<ButtonInput<KeyCode>>, mut cam: ResMut<LemmingCam>, mut views: Query<&mut ViewCamera>) {
     let Ok(mut view) = views.single_mut() else { return };
@@ -113,6 +121,7 @@ fn follow(
     game: Res<Game>,
     opts: Res<crate::Options>,
     mut started: Local<bool>,
+    mut sway: Local<f32>,
     mut cam: ResMut<LemmingCam>,
     mut views: Query<&mut ViewCamera>,
 ) {
@@ -125,7 +134,10 @@ fn follow(
         *started = true;
         *cam = LemmingCam::Following { lemming: i, saved: (view.pos, view.yaw) };
     }
-    let Some(i) = cam.following() else { return };
+    let Some(i) = cam.following() else {
+        view.roll = 0.0;
+        return;
+    };
     let lemming = game.sim.as_ref().and_then(|s| s.lemmings.get(i)).filter(|l| !l.gone);
     let Some(l) = lemming else {
         cam.turn_off(&mut view);
@@ -144,6 +156,14 @@ fn follow(
     }
     let target = eye(behind);
     let k = 1.0 - (-FOLLOW_RATE * time.delta_secs()).exp();
+    // A slight roll from side to side with the lemming's steps while it
+    // walks, levelling out otherwise.
+    let walking = l.state == l3d_sim::State::Walking;
+    if walking {
+        *sway = (*sway + time.delta_secs() * std::f32::consts::TAU / SWAY_PERIOD).rem_euclid(std::f32::consts::TAU);
+    }
+    let roll = if walking { SWAY_ROLL.to_radians() * sway.sin() } else { 0.0 };
+    view.roll += (roll - view.roll) * (1.0 - (-ROLL_RATE * time.delta_secs()).exp());
     // Turn the short way round.
     let turn = (yaw - view.yaw + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
     view.yaw += turn * k;
