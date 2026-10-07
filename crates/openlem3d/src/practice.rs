@@ -32,8 +32,10 @@ impl Plugin for PracticePlugin {
 /// Where an icon's frames come from.
 #[derive(Clone, Copy)]
 enum Source {
-    Mini(usize),
-    Panel(usize),
+    /// A skill: its panel button's animation (index into `panel::SKILL_BUTTONS`).
+    Skill(usize),
+    /// Panel icons, played in turn.
+    Panel(&'static [usize]),
     Deflicon,
     Prac(usize, usize),
 }
@@ -45,17 +47,17 @@ const COLUMNS: [[f32; 7]; 3] =
     [[22.0, 70.0, 115.0, 160.0, 200.0, 238.0, 277.0], [39.0, 78.0, 120.0, 160.0, 200.0, 238.0, 277.0], [36.0, 81.0, 118.0, 160.0, 205.0, 241.0, 281.0]];
 /// Icons in grid order: levels 80–99, then EXIT; each with its voice.
 const ITEMS: [(Source, &str); 21] = [
-    (Source::Mini(19), "VOXFX/BLOCKER1"),
-    (Source::Mini(26), "VOXFX/TURNER1"),
-    (Source::Mini(0), "VOXFX/BOMBER"),
-    (Source::Mini(46), "VOXFX/BUILDER2"),
-    (Source::Mini(33), "VOXFX/BASHER2"),
-    (Source::Mini(52), "VOXFX/MINER2"),
-    (Source::Mini(58), "VOXFX/DIGGER2"),
-    (Source::Mini(11), "VOXFX/CLIMBER2"),
-    (Source::Mini(41), "VOXFX/FLOATER1"),
-    (Source::Panel(icon::FACE + 1), "VOXFX/HILITE"),
-    (Source::Panel(icon::RED_DOWN), "VOXFX/VIRTUAL1"),
+    (Source::Skill(0), "VOXFX/BLOCKER1"),
+    (Source::Skill(1), "VOXFX/TURNER1"),
+    (Source::Skill(2), "VOXFX/BOMBER"),
+    (Source::Skill(3), "VOXFX/BUILDER2"),
+    (Source::Skill(4), "VOXFX/BASHER2"),
+    (Source::Skill(5), "VOXFX/MINER2"),
+    (Source::Skill(6), "VOXFX/DIGGER2"),
+    (Source::Skill(7), "VOXFX/CLIMBER2"),
+    (Source::Skill(8), "VOXFX/FLOATER1"),
+    (Source::Panel(&[icon::FACE + 1, icon::FACE]), "VOXFX/HILITE"),
+    (Source::Panel(&[39, 40, 41, 42, 43, 44]), "VOXFX/VIRTUAL1"),
     (Source::Deflicon, "VOXFX/DEFLECT"),
     (Source::Prac(26, 8), "VOXFX/MUD1"),
     (Source::Prac(6, 4), "VOXFX/ONEWAY"),
@@ -102,8 +104,8 @@ fn load(mut commands: Commands, mut data: ResMut<Data>, mut images: ResMut<Asset
     let items = ITEMS
         .iter()
         .map(|(src, _)| match *src {
-            Source::Mini(c) => up(&mini[c..=c]),
-            Source::Panel(c) => up(&panel[c.min(panel.len().saturating_sub(1))..=c.min(panel.len().saturating_sub(1))]),
+            Source::Skill(s) => up(&crate::panel::SKILL_BUTTONS[s].1.iter().filter_map(|&c| mini.get(c).cloned()).collect::<Vec<_>>()),
+            Source::Panel(cells) => up(&cells.iter().filter_map(|&c| panel.get(c).cloned()).collect::<Vec<_>>()),
             Source::Deflicon => up(&defl),
             Source::Prac(first, n) => up(&prac[first..first + n]),
         })

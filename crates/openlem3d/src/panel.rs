@@ -38,7 +38,7 @@ const SCREEN: Vec2 = Vec2::new(320.0, 200.0);
 
 /// Skill buttons: x position and `MINILEMM` cells (rest cell first), in
 /// [`Skill::ALL`] order. Cell ranges after the first three are estimated.
-const SKILL_BUTTONS: [(f32, &[usize]); 9] = [
+pub(crate) const SKILL_BUTTONS: [(f32, &[usize]); 9] = [
     (45.0, &[19, 20, 21, 22, 23, 24, 25, 24, 23, 22, 21, 20]),
     (72.0, &[26, 27, 28, 29, 30, 31, 32, 31, 30, 29, 28, 27]),
     (98.0, &[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]),
