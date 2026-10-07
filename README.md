@@ -78,6 +78,7 @@ extracting.
 | Turner | click the lemming, then click beside it on the side it should point to | tap, then tap beside it |
 | Highlight a lemming | click the arrow (bottom left): the lemming nearest the middle of the view gets an arrow over it; click another lemming to move it there. Skills clicked go straight to it, and the face rides along with it. The arrow again switches it off | tap the arrow; tap a lemming to move it |
 | Ride along with a lemming | V, I or the face, then click a lemming (or the face with a lemming highlighted); V, I, Esc or the face again to return | tap the face, then a lemming; tap the face again to return |
+| Skills while riding along | click anywhere in the view: the selected skill goes to the lemming ridden with; a turner points to the half of the screen clicked (the two turn arrows show in the middle) | tap |
 | Release rate | − / + (hold to repeat) | − / + buttons (hold to repeat) |
 | Nuke | Alt+Q, or click the bomb | tap the bomb |
 | Mute music and sounds | M | — |

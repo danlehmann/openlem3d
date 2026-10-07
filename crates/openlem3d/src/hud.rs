@@ -185,6 +185,19 @@ pub(crate) fn assign_on_pointer(
     };
     let Some(point) = point else { return };
     let size = Vec2::new(window.width(), window.height());
+    // Riding along, a click acts on the lemming ridden with; a turner points
+    // to the side of the screen clicked (left half: its left).
+    if let Some(f) = lemming_cam.following() {
+        let Some(skill) = selected.0 else { return };
+        let ok = if skill == Skill::Turner {
+            let sides = view_sides(&camera, &sim.lemmings[f]);
+            sim.assign_turner(f, sides[(point.x >= size.x / 2.0) as usize])
+        } else {
+            sim.assign(f, skill)
+        };
+        sfx.write(crate::sfx::Sfx(if ok { "VOXFX/OK2" } else { "VOXFX/UH_UH1" }));
+        return;
+    }
     if let Some(i) = pending.0.take().filter(|_| !picking) {
         let Some(to) = turner_choice(&camera, size, &sim.lemmings[i], point) else { return };
         let ok = sim.assign_turner(i, to);
@@ -327,10 +340,27 @@ fn place_turner_marker(
     time: Res<Time>,
     windows: Query<&Window>,
     mut arrows: Query<(&TurnerArrow, &mut ImageNode, &mut Node, &mut Visibility)>,
+    lemming_cam: Res<LemmingCam>,
+    selected: Res<SelectedSkill>,
 ) {
     let shown = (|| {
         if *state.get() != AppState::Playing {
             return None;
+        }
+        // Riding along with the turner selected: both arrows in the middle
+        // of the screen, left and right, for the two halves a click picks.
+        if let Some(f) = lemming_cam.following() {
+            let sim = game.sim.as_ref()?;
+            if selected.0 != Some(Skill::Turner) || !sim.can_assign(f, Skill::Turner) {
+                return None;
+            }
+            let window = windows.single().ok()?;
+            let size = Vec2::new(window.width(), window.height());
+            let sides = view_sides(&camera, &sim.lemmings[f]);
+            let l = &sim.lemmings[f];
+            let screen = |d: l3d_sim::Dir| if d == sides[0] { Vec2::NEG_X } else { Vec2::X };
+            let dirs = [screen(l.dir.anticlockwise()), screen(l.dir.clockwise())];
+            return Some((size / 2.0, dirs, [true, true], size.y / 200.0 * 2.0));
         }
         let l = game.sim.as_ref()?.lemmings.get(pending.0?)?;
         let window = windows.single().ok()?;
@@ -396,4 +426,12 @@ pub fn nearest_to_centre(sim: &l3d_sim::Simulation, camera: &SceneCamera, size: 
         })
         .min_by(|a, b| a.1.total_cmp(&b.1))
         .map(|(i, _)| i)
+}
+
+/// For the lemming ridden with: its turn towards screen-left and towards
+/// screen-right, as seen through its eyes.
+fn view_sides(camera: &SceneCamera, l: &l3d_sim::Lemming) -> [l3d_sim::Dir; 2] {
+    let [x, _, z] = l.dir.clockwise().delta();
+    let cw_right = Vec3::new(x as f32, 0.0, z as f32).dot(camera.right) > 0.0;
+    if cw_right { [l.dir.anticlockwise(), l.dir.clockwise()] } else { [l.dir.clockwise(), l.dir.anticlockwise()] }
 }

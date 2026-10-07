@@ -86,6 +86,7 @@ fn update(
     camera: Res<SceneCamera>,
     touches: Res<Touches>,
     ui: Query<&Interaction>,
+    lemming_cam: Res<crate::lemming_cam::LemmingCam>,
     windows: Query<(Entity, &Window, Option<&CursorIcon>)>,
     mut images: ResMut<Assets<Image>>,
 ) {
@@ -94,7 +95,9 @@ fn update(
     let size = Vec2::new(window.width(), window.height());
     let cell = match (state.get(), position) {
         (AppState::Code, _) | (_, None) => None,
-        (AppState::Playing, Some(p)) => Some(if ui.iter().any(|i| *i != Interaction::None) {
+        (AppState::Playing, Some(p)) => Some(if ui.iter().any(|i| *i != Interaction::None) || lemming_cam.following().is_some() {
+            // Riding along a click acts on the lemming ridden with, so the
+            // pointer stays the cross-hair.
             CROSS_HAIR
         } else if game.sim.as_ref().and_then(|sim| crate::hud::lemming_at(sim, &camera, size, p)).is_some() {
             BRACKET
