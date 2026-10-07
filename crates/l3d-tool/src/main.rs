@@ -880,7 +880,8 @@ fn main() -> Result<()> {
             for ((id, shape), c) in counts {
                 let d = &blk.defs[id as usize];
                 let tex: Vec<u8> = d.faces.iter().map(|f| f.texture).collect();
-                println!("  ({id:2},{shape:2}) x{c:4}  flags {:02x} tex {tex:?}", d.flags);
+                let shade: Vec<u8> = d.faces.iter().map(|f| f.shading).collect();
+                println!("  ({id:2},{shape:2}) x{c:4}  flags {:02x} tex {tex:?} shade {shade:?}", d.flags);
             }
             println!("object kinds: {objs:?}");
             for (x, y, z, b, _) in l.cells().filter(|c| !c.3.is_empty() && c.3.id <= 2) {

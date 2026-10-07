@@ -80,7 +80,9 @@ fn fs(v: VOut) -> @location(0) vec4<f32> {
     if (v.params.y > 0.5 && c.a < 0.5) {
         discard;
     }
-    return vec4(c.rgb * v.params.x, 1.0);
+    // Brightness darkens the palette colours as the original does, i.e. in
+    // sRGB space; the sampled colour is linear, so the factor is linearised.
+    return vec4(c.rgb * pow(v.params.x, 2.2), 1.0);
 }
 
 // Sky: a full-screen triangle. Above the horizon the sky image is stretched

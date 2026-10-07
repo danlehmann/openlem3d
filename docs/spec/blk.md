@@ -50,7 +50,7 @@ Every file is exactly 1,408 bytes: 64 definitions × 22 bytes, uncompressed.
 |---|---|
 | 0 | Tile index in the level's `TEXTURE` file |
 | 1 | Modifiers |
-| 2 | Shading: 0 = unchanged, up to 8 = darkest [L3DEdit] |
+| 2 | Shading: 0 = unchanged, up to 8 = darkest [L3DEdit]. Each step darkens the colours by about 7 % (verified: the steel spire of `LEVEL.068`, shading 7, shows tile 67 at about 0.45 of its colour in the original, matched by 1 − 7 × 0.07 applied to the palette colours) |
 
 ### Flags (unverified, [L3DEdit])
 
