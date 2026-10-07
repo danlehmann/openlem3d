@@ -645,6 +645,7 @@ pub(crate) fn camera_controls(
 
 /// With `--screenshot`, saves one frame `--wait` seconds after the level has
 /// loaded, then exits.
+#[allow(clippy::too_many_arguments)] // Bevy system parameters
 fn screenshot_when_ready(
     mut commands: Commands,
     opts: Res<Options>,
