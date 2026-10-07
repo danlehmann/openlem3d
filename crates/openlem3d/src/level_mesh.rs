@@ -345,7 +345,11 @@ impl MeshData {
 }
 
 /// Builds the geometry of all visible blocks.
-pub fn build(level: &Level, blocks: &BlockSet) -> LevelMesh {
+/// `art_on_top(tile)` says whether a tile's picture is in its top half; a
+/// half-height hatch's flaps show the half that has it (texture sets differ:
+/// `TEXTURE.004` and `.006` draw the crate side in the top half of tiles 59
+/// and 60).
+pub fn build(level: &Level, blocks: &BlockSet, art_on_top: &dyn Fn(u32) -> bool) -> LevelMesh {
     let grid = Grid { level, blocks };
     let mut out = LevelMesh::default();
     let mut unsupported = std::collections::BTreeMap::<u8, usize>::new();
@@ -371,7 +375,8 @@ pub fn build(level: &Level, blocks: &BlockSet) -> LevelMesh {
                 .iter()
                 .map(|v| {
                     // Faces show the part of their tile matching their height;
-                    // flaps show the bottom part, where the hatch art is.
+                    // flaps show its bottom part, or the top (below) when the
+                    // art is there.
                     let ly = if is_flap(cell, p.src) { v[1] * (y1 - y0) } else { y0 + v[1] * (y1 - y0) };
                     tile_uv(p.src, [v[0], ly, v[2]])
                 })
@@ -440,7 +445,8 @@ pub fn build(level: &Level, blocks: &BlockSet) -> LevelMesh {
                 None => [1.0, 0.0],
             };
             let strip = |tile: u32| -> Vec<[f32; 2]> {
-                uvs.iter().map(|[u, v]| [*u, (tile as f32 + v.clamp(0.0, 1.0)) / TILES as f32]).collect()
+                let shift = if flap && art_on_top(tile) { y1 - y0 - 1.0 } else { 0.0 };
+                uvs.iter().map(|[u, v]| [*u, (tile as f32 + (v + shift).clamp(0.0, 1.0)) / TILES as f32]).collect()
             };
             let brightness = 1.0 - (face.shading.min(8) as f32) * 0.07;
             let transparent = face.modifiers & (modifiers::COLOR0_TRANSPARENT | modifiers::REVERSE_SIDE) != 0;

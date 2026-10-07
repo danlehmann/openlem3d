@@ -590,11 +590,23 @@ pub struct BuiltLevel {
     pub block_layer: usize,
 }
 
+/// Whether tile `tile` of a 64-wide strip of 64×64 tiles has more opaque
+/// pixels in its top half than its bottom half; `opaque(i)` says whether
+/// pixel `i` of the strip is.
+fn art_on_top(opaque: impl Fn(usize) -> bool, tile: u32) -> bool {
+    let count = |rows: std::ops::Range<usize>| {
+        let base = tile as usize * 64 * 64;
+        rows.flat_map(|y| (0..64).map(move |x| base + y * 64 + x)).filter(|&i| opaque(i)).count()
+    };
+    count(0..32) > count(32..64)
+}
+
 /// Replaces the block geometry of `scene` with a mesh of the current grid.
 pub fn rebuild_blocks(scene: &SceneData, layer: usize, level: &Level, blocks: &BlockSet, bricks: &[l3d_sim::Brick]) -> SceneData {
     let mut out = scene.clone();
     let texture = out.layers[layer].texture.clone();
-    out.layers[layer] = block_layer(&level_mesh::build(level, blocks), texture);
+    let on_top = |tile: u32| art_on_top(|i| texture.texels.get(i * 4 + 3).is_some_and(|&a| a > 0), tile);
+    out.layers[layer] = block_layer(&level_mesh::build(level, blocks, &on_top), texture);
     out.layers[layer + 1] = brick_layer(bricks);
     out
 }
@@ -651,10 +663,10 @@ pub fn build(data: &mut GameData, n: u32, show: Show) -> Result<BuiltLevel, l3d_
     let level = data.level(n)?;
     let blocks = data.blocks(n)?;
     let pal = data.palette("GFX/LM3D.PAL")?;
-    let mesh = level_mesh::build(&level, &blocks);
+    let tex = data.gfx("TEXTURE", level.texture_set)?;
+    let mesh = level_mesh::build(&level, &blocks, &|tile| art_on_top(|i| tex.get(i).is_some_and(|&p| p != 0), tile));
     let mut scene = SceneData::default();
 
-    let tex = data.gfx("TEXTURE", level.texture_set)?;
     let flags = level.flags;
     let surround = flags & level_flags::SURROUND_SKY != 0;
 
