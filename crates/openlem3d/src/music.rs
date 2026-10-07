@@ -21,7 +21,13 @@ pub struct MusicPlugin;
 
 impl Plugin for MusicPlugin {
     fn build(&self, app: &mut App) {
+        use crate::menu::AppState;
         app.init_resource::<MusicMuted>().add_systems(Update, toggle_mute);
+        // Music plays only in levels, not on the briefing or in the menus
+        // (verified); the options screen opened from a level keeps it.
+        for state in [AppState::Title, AppState::Code, AppState::Menu, AppState::Practice, AppState::Briefing, AppState::Results] {
+            app.add_systems(OnEnter(state), stop);
+        }
     }
 }
 
@@ -141,5 +147,11 @@ fn toggle_mute(
         for mut sink in &mut sinks {
             sink.set_volume(Volume::Linear(volume(&muted, &settings)));
         }
+    }
+}
+
+fn stop(mut commands: Commands, music: Query<Entity, With<LevelMusic>>) {
+    for e in &music {
+        commands.entity(e).despawn();
     }
 }
