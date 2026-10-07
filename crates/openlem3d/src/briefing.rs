@@ -180,7 +180,7 @@ fn briefing_input(
     } else if show && has_demo(current.number) {
         let n = current.number;
         let log = data.0.level(n).ok().zip(data.0.blocks(n).ok()).and_then(|(level, blocks)| l3d_sim::demos::demo(n, &level, &blocks));
-        game.replay = log.map(crate::Replay::demo);
+        game.replay = log.map(|log| crate::Replay::demo(log, AppState::Briefing));
         next.set(AppState::Playing);
     } else if show {
         preview.active = true;
@@ -250,7 +250,7 @@ fn has_demo(level: u32) -> bool {
     level >= crate::menu::PRACTICE as u32 * crate::menu::LEVELS_PER_RATING && l3d_sim::demos::solution(level).is_some()
 }
 
-/// Any key, click or tap ends a demo, back to the briefing.
+/// Any key, click or tap ends a demo, back to where it was started.
 fn end_demo(
     mut keys: ResMut<ButtonInput<KeyCode>>,
     mut mouse: ResMut<ButtonInput<MouseButton>>,
@@ -259,14 +259,12 @@ fn end_demo(
     mut current: ResMut<CurrentLevel>,
     mut next: ResMut<NextState<AppState>>,
 ) {
-    if !game.replay.as_ref().is_some_and(|r| r.demo) {
-        return;
-    }
+    let Some(back_to) = game.replay.as_ref().and_then(|r| r.demo) else { return };
     if keys.get_just_pressed().next().is_some() || mouse.get_just_pressed().next().is_some() || touches.any_just_released() {
         keys.clear();
         mouse.clear();
         game.replay = None;
         current.loaded = None;
-        next.set(AppState::Briefing);
+        next.set(back_to);
     }
 }

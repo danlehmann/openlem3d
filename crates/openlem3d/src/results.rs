@@ -56,9 +56,9 @@ fn level_over(
         return;
     }
     // A demo ends back on the briefing, unrecorded.
-    if game.replay.as_ref().is_some_and(|r| r.demo) {
+    if let Some(back_to) = game.replay.as_ref().and_then(|r| r.demo) {
         current.loaded = None;
-        next.set(AppState::Briefing);
+        next.set(back_to);
         return;
     }
     let outcome = Outcome { level: current.number, saved: sim.counts.saved, total: sim.to_release.max(1), needed: game.save_requirement };

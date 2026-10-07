@@ -47,6 +47,7 @@ impl Plugin for TitlePlugin {
         app.add_systems(Startup, load_art)
             .init_resource::<CodeText>()
             .add_systems(OnExit(AppState::Title), despawn::<ScreenRoot>)
+            .add_systems(Update, attract.run_if(in_state(AppState::Title)))
             .add_systems(
                 Update,
                 (spawn_title, title_input, animate_logo, animate_winders, animate_banner, animate_faces, show_rating)
@@ -835,4 +836,41 @@ fn animate_slots(
     for mut v in &mut correct {
         *v = if code.accepted.is_some() { Visibility::Inherited } else { Visibility::Hidden };
     }
+}
+
+/// Seconds on the title screen before a demo plays, as the original's
+/// attract mode (about 125 s, observed). Unlike the original, any input
+/// restarts the wait.
+const ATTRACT_AFTER: f32 = 125.0;
+
+/// Attract mode: after a while without input, the next Practice demo plays;
+/// any input, or its end, returns to the title.
+#[allow(clippy::too_many_arguments)]
+fn attract(
+    time: Res<Time>,
+    keys: Res<ButtonInput<KeyCode>>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    motion: Res<bevy::input::mouse::AccumulatedMouseMotion>,
+    touches: Res<Touches>,
+    mut data: ResMut<Data>,
+    mut game: ResMut<crate::Game>,
+    mut current: ResMut<CurrentLevel>,
+    mut next: ResMut<NextState<AppState>>,
+    mut idle: Local<f32>,
+    mut turn: Local<usize>,
+) {
+    let input = keys.get_pressed().next().is_some() || mouse.get_pressed().next().is_some() || motion.delta != Vec2::ZERO || touches.iter().next().is_some();
+    *idle = if input { 0.0 } else { *idle + time.delta_secs() };
+    if *idle < ATTRACT_AFTER {
+        return;
+    }
+    *idle = 0.0;
+    let demos: Vec<u32> = l3d_sim::demos::SOLUTIONS.iter().map(|s| s.level).filter(|&n| n >= crate::menu::PRACTICE as u32 * crate::menu::LEVELS_PER_RATING).collect();
+    let n = demos[*turn % demos.len()];
+    *turn += 1;
+    let Some(log) = data.0.level(n).ok().zip(data.0.blocks(n).ok()).and_then(|(level, blocks)| l3d_sim::demos::demo(n, &level, &blocks)) else { return };
+    current.number = n;
+    current.loaded = None;
+    game.replay = Some(crate::Replay::demo(log, AppState::Title));
+    next.set(AppState::Playing);
 }

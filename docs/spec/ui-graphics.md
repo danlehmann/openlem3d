@@ -362,7 +362,10 @@ level starts (its briefing shows "Rating Demo", and "Demo" is printed at
 the bottom left during play); a click returns to the title. Mouse
 movement and clicks on the title did not postpone it (observed three
 times). Estimated: in the first stay after boot no demo started within
-10 minutes, which is unexplained.
+10 minutes, which is unexplained. Ours plays the Practice demos in turn after
+125 s on the title screen without input (any input restarts the wait, so
+it never interrupts a choice), and returns to the title on any input or
+when the level ends.
 
 ### Code screen (F2)
 
