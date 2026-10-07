@@ -67,7 +67,7 @@ pub struct SceneLayer {
 pub struct RgbaImage {
     pub width: u32,
     pub height: u32,
-    pub texels: Vec<u8>,
+    pub texels: Arc<[u8]>,
 }
 
 /// Per-frame view parameters.
@@ -132,6 +132,9 @@ struct SceneGpu {
     depth: Option<((u32, u32), wgpu::TextureView)>,
     /// Size of the colour target, for the sky parameters.
     target_size: (u32, u32),
+    /// Uploaded textures by their texel data, kept while the content still
+    /// uses that data (a terrain change re-uploads geometry only).
+    textures: Vec<(Arc<[u8]>, wgpu::BindGroup)>,
 }
 
 struct UploadedLayer {
@@ -206,6 +209,7 @@ impl FromWorld for SceneGpu {
             sprites: None,
             depth: None,
             target_size: (1, 1),
+            textures: Vec::new(),
         }
     }
 }
@@ -361,11 +365,23 @@ fn prepare_scene(
         gpu.sprite_atlas = None;
         return;
     };
-    let layers = data
-        .layers
-        .iter()
-        .filter(|l| !l.indices.is_empty())
-        .map(|l| UploadedLayer {
+    let old = std::mem::take(&mut gpu.textures);
+    let bind = |gpu: &mut SceneGpu, img: &RgbaImage| {
+        let same = |(t, _): &&(Arc<[u8]>, wgpu::BindGroup)| Arc::ptr_eq(t, &img.texels);
+        if let Some((_, b)) = gpu.textures.iter().find(same) {
+            return b.clone();
+        }
+        let b = match old.iter().find(same) {
+            Some((_, b)) => b.clone(),
+            None => gpu.bind_texture(device, &queue, img),
+        };
+        gpu.textures.push((img.texels.clone(), b.clone()));
+        b
+    };
+    let mut layers = Vec::new();
+    for l in data.layers.iter().filter(|l| !l.indices.is_empty()) {
+        let bind_group = bind(&mut gpu, &l.texture);
+        layers.push(UploadedLayer {
             vertices: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("scene vertices"),
                 contents: &f32_bytes(&l.vertices),
@@ -377,12 +393,12 @@ fn prepare_scene(
                 usage: wgpu::BufferUsages::INDEX,
             }),
             index_count: l.indices.len() as u32,
-            bind_group: gpu.bind_texture(device, &queue, &l.texture),
-        })
-        .collect();
+            bind_group,
+        });
+    }
     gpu.layers = layers;
-    gpu.sky = data.sky.as_ref().map(|s| gpu.bind_texture(device, &queue, s));
-    gpu.sprite_atlas = data.sprite_atlas.as_ref().map(|s| gpu.bind_texture(device, &queue, s));
+    gpu.sky = data.sky.as_ref().map(|s| bind(&mut gpu, s));
+    gpu.sprite_atlas = data.sprite_atlas.as_ref().map(|s| bind(&mut gpu, s));
 }
 
 /// Copies this frame's sprite geometry into GPU buffers, growing them when
