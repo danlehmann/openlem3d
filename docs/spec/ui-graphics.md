@@ -621,3 +621,22 @@ item's name shows at the bottom in the large font ("Slippery Block" seen).
 - When the game shows the scenes, the intro slides at each resolution, and
   `ENDLEMMS`, `DEFLICON` and `PRACICON` (probably practice mode
   and the level-end screen). This needs observation of the running game.
+
+**Highlight arrow (measured; play mode with the serial mouse and the
+Practice "Hi-Light" and "Virtual Lemming" demos).** Clicking the panel's arrow
+(cell 38) switches highlighting on: the icon turns green and spins (cells
+39–44) and the lemming nearest the middle of the view gets a white down arrow
+over its head (`BOMBNUMB` cell 6, a sprite in the 3D world, still, hidden by
+nearer objects). A click on a lemming moves the highlight to it. Clicking a
+skill gives it straight to the highlighted lemming without selecting it (the
+icon plays its animation once); the highlight stays. The face then rides
+along with the highlighted lemming at once; the face again leaves, the
+highlight staying. Entering the lemming view with the face and a click also
+highlights that lemming. The arrow again switches highlighting off; it also
+ends when the lemming ridden with dies or leaves (about 2.7 s after). No arrow
+shows over the lemming ridden with. Whether the arrow switches the lemming
+view to another lemming is unconfirmed (ours does).
+
+**Practice grid order.** The face (Virtual Lemming, level 90
+"Claustrophobic") stands before the arrow (Hi-Light Lemming, level 89) in the
+second row (hover labels and briefings checked).

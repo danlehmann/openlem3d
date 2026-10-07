@@ -122,12 +122,14 @@ pub fn lemming_at(sim: &l3d_sim::Simulation, camera: &SceneCamera, size: Vec2, p
     best.map(|(i, _)| i)
 }
 
-/// The highlighted lemming (the panel's arrow, then a click on a lemming):
-/// it carries an arrow, a skill clicked next is given to it, and the face
-/// rides along with it. `armed` while the arrow waits for that click.
+/// Highlighting (the panel's arrow; measured in the original): `on` from
+/// the arrow's click, which highlights the lemming nearest the middle of
+/// the view, until the arrow is clicked again; meanwhile a click on a
+/// lemming moves the highlight to it. The highlighted lemming carries an
+/// arrow, a skill clicked is given to it, and the face rides along with it.
 #[derive(Resource, Default)]
 pub struct Highlight {
-    pub armed: bool,
+    pub on: bool,
     pub lemming: Option<usize>,
 }
 
@@ -190,11 +192,10 @@ pub(crate) fn assign_on_pointer(
         return;
     }
     let best = lemming_at(sim, &camera, size, point);
-    if highlight.armed {
-        // The arrow's click: highlight that lemming; riding along with
-        // another, the view switches to it.
+    if highlight.on {
+        // A click on a lemming moves the highlight to it; riding along
+        // with another, the view switches to it.
         if let Some(i) = best {
-            highlight.armed = false;
             highlight.lemming = Some(i);
             if lemming_cam.following().is_some()
                 && let Ok(view) = views.single()
@@ -208,6 +209,8 @@ pub(crate) fn assign_on_pointer(
     if picking {
         if let Some(i) = best {
             lemming_cam.pick(i);
+            // Riding along also highlights it (seen in the original).
+            *highlight = Highlight { on: true, lemming: Some(i) };
         }
         return;
     }
@@ -371,7 +374,26 @@ fn clear_highlight(game: Res<Game>, current: Res<crate::CurrentLevel>, mut highl
         return;
     }
     let alive = |i: usize| game.sim.as_ref().and_then(|s| s.lemmings.get(i)).is_some_and(|l| !l.gone);
+    // The highlighted lemming gone, highlighting ends (seen when the
+    // lemming ridden with died or left).
     if highlight.lemming.is_some_and(|i| !alive(i)) {
-        highlight.lemming = None;
+        *highlight = Highlight::default();
     }
+}
+
+/// The lemming on screen nearest the middle of the view, the one the arrow
+/// highlights when switched on (seen in the original: the one nearest the
+/// view's centre).
+pub fn nearest_to_centre(sim: &l3d_sim::Simulation, camera: &SceneCamera, size: Vec2) -> Option<usize> {
+    let mid = size / 2.0;
+    sim.lemmings
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| !l.gone)
+        .filter_map(|(i, l)| {
+            let (p, _) = to_screen(camera, size, lemming_centre(l))?;
+            (p.x >= 0.0 && p.y >= 0.0 && p.x <= size.x && p.y <= size.y).then_some((i, p.distance(mid)))
+        })
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(i, _)| i)
 }

@@ -42,6 +42,18 @@ enum Source {
 
 /// The first Practice level.
 const FIRST: u32 = 80;
+
+/// The level an icon opens: the grid follows the level order, except that
+/// the face (Virtual Lemming, level 90 "Claustrophobic") comes before the
+/// arrow (Hi-Light Lemming, level 89), as in the original (hover labels and
+/// briefings checked).
+fn level_of(item: usize) -> u32 {
+    FIRST + match item {
+        9 => 10,
+        10 => 9,
+        i => i as u32,
+    }
+}
 const ROW_Y: [f32; 3] = [37.0, 86.0, 136.0];
 const COLUMNS: [[f32; 7]; 3] =
     [[22.0, 70.0, 115.0, 160.0, 200.0, 238.0, 277.0], [39.0, 78.0, 120.0, 160.0, 200.0, 238.0, 277.0], [36.0, 81.0, 118.0, 160.0, 205.0, 241.0, 281.0]];
@@ -56,8 +68,8 @@ const ITEMS: [(Source, &str); 21] = [
     (Source::Skill(6), "VOXFX/DIGGER2"),
     (Source::Skill(7), "VOXFX/CLIMBER2"),
     (Source::Skill(8), "VOXFX/FLOATER1"),
-    (Source::Panel(&[icon::FACE + 1, icon::FACE]), "VOXFX/HILITE"),
-    (Source::Panel(&[39, 40, 41, 42, 43, 44]), "VOXFX/VIRTUAL1"),
+    (Source::Panel(&[icon::FACE + 1, icon::FACE]), "VOXFX/VIRTUAL1"),
+    (Source::Panel(&[39, 40, 41, 42, 43, 44]), "VOXFX/HILITE"),
     (Source::Deflicon, "VOXFX/DEFLECT"),
     (Source::Prac(26, 8), "VOXFX/MUD1"),
     (Source::Prac(6, 4), "VOXFX/ONEWAY"),
@@ -142,7 +154,7 @@ fn spawn_grid(mut commands: Commands, art: Option<Res<Art>>, pics: Option<Res<Pi
         let size = if matches!(ITEMS[i].0, Source::Panel(_)) { 24.0 } else { 32.0 };
         let e = commands.spawn((Item(i), Button, image_at(frames[0].clone(), at(cx - size / 2.0, cy - size / 2.0, size, size)))).id();
         commands.entity(canvas).add_child(e);
-        if i < 20 && settings.completed.contains(&(FIRST + i as u32)) {
+        if i < 20 && settings.completed.contains(&level_of(i)) {
             let t = commands.spawn((image_at(pics.tick.clone(), at(cx - 4.0, cy - 16.0, 32.0, 32.0)), Pickable::IGNORE)).id();
             commands.entity(canvas).add_child(t);
         }
@@ -188,7 +200,7 @@ fn hover(
     }
     let Some(i) = hovered else { return };
     sfx.write(crate::sfx::Sfx(ITEMS[i].1));
-    let name = if i < 20 { titles.map(|t| crate::menu::title_case(&t.0[(FIRST as usize) + i])).unwrap_or_default() } else { "Exit".into() };
+    let name = if i < 20 { titles.map(|t| crate::menu::title_case(&t.0[level_of(i) as usize])).unwrap_or_default() } else { "Exit".into() };
     if let Some(font) = &art.large {
         let (glyphs, w) = font.layout(&name);
         let left = (160.0 - w / 2.0).round();
@@ -216,7 +228,7 @@ fn pick(
         if item.0 == 20 {
             next.set(AppState::Title);
         } else {
-            current.number = FIRST + item.0 as u32;
+            current.number = level_of(item.0);
             current.loaded = None;
             next.set(AppState::Briefing);
         }
