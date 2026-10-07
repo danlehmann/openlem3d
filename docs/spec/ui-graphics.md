@@ -500,6 +500,8 @@ animated; from the navigation document, not re-measured here).
 (the navigation document also found clicks unreliable; Alt+Q works). Its
 animation (explosion cells 27–37) was not observed.
 
+**Turner arrows (ours, provisional).** After the first click with the turner, two white arrows (`MOUSE` cells 11–42, picked by their screen direction) stand beside the lemming, pointing to its two sides, and blink (0.4 s period) until the pointer is clearly on one side; then only that arrow shows, previewing the direction the next click gives. Whether the original does this is being checked.
+
 **Mouse pointer.** Ours is the system's hardware cursor showing these cells, so it moves at the system's rate rather than the game's frame rate. Over the panel icons: cross-hair, `MOUSE` cell 9. Over
 the 3D view (and the minimap) the pointer depends on which third of the
 view it is in, horizontally and vertically, as a 3×3 grid:
