@@ -58,11 +58,11 @@ pub(crate) struct ScenePics {
     pub(crate) prompts: Vec<Handle<Image>>,
 }
 
-fn upload(img: &IndexedImage, pal: &l3d_formats::gamedata::Palette, images: &mut Assets<Image>) -> Handle<Image> {
+fn upload(img: &IndexedImage, pal: &l3d_formats::gamedata::Palette, transparent0: bool, images: &mut Assets<Image>) -> Handle<Image> {
     let mut image = Image::new(
         Extent3d { width: img.width as u32, height: img.height as u32, depth_or_array_layers: 1 },
         TextureDimension::D2,
-        img.to_rgba(pal, false),
+        img.to_rgba(pal, transparent0),
         TextureFormat::Rgba8UnormSrgb,
         RenderAssetUsages::RENDER_WORLD,
     );
@@ -76,8 +76,10 @@ pub(crate) fn load_scene(data: &mut Data, theme: u8, images: &mut Assets<Image>)
     let scene = screen::scene(&d.read(&format!("GFX/SCENE{theme:03}.SVG")).ok()?, screen::HIGH_RES).ok()?;
     let pal = d.palette(&format!("GFX/SCENE{theme:03}.SVP")).ok()?;
     Some(ScenePics {
-        picture: upload(&scene.image, &pal, images),
-        prompts: scene.prompts.iter().map(|p| upload(p, &pal, images)).collect(),
+        picture: upload(&scene.image, &pal, false, images),
+        // The prompts are drawn over the picture, index 0 transparent (as seen
+        // in the original: the mice show the picture around them).
+        prompts: scene.prompts.iter().map(|p| upload(p, &pal, true, images)).collect(),
     })
 }
 
