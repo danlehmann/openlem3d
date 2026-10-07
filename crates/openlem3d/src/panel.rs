@@ -352,9 +352,13 @@ fn buttons(
                 }
             }
             // The arrow arms highlighting (the next click on a lemming picks
-            // it); clicked again, it disarms and drops the highlight.
+            // it); clicked again, it disarms and drops the highlight. In the
+            // lemming view it can't be dropped: the lemming ridden with stays
+            // the current one (owner's observation).
             Action::Arrow => {
-                if highlight.on {
+                if let Some(i) = lemming_cam.following() {
+                    *highlight = crate::hud::Highlight { on: true, lemming: Some(i) };
+                } else if highlight.on {
                     *highlight = crate::hud::Highlight::default();
                 } else {
                     let size = windows.single().map_or(Vec2::ONE, |w| Vec2::new(w.width(), w.height()));

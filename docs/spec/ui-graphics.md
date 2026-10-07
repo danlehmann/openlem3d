@@ -632,7 +632,9 @@ skill gives it straight to the highlighted lemming without selecting it (the
 icon plays its animation once); the highlight stays. The face then rides
 along with the highlighted lemming at once; the face again leaves, the
 highlight staying. Entering the lemming view with the face and a click also
-highlights that lemming. The arrow again switches highlighting off; it also
+highlights that lemming. The arrow again switches highlighting off, except
+in the lemming view, where it does nothing: the lemming ridden with stays
+highlighted (owner's observation). Highlighting also
 ends when the lemming ridden with dies or leaves (about 2.7 s after). No arrow
 shows over the lemming ridden with. Whether the arrow switches the lemming
 view to another lemming is unconfirmed (ours does).
