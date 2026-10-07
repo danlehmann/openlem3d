@@ -104,7 +104,7 @@ else is **guessed** from the contact sheet's appearance.
 | 474–488 | Builder out of bricks (shrug) | 5 × 3 | Owner recalls the builder shrugging when out of bricks; drawn for 6 ticks (unmeasured) before it walks on. |
 | 489–513 | Standing, arms out, falling over onto the back | 5 × 5 | Guessed: splat, stunned or "oh no". |
 | 514–523 | Electrocution: normal and X-ray skeleton frames alternating | 5 × 2 | Guessed (pairs 514/515 front … 522/523 back). |
-| 524–533 | Electrocution cloud (gathers, lightning, shrinks) | 1 × 10 | Guessed. View-independent. |
+| 524–533 | Electrocution cloud (gathers, lightning, shrinks) | 1 × 10 | Guessed. View-independent. Drawn over a zapped lemming, spread over its death (unmeasured). |
 | 534–537 | Smoke puff, shrinking (bomber explosion) | 1 × 4 | Guessed. View-independent. |
 | 538–562 | Climber (arms raised against a wall, legs alternating) | 5 × 5 | Guessed. The back block (558–562) matches the climber skill icon's pose. |
 | 563–567 | Film camera (the level's camera marker, not a lemming) | 5 × 1 | Guessed. |

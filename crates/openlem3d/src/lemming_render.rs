@@ -346,6 +346,10 @@ fn sparkle_at(t: u32, from: [i32; 3], to: [i32; 3]) -> Option<[i32; 3]> {
 const EXIT_SHRINK_TICKS: u32 = 6;
 const EXIT_SHRINK_DEPTH: f32 = 0.2;
 
+/// The electrocution cloud's cells.
+const ZAP_CLOUD_FIRST: u32 = 524;
+const ZAP_CLOUD_FRAMES: u32 = 10;
+
 /// Builds this frame's lemming sprites for a camera facing `camera_yaw`.
 pub fn build(sim: &Simulation, atlas_rows: u32, camera_yaw: f32, doors: &[Door]) -> SceneSprites {
     let lemmings = &sim.lemmings;
@@ -439,6 +443,16 @@ pub fn build(sim: &Simulation, atlas_rows: u32, camera_yaw: f32, doors: &[Door])
                 let over = [anchor[0], anchor[1] + size / LEMMING_TEXELS_PER_UNIT, anchor[2]];
                 b.sprite_scaled(over, [cx as f32, cy as f32, 32.0, 32.0], tex, 1, 0.0, DIGIT_TEXELS_PER_UNIT);
             }
+        }
+        if l.state == State::Zapped {
+            // The electrocution cloud over the lemming: it gathers, strikes
+            // with lightning and shrinks away (cells 524–533, view-independent;
+            // spread over the death, timing unmeasured).
+            let frame = (l.state_ticks * ZAP_CLOUD_FRAMES / l3d_sim::DEATH_TICKS).min(ZAP_CLOUD_FRAMES - 1);
+            let cell = ZAP_CLOUD_FIRST + frame;
+            let (cx, cy) = ((cell % ATLAS_COLUMNS) * LEMMING_CELL, (cell / ATLAS_COLUMNS) * LEMMING_CELL);
+            let over = [anchor[0], anchor[1] + size / LEMMING_TEXELS_PER_UNIT * 0.6, anchor[2]];
+            b.sprite_scaled(over, [cx as f32, cy as f32, size, size], tex, 1, 0.0, LEMMING_TEXELS_PER_UNIT);
         }
         if l.state == State::Floating {
             // The umbrella is stored apart (cells 336–343), its handle at the

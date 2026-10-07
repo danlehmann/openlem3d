@@ -74,7 +74,7 @@ const BASH_TICKS: u32 = 32;
 const MINE_TICKS: u32 = 49;
 /// Duration of terminal animations, in ticks (provisional).
 const EXIT_TICKS: u32 = 11;
-const DEATH_TICKS: u32 = 14;
+pub const DEATH_TICKS: u32 = 14;
 /// How long a killing trap stays busy after taking a lemming (provisional).
 pub const TRAP_BUSY_TICKS: u32 = 28;
 /// How long a spring shows its launch after throwing a lemming (unmeasured:
