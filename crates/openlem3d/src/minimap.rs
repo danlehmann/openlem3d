@@ -31,10 +31,11 @@ impl Plugin for MinimapPlugin {
 const PX: usize = 2;
 const MAP: usize = SIZE_X * PX;
 
-const EXIT: [u8; 3] = [200, 0, 0];
-const HATCH: [u8; 3] = [240, 150, 0];
+/// Colours measured on the original's minimap (Practice levels).
+const EXIT: [u8; 3] = [247, 0, 0];
+const HATCH: [u8; 3] = [255, 162, 0];
 const LEMMING: [u8; 3] = [255, 255, 255];
-const CAMERA: [u8; 3] = [255, 230, 0];
+const CAMERA: [u8; 3] = [247, 231, 0];
 
 /// Level header flags: minimap off, and click-to-place off.
 const FLAG_NO_MINIMAP: u16 = 0x1000;

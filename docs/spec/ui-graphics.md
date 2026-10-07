@@ -434,7 +434,7 @@ identical placements in both video modes).
 
 | Element | Graphic (`ICONS.RNC` unless noted) | Position | Status |
 |---|---|---|---|
-| Minimap | frame drawn; map 64×64 | outer (0, 0)–(70, 70); map at (3, 3) | verified (pixel rows). Content (by eye, four captures): a top-down map, two pixels per cell, X to the right and Z downwards; sea in its colour (blue, or red on a lava level), land green, blocks in their colours, the exit red, the hatch orange, lemmings as white dots and a yellow dot for the camera. Our implementation colours blocks by their top texture (a stone path shows grey where the original shows brown) |
+| Minimap | frame drawn; map 64×64 | outer (0, 0)–(70, 70); map at (3, 3) | verified (pixel rows). Content (by eye, four captures): a top-down map, two pixels per cell, X to the right and Z downwards; sea in its colour (blue, or red on a lava level), land green, blocks in their colours, the exit red, the hatch orange, lemmings as white dots and a yellow dot for the camera. Measured (Practice levels, exact RGB): sea 0,101,231; grass and grass-topped blocks 48,138,48; grey stone paths topped at 1 unit 77,40,4 (dark brown); other blocks 81,44,4, 89,48,8 and, for a house topped at about 3 units, 93,52,12; exit 247,0,0; hatch 255,162,0; lemmings white; camera 247,231,0. On Fun 1 the tall castle walls show nearly white, so the rule is not a simple height ramp (open). Ours uses the measured exit, hatch and camera colours and colours blocks by their top texture |
 | Corner marks | 3×3 red squares | (0, 0), (317, 0), (0, 197) | estimated (pixel rows) |
 | "IN" label | labels cell 1 (32×16) | (260, 0) | verified (match) |
 | "OUT" label | labels cell 2 | (260, 16) | verified (match) |
