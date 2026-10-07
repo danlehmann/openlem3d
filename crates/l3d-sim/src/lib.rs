@@ -317,6 +317,10 @@ pub struct Lemming {
     /// Standing on the teleporter it arrived on; it must step off before
     /// another teleport.
     pub teleported: bool,
+    /// A skill given but not started yet: blockers, turners, bashers and
+    /// miners walk on until they cross into the next cell along their
+    /// heading, then take it up (measured in the original's Practice demos).
+    pub pending: Option<State>,
 }
 
 impl Lemming {
@@ -493,7 +497,7 @@ impl Simulation {
             | Skill::Digger
             | Skill::Builder
             | Skill::Basher
-            | Skill::Miner => l.state == State::Walking && !busy,
+            | Skill::Miner => l.state == State::Walking && !busy && l.pending.is_none(),
         }
     }
 
@@ -516,13 +520,15 @@ impl Simulation {
             Skill::Climber => l.climber = true,
             Skill::Floater => l.floater = true,
             Skill::Bomber => l.fuse = Some(FUSE_TICKS),
-            Skill::Blocker => l.set_state(State::Blocking),
+            // Diggers and builders start where they stand; the others walk on
+            // to the next cell first (measured).
+            Skill::Blocker => l.pending = Some(State::Blocking),
             // The turner's own left (the one verified case; see `assign_turner`).
-            Skill::Turner => l.set_state(State::Turning { to: l.dir.anticlockwise() }),
+            Skill::Turner => l.pending = Some(State::Turning { to: l.dir.anticlockwise() }),
             Skill::Digger => l.set_state(State::Digging),
             Skill::Builder => l.set_state(State::Building { bricks_left: BRICKS }),
-            Skill::Basher => l.set_state(State::Bashing),
-            Skill::Miner => l.set_state(State::Mining),
+            Skill::Basher => l.pending = Some(State::Bashing),
+            Skill::Miner => l.pending = Some(State::Mining),
         }
         true
     }
@@ -535,7 +541,7 @@ impl Simulation {
         if to == l.dir || to == l.dir.reverse() || !self.give(i, Skill::Turner) {
             return false;
         }
-        self.lemmings[i].state = State::Turning { to };
+        self.lemmings[i].pending = Some(State::Turning { to });
         self.log.push((self.tick, Command::Turner { lemming: i, to }));
         true
     }
@@ -578,6 +584,7 @@ impl Simulation {
                     fuse: None,
                     gone: false,
                     teleported: false,
+                    pending: None,
                 });
                 self.counts.released += 1;
                 // The countdown includes the releasing tick: the next release
@@ -728,7 +735,33 @@ impl Simulation {
             }
             State::Falling { from_y } => self.fall(l, from_y),
             State::Floating => self.float(l),
-            State::Walking | State::Sliding => self.walk(l, obstacles),
+            State::Walking | State::Sliding => {
+                // A pending skill starts at the edge of the cell, where the
+                // next step would cross it, standing on the edge (before any
+                // fall beyond it).
+                let d = l.dir.delta();
+                let (x, z) = (l.pos[0] + d[0] * WALK_SPEED, l.pos[2] + d[2] * WALK_SPEED);
+                let crossing = x.div_euclid(SUB) != l.pos[0].div_euclid(SUB) || z.div_euclid(SUB) != l.pos[2].div_euclid(SUB);
+                if l.state == State::Walking && crossing && let Some(s) = l.pending.take() {
+                    let edge = |v: i32, step: i32| if step > 0 { (v.div_euclid(SUB) + 1) * SUB - 1 } else if step < 0 { v.div_euclid(SUB) * SUB } else { v };
+                    l.pos[0] = edge(l.pos[0], d[0]);
+                    l.pos[2] = edge(l.pos[2], d[2]);
+                    l.set_state(s);
+                } else {
+                    let dir = l.dir;
+                    self.walk(l, obstacles);
+                    // Or at a wall that would turn the walker round, facing
+                    // the wall (the original's basher demo bashes the crate it
+                    // walked up to).
+                    if l.state == State::Walking
+                        && l.dir == dir.reverse()
+                        && let Some(s) = l.pending.take()
+                    {
+                        l.dir = dir;
+                        l.set_state(s);
+                    }
+                }
+            }
             State::Bouncing { hop, k, y0 } => self.fly(l, hop, k, y0),
             State::Climbing => self.climb(l),
             State::Digging => self.dig(l),
@@ -934,6 +967,12 @@ impl Simulation {
                 [0, 1] => Dir::PosZ,
                 _ => Dir::NegZ,
             };
+            // Turned at the centre of the deflector's cell (inferred: lemmings
+            // turned in the air at the far corner of Practice "Trampoline"
+            // must land on the one-cell-wide back row).
+            let centre = |v: i32| v.div_euclid(SUB) * SUB + SUB / 2;
+            l.pos[0] = centre(next[0]);
+            l.pos[2] = centre(next[2]);
             l.pos[1] = y;
             advance(l);
             return;

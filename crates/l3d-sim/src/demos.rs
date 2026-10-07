@@ -32,7 +32,7 @@ const fn at(level: u32, steps: &'static [(u64, usize, u8, Option<bool>)]) -> Sol
 
 pub const SOLUTIONS: &[Solution] = &[
     at(80, &[(140, 0, 0, None)]),
-    at(81, &[(175, 0, 1, Some(true))]),
+    at(81, &[(150, 0, 1, Some(true))]),
     at(82, &[(125, 0, 2, None)]),
     at(83, &[(185, 0, 3, None)]),
     at(84, &[(235, 0, 4, None)]),
@@ -41,17 +41,17 @@ pub const SOLUTIONS: &[Solution] = &[
     Solution { level: 87, plan: Plan::Each(7), saves: 0 },
     Solution { level: 88, plan: Plan::Each(8), saves: 0 },
     at(89, &[(41, 1, 4, None)]),
-    at(90, &[(410, 0, 1, Some(true))]),
-    at(91, &[(570, 0, 4, None)]),
+    at(90, &[(406, 0, 1, Some(true))]),
+    at(91, &[(538, 0, 4, None)]),
     at(92, &[(100, 0, 3, None), (283, 0, 3, None)]),
     at(93, &[(122, 0, 4, None)]),
-    at(94, &[(190, 0, 1, Some(false))]),
-    at(95, &[(245, 0, 1, Some(true))]),
+    at(94, &[(182, 0, 1, Some(false))]),
+    at(95, &[(239, 0, 1, Some(true))]),
     at(96, &[(167, 0, 1, Some(false))]),
     at(97, &[(170, 0, 0, None)]),
-    Solution { level: 98, plan: Plan::At(&[(255, 0, 1, Some(false))]), saves: 18 },
+    Solution { level: 98, plan: Plan::At(&[(253, 0, 1, Some(false))]), saves: 18 },
     at(99, &[(1124, 0, 4, None)]),
-    at(0, &[(1415, 0, 1, Some(false))]),
+    at(0, &[(1409, 0, 1, Some(false))]),
 ];
 
 pub fn solution(level: u32) -> Option<&'static Solution> {

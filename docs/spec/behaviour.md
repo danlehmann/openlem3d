@@ -313,3 +313,27 @@ and "Teleporter" use 8, 4, 3 and 5, which agrees.
 | Leaving the kill boundary (header `0x153`) or rising above the kill ceiling | Zapped |
 
 Each death animation lasts about 1 s (provisional).
+
+## When a skill starts (measured)
+
+From the original's Practice demos (raw grabs about 37 frames/s; the
+assignment tick is the one where the panel's count drops; one demo per
+skill, positions ±0.05–0.1 unit):
+
+| Skill | After assignment | Evidence |
+|---|---|---|
+| Digger | Starts on the next tick where it stands; digs out exactly the cell it stands in | "Digger": given at 0.42 across its cell, crouched the next tick (a "walk to the middle" rule, 2–3 ticks away, can't be fully excluded) |
+| Builder | Starts at once where it stands | "Builder": bag and pose in the same frame as the count drop |
+| Blocker | Walks on to the edge of its cell along its heading, then blocks there | "Blocker": 21–22 ticks from 0.23 across to the edge |
+| Turner | The same, then points | "Turner": 16 ticks from 0.41 across to the edge |
+| Miner | The same, then mines | "Miner": 14 ticks from mid-cell to the edge |
+| Basher | The same (here the edge was a crate face) | "Basher": 11 ticks to the crate face |
+| Bomber | Walks on until its countdown ends (time, not position) | "Bomber": stopped about 40 ticks on, not at an edge |
+
+Implemented: blockers, turners, miners and bashers keep the skill pending
+and take it up on the step that would carry them into the next cell,
+standing on the edge (before any fall beyond it), or at a wall that would
+turn them round, facing it. A deflector turning a lemming in the air puts
+it at the centre of the deflector's cell (inferred: with turners now
+standing at a cell edge, the Trampoline demo's lemmings land on the
+one-cell back row only with this).
