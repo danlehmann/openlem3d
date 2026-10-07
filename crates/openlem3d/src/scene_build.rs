@@ -1,7 +1,7 @@
 //! Assembles a level's renderable content (blocks, sea, land, sky, sprite
 //! objects) from the game data. Formats and conventions: `docs/spec/`.
 
-use l3d_formats::blk::BlockSet;
+use l3d_formats::blk::{BlockSet, FaceDir};
 use l3d_formats::gamedata::{GameData, Palette};
 use l3d_formats::level::{BlockCell, LandVertex, Level, SIZE_X, SIZE_Z};
 
@@ -142,7 +142,7 @@ impl LayerBuilder {
     /// A vertical quad whose bottom edge is centred on `centre`, facing
     /// horizontal direction `normal`, `width` × `height` units.
     #[allow(clippy::too_many_arguments)]
-    fn vertical_quad(&mut self, centre: [f32; 3], normal: [f32; 2], width: f32, height: f32, rect: [f32; 4], tex: [f32; 2], brightness: f32) {
+    pub fn vertical_quad(&mut self, centre: [f32; 3], normal: [f32; 2], width: f32, height: f32, rect: [f32; 4], tex: [f32; 2], brightness: f32) {
         // Right as seen from the front: +Y × normal.
         let right = [normal[1], -normal[0]];
         let (hw, [cx, cy, cz]) = (width / 2.0, centre);
@@ -490,8 +490,16 @@ pub const TRAP_ATLAS_CELLS: u32 = 8;
 /// The first atlas cell holding `BOMBNUMB.GFX` (32×32 each, in the top-left
 /// of their cells): the countdown digits 1–5, then `?`, an arrow, a blank.
 pub const BOMBNUMB_ATLAS_FIRST: u32 = TRAP_ATLAS_FIRST + TRAP_ATLAS_CELLS;
+/// The exit block's id (`docs/spec/blk.md`).
+pub const EXIT_ID: usize = 1;
+
+/// The first atlas cell holding the exit door's four pictures (64×64 each,
+/// from the level's texture set): closed, three-quarters closed, half open,
+/// open.
+pub const DOOR_ATLAS_FIRST: u32 = BOMBNUMB_ATLAS_FIRST + 8;
+pub const DOOR_FRAMES: u32 = 4;
 /// Rows in the sprite atlas.
-pub const ATLAS_ROWS: u32 = (BOMBNUMB_ATLAS_FIRST + 8).div_ceil(ATLAS_COLUMNS);
+pub const ATLAS_ROWS: u32 = (DOOR_ATLAS_FIRST + DOOR_FRAMES).div_ceil(ATLAS_COLUMNS);
 
 /// Cells per row in the lemming atlas.
 pub const ATLAS_COLUMNS: u32 = 32;
@@ -503,7 +511,7 @@ pub const TRAP_FRAME: u32 = 64;
 /// All `LEMM.MHC` cells packed into one texture, [`ATLAS_COLUMNS`] per row
 /// (cell `i` at column `i % ATLAS_COLUMNS`, row `i / ATLAS_COLUMNS`), then
 /// the level's `TRAPS` frames from [`TRAP_ATLAS_FIRST`].
-fn lemming_atlas(data: &mut GameData, pal: &Palette, traps: Option<&[u8]>) -> Result<RgbaImage, l3d_formats::Error> {
+fn lemming_atlas(data: &mut GameData, pal: &Palette, traps: Option<&[u8]>, door: &[u8]) -> Result<RgbaImage, l3d_formats::Error> {
     // The 128-pixel sprites; the 64-pixel set (same cells) doubled if missing.
     let (raw, scale) = match data.read("LEMM/LEMM128.MHC") {
         Ok(raw) => (raw, 1),
@@ -542,6 +550,9 @@ fn lemming_atlas(data: &mut GameData, pal: &Palette, traps: Option<&[u8]>) -> Re
         for (k, d) in digits.iter().take(8).enumerate() {
             put_sized(BOMBNUMB_ATLAS_FIRST + k as u32, &d.pixels, d.width as u32);
         }
+    }
+    for (k, f) in door.chunks_exact(64 * 64).take(DOOR_FRAMES as usize).enumerate() {
+        put_sized(DOOR_ATLAS_FIRST + k as u32, f, 64);
     }
     Ok(indexed_to_rgba(&pixels, w, pal))
 }
@@ -678,7 +689,11 @@ pub fn build(data: &mut GameData, n: u32, show: Show) -> Result<BuiltLevel, l3d_
     scene.layers.extend(trap_layer(data, &level, &pal));
 
     let traps = (level.trap_type != 0xFF).then(|| data.gfx("TRAPS", level.trap_type).ok()).flatten();
-    scene.sprite_atlas = lemming_atlas(data, &pal, traps.as_deref()).ok();
+    // The exit's doorway tile and the three after it: the door opening
+    // (verified for `TEXTURE.095`, tiles 8–11; [L3DEdit]).
+    let door = blocks.defs.get(EXIT_ID).map_or(0, |d| d.face(FaceDir::PosZ).texture as usize) * 64 * 64;
+    let door = tex.get(door..(door + 4 * 64 * 64).min(tex.len())).unwrap_or_default();
+    scene.sprite_atlas = lemming_atlas(data, &pal, traps.as_deref(), door).ok();
 
     if show.sky
         && level.sky_gfx != 0xFF

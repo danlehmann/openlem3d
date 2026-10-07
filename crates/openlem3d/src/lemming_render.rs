@@ -11,7 +11,7 @@ use std::f32::consts::{FRAC_PI_4, TAU};
 use l3d_sim::objects::ObjectKind;
 use l3d_sim::{SUB, Simulation, State};
 
-use crate::scene_build::{ATLAS_COLUMNS, BOMBNUMB_ATLAS_FIRST, LEMMING_CELL, LayerBuilder, TRAP_ATLAS_CELLS, TRAP_ATLAS_FIRST, TRAP_FRAME};
+use crate::scene_build::{ATLAS_COLUMNS, BOMBNUMB_ATLAS_FIRST, DOOR_ATLAS_FIRST, DOOR_FRAMES, EXIT_ID, LEMMING_CELL, LayerBuilder, TRAP_ATLAS_CELLS, TRAP_ATLAS_FIRST, TRAP_FRAME};
 use crate::scene_render::SceneSprites;
 
 /// Texels per world unit for lemming cells: a cell spans half a grid unit
@@ -238,6 +238,57 @@ fn objects(b: &mut LayerBuilder, sim: &Simulation, tex: [f32; 2]) {
     }
 }
 
+/// Gap between the drawn door and the exit block's face.
+const DOOR_OFFSET: f32 = 0.004;
+
+/// An exit's door: its cell, the doorway's outward normal `[x, z]`, its
+/// face's shading, and which of the [`DOOR_FRAMES`] pictures it shows (0:
+/// closed, as the block itself is textured; 3: open).
+#[derive(Clone, Copy, Debug)]
+pub struct Door {
+    pub cell: [i32; 3],
+    pub normal: [i32; 2],
+    pub brightness: f32,
+    pub frame: u32,
+}
+
+/// The level's exit doors, closed.
+pub fn doors(level: &l3d_formats::level::Level, blocks: &l3d_formats::blk::BlockSet) -> Vec<Door> {
+    let shading = blocks.defs.get(EXIT_ID).map_or(0, |d| d.face(l3d_formats::blk::FaceDir::PosZ).shading);
+    level
+        .cells()
+        .filter(|(.., b, _)| b.id as usize == EXIT_ID && !b.is_empty())
+        .map(|(x, y, z, b, _)| Door {
+            cell: [x as i32, y as i32, z as i32],
+            // The doorway is the +Z face turned with the block: 0 → +Z, 1 → +X,
+            // 2 → −Z, 3 → −X (verified).
+            normal: [[0, 1], [1, 0], [0, -1], [-1, 0]][(b.rotation % 4) as usize],
+            brightness: 1.0 - (shading.min(8) as f32) * 0.07,
+            frame: 0,
+        })
+        .collect()
+}
+
+/// One tick of the doors: a door with a lemming going in opens at once
+/// (closed, half open, open on successive ticks) and stays open while
+/// lemmings keep coming; then it swings shut a picture per tick (observed
+/// in the original's Practice "Blocker" demo: open within about 0.1 s,
+/// shut over about 0.15 s).
+pub fn step_doors(doors: &mut [Door], sim: &Simulation) {
+    for d in doors {
+        let face = [d.cell[0] as f32 + 0.5 + d.normal[0] as f32 * 0.5, d.cell[2] as f32 + 0.5 + d.normal[1] as f32 * 0.5];
+        let entering = sim.lemmings.iter().any(|l| {
+            let p = l.pos.map(|v| v as f32 / SUB as f32);
+            !l.gone && l.state == State::Exiting && (p[0] - face[0]).abs() < 0.8 && (p[2] - face[1]).abs() < 0.8 && (p[1] - d.cell[1] as f32).abs() < 1.0
+        });
+        d.frame = match (entering, d.frame) {
+            (true, 0) => 2,
+            (true, _) => DOOR_FRAMES - 1,
+            (false, f) => f.saturating_sub(1),
+        };
+    }
+}
+
 /// How wide a teleporting lemming is drawn, `state_ticks` into it.
 fn teleport_width(t: u32) -> f32 {
     use l3d_sim::{TELEPORT_APPEAR as APPEAR, TELEPORT_AWAY as AWAY, TELEPORT_STAND as STAND, TELEPORT_VANISH as VANISH};
@@ -255,11 +306,18 @@ fn teleport_width(t: u32) -> f32 {
 }
 
 /// Builds this frame's lemming sprites for a camera facing `camera_yaw`.
-pub fn build(sim: &Simulation, atlas_rows: u32, camera_yaw: f32) -> SceneSprites {
+pub fn build(sim: &Simulation, atlas_rows: u32, camera_yaw: f32, doors: &[Door]) -> SceneSprites {
     let lemmings = &sim.lemmings;
     let mut b = LayerBuilder::default();
     let tex = [(ATLAS_COLUMNS * LEMMING_CELL) as f32, (atlas_rows * LEMMING_CELL) as f32];
     objects(&mut b, sim, tex);
+    for d in doors.iter().filter(|d| d.frame > 0) {
+        let cell = DOOR_ATLAS_FIRST + d.frame;
+        let (cx, cy) = ((cell % ATLAS_COLUMNS) * LEMMING_CELL, (cell / ATLAS_COLUMNS) * LEMMING_CELL);
+        let n = d.normal.map(|v| v as f32);
+        let c = [d.cell[0] as f32 + 0.5 + n[0] * (0.5 + DOOR_OFFSET), d.cell[1] as f32, d.cell[2] as f32 + 0.5 + n[1] * (0.5 + DOOR_OFFSET)];
+        b.vertical_quad(c, n, 1.0, 1.0, [cx as f32, cy as f32, 64.0, 64.0], tex, d.brightness);
+    }
     // Trapped lemmings are shown by the trap's own animation.
     for l in lemmings.iter().filter(|l| !l.gone && l.state != State::Trapped) {
         let view = ViewAngle::from_yaws(l.dir.yaw(), camera_yaw);

@@ -337,6 +337,8 @@ pub struct Game {
     /// The level restarted as a replay of an earlier attempt, until the
     /// player takes over.
     pub replay: Option<Replay>,
+    /// The exits' doors as drawn.
+    doors: Vec<lemming_render::Door>,
 }
 
 /// An earlier attempt's commands, fed back into a restarted level.
@@ -384,12 +386,13 @@ fn step_simulation(keys: Res<ButtonInput<KeyCode>>, options: Res<Options>, mut g
     if keys.just_pressed(KeyCode::KeyP) {
         game.paused = !game.paused;
     }
-    let Game { sim: Some(sim), paused: false, terrain, fast_forward, replay, .. } = &mut *game else { return };
+    let Game { sim: Some(sim), paused: false, terrain, fast_forward, replay, doors, .. } = &mut *game else { return };
     for _ in 0..if *fast_forward { FAST_FORWARD_TICKS } else { 1 } {
         if replay.as_mut().is_some_and(|r| !r.feed(sim)) {
             *replay = None;
         }
         sim.step();
+        lemming_render::step_doors(doors, sim);
         for (tick, i, skill, side) in &options.assign {
             if *tick == sim.tick
                 && replay.is_none()
@@ -424,7 +427,7 @@ fn update_lemming_sprites(
 ) {
     let Some(sim) = &game.sim else { return };
     let yaw = cams.iter().next().map_or(0.0, |c| c.yaw);
-    *sprites = lemming_render::build(sim, scene_build::ATLAS_ROWS, yaw);
+    *sprites = lemming_render::build(sim, scene_build::ATLAS_ROWS, yaw, &game.doors);
 }
 
 #[allow(clippy::too_many_arguments)] // Bevy system parameters
@@ -475,6 +478,7 @@ fn load_level(
     }
     commands.insert_resource(LevelInfo { cameras: level.cameras });
     game.sim = Some(l3d_sim::Simulation::new(&level, &blocks));
+    game.doors = lemming_render::doors(&level, &blocks);
     game.save_requirement = level.save_requirement as u32;
     let track = music::track_for(level.theme, level.music);
     music::play_track(&mut commands, &mut sources, &music::current(&music), &data.0.disc, track, music::volume(&muted, &settings));
