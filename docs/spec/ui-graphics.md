@@ -500,7 +500,7 @@ animated; from the navigation document, not re-measured here).
 (the navigation document also found clicks unreliable; Alt+Q works). Its
 animation (explosion cells 27–37) was not observed.
 
-**Mouse pointer.** Over the panel icons: cross-hair, `MOUSE` cell 9. Over
+**Mouse pointer.** Ours is the system's hardware cursor showing these cells, so it moves at the system's rate rather than the game's frame rate. Over the panel icons: cross-hair, `MOUSE` cell 9. Over
 the 3D view (and the minimap) the pointer depends on which third of the
 view it is in, horizontally and vertically, as a 3×3 grid:
 
