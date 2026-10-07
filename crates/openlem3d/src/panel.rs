@@ -211,12 +211,14 @@ fn spawn_panel(mut commands: Commands, art: Option<Res<Art>>, mut images: ResMut
         }
         let id = e.id();
         commands.entity(root).add_child(id);
+        id
     };
     let icon24 = Vec2::splat(24.0);
     let p = |i: usize| art.panel[i].clone();
     // The minimap and its frame (the map image arrives with the level).
     let frame = images.add(crate::minimap::frame_image());
-    item(&mut commands, Vec2::ZERO, Vec2::splat(70.0), frame, None, None);
+    let frame = item(&mut commands, Vec2::ZERO, Vec2::splat(70.0), frame, None, None);
+    commands.entity(frame).insert(MinimapFrame);
     let map = commands
         .spawn((
             PanelPos { at: Vec2::splat(3.0), size: Vec2::splat(64.0) },
@@ -503,17 +505,27 @@ fn glyph_texts(
     }
 }
 
-/// Shows the level's minimap image, unless the level hides its minimap.
-fn show_minimap(map: Option<Res<crate::minimap::Minimap>>, mut views: Query<(&mut ImageNode, &mut Visibility), With<crate::minimap::MinimapView>>) {
+/// The minimap's frame.
+#[derive(Component)]
+struct MinimapFrame;
+
+/// Shows the level's minimap image and its frame, unless the level hides
+/// its minimap; then neither shows (observed on `LEVEL.019`, `044`, `062`).
+fn show_minimap(
+    map: Option<Res<crate::minimap::Minimap>>,
+    mut views: Query<(&mut ImageNode, &mut Visibility), With<crate::minimap::MinimapView>>,
+    mut frames: Query<&mut Visibility, (With<MinimapFrame>, Without<crate::minimap::MinimapView>)>,
+) {
     let Some(map) = map else { return };
+    let v = if map.shown { Visibility::Inherited } else { Visibility::Hidden };
+    for mut vis in &mut frames {
+        vis.set_if_neq(v);
+    }
     for (mut node, mut vis) in &mut views {
         if node.image != map.image {
             node.image = map.image.clone();
         }
-        let v = if map.shown { Visibility::Inherited } else { Visibility::Hidden };
-        if *vis != v {
-            *vis = v;
-        }
+        vis.set_if_neq(v);
     }
 }
 
