@@ -408,6 +408,22 @@ duration estimated). With an unknown code (`QWERTYUI`) the game returns
 straight to the title screen with no message (verified). On the title the
 banner then restarts from its first page.
 
+### Screen transitions
+
+Observed (30 ms bursts): from the title to the code screen (F2) the whole
+picture fades evenly to black in about 0.6 s, stays black about 0.15 s, and
+the code screen fades in in about 0.15 s. Leaving the code screen (Return
+with an empty code shows "Password Incorrect" first) fades out in about
+0.15 s, stays black about 0.7 s and fades the title in over about 0.42 s;
+the banner restarts from its first page. Title to Options (F12) is an
+instant cut; leaving Options cuts to black and fades the title in over
+about 0.43 s. No wipes or slides. Esc does nothing on the original's code
+screen (only Return leaves it); ours also leaves on Esc.
+
+Ours keeps only the fade-ins (the code screen over 0.3 s, standing for the
+whole change; the title over 0.42 and 0.43 s), so a screen takes input from
+its first frame.
+
 ### In-level panel
 
 The panel is not a separate area: every element is a sprite drawn straight

@@ -9,6 +9,7 @@
 
 mod briefing;
 mod codes;
+mod fade;
 mod hud;
 mod lemming_cam;
 mod panel;
@@ -176,6 +177,7 @@ fn main() {
                 }),
         )
         .add_plugins((SceneRenderPlugin, hud::HudPlugin, menu::MenuPlugin, music::MusicPlugin, touch::TouchPlugin, title::TitlePlugin, lemming_cam::LemmingCamPlugin, panel::PanelPlugin, briefing::BriefingPlugin, minimap::MinimapPlugin, results::ResultsPlugin, pointer::PointerPlugin, sfx::SfxPlugin, options::OptionsPlugin, practice::PracticePlugin))
+        .add_plugins(fade::FadePlugin)
         .insert_resource(ClearColor(Color::srgb(0.35, 0.55, 0.85)))
         .insert_resource(opts.clone())
         .insert_resource(Data(data))
@@ -712,6 +714,8 @@ fn key_code(name: &str) -> Option<KeyCode> {
         "Escape" => KeyCode::Escape,
         "Enter" => KeyCode::Enter,
         "Space" => KeyCode::Space,
+        "F1" => KeyCode::F1,
+        "F2" => KeyCode::F2,
         "F12" => KeyCode::F12,
         "KeyP" => KeyCode::KeyP,
         "KeyV" => KeyCode::KeyV,
