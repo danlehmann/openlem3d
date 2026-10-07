@@ -10,7 +10,15 @@ Each names where it shows up, so a run can go straight there.
 - **Skills on sliding lemmings.** Whether a turner or blocker can be given
   to a lemming on ice (Practice "Slippery", `LEVEL.095`). We refuse them.
 - **Turned walkers.** Whether walkers turn at a turner's arm's length or on
-  its line (we use its line; Practice "Claustrophobic" needs that).
+  its line (we use its line; Practice "Claustrophobic" needs that). In the
+  original's "Turner" demo walkers bunched up and turned about one path
+  width (≈1 unit, by screen distance) before the turner, never reaching its
+  line; the turner's exact cell was not pinned down.
+- **Turner pose.** In the same demo the turner was seen side on, facing the
+  walkers coming towards it, one arm straight out along its facing, while
+  the walkers turned to its own left (one view; medium confidence). Ours
+  keeps the turner's heading and holds out the arm on the side it sends
+  walkers, which reads correctly from the other views.
 - **Hanging deflectors.** "Team Work" (`LEVEL.051`) has a deflector hanging
   ¼ unit above the floor. We let a deflector turn a walker wherever it
   crosses the body, feet to head; before that, walkers passed under it, hit

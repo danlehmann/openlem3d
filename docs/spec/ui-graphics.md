@@ -361,13 +361,13 @@ rating; Exit opens a confirmation, per the navigation document); there is no
 pressed-button image. Clicks were only reliable with the button held about
 300 ms (estimated; the game seems to poll the mouse once per frame).
 
-**Attract mode.** About 125 s after the title screen is entered, a demo
+**Attract mode.** About 125 s (a second run: about 118 s) after the title screen is entered, a demo
 level starts (its briefing shows "Rating Demo", and "Demo" is printed at
 the bottom left during play); a click returns to the title. Mouse
 movement and clicks on the title did not postpone it (observed three
 times). Estimated: in the first stay after boot no demo started within
 10 minutes, which is unexplained. Ours plays the Practice demos in turn after
-125 s on the title screen without input (any input restarts the wait, so
+120 s on the title screen without input (any input restarts the wait, so
 it never interrupts a choice), and returns to the title on any input or
 when the level ends.
 

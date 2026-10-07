@@ -840,9 +840,9 @@ fn animate_slots(
 }
 
 /// Seconds on the title screen before a demo plays, as the original's
-/// attract mode (about 125 s, observed). Unlike the original, any input
-/// restarts the wait.
-const ATTRACT_AFTER: f32 = 125.0;
+/// attract mode (observed twice: about 125 s and about 118 s). Unlike the
+/// original, any input restarts the wait.
+const ATTRACT_AFTER: f32 = 120.0;
 
 /// Attract mode: after a while without input, the next Practice demo plays;
 /// any input, or its end, returns to the title.
