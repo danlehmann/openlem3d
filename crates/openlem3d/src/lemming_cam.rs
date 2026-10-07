@@ -1,4 +1,4 @@
-//! The virtual-lemming camera: the view rides along behind one lemming at
+//! The virtual-lemming camera: the view looks out of one lemming's eyes at
 //! its eye level, turning as it turns, as the original's face icon does.
 //! Arm it with the face button, V or I, then click or tap a lemming. V or I again,
 //! Esc or a preset camera key (1–4) returns to the previous view, as does
@@ -86,12 +86,11 @@ impl LemmingCam {
     }
 }
 
-/// Eye position relative to the lemming's feet: behind it and above its
-/// head, so its back is in view (the original's lemming-cam view shows the
-/// walker from behind; offsets estimated).
-const EYE_BEHIND: f32 = 1.4;
-const EYE_HEIGHT: f32 = 0.65;
-/// How quickly the camera catches up with the lemming (per second).
+/// The lemming's eyes above its feet: the view is through them (the
+/// followed lemming itself is not drawn). Its sprite stands half a unit
+/// tall; the eyes are near the top of the head.
+const EYE_HEIGHT: f32 = 0.4;
+/// How quickly the view turns to the lemming's heading (per second).
 const FOLLOW_RATE: f32 = 10.0;
 /// The walking sway: peak roll in degrees, and seconds per swing left and
 /// back, one walk cycle (6 ticks; ours, after the owner's observation that
@@ -145,16 +144,7 @@ fn follow(
     };
     let feet = Vec3::from_array(l.pos.map(|v| v as f32 / SUB as f32));
     let yaw = l.dir.yaw();
-    let forward = Vec3::new(-yaw.cos(), 0.0, -yaw.sin());
-    // Behind the lemming, but no further back than the nearest wall.
-    let eye = |behind: f32| feet - forward * behind + Vec3::Y * EYE_HEIGHT;
-    let mut behind = EYE_BEHIND;
-    if let Some((level, blocks, _)) = &game.terrain {
-        while behind > 0.2 && crate::camera_blocked(level, blocks, eye(behind)) {
-            behind -= 0.1;
-        }
-    }
-    let target = eye(behind);
+    let target = feet + Vec3::Y * EYE_HEIGHT;
     let k = 1.0 - (-FOLLOW_RATE * time.delta_secs()).exp();
     // A slight roll from side to side with the lemming's steps while it
     // walks, levelling out otherwise.
@@ -167,5 +157,5 @@ fn follow(
     // Turn the short way round.
     let turn = (yaw - view.yaw + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
     view.yaw += turn * k;
-    view.pos = view.pos.lerp(target, k);
+    view.pos = target;
 }

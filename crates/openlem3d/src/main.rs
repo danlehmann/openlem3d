@@ -444,11 +444,12 @@ fn step_simulation(keys: Res<ButtonInput<KeyCode>>, options: Res<Options>, mut g
 fn update_lemming_sprites(
     game: Res<Game>,
     cams: Query<&ViewCamera>,
+    lemming_cam: Res<lemming_cam::LemmingCam>,
     mut sprites: ResMut<scene_render::SceneSprites>,
 ) {
     let Some(sim) = &game.sim else { return };
     let yaw = cams.iter().next().map_or(0.0, |c| c.yaw);
-    *sprites = lemming_render::build(sim, scene_build::ATLAS_ROWS, yaw, &game.doors);
+    *sprites = lemming_render::build(sim, scene_build::ATLAS_ROWS, yaw, &game.doors, lemming_cam.following());
 }
 
 #[allow(clippy::too_many_arguments)] // Bevy system parameters

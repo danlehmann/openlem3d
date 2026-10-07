@@ -31,6 +31,11 @@ No control tilts the view. The horizon stays on the same screen row while the
 camera rotates, moves or changes height. The sky is a flat band that only
 slides sideways when the camera turns.
 
+The virtual-lemming view looks out of the followed lemming's eyes (the
+project owner: it is meant to be its eyes). Ours puts the camera 0.4 units
+above its feet, the top of its half-unit-tall sprite, facing its heading,
+and does not draw that lemming.
+
 The virtual-lemming view does not tilt either, as far as observed: through
 about 3 minutes of lemming view in the Practice "Virtual Lemming" demo and
 an attract-mode demo (100–150 ms bursts), the sea horizon stayed level on

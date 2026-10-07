@@ -350,8 +350,9 @@ const EXIT_SHRINK_DEPTH: f32 = 0.2;
 const ZAP_CLOUD_FIRST: u32 = 524;
 const ZAP_CLOUD_FRAMES: u32 = 10;
 
-/// Builds this frame's lemming sprites for a camera facing `camera_yaw`.
-pub fn build(sim: &Simulation, atlas_rows: u32, camera_yaw: f32, doors: &[Door]) -> SceneSprites {
+/// Builds this frame's lemming sprites for a camera facing `camera_yaw`,
+/// leaving out lemming `eyes`, the one the view looks out of.
+pub fn build(sim: &Simulation, atlas_rows: u32, camera_yaw: f32, doors: &[Door], eyes: Option<usize>) -> SceneSprites {
     let lemmings = &sim.lemmings;
     let mut b = LayerBuilder::default();
     let tex = [(ATLAS_COLUMNS * LEMMING_CELL) as f32, (atlas_rows * LEMMING_CELL) as f32];
@@ -364,7 +365,7 @@ pub fn build(sim: &Simulation, atlas_rows: u32, camera_yaw: f32, doors: &[Door])
         b.vertical_quad(c, n, 1.0, 1.0, [cx as f32, cy as f32, 64.0, 64.0], tex, d.brightness);
     }
     // Trapped lemmings are shown by the trap's own animation.
-    for l in lemmings.iter().filter(|l| !l.gone && l.state != State::Trapped) {
+    for (_, l) in lemmings.iter().enumerate().filter(|(i, l)| !l.gone && l.state != State::Trapped && Some(*i) != eyes) {
         // A turner stands facing the walkers coming up behind it, the way it
         // came (seen in the original's "Turner" demo; drawn the other way,
         // turners showed their backs to the cameras of "Take a Dive").
