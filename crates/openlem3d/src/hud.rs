@@ -20,7 +20,7 @@ impl Plugin for HudPlugin {
             .add_systems(Startup, spawn_turner_marker)
             .add_systems(
                 Update,
-                (skill_keys, nuke_key, take_over, assign_on_pointer)
+                (skill_keys, nuke_key, assign_on_pointer, take_over)
                     .chain()
                     .run_if(in_state(AppState::Playing)),
             )
@@ -63,7 +63,8 @@ fn skill_keys(keys: Res<ButtonInput<KeyCode>>, mut selected: ResMut<SelectedSkil
 }
 
 /// During a replay, a click or tap on the view hands control back to the
-/// player ("Click to Play"); the click itself does nothing else.
+/// player ("Click to Play"); the click itself does nothing else (skills are
+/// only given from the next one).
 pub(crate) fn take_over(
     mut mouse: ResMut<ButtonInput<MouseButton>>,
     touches: Res<Touches>,
@@ -129,7 +130,7 @@ pub struct PendingTurner(pub Option<usize>);
 /// turner takes two: one on the lemming, then one to the side it should
 /// point to.
 #[allow(clippy::too_many_arguments)]
-fn assign_on_pointer(
+pub(crate) fn assign_on_pointer(
     mouse: Res<ButtonInput<MouseButton>>,
     touches: Res<Touches>,
     windows: Query<&Window>,
@@ -142,6 +143,10 @@ fn assign_on_pointer(
     mut sfx: MessageWriter<crate::sfx::Sfx>,
     settings: Res<crate::settings::Settings>,
 ) {
+    // During a replay a click only takes over (`take_over`, next).
+    if game.replay.is_some() {
+        return;
+    }
     let Some(sim) = &mut game.sim else { return };
     let picking = lemming_cam.picking();
     if selected.0 != Some(Skill::Turner) || mouse.just_pressed(settings.turn_button()) {

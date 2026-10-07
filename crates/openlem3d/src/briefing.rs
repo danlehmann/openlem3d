@@ -33,7 +33,7 @@ impl Plugin for BriefingPlugin {
                 Update,
                 end_demo
                     .before(crate::menu::back_to_menu)
-                    .before(crate::hud::take_over)
+                    .before(crate::hud::assign_on_pointer)
                     .before(crate::lemming_cam::toggle_keys)
                     .run_if(in_state(AppState::Playing)),
             );
