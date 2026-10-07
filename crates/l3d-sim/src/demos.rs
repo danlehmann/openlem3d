@@ -51,7 +51,7 @@ pub const SOLUTIONS: &[Solution] = &[
     at(97, &[(170, 0, 0, None)]),
     Solution { level: 98, plan: Plan::At(&[(338, 1, 1, Some(false))]), saves: 18 },
     at(99, &[(1124, 0, 4, None)]),
-    at(0, &[(1943, 0, 1, Some(false))]),
+    at(0, &[(1415, 0, 1, Some(false))]),
 ];
 
 pub fn solution(level: u32) -> Option<&'static Solution> {

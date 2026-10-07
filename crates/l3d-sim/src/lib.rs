@@ -867,11 +867,12 @@ impl Simulation {
         let from_drop = ((2 * BOUNCE_GRAVITY * height.max(0)) as f32).sqrt() as i32;
         let (vy, vx) = if height > BIG_DROP {
             // A long drop throws the lemming back as high as it fell and
-            // forward about 0.8 of that (provisional: Fun 1 drops lemmings 12
-            // units onto a trampoline that must carry them about 10 units to
-            // the exit; the demo hints that stronger bounces move faster).
+            // forward about 1.2 times that (provisional, from Fun 1 "Take a
+            // Dive", whose known solution drops lemmings off the third of
+            // the tower's platforms, 10 units above the trampoline: the throw
+            // must land them 11–13 units on, inside the exit house).
             let ticks = 2 * from_drop / BOUNCE_GRAVITY;
-            (from_drop, (height * 4 / 5 / ticks.max(1)).max(BOUNCE_VX))
+            (from_drop, (height * 6 / 5 / ticks.max(1)).max(BOUNCE_VX))
         } else {
             (from_drop.clamp(BOUNCE_FIRST_VY, BOUNCE_MAX_VY), BOUNCE_VX)
         };
