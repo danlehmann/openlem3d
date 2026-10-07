@@ -176,10 +176,12 @@ fn load_art(mut commands: Commands, mut data: ResMut<Data>, mut images: ResMut<A
         .and_then(|raw| sheets::WINDER.cut(&raw).ok())
         .map(|cells| cells.iter().map(|c| add(c, true)).collect())
         .unwrap_or_default();
+    // The card's white: the palette entry nearest pure white.
+    let white = (1..=255u8).max_by_key(|&i| pal[i as usize].iter().map(|&c| c as u32).sum::<u32>()).unwrap_or(15);
     let rating_labels = ["PRACTICE", "FUN", "TRICKY", "TAXING", "MAYHEM"]
         .iter()
         .map(|name| {
-            let img = rating_label(name);
+            let img = rating_label(name, white);
             let size = Vec2::new(img.width as f32, img.height as f32);
             (add(&img, false), size)
         })
@@ -195,8 +197,8 @@ fn load_art(mut commands: Commands, mut data: ResMut<Data>, mut images: ResMut<A
     commands.insert_resource(Art { backdrop, logo, buttons, faces, ratings, rating_labels, winder, banner, large, letters });
 }
 
-/// The rating label's box: every label is drawn this wide, black with its
-/// name centred, so it covers the "PRACTICE" printed in the card's own
+/// The rating label's box: every label is drawn this wide, on the card's
+/// white with its name centred, so it covers the label printed in the card's own
 /// box (x 207–239) whatever the rating.
 const LABEL_WIDTH: usize = 33;
 
@@ -227,21 +229,38 @@ fn letter_rows(c: char) -> [&'static str; 5] {
 
 /// A rating name as the original shows it under the sign: 3×5 capitals with
 /// a 1-pixel gap, each row coloured from the red-to-yellow ramp (indices
-/// 0x40–0x50), on a black box one pixel larger on every side (measured),
-/// widened to hide the button's own "FUN" label (5-pixel letters at x
-/// 214–230) under short names.
-fn rating_label(name: &str) -> IndexedImage {
+/// 0x40–0x50), each letter outlined one pixel wide in black, straight on the
+/// white card (seen in the original). The label is drawn over a box of the
+/// card's white (`white`), [`LABEL_WIDTH`] wide, hiding the button's own
+/// printed label.
+fn rating_label(name: &str, white: u8) -> IndexedImage {
     let n = name.chars().count();
     let (w, h) = ((4 * n + 1).max(LABEL_WIDTH), 7);
     let pad = (w - (4 * n + 1)) / 2;
-    let mut pixels = vec![0u8; w * h];
-    // Index 0 is black and drawn opaque here.
+    let mut pixels = vec![white; w * h];
+    let mut ink = vec![false; w * h];
     for (i, c) in name.chars().enumerate() {
         for (y, row) in letter_rows(c).iter().enumerate() {
             for (x, b) in row.bytes().enumerate() {
                 if b == b'#' {
-                    pixels[(y + 1) * w + pad + 1 + 4 * i + x] = 0x40 + 4 * y as u8;
+                    let p = (y + 1) * w + pad + 1 + 4 * i + x;
+                    pixels[p] = 0x40 + 4 * y as u8;
+                    ink[p] = true;
                 }
+            }
+        }
+    }
+    // The outline: black (index 0, drawn opaque here) around every letter
+    // pixel, diagonals included.
+    for y in 0..h as i32 {
+        for x in 0..w as i32 {
+            let p = (y as usize) * w + x as usize;
+            let near = (-1..=1).any(|dy| (-1..=1).any(|dx| {
+                let (nx, ny) = (x + dx, y + dy);
+                (0..w as i32).contains(&nx) && (0..h as i32).contains(&ny) && ink[ny as usize * w + nx as usize]
+            }));
+            if !ink[p] && near {
+                pixels[p] = 0;
             }
         }
     }
