@@ -212,6 +212,12 @@ around a still of the game screen) in empty cells in front of the
 monitor's body, and they only read left to right facing into those cells.
 Whether level flag `0x0400` makes that screen live is unknown.
 
+**Top and underside decals** (high nibble C: top, B: underside) follow the
+same rule against the cell above or below. Verified by the picture: on
+`LEVEL.019` ("Alilemm's") the corridor ceiling, lit panels seen from below
+in the original, is top decals in empty cells under invisible blocks; the
+floor is top decals on solid invisible blocks.
+
 Objects are not solid. Official levels put an invisible block 4 in the same
 cell where solidity is needed (verified for `LEVEL.001`).
 

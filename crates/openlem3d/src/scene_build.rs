@@ -448,15 +448,33 @@ fn decal_layers(data: &mut GameData, level: &Level, pal: &Palette) -> Vec<SceneL
                             wall_b.vertical_quad(face(-DECAL_OFFSET), [-n[0], -n[1]], 1.0, 1.0, rect, wall_tex, 1.0);
                         }
                     }
-                    0xB => {
-                        // Underside; the image's bottom edge faces −X.
-                        let y = base_y - DECAL_OFFSET;
-                        wall_b.quad([[x0, y, z1], [x0, y, z0], [x1, y, z0], [x1, y, z1]], rect, wall_tex, 1.0);
-                    }
-                    0xC => {
-                        // Top; the image's bottom edge faces −X.
-                        let y = base_y + 1.0 + DECAL_OFFSET;
-                        wall_b.quad([[x0, y, z0], [x0, y, z1], [x1, y, z1], [x1, y, z0]], rect, wall_tex, 1.0);
+                    flat @ (0xB | 0xC) => {
+                        // Underside (0xB) or top (0xC) of the cell, facing
+                        // whichever of the cell and its neighbour below or
+                        // above is open, as side decals do: the corridor
+                        // ceilings of "Alilemm's" (`LEVEL.019`) are top
+                        // decals in empty cells under invisible blocks,
+                        // seen from below. The image's bottom edge faces −X.
+                        let up = flat == 0xC;
+                        let ny = if up { y as i32 + 1 } else { y as i32 - 1 };
+                        let next = (0..16).contains(&ny) && !level.block(x, ny as usize, z).is_empty();
+                        let own = !block.is_empty();
+                        let plane = if up { base_y + 1.0 } else { base_y };
+                        let face = |b: &mut LayerBuilder, y: f32, facing_up: bool| {
+                            if facing_up {
+                                b.quad([[x0, y, z0], [x0, y, z1], [x1, y, z1], [x1, y, z0]], rect, wall_tex, 1.0);
+                            } else {
+                                b.quad([[x0, y, z1], [x0, y, z0], [x1, y, z0], [x1, y, z1]], rect, wall_tex, 1.0);
+                            }
+                        };
+                        // Outwards (away from the cell), then inwards.
+                        let out = if up { DECAL_OFFSET } else { -DECAL_OFFSET };
+                        if own || !next {
+                            face(&mut wall_b, plane + out, up);
+                        }
+                        if !own {
+                            face(&mut wall_b, plane - out, !up);
+                        }
                     }
                     half @ (0xD | 0xE) => {
                         // Half-height, darkened panel through the middle of the
