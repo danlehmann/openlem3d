@@ -98,7 +98,10 @@ fn replaying_the_log_reproduces_the_game() {
         played.step();
         match played.tick {
             40 => played.adjust_release_rate(30),
-            343 => assert!(played.assign_turner(1, played.lemmings[1].dir.anticlockwise())),
+            // The first moment lemming 1 can take a turner after tick 300.
+            t if t >= 300 && played.log.len() == 1 && played.can_assign(1, l3d_sim::Skill::Turner) => {
+                assert!(played.assign_turner(1, played.lemmings[1].dir.anticlockwise()))
+            }
             500 => played.nuke(),
             _ => {}
         }

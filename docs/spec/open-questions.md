@@ -6,7 +6,7 @@ Each names where it shows up, so a run can go straight there.
 
 ## Mechanics
 
-- **Trampoline bounces beyond the first two hops**: how fast later hops grow and move (one "left much faster"), and whether a long drop bounces differently (Fun 1).
+- **Trampoline bounces beyond the third hop** and the strongest bounce, and whether a long drop bounces differently (Fun 1).
 - **Skills on sliding lemmings.** Whether a turner or blocker can be given
   to a lemming on ice (Practice "Slippery", `LEVEL.095`). We refuse them.
 - **Splitter.** Whether the very first lemming goes right (the first one seen did).

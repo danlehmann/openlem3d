@@ -49,7 +49,7 @@ pub const SOLUTIONS: &[Solution] = &[
     at(95, &[(245, 0, 1, Some(true))]),
     at(96, &[(200, 0, 1, Some(false))]),
     at(97, &[(170, 0, 0, None)]),
-    Solution { level: 98, plan: Plan::At(&[(343, 1, 1, Some(false))]), saves: 18 },
+    Solution { level: 98, plan: Plan::At(&[(338, 1, 1, Some(false))]), saves: 18 },
     at(99, &[(1124, 0, 4, None)]),
     at(0, &[(1943, 0, 1, Some(false))]),
 ];

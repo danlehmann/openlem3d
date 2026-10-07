@@ -88,16 +88,16 @@ const ROPE_GRAB_TICKS: u32 = 8;
 const SPRING_TICKS_PER_UNIT: f32 = 1.4;
 const SPRING_ARC: f32 = 0.3;
 /// Trampoline flight, per tick and sub-units, from the original's Practice
-/// "Trampoline" demo: gravity (about 8.5 units/s²), forward speed (1.48
-/// units/s), the first hop's take-off speed (peaking 1.5 units up), the
-/// growth per bounce (the second hop peaked about 2.4 units up) and the
-/// strongest bounce (peaking 7.5 units above a pad). The last two were
-/// chosen within the measurements so that, as in the demo, every lemming
-/// lands on that level's floating cube and the demo's one turner saves 18.
-const BOUNCE_GRAVITY: i32 = 11;
+/// "Trampoline" demo (side view, hops tracked): gravity (about 6.6
+/// units/s²), forward speed (1.5–1.7 units/s), the first hop's take-off
+/// speed (peaking about 1.2 units up, 1.1 s in the air), the growth per
+/// bounce (each hop peaks about a unit higher: 1.2, 2.2, 3.0) and the
+/// strongest bounce (peaking 7.5 units above a pad; unmeasured).
+const BOUNCE_GRAVITY: i32 = 9;
 const BOUNCE_VX: i32 = 27;
-const BOUNCE_FIRST_VY: i32 = 92;
-const BOUNCE_GAIN: f32 = 1.32;
+const BOUNCE_FIRST_VY: i32 = 74;
+/// Height added to each successive hop, sub-units.
+const BOUNCE_GROWTH: i32 = SUB;
 const BOUNCE_MAX_VY: i32 = 205;
 /// Drops onto a trampoline longer than this (sub-units) are thrown far.
 const BIG_DROP: i32 = 8 * SUB;
@@ -914,7 +914,8 @@ impl Simulation {
             if ground >= next[1] {
                 l.pos = [next[0], ground, next[2]];
                 if self.object_kind == Some(objects::ObjectKind::Trampoline) && self.objects.iter().any(|o| o.touches(l.pos)) {
-                    let up = ((-vy) as f32 * BOUNCE_GAIN) as i32;
+                    // A unit higher than the hop that landed.
+                    let up = ((vy * vy + 2 * BOUNCE_GRAVITY * BOUNCE_GROWTH) as f32).sqrt() as i32;
                     l.set_state(State::Bouncing { vy: up.min(BOUNCE_MAX_VY), vx: BOUNCE_VX });
                 } else {
                     self.land(l, on_block, 0);
