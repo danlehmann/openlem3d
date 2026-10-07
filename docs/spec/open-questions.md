@@ -9,7 +9,6 @@ Each names where it shows up, so a run can go straight there.
 - **Trampoline bounces beyond the third hop** and the strongest bounce, and whether a long drop bounces differently (Fun 1).
 - **Skills on sliding lemmings.** Whether a turner or blocker can be given
   to a lemming on ice (Practice "Slippery", `LEVEL.095`). We refuse them.
-- **Splitter.** Whether the very first lemming goes right (the first one seen did).
 - **Turned walkers.** Whether walkers turn at a turner's arm's length or on
   its line (we use its line; Practice "Claustrophobic" needs that).
 - **Hanging deflectors.** "Team Work" (`LEVEL.051`) has a deflector hanging

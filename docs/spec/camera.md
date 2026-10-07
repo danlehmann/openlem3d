@@ -111,6 +111,14 @@ How we verified it:
   +0.2 units/s in X and 0.4–0.9 units/s towards −Z. Directions and the X
   speed agree; the Z estimate rests on a 2–5 pixel vertical shift of a
   finely shrunk texture (±30 % or worse) and is not taken as a correction.
+  A second run on `LEVEL.098` (same speeds and sea as `LEVEL.080`; camera 1
+  held still, sea in front of the trampoline row) measured a steady shift of
+  (+13, −7) px per 0.5 s, about 0.5 units/s towards +X (±15 %) and 0.8
+  units/s towards −Z (±35 %). Directions agree again; the X speed disagrees
+  with the first run (0.2), and both runs find Z faster than X although the
+  header gives them equal magnitude. Left unchanged until a cleaner
+  measurement. Whether the sea also changes shape in place stays open (the
+  leftover mismatch grew with time, which perspective could also explain).
 - **Land polygons:** drawn at the same height with the `LAND` texture. Shape
   verified visually in `LEVEL.000`.
   - **Texture scale:** with the level flag `0x0100` ("128×128 land"), one

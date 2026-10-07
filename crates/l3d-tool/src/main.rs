@@ -865,6 +865,7 @@ fn main() -> Result<()> {
             println!("land polygons: {:?}", l.land_polygons);
             println!("cameras: {:?}", l.cameras);
             println!("border kill {:?} ceiling {} pivot {:?} flags2 {:02x}", l.border_kill, l.ceiling_kill, l.preview_pivot, l.flags2);
+            println!("flags {:04x} water speed x {} z {}", l.flags, l.water_speed_x, l.water_speed_z);
             let mut counts: BTreeMap<(u8, u8), usize> = BTreeMap::new();
             let mut objs: BTreeMap<u8, usize> = BTreeMap::new();
             for (_, _, _, b, o) in l.cells() {
