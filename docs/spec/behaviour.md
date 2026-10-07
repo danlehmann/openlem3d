@@ -45,6 +45,19 @@ at each death.
   game's clock runs in real time: 1.00 s per displayed second over 12 s.
   14 Hz is 70 Hz VGA refresh divided by 5, which may be the underlying
   timer. The implementation runs at 14 ticks per second.
+- **On slow machines the game slows down (verified).** Each pass of the
+  original's main loop draws one frame and runs at most one tick, once 1/14 s
+  has passed; unused time carries over, but missed ticks are never made up.
+  So the game runs at the lower of 14 ticks/s and the frame rate. Measured
+  in DOSBox-X on Practice "Blocker" at fixed CPU speeds: at max, 60000 and
+  30000 cycles (about 60, 37 and 18 frames/s) it ticked 14 times a second
+  with a real-time clock; at 15000 cycles (about 8.5–9 frames/s) and 8000
+  (about 4.4) it ticked once per frame, and the clock, the release interval
+  and walking all slowed to 0.59 and 0.31 of real time. The lemming's steps
+  were identical at every speed, only further apart. On the PCs of 1995,
+  heavier views will often have dropped below 14 frames/s, so the game
+  will often have run slower than its design speed; 14 ticks/s is that
+  design speed.
 
 ## Collision
 
