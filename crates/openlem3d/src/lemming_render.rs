@@ -209,8 +209,7 @@ fn cell_for(a: Anim, view: ViewAngle, ticks: u32) -> (u32, bool) {
 /// Interactive objects other than trampolines (`TRAPS` frames, one unit
 /// tall). Bear traps and squashers rest on frame 0 and play frames 1–7
 /// while busy; the weird trap rests on its last (empty) frame and plays
-/// from 0; flame-blowers and lasers show only while firing. Springs show
-/// frame 0. Which frames are idle is read off the sheets;
+/// from 0; flame-blowers and lasers show only while firing. Which frames are idle is read off the sheets;
 /// timings are provisional.
 fn objects(b: &mut LayerBuilder, sim: &Simulation, tex: [f32; 2]) {
     const TRAP_TEXELS_PER_UNIT: f32 = 64.0;
@@ -228,9 +227,11 @@ fn objects(b: &mut LayerBuilder, sim: &Simulation, tex: [f32; 2]) {
             ObjectKind::WeirdTrap => if firing { step(TRAP_ATLAS_CELLS) } else { last },
             ObjectKind::FlameBlower | ObjectKind::Laser if !firing => continue,
             ObjectKind::FlameBlower | ObjectKind::Laser => o.busy % 4,
-            // Teleporter pads are in the static scene too.
+            // Teleporter and spring pads are in the static scene too; a
+            // spring shows its launch (frames 1–7, side on) while busy.
             ObjectKind::Teleporter => continue,
-            ObjectKind::Spring => 0,
+            ObjectKind::Spring if o.busy == 0 => continue,
+            ObjectKind::Spring => 1 + (l3d_sim::SPRING_BUSY_TICKS - o.busy).min(6),
         };
         let cell = TRAP_ATLAS_FIRST + frame;
         let (cx, cy) = ((cell % ATLAS_COLUMNS) * LEMMING_CELL, (cell / ATLAS_COLUMNS) * LEMMING_CELL);
