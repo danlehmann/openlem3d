@@ -209,8 +209,8 @@ fn cell_for(a: Anim, view: ViewAngle, ticks: u32) -> (u32, bool) {
 /// Interactive objects other than trampolines (`TRAPS` frames, one unit
 /// tall). Bear traps and squashers rest on frame 0 and play frames 1–7
 /// while busy; the weird trap rests on its last (empty) frame and plays
-/// from 0; flame-blowers and lasers show only while firing. Springs and
-/// teleporters show frame 0. Which frames are idle is read off the sheets;
+/// from 0; flame-blowers and lasers show only while firing. Springs show
+/// frame 0. Which frames are idle is read off the sheets;
 /// timings are provisional.
 fn objects(b: &mut LayerBuilder, sim: &Simulation, tex: [f32; 2]) {
     const TRAP_TEXELS_PER_UNIT: f32 = 64.0;
@@ -228,7 +228,9 @@ fn objects(b: &mut LayerBuilder, sim: &Simulation, tex: [f32; 2]) {
             ObjectKind::WeirdTrap => if firing { step(TRAP_ATLAS_CELLS) } else { last },
             ObjectKind::FlameBlower | ObjectKind::Laser if !firing => continue,
             ObjectKind::FlameBlower | ObjectKind::Laser => o.busy % 4,
-            ObjectKind::Spring | ObjectKind::Teleporter => 0,
+            // Teleporter pads are in the static scene too.
+            ObjectKind::Teleporter => continue,
+            ObjectKind::Spring => 0,
         };
         let cell = TRAP_ATLAS_FIRST + frame;
         let (cx, cy) = ((cell % ATLAS_COLUMNS) * LEMMING_CELL, (cell / ATLAS_COLUMNS) * LEMMING_CELL);
@@ -305,6 +307,22 @@ fn teleport_width(t: u32) -> f32 {
     }
 }
 
+/// The teleporter sparkle: frames 4–7 of its `TRAPS` sheet (the pad is
+/// 0–3), drawn so the column stands about half a unit tall, half again a
+/// lemming's height (observed).
+const SPARKLE_FIRST: u32 = 4;
+const SPARKLE_FRAMES: u32 = 4;
+const SPARKLE_TEXELS_PER_UNIT: f32 = 112.0;
+
+/// Where a teleporting lemming's sparkle shows, `state_ticks` into it: over
+/// the pad it left for the first half of its time away, then over the one
+/// it arrives at (observed: about 0.5 s each).
+fn sparkle_at(t: u32, from: [i32; 3], to: [i32; 3]) -> Option<[i32; 3]> {
+    use l3d_sim::{TELEPORT_AWAY as AWAY, TELEPORT_STAND as STAND, TELEPORT_VANISH as VANISH};
+    let away = t.checked_sub(STAND + VANISH).filter(|&a| a < AWAY)?;
+    Some(if away < AWAY / 2 { from } else { to })
+}
+
 /// Builds this frame's lemming sprites for a camera facing `camera_yaw`.
 pub fn build(sim: &Simulation, atlas_rows: u32, camera_yaw: f32, doors: &[Door]) -> SceneSprites {
     let lemmings = &sim.lemmings;
@@ -355,7 +373,15 @@ pub fn build(sim: &Simulation, atlas_rows: u32, camera_yaw: f32, doors: &[Door])
         // Teleporting: squeezed to a sliver, away, then stretched out again
         // (observed).
         let width = match l.state {
-            State::Teleporting { .. } => teleport_width(l.state_ticks),
+            State::Teleporting { to } => {
+                if let Some(at) = sparkle_at(l.state_ticks, l.pos, to) {
+                    let cell = TRAP_ATLAS_FIRST + SPARKLE_FIRST + l.state_ticks % SPARKLE_FRAMES;
+                    let (cx, cy) = ((cell % ATLAS_COLUMNS) * LEMMING_CELL, (cell / ATLAS_COLUMNS) * LEMMING_CELL);
+                    let s = TRAP_FRAME as f32;
+                    b.sprite_scaled(at.map(|v| v as f32 / SUB as f32), [cx as f32, cy as f32, s, s], tex, 1, 0.0, SPARKLE_TEXELS_PER_UNIT);
+                }
+                teleport_width(l.state_ticks)
+            }
             _ => 1.0,
         };
         if width <= 0.0 {

@@ -240,7 +240,7 @@ fn land_layer(polygons: &[&Vec<LandVertex>], texture: RgbaImage, tile: f32) -> S
         let base = b.base();
         // The top 3 bits of the options byte darken the texture (unverified).
         let brightness = 1.0 - (poly[0].options >> 5) as f32 * 0.07;
-        let pts: Vec<[f32; 3]> = poly.iter().map(|v| [v.x as f32, GROUND_Y + 0.002, v.z as f32]).collect();
+        let pts: Vec<[f32; 3]> = poly.iter().map(|v| [v.x as f32, GROUND_Y - 0.004, v.z as f32]).collect();
         for p in &pts {
             Vertex::fixed(*p, [p[0] / tile, p[2] / tile], brightness, false).push(&mut b.vertices);
         }
@@ -291,18 +291,20 @@ fn object_base_y(y: usize, block: BlockCell) -> f32 {
 
 /// Interactive-object type values (header `0x114`, [L3DEdit]).
 const TRAP_TRAMPOLINE: u8 = 3;
+const TRAP_TELEPORTER: u8 = 5;
 
 /// Height of the top of the block in a cell, if the cell holds one.
 fn block_top(y: usize, block: BlockCell) -> Option<f32> {
     (block.segments != 0).then(|| y as f32 + (8 - block.segments.leading_zeros()) as f32 / 4.0)
 }
 
-/// Trampoline pads (`0x60`–`0x67` on a trampoline level) from the level's
-/// `TRAPS` sheet of 64×64 frames, flat on top of their block ([L3DEdit],
-/// unverified). Other interactive objects are sprites drawn each frame with
+/// Trampoline and teleporter pads (`0x60`–`0x67` on such a level) from the
+/// level's `TRAPS` sheet of 64×64 frames, flat on top of their block
+/// ([L3DEdit]; teleporter pads observed flat on the path in the Practice
+/// "Teleporter" demo). Other interactive objects are sprites drawn each frame with
 /// the lemmings (`lemming_render`), so they can animate.
 fn trap_layer(data: &mut GameData, level: &Level, pal: &Palette) -> Option<SceneLayer> {
-    if level.trap_type != TRAP_TRAMPOLINE {
+    if level.trap_type != TRAP_TRAMPOLINE && level.trap_type != TRAP_TELEPORTER {
         return None;
     }
     let traps = data.gfx("TRAPS", level.trap_type).ok()?;
@@ -314,8 +316,9 @@ fn trap_layer(data: &mut GameData, level: &Level, pal: &Palette) -> Option<Scene
         }
         // Pads need a block to lie on ([L3DEdit]).
         let Some(top) = block_top(y, block) else { continue };
-        // Red pads use frames 0–3, blue pads frames 4–7.
-        let frame = if o.kind >= 0x64 { 4.0 } else { 0.0 };
+        // Red trampolines use frames 0–3, blue ones frames 4–7; teleporter
+        // pads are frames 0–3 (4–7 are the sparkle).
+        let frame = if o.kind >= 0x64 && level.trap_type == TRAP_TRAMPOLINE { 4.0 } else { 0.0 };
         let y = top + DECAL_OFFSET;
         let (x0, z0, x1, z1) = (x as f32, z as f32, x as f32 + 1.0, z as f32 + 1.0);
         b.quad([[x0, y, z1], [x1, y, z1], [x1, y, z0], [x0, y, z0]], [0.0, frame * 64.0, 64.0, 64.0], tex, 1.0);

@@ -33,7 +33,7 @@ preview screens.
 | `WALLS` | 64 | 16 × 64×64 [L3DEdit] | Unverified |
 | `ANIMOBJ` | 64 | 64×256: four 64×64 animation frames? | Unverified |
 | `SEA` | 64? | 16,384 bytes: 128×128 or 64×256? | Unverified |
-| `TRAPS` | 64 | 64×512: animation frames | Unverified |
+| `TRAPS` | 64 | 64×512: eight 64×64 frames. `TRAPS.005` (teleporter): frames 0–3 the red pad in a steel frame, 4–7 a blue sparkle of stars | Frame size verified by rendering; the teleporter pad seen flat on the path and a blue sparkle over it in the Practice "Teleporter" demo (that it is these frames is by appearance) |
 | `BGRD` | 320 | 320×48: the scrolling backdrop of the title and code screens, palette `LM3D.PAL` | Verified in the running game ([ui-graphics.md](ui-graphics.md#title-screen-main-menu)) |
 
 ## `OBJ` packing (verified)

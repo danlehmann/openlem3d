@@ -99,6 +99,9 @@ clean octagon). Coordinates name grid corners.
 The following is **unverified** [L3DEdit]:
 - Polygons are convex and wound anticlockwise.
 - They are drawn at the bottom of the level with the `LAND` texture.
+  **Observed:** blocks in grid layer 0 show over the land: on Practice
+  "Teleporter" (`LEVEL.099`) the stone paths of layer 0, whose tops are at
+  ground height, are seen running across the grass.
 - The top 3 bits of `options` darken the texture; the low 3 bits pick a
   sub-texture in multi-texture `LAND` files.
 
