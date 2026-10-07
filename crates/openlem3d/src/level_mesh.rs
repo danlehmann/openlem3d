@@ -47,7 +47,7 @@ struct Poly {
 
 /// A shape polygon placed in world space: vertices, tile texture
 /// coordinates, and the source polygon.
-type PlacedPoly<'a> = (Vec<[f32; 3]>, Vec<[f32; 2]>, &'a Poly);
+type PlacedPoly<'a> = (Vec<[f32; 3]>, Vec<[f32; 2]>, &'a Poly, bool);
 
 fn poly(verts: &[[f32; 3]], src: FaceDir, on_face: Option<FaceDir>) -> Poly {
     Poly { verts: verts.to_vec(), src, on_face }
@@ -161,14 +161,17 @@ fn rotate_dir(d: FaceDir, r: u8) -> FaceDir {
     d
 }
 
-/// Whether polygon `src` of `cell` is one of an entrance hatch's two flaps:
-/// the local ±X side faces of an entrance block (id 0).
+/// Whether polygon `src` of `cell` carries an entrance hatch's flap picture:
+/// the local ±X side faces of an entrance block (id 0). The hatch's bottom
+/// opens as two doors hinged at those walls' bottom edges; the walls stay.
 fn is_flap(cell: BlockCell, src: FaceDir) -> bool {
     cell.id == 0 && cell.shape == 0 && matches!(src, FaceDir::PosX | FaceDir::NegX)
 }
 
-/// Swings a point of a hatch side face open: 135° outward about the face's
-/// bottom edge, so the flap hangs down and out at 45° (matches the original's
+/// Where a point of a hatch side face lies on the open door hinged at that
+/// wall's bottom edge: the face swung 135° outward about that edge (the
+/// same place as the half of the bottom swung down), so the door hangs down
+/// and out at 45° (matches the original's
 /// open hatches; angle estimated from captures).
 fn open_flap(p: [f32; 3], src: FaceDir, y0: f32) -> [f32; 3] {
     const S: f32 = std::f32::consts::FRAC_1_SQRT_2;
@@ -369,7 +372,10 @@ pub fn build(level: &Level, blocks: &BlockSet, art_on_top: &dyn Fn(u32) -> bool)
         let origin = [x as f32, y as f32, z as f32];
         let mut solid_verts: Vec<[f32; 3]> = Vec::new();
         let mut placed: Vec<PlacedPoly> = Vec::new();
-        for p in &polys {
+        // A hatch keeps all its walls; each flap is a second copy of a side
+        // wall, swung open below it.
+        let flaps = polys.iter().filter(|p| is_flap(cell, p.src)).map(|p| (p, true));
+        for (p, flap) in polys.iter().map(|p| (p, false)).chain(flaps) {
             let uvs: Vec<[f32; 2]> = p
                 .verts
                 .iter()
@@ -380,7 +386,7 @@ pub fn build(level: &Level, blocks: &BlockSet, art_on_top: &dyn Fn(u32) -> bool)
                     // A flap is upside down once open (its top edge swings out and
                     // down), so its picture is flipped to keep the hinges at the
                     // hinge.
-                    let ly = if is_flap(cell, p.src) { (1.0 - v[1]) * (y1 - y0) } else { y0 + v[1] * (y1 - y0) };
+                    let ly = if flap { (1.0 - v[1]) * (y1 - y0) } else { y0 + v[1] * (y1 - y0) };
                     tile_uv(p.src, [v[0], ly, v[2]])
                 })
                 .collect();
@@ -389,7 +395,7 @@ pub fn build(level: &Level, blocks: &BlockSet, art_on_top: &dyn Fn(u32) -> bool)
                 .iter()
                 .map(|v| {
                     let mut lp = [v[0], y0 + v[1] * (y1 - y0), v[2]];
-                    if is_flap(cell, p.src) {
+                    if flap {
                         lp = open_flap(lp, p.src, y0);
                     }
                     let r = rotate_point(lp, effective_rotation(cell.shape, cell.rotation));
@@ -397,16 +403,15 @@ pub fn build(level: &Level, blocks: &BlockSet, art_on_top: &dyn Fn(u32) -> bool)
                 })
                 .collect();
             solid_verts.extend(&verts);
-            placed.push((verts, uvs, p));
+            placed.push((verts, uvs, p, flap));
         }
         let centre = {
             let n = solid_verts.len() as f32;
             let s = solid_verts.iter().fold([0.0; 3], |a, v| [a[0] + v[0], a[1] + v[1], a[2] + v[2]]);
             s.map(|c| c / n)
         };
-        for (mut verts, mut uvs, p) in placed {
+        for (mut verts, mut uvs, p, flap) in placed {
             // Faces on the cell boundary are hidden by an opaque neighbour.
-            let flap = is_flap(cell, p.src);
             if let Some(local) = p.on_face.filter(|_| !flap) {
                 let world = rotate_dir(local, effective_rotation(cell.shape, cell.rotation));
                 let on_boundary = match world {
