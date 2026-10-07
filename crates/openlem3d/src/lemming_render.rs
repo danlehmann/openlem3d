@@ -345,9 +345,11 @@ pub fn build(sim: &Simulation, atlas_rows: u32, camera_yaw: f32, doors: &[Door])
     for l in lemmings.iter().filter(|l| !l.gone && l.state != State::Trapped) {
         let view = ViewAngle::from_yaws(l.dir.yaw(), camera_yaw);
         let (cell, mirror) = match l.state {
-            // The stored turner points to its left (assumed from the one
-            // verified case); one pointing right is its mirror image.
-            State::Turning { to } if to == l.dir.clockwise() => {
+            // The stored turner points to its right (cells 30–36, seen from
+            // the front, hold out the lemming's right arm); one pointing
+            // left is its mirror image. The reverse showed turners pointing
+            // away from where they sent walkers.
+            State::Turning { to } if to == l.dir.anticlockwise() => {
                 let (cell, mirror) = cell_for(anim_for(l.state), view.mirrored(), l.state_ticks);
                 (cell, !mirror)
             }
