@@ -237,9 +237,10 @@ const ARROW_DIRECTIONS: usize = 32;
 /// 320×200 pixels.
 const ARROW_SIZE: f32 = 16.0;
 const ARROW_DISTANCE: f32 = 12.0;
-/// While the pointer is not clearly on one side, both arrows blink with
-/// this period (seconds).
-const ARROW_BLINK: f32 = 0.4;
+/// While the pointer is not clearly on one side, the two arrows take turns,
+/// each shown this long (seconds; observed in the original's Practice
+/// "Turner" demo: never both at once, 7–10 swaps a second).
+const ARROW_SWAP: f32 = 0.12;
 /// How much better one side must line up with the pointer than the other,
 /// and how far (in 320×200 pixels) the pointer must be from the lemming,
 /// for the choice to count as clear.
@@ -282,8 +283,8 @@ fn spawn_turner_marker(mut commands: Commands, mut data: ResMut<crate::Data>, mu
     }
 }
 
-/// Shows the arrows beside a lemming waiting for its turner direction: both
-/// blink until the pointer is clearly on one side, then only that side's
+/// Shows the arrows beside a lemming waiting for its turner direction: they
+/// take turns until the pointer is clearly on one side, then only that side's
 /// arrow shows, previewing where the next click points the turner.
 #[allow(clippy::too_many_arguments)]
 fn place_turner_marker(
@@ -307,8 +308,8 @@ fn place_turner_marker(
         let (at, dirs, fit) = turner_sides(&camera, size, l, pointer)?;
         let scale = size.y / 200.0;
         let clear = pointer.is_some_and(|p| p.distance(at) > ARROW_CLEAR_DISTANCE * scale) && (fit[0] - fit[1]).abs() > ARROW_CLEAR_MARGIN;
-        let blink_on = ((time.elapsed_secs() / (ARROW_BLINK / 2.0)) as u32).is_multiple_of(2);
-        let visible = if clear { [fit[0] >= fit[1], fit[1] > fit[0]] } else { [blink_on; 2] };
+        let first = ((time.elapsed_secs() / ARROW_SWAP) as u32).is_multiple_of(2);
+        let visible = if clear { [fit[0] >= fit[1], fit[1] > fit[0]] } else { [first, !first] };
         Some((at, dirs, visible, scale))
     })();
     for (arrow, mut image, mut node, mut vis) in &mut arrows {
