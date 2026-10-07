@@ -304,6 +304,8 @@ fn buttons(
     cameras: Option<Res<LevelInfo>>,
     mut preset: ResMut<PresetIndex>,
     mut sfx: MessageWriter<crate::sfx::Sfx>,
+    mut highlight: ResMut<crate::hud::Highlight>,
+    mut pending_turner: ResMut<crate::hud::PendingTurner>,
 ) {
     for (interaction, action) in &pressed {
         if *interaction != Interaction::Pressed {
@@ -315,6 +317,18 @@ fn buttons(
                 // A skill with none left can't be selected (verified).
                 if sim.skills_left[s as usize] > 0 {
                     selected.0 = Some(s);
+                    // Given straight to the highlighted lemming; a turner then
+                    // waits for the click on the side it should point to.
+                    if let Some(i) = highlight.lemming {
+                        if s == Skill::Turner {
+                            if sim.can_assign(i, s) {
+                                pending_turner.0 = Some(i);
+                            }
+                        } else {
+                            let ok = sim.assign(i, s);
+                            sfx.write(crate::sfx::Sfx(if ok { "VOXFX/OK2" } else { "VOXFX/UH_UH1" }));
+                        }
+                    }
                 }
             }
             Action::Nuke => {
@@ -332,11 +346,23 @@ fn buttons(
                     *lemming_cam = LemmingCam::Off;
                 }
             }
-            Action::LemmingCam | Action::Arrow => {
-                if let Ok(mut view) = views.single_mut()
-                    && (*action == Action::LemmingCam || *lemming_cam != LemmingCam::Off)
-                {
-                    lemming_cam.toggle(&mut view);
+            // The arrow arms highlighting (the next click on a lemming picks
+            // it); clicked again, it disarms and drops the highlight.
+            Action::Arrow => {
+                if highlight.armed || highlight.lemming.is_some() {
+                    *highlight = crate::hud::Highlight::default();
+                } else {
+                    highlight.armed = true;
+                }
+            }
+            Action::LemmingCam => {
+                if let Ok(mut view) = views.single_mut() {
+                    match highlight.lemming {
+                        // Ride along with the highlighted lemming (switching to
+                        // it from another); riding with it already, return.
+                        Some(i) if lemming_cam.following() != Some(i) => lemming_cam.follow(i, &view),
+                        _ => lemming_cam.toggle(&mut view),
+                    }
                 }
             }
             Action::TurnClockwise | Action::TurnAnticlockwise | Action::Slower | Action::Faster => {}
@@ -407,6 +433,7 @@ fn animate(
     held: Query<(&Interaction, &Action)>,
     keys: Res<ButtonInput<KeyCode>>,
     mut items: Query<(&Animated, &mut ImageNode)>,
+    highlight: Res<crate::hud::Highlight>,
 ) {
     let Some(art) = art else { return };
     let t = time.elapsed_secs();
@@ -436,9 +463,11 @@ fn animate(
                 let on = down(Action::Faster) || keys.pressed(KeyCode::Equal);
                 art.panel[icon::PLUS + !on as usize].clone()
             }
-            Animated::Arrow => match lemming_cam.following() {
-                Some(_) => art.panel[icon::GREEN_DOWN.start + (t * ARROW_FPS) as usize % icon::GREEN_DOWN.len()].clone(),
-                None => art.panel[icon::RED_DOWN].clone(),
+            // Green, moving, while it waits for a lemming or one is
+            // highlighted.
+            Animated::Arrow => match highlight.armed || highlight.lemming.is_some() {
+                true => art.panel[icon::GREEN_DOWN.start + (t * ARROW_FPS) as usize % icon::GREEN_DOWN.len()].clone(),
+                false => art.panel[icon::RED_DOWN].clone(),
             },
             // Squinting when idle, eyes open when armed or riding along.
             Animated::Face => art.panel[icon::FACE + (*lemming_cam == LemmingCam::Off) as usize].clone(),

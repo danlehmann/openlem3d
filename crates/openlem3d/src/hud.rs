@@ -16,6 +16,7 @@ impl Plugin for HudPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SelectedSkill>()
             .init_resource::<PendingTurner>()
+            .init_resource::<Highlight>()
             .add_systems(Startup, spawn_turner_marker)
             .add_systems(
                 Update,
@@ -23,7 +24,8 @@ impl Plugin for HudPlugin {
                     .chain()
                     .run_if(in_state(AppState::Playing)),
             )
-            .add_systems(Update, place_turner_marker);
+            .add_systems(Update, (place_turner_marker, clear_highlight))
+            .add_systems(OnEnter(AppState::Briefing), |mut h: ResMut<Highlight>| *h = Highlight::default());
     }
 }
 
@@ -120,6 +122,15 @@ pub fn lemming_at(sim: &l3d_sim::Simulation, camera: &SceneCamera, size: Vec2, p
     best.map(|(i, _)| i)
 }
 
+/// The highlighted lemming (the panel's arrow, then a click on a lemming):
+/// it carries an arrow, a skill clicked next is given to it, and the face
+/// rides along with it. `armed` while the arrow waits for that click.
+#[derive(Resource, Default)]
+pub struct Highlight {
+    pub armed: bool,
+    pub lemming: Option<usize>,
+}
+
 /// The lemming a first turner click picked; the next click picks the side it
 /// points to, as in the original.
 #[derive(Resource, Default)]
@@ -141,6 +152,8 @@ pub(crate) fn assign_on_pointer(
     mut game: ResMut<Game>,
     mut sfx: MessageWriter<crate::sfx::Sfx>,
     settings: Res<crate::settings::Settings>,
+    mut highlight: ResMut<Highlight>,
+    views: Query<&crate::ViewCamera>,
 ) {
     // During a replay a click only takes over (`take_over`, next).
     if game.replay.is_some() {
@@ -177,6 +190,21 @@ pub(crate) fn assign_on_pointer(
         return;
     }
     let best = lemming_at(sim, &camera, size, point);
+    if highlight.armed {
+        // The arrow's click: highlight that lemming; riding along with
+        // another, the view switches to it.
+        if let Some(i) = best {
+            highlight.armed = false;
+            highlight.lemming = Some(i);
+            if lemming_cam.following().is_some()
+                && let Ok(view) = views.single()
+            {
+                lemming_cam.follow(i, view);
+            }
+            sfx.write(crate::sfx::Sfx("SPOTFX/SCALE"));
+        }
+        return;
+    }
     if picking {
         if let Some(i) = best {
             lemming_cam.pick(i);
@@ -333,5 +361,17 @@ fn place_turner_marker(
         node.width = px(half * 2.0);
         node.height = px(half * 2.0);
         vis.set_if_neq(Visibility::Inherited);
+    }
+}
+
+/// Drops the highlight when its lemming leaves play or a new level starts.
+fn clear_highlight(game: Res<Game>, current: Res<crate::CurrentLevel>, mut highlight: ResMut<Highlight>) {
+    if current.loaded.is_none() {
+        *highlight = Highlight::default();
+        return;
+    }
+    let alive = |i: usize| game.sim.as_ref().and_then(|s| s.lemmings.get(i)).is_some_and(|l| !l.gone);
+    if highlight.lemming.is_some_and(|i| !alive(i)) {
+        highlight.lemming = None;
     }
 }

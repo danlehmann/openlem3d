@@ -445,11 +445,12 @@ fn update_lemming_sprites(
     game: Res<Game>,
     cams: Query<&ViewCamera>,
     lemming_cam: Res<lemming_cam::LemmingCam>,
+    highlight: Res<hud::Highlight>,
     mut sprites: ResMut<scene_render::SceneSprites>,
 ) {
     let Some(sim) = &game.sim else { return };
     let yaw = cams.iter().next().map_or(0.0, |c| c.yaw);
-    *sprites = lemming_render::build(sim, scene_build::ATLAS_ROWS, yaw, &game.doors, lemming_cam.following());
+    *sprites = lemming_render::build(sim, scene_build::ATLAS_ROWS, yaw, &game.doors, lemming_cam.following(), highlight.lemming);
 }
 
 #[allow(clippy::too_many_arguments)] // Bevy system parameters

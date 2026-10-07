@@ -351,8 +351,9 @@ const ZAP_CLOUD_FIRST: u32 = 524;
 const ZAP_CLOUD_FRAMES: u32 = 10;
 
 /// Builds this frame's lemming sprites for a camera facing `camera_yaw`,
-/// leaving out lemming `eyes`, the one the view looks out of.
-pub fn build(sim: &Simulation, atlas_rows: u32, camera_yaw: f32, doors: &[Door], eyes: Option<usize>) -> SceneSprites {
+/// leaving out lemming `eyes`, the one the view looks out of, and marking
+/// lemming `highlight` with an arrow.
+pub fn build(sim: &Simulation, atlas_rows: u32, camera_yaw: f32, doors: &[Door], eyes: Option<usize>, highlight: Option<usize>) -> SceneSprites {
     let lemmings = &sim.lemmings;
     let mut b = LayerBuilder::default();
     let tex = [(ATLAS_COLUMNS * LEMMING_CELL) as f32, (atlas_rows * LEMMING_CELL) as f32];
@@ -365,7 +366,7 @@ pub fn build(sim: &Simulation, atlas_rows: u32, camera_yaw: f32, doors: &[Door],
         b.vertical_quad(c, n, 1.0, 1.0, [cx as f32, cy as f32, 64.0, 64.0], tex, d.brightness);
     }
     // Trapped lemmings are shown by the trap's own animation.
-    for (_, l) in lemmings.iter().enumerate().filter(|(i, l)| !l.gone && l.state != State::Trapped && Some(*i) != eyes) {
+    for (i, l) in lemmings.iter().enumerate().filter(|(i, l)| !l.gone && l.state != State::Trapped && Some(*i) != eyes) {
         // A turner stands facing the walkers coming up behind it, the way it
         // came (seen in the original's "Turner" demo; drawn the other way,
         // turners showed their backs to the cameras of "Take a Dive").
@@ -444,6 +445,13 @@ pub fn build(sim: &Simulation, atlas_rows: u32, camera_yaw: f32, doors: &[Door],
                 let over = [anchor[0], anchor[1] + size / LEMMING_TEXELS_PER_UNIT, anchor[2]];
                 b.sprite_scaled(over, [cx as f32, cy as f32, 32.0, 32.0], tex, 1, 0.0, DIGIT_TEXELS_PER_UNIT);
             }
+        }
+        if Some(i) == highlight {
+            // The highlight arrow over the lemming (`BOMBNUMB` cell 6).
+            let cell = BOMBNUMB_ATLAS_FIRST + 6;
+            let (cx, cy) = ((cell % ATLAS_COLUMNS) * LEMMING_CELL, (cell / ATLAS_COLUMNS) * LEMMING_CELL);
+            let over = [anchor[0], anchor[1] + size / LEMMING_TEXELS_PER_UNIT, anchor[2]];
+            b.sprite_scaled(over, [cx as f32, cy as f32, 32.0, 32.0], tex, 1, 0.0, DIGIT_TEXELS_PER_UNIT);
         }
         if l.state == State::Zapped {
             // The electrocution cloud over the lemming: it gathers, strikes

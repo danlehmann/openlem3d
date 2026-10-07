@@ -74,6 +74,13 @@ impl LemmingCam {
         }
     }
 
+    /// Rides along with lemming `i` (switching from another one if already
+    /// riding), keeping the view to return to.
+    pub fn follow(&mut self, i: usize, view: &ViewCamera) {
+        let saved = self.saved().unwrap_or((view.pos, view.yaw));
+        *self = LemmingCam::Following { lemming: i, saved };
+    }
+
     pub fn picking(&self) -> bool {
         matches!(self, LemmingCam::Picking(_))
     }
