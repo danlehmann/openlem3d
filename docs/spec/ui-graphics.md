@@ -301,12 +301,16 @@ up): the "Psygnosis" wordmark, a small "3D Lemmings" logo and a
 
 Pages enter from the right and move left **2 pixels per step, about 35
 steps/s (≈70 px/s)**; when a page is centred the scroll and the winders
-stop for about 1 s, then the page leaves to the left while the next one
+stop for about 0.7 s (a second run: about 3.1 s moving, 0.7 s still, about 3.8 s per page), then the page leaves to the left while the next one
 follows (verified: burst of a glyph's x position, 226 → 140 in 1.24 s in
 steps of 2, then stationary; hold estimated). Page order: wordmark,
 "Proudly Presents.", logo, then the game credits as pages of a role line
-and a names line, with the Clockwork Games logo between sections. The
-sequence restarts from the beginning whenever the title screen is entered.
+and a names line, with the Clockwork Games logo between sections. The roll runs to at least 32 pages (design, programming, graphics, level
+design, music, production, play testing, special thanks) before attract
+mode cut it off; whether it loops was not seen. The
+sequence restarts from the beginning whenever the title screen is entered. Ours keeps the three
+picture pages and replaces the original team's credits with a few pages of
+our own, so the remake does not read as the original publisher's product.
 
 **Faces in the buttons.** Head *k* (`faces` cells 3*k* … 3*k* + 2) sits in
 button *k*, drawn *under* the button (the button's opaque border overlaps

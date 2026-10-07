@@ -29,9 +29,10 @@ const LOGO_FPS: f32 = 35.0;
 const LOGO_HOLD: f32 = 1.4;
 /// Winders: cells per second.
 const WINDER_FPS: f32 = 17.5;
-/// Banner: pages move left at this speed and hold this long when centred.
+/// Banner: pages move left at this speed and hold this long when centred
+/// (observed: about 70 px/s for about 3.1 s, then about 0.7 s still).
 const BANNER_SPEED: f32 = 70.0;
-const BANNER_HOLD: f32 = 1.0;
+const BANNER_HOLD: f32 = 0.7;
 /// The banner paper (x 63–256, y 93–127) and its text lines.
 const PAPER: Rect = Rect { min: Vec2::new(63.0, 93.0), max: Vec2::new(257.0, 128.0) };
 const BANNER_LINES: [f32; 2] = [97.0, 111.0];

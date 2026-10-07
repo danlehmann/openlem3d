@@ -27,7 +27,6 @@ Each names where it shows up, so a run can go straight there.
 
 ## Presentation
 
-- The original's credit pages on the title banner (we show our own).
 - How the minimap picks block colours (a stone path is brown there).
 - Pointer shapes over the 3D view and what holding the mouse there does
   (ours moves the camera as the arrow shows).
