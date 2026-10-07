@@ -31,6 +31,15 @@ No control tilts the view. The horizon stays on the same screen row while the
 camera rotates, moves or changes height. The sky is a flat band that only
 slides sideways when the camera turns.
 
+The virtual-lemming view does not tilt either, as far as observed: through
+about 3 minutes of lemming view in the Practice "Virtual Lemming" demo and
+an attract-mode demo (100–150 ms bursts), the sea horizon stayed level on
+the same row as the preset cameras (row 163 of 480), vertical edges stayed
+vertical, walking showed no bob beyond 1–3 px, and turns snapped without
+roll. Not covered: the horizon was hidden while the lemming climbed a steep
+path, and no fall, float, bounce, slide or climb was seen in the lemming
+view.
+
 ## Projection (verified, fitted)
 
 - **The horizon is not in the middle of the screen.** Eye level is drawn at
