@@ -101,10 +101,16 @@ How we verified it:
 - **Sea texture, without the flag:** a 64-wide strip, probably 64×64
   animation frames (unverified). We cycle them at 8 frames per second unless
   the level flag `0x0010` ("sea not animated") is set.
-- **Sea drift:** the header's water speeds (`water_speed_x`, `_z`, values
-  −3 to 4, one level −33) are taken as texels per tick in X and Z, so the
-  sea texture slides slowly (unverified: not yet compared with the
-  original).
+- **Sea drift (partly verified):** the header's water speeds (`water_speed_x`,
+  `_z`, values −3 to 4, one level −33) are taken as texels per tick, the
+  sea moving against their signs: on `LEVEL.080` (X −1, Z +1, 128×128 sea
+  over 2 units) that is 0.22 units/s towards +X and towards −Z. Observed in
+  the original's Practice "Blocker" demo with the camera still (camera 1,
+  1.75 units above the sea, facing −Z): the near sea slid about 18 px/s
+  right and 5 px/s up on the 640×480 screen, which works out to about
+  +0.2 units/s in X and 0.4–0.9 units/s towards −Z. Directions and the X
+  speed agree; the Z estimate rests on a 2–5 pixel vertical shift of a
+  finely shrunk texture (±30 % or worse) and is not taken as a correction.
 - **Land polygons:** drawn at the same height with the `LAND` texture. Shape
   verified visually in `LEVEL.000`.
   - **Texture scale:** with the level flag `0x0100` ("128×128 land"), one

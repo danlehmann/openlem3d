@@ -22,8 +22,9 @@ Each names where it shows up, so a run can go straight there.
   orientation the half-height ramps continue the full ramps below them
   seamlessly, while the reverse leaves a 1.5-unit drop at z = 8.
 - **Highest step a walker climbs** (we use ¼ unit; ½ is untested).
-- **Sea drift and animation:** how fast the sea slides for the header's
-  water speeds, and its frame rate.
+- **Sea drift and animation:** the Z speed (one rough observation was 2–4×
+  ours; X agrees), and whether and how fast the sea animates in place on
+  levels without flag `0x0010`.
 
 ## Presentation
 
