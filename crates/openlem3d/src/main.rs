@@ -508,7 +508,7 @@ fn load_level(
 }
 
 #[allow(clippy::too_many_arguments)] // Bevy system parameters
-fn camera_controls(
+pub(crate) fn camera_controls(
     opts: Res<Options>,
     keys: Res<ButtonInput<KeyCode>>,
     mouse: Res<ButtonInput<MouseButton>>,
@@ -590,6 +590,8 @@ fn camera_controls(
             };
             cam.pos.y += notches * WHEEL_STEP;
         }
+        // Never below the ground plane (the sea and land).
+        cam.pos.y = cam.pos.y.max(scene_build::GROUND_Y + CAMERA_RADIUS);
         // The camera can't enter blocks (unless they are marked passable for
         // it); it slides along them. Preset jumps and the lemming view are
         // exempt.

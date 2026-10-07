@@ -20,7 +20,7 @@ pub struct TouchPlugin;
 
 impl Plugin for TouchPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, touch_camera.run_if(in_state(AppState::Playing)));
+        app.add_systems(Update, touch_camera.before(crate::camera_controls).run_if(in_state(AppState::Playing)));
     }
 }
 
