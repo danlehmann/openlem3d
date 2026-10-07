@@ -29,6 +29,7 @@ impl Plugin for BriefingPlugin {
             .add_systems(Update, (spawn_briefing, briefing_input).chain().run_if(in_state(AppState::Briefing)))
             .add_systems(OnExit(AppState::Briefing), despawn_briefing)
             .add_systems(Update, preview.before(crate::camera_controls).run_if(in_state(AppState::Playing)))
+            .add_systems(Update, preview_overlay.after(preview))
             .add_systems(
                 Update,
                 end_demo
@@ -193,7 +194,7 @@ fn briefing_input(
     }
 }
 
-/// The level preview: the camera circles the pivot while the level waits.
+/// The level preview: the camera circles the level while it waits.
 #[derive(Resource, Default)]
 pub struct Preview {
     pub active: bool,
@@ -201,11 +202,36 @@ pub struct Preview {
     angle: f32,
 }
 
-/// Preview orbit: radius and height above the pivot (grid units), and turn
-/// speed (radians per second). The original's preview path is unmeasured.
-const ORBIT_RADIUS: f32 = 14.0;
-const ORBIT_HEIGHT: f32 = 4.0;
-const ORBIT_SPEED: f32 = 0.35;
+/// Preview orbit, measured in the original (`docs/spec/camera.md`): radius in
+/// grid units, and the height used when the level sets no pivot. The turn
+/// rate is ours: the original turns 2.8125° per drawn frame (one turn in
+/// 1.8 s on a fast machine, far slower on the PCs of its day); 45°/s is about
+/// what a 15-frames-per-second machine showed.
+const ORBIT_RADIUS: f32 = 32.0;
+const UNSET_HEIGHT: f32 = 8.0;
+const ORBIT_SPEED: f32 = std::f32::consts::FRAC_PI_4;
+/// Level flag: the preview keeps camera 1's view still.
+const FLAG_PREVIEW_STATIC: u16 = 0x0040;
+
+/// The point the preview circles and its height: the level's pivot (y, z, x)
+/// as grid coordinates, or, when unset (all zero), the middle of the x/z
+/// extent of its visible blocks at height 8 (measured on Fun 2 and Fun 10).
+fn preview_centre(level: &l3d_formats::level::Level, blocks: &l3d_formats::blk::BlockSet) -> Vec3 {
+    let [py, pz, px] = level.preview_pivot;
+    if [py, pz, px] != [0, 0, 0] {
+        return Vec3::new(px as f32, py as f32, pz as f32);
+    }
+    let visible = |id: u8| blocks.defs.get(id as usize).is_some_and(|d| !d.is_placeholder() && d.faces.iter().any(|f| f.texture != 0xFF));
+    let (mut lo, mut hi) = (Vec2::splat(f32::MAX), Vec2::splat(f32::MIN));
+    for (x, _, z, b, _) in level.cells() {
+        if !b.is_empty() && visible(b.id) {
+            lo = lo.min(Vec2::new(x as f32, z as f32));
+            hi = hi.max(Vec2::new(x as f32 + 1.0, z as f32 + 1.0));
+        }
+    }
+    let mid = if lo.x <= hi.x { (lo + hi) / 2.0 } else { Vec2::splat(16.0) };
+    Vec3::new(mid.x, UNSET_HEIGHT, mid.y)
+}
 
 #[allow(clippy::too_many_arguments)]
 fn preview(
@@ -213,13 +239,23 @@ fn preview(
     keys: Res<ButtonInput<KeyCode>>,
     mouse: Res<ButtonInput<MouseButton>>,
     touches: Res<Touches>,
-    current: Res<CurrentLevel>,
+    mut current: ResMut<CurrentLevel>,
     mut state: ResMut<Preview>,
     mut game: ResMut<Game>,
     mut views: Query<&mut ViewCamera>,
-    mut pivot: Local<Option<(u32, Vec3)>>,
+    mut next: ResMut<NextState<AppState>>,
+    mut centre: Local<Option<(u32, Vec3, bool)>>,
 ) {
     if !state.active {
+        return;
+    }
+    // Right click (or Esc) goes back to the level list, as in the original;
+    // any other key, click or tap starts the level.
+    if state.started && (mouse.just_pressed(MouseButton::Right) || keys.just_pressed(KeyCode::Escape)) {
+        state.active = false;
+        game.paused = false;
+        current.loaded = None;
+        next.set(AppState::Menu);
         return;
     }
     let any = keys.get_just_pressed().next().is_some() || mouse.get_just_pressed().next().is_some() || touches.any_just_released();
@@ -228,22 +264,28 @@ fn preview(
         game.paused = false;
         return;
     }
+    let Ok(mut view) = views.single_mut() else { return };
+    game.paused = true;
+    let first = !state.started;
     // Input that started the preview doesn't end it.
     state.started = true;
-    game.paused = true;
-    if pivot.is_none_or(|(n, _)| n != current.number) {
-        // The pivot is stored (y, z, x) in grid cells.
-        let Some(p) = game.terrain.as_ref().map(|(level, ..)| level.preview_pivot) else { return };
-        *pivot = Some((current.number, Vec3::new(p[2] as f32 + 0.5, p[0] as f32, p[1] as f32 + 0.5)));
+    let Some((level, blocks, _)) = game.terrain.as_ref() else { return };
+    if centre.is_none_or(|(n, ..)| n != current.number) || first {
+        // It starts where camera 1 looks from.
+        state.angle = level.cameras[0].rotation as f32 * std::f32::consts::FRAC_PI_2;
+        *centre = Some((current.number, preview_centre(level, blocks), level.flags & FLAG_PREVIEW_STATIC != 0));
     }
-    let Some((_, centre)) = *pivot else { return };
-    let Ok(mut view) = views.single_mut() else { return };
-    state.angle += ORBIT_SPEED * time.delta_secs();
-    // The camera looks at the pivot from a point on the circle.
-    let offset = Vec3::new(state.angle.cos(), 0.0, state.angle.sin()) * ORBIT_RADIUS;
-    view.pos = centre + offset + Vec3::Y * ORBIT_HEIGHT;
-    // Yaw convention: forward = (−cos yaw, 0, −sin yaw).
+    let Some((_, c, still)) = *centre else { return };
+    if still {
+        view.set_preset(&level.cameras[0]);
+        return;
+    }
+    // Turning left all the way round (the facing goes +Z, +X, −Z, −X).
+    state.angle -= ORBIT_SPEED * time.delta_secs();
     view.yaw = state.angle;
+    // Looking at the centre from the circle; forward = (−cos yaw, 0, −sin yaw).
+    let forward = Vec3::new(-state.angle.cos(), 0.0, -state.angle.sin());
+    view.pos = c - forward * ORBIT_RADIUS;
 }
 
 /// Practice levels offer a demo (as the original's "Enter = Demo") instead
@@ -269,4 +311,83 @@ fn end_demo(
         current.loaded = None;
         next.set(back_to);
     }
+}
+
+/// The preview's overlay, as in the original: the level's details in white
+/// with a dark shadow at the top left, and Continue (left button) and Menu
+/// (right button) along the bottom. The panel is hidden meanwhile.
+#[derive(Component)]
+struct PreviewRoot;
+
+/// Lines of the preview's details (wording from the original; where the
+/// numbers sit in each line is estimated).
+fn preview_lines(n: u32, level: &l3d_formats::level::Level) -> [String; 6] {
+    let rating = crate::menu::RATINGS.get((n / crate::menu::LEVELS_PER_RATING) as usize).copied().unwrap_or("");
+    [
+        format!("Level {}  {}", n + 1, level.title.trim()),
+        format!("Number Of Lemmings {}", level.lemmings),
+        format!("{} To Be Saved", level.save_requirement),
+        format!("Release Rate {}", level.release_rate),
+        format!("Time {}:{:02} Minutes", level.time_minutes, level.time_seconds),
+        format!("Rating {rating}"),
+    ]
+}
+
+#[allow(clippy::too_many_arguments)]
+fn preview_overlay(
+    mut commands: Commands,
+    state: Res<Preview>,
+    art: Option<Res<Art>>,
+    current: Res<CurrentLevel>,
+    game: Res<Game>,
+    mut data: ResMut<Data>,
+    mut images: ResMut<Assets<Image>>,
+    mut cache: Local<HashMap<u8, Option<ScenePics>>>,
+    roots: Query<Entity, With<PreviewRoot>>,
+) {
+    if !state.active {
+        for e in &roots {
+            commands.entity(e).despawn();
+        }
+        return;
+    }
+    if !roots.is_empty() {
+        return;
+    }
+    let (Some(font), Some((level, ..))) = (art.as_ref().and_then(|a| a.large.as_ref()), game.terrain.as_ref()) else { return };
+    let root = commands
+        .spawn((PreviewRoot, Node { position_type: PositionType::Absolute, width: percent(100), height: percent(100), ..default() }, Pickable::IGNORE))
+        .id();
+    let canvas = commands.spawn((Canvas(SCREEN), Node { position_type: PositionType::Absolute, ..default() }, Pickable::IGNORE)).id();
+    commands.entity(root).add_child(canvas);
+    let add = |commands: &mut Commands, mut bundle: (ImageNode, At, Node), shade: Option<Color>| {
+        if let Some(c) = shade {
+            bundle.0.color = c;
+        }
+        let e = commands.spawn((bundle, Pickable::IGNORE)).id();
+        commands.entity(canvas).add_child(e);
+    };
+    let text = |commands: &mut Commands, s: &str, x: f32, y: f32| {
+        let (glyphs, _) = font.layout(s);
+        // The shadow first, then the text.
+        for (shadow, dx) in [(Some(Color::srgba(0.0, 0.0, 0.0, 0.7)), 2.0), (None, 0.0)] {
+            for (gx, image) in glyphs.iter() {
+                let r = at(x + gx * TEXT_SCALE + dx, y + dx, font.size.x * TEXT_SCALE, font.size.y * TEXT_SCALE);
+                add(commands, image_at(image.clone(), r), shadow);
+            }
+        }
+    };
+    for (k, line) in preview_lines(current.number, level).iter().enumerate() {
+        text(&mut commands, line, 21.0, TOP_Y + 26.0 * k as f32);
+    }
+    let pics = cache.entry(level.theme).or_insert_with(|| load_scene(&mut data, level.theme, &mut images)).clone();
+    if let Some(p) = &pics {
+        for (i, x) in [(0, 25.0), (1, 522.0)] {
+            if let Some(h) = p.prompts.get(i).cloned() {
+                add(&mut commands, image_at(h, at(x, PROMPT_Y, 32.0, 32.0)), None);
+            }
+        }
+    }
+    text(&mut commands, "Continue", 61.0, LABEL_Y);
+    text(&mut commands, "Menu", 561.0, LABEL_Y);
 }

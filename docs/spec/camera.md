@@ -160,3 +160,34 @@ cells within 0.2 units of the camera against the present segments and slide
 along blocks axis by axis (provisional). Of the 400 preset cameras only
 `LEVEL.062`'s camera 3 starts inside a block; a camera that starts
 blocked moves freely until it is clear.
+
+## Level preview (measured)
+
+Measured in the original on Fun 1, Fun 2, Fun 10, Tricky 2 and Practice
+"Blocker" (raw grabs at about 40 frames/s; yaw from the sky panorama's
+position, the camera path fitted to block silhouettes):
+
+- **Centre and height.** With a pivot set (header `0x159`, stored y, z, x),
+  the camera circles the point (x, z) taken as grid coordinates (not cell
+  centres) at height y. With the pivot unset (all zero, 54 levels), it circles
+  the middle of the x/z extent of the visible blocks (block definitions whose
+  six textures are all 255 excluded) at height 8.
+- **Path.** Radius about 32 units (31.5 ± 0.5 with our projection), always
+  looking at the centre, never pitching. It starts where camera 1 looks from
+  and turns left without end (facing +Z, +X, −Z, −X in turn).
+- **Speed.** 2.8125° (8 sky texels) per drawn frame: one turn in 1.8 s at
+  70 frames/s, about 16°/s at 5.6. Ours turns at 45°/s, roughly what a
+  15-frames-per-second machine showed.
+- **Flag `0x0040`:** the camera holds camera 1's view still (`LEVEL.062`).
+- **On screen:** no panel. At the top left, in white with a dark shadow:
+  "Level N TITLE", "Number Of Lemmings", "N To Be Saved", "Release Rate",
+  "Time M:SS Minutes", "Rating X" (they appear one by one from about 1.2 s
+  in; ours shows them at once); along the bottom the left-mouse icon with
+  "Continue" and the right-mouse icon with "Menu". The briefing fades out
+  in about 0.65 s, black for 0.25 s, then the view fades in over 0.4 s
+  (ours: the fade-in).
+- **Input.** Left click or Space starts the level; right click returns to
+  the menu; Enter and Esc do nothing. Ours: right click and Esc return,
+  any other key, click or tap starts.
+- Practice briefings offer "Demo" instead of a preview, with the same
+  flyover running behind the briefing.

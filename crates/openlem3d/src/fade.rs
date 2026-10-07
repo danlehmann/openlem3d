@@ -14,6 +14,7 @@ impl Plugin for FadePlugin {
             .add_systems(OnTransition { exited: AppState::Title, entered: AppState::Code }, start(CODE_IN))
             .add_systems(OnTransition { exited: AppState::Code, entered: AppState::Title }, start(TITLE_FROM_CODE_IN))
             .add_systems(OnTransition { exited: AppState::Options, entered: AppState::Title }, start(TITLE_FROM_OPTIONS_IN))
+            .add_systems(OnTransition { exited: AppState::Briefing, entered: AppState::Playing }, start(LEVEL_IN))
             .add_systems(Update, fade);
     }
 }
@@ -25,6 +26,9 @@ impl Plugin for FadePlugin {
 const CODE_IN: f32 = 0.3;
 const TITLE_FROM_CODE_IN: f32 = 0.42;
 const TITLE_FROM_OPTIONS_IN: f32 = 0.43;
+/// From the briefing into the level or its preview (measured: the 3D view
+/// fades in over about 0.4 s after the briefing has faded out).
+const LEVEL_IN: f32 = 0.4;
 
 /// The black overlay: when its fade started and how long it lasts.
 #[derive(Component, Default)]
