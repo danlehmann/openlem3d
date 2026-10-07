@@ -23,7 +23,7 @@ fn main() {
             }
         }
     }
-    best.sort_by(|a, b| b.0.cmp(&a.0));
+    best.sort_by_key(|b| std::cmp::Reverse(b.0));
     for (saved, t, i, side) in best.iter().take(10) {
         println!("saved {saved:3}  tick {t} lemming {i} side {side:?}");
     }
