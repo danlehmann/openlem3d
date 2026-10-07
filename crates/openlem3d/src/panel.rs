@@ -531,8 +531,15 @@ fn show_minimap(
     }
 }
 
-fn show_in_play(state: Res<State<AppState>>, opts: Res<crate::Options>, mut roots: Query<&mut Visibility, With<PanelRoot>>) {
-    let v = if *state.get() == AppState::Playing && !opts.no_hud { Visibility::Inherited } else { Visibility::Hidden };
+/// The panel shows while playing, but not during the level preview (an
+/// interstitial in the original, without the panel).
+fn show_in_play(
+    state: Res<State<AppState>>,
+    opts: Res<crate::Options>,
+    preview: Res<crate::briefing::Preview>,
+    mut roots: Query<&mut Visibility, With<PanelRoot>>,
+) {
+    let v = if *state.get() == AppState::Playing && !opts.no_hud && !preview.active { Visibility::Inherited } else { Visibility::Hidden };
     for mut vis in &mut roots {
         if *vis != v {
             *vis = v;
