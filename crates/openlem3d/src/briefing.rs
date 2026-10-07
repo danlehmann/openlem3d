@@ -28,7 +28,15 @@ impl Plugin for BriefingPlugin {
         app.init_resource::<Preview>()
             .add_systems(Update, (spawn_briefing, briefing_input).chain().run_if(in_state(AppState::Briefing)))
             .add_systems(OnExit(AppState::Briefing), despawn_briefing)
-            .add_systems(Update, preview.before(crate::camera_controls).run_if(in_state(AppState::Playing)));
+            .add_systems(Update, preview.before(crate::camera_controls).run_if(in_state(AppState::Playing)))
+            .add_systems(
+                Update,
+                end_demo
+                    .before(crate::menu::back_to_menu)
+                    .before(crate::hud::take_over)
+                    .before(crate::lemming_cam::toggle_keys)
+                    .run_if(in_state(AppState::Playing)),
+            );
     }
 }
 
@@ -125,7 +133,7 @@ fn spawn_briefing(
     text(&mut commands, &(current.number + 1).to_string(), 158.0, TOP_Y, true);
     text(&mut commands, level.title.trim(), 169.0, TOP_Y, false);
     text(&mut commands, "Continue", 61.0, LABEL_Y, false);
-    text(&mut commands, "Preview", 342.0, LABEL_Y, false);
+    text(&mut commands, if has_demo(current.number) { "Demo" } else { "Preview" }, 342.0, LABEL_Y, false);
     text(&mut commands, "Menu", 561.0, LABEL_Y, false);
     // Clicking or tapping a prompt picks it; anywhere else continues.
     for (choice, x, w) in [(Choice::Preview, 268.0, 150.0), (Choice::Menu, 522.0, 110.0)] {
@@ -147,6 +155,7 @@ fn despawn_briefing(mut commands: Commands, roots: Query<Entity, With<BriefingRo
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn briefing_input(
     choices: Query<(&Interaction, &Choice)>,
     keys: Res<ButtonInput<KeyCode>>,
@@ -154,6 +163,8 @@ fn briefing_input(
     touches: Res<Touches>,
     mut preview: ResMut<Preview>,
     current: Res<CurrentLevel>,
+    mut data: ResMut<Data>,
+    mut game: ResMut<Game>,
     mut next: ResMut<NextState<AppState>>,
 ) {
     let on = |c: Choice| choices.iter().any(|(i, k)| *i == Interaction::Pressed && *k == c);
@@ -166,6 +177,11 @@ fn briefing_input(
         || keys.get_just_pressed().any(|k| !matches!(k, KeyCode::Escape | KeyCode::Enter | KeyCode::NumpadEnter));
     if back {
         next.set(crate::menu::level_menu(current.number));
+    } else if show && has_demo(current.number) {
+        let n = current.number;
+        let log = data.0.level(n).ok().zip(data.0.blocks(n).ok()).and_then(|(level, blocks)| l3d_sim::demos::demo(n, &level, &blocks));
+        game.replay = log.map(crate::Replay::demo);
+        next.set(AppState::Playing);
     } else if show {
         preview.active = true;
         preview.started = false;
@@ -226,4 +242,31 @@ fn preview(
     view.pos = centre + offset + Vec3::Y * ORBIT_HEIGHT;
     // Yaw convention: forward = (−cos yaw, 0, −sin yaw).
     view.yaw = state.angle;
+}
+
+/// Practice levels offer a demo (as the original's "Enter = Demo") instead
+/// of the preview.
+fn has_demo(level: u32) -> bool {
+    level >= crate::menu::PRACTICE as u32 * crate::menu::LEVELS_PER_RATING && l3d_sim::demos::solution(level).is_some()
+}
+
+/// Any key, click or tap ends a demo, back to the briefing.
+fn end_demo(
+    mut keys: ResMut<ButtonInput<KeyCode>>,
+    mut mouse: ResMut<ButtonInput<MouseButton>>,
+    touches: Res<Touches>,
+    mut game: ResMut<Game>,
+    mut current: ResMut<CurrentLevel>,
+    mut next: ResMut<NextState<AppState>>,
+) {
+    if !game.replay.as_ref().is_some_and(|r| r.demo) {
+        return;
+    }
+    if keys.get_just_pressed().next().is_some() || mouse.get_just_pressed().next().is_some() || touches.any_just_released() {
+        keys.clear();
+        mouse.clear();
+        game.replay = None;
+        current.loaded = None;
+        next.set(AppState::Briefing);
+    }
 }

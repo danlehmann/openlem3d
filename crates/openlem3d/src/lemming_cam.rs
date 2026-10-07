@@ -93,7 +93,7 @@ const EYE_HEIGHT: f32 = 0.65;
 /// How quickly the camera catches up with the lemming (per second).
 const FOLLOW_RATE: f32 = 10.0;
 
-fn toggle_keys(mut keys: ResMut<ButtonInput<KeyCode>>, mut cam: ResMut<LemmingCam>, mut views: Query<&mut ViewCamera>) {
+pub(crate) fn toggle_keys(mut keys: ResMut<ButtonInput<KeyCode>>, mut cam: ResMut<LemmingCam>, mut views: Query<&mut ViewCamera>) {
     let Ok(mut view) = views.single_mut() else { return };
     let presets = [KeyCode::Digit1, KeyCode::Digit2, KeyCode::Digit3, KeyCode::Digit4];
     if keys.just_pressed(KeyCode::KeyV) || keys.just_pressed(KeyCode::KeyI) {

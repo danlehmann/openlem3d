@@ -4,7 +4,9 @@
 use std::path::{Path, PathBuf};
 
 use l3d_formats::gamedata::{DATA_ENV, GameData};
-use l3d_sim::{Simulation, Skill, TICKS_PER_SECOND};
+use l3d_formats::blk::BlockSet;
+use l3d_formats::level::Level;
+use l3d_sim::{Command, Simulation, TICKS_PER_SECOND, demos};
 
 fn data_dir() -> Option<PathBuf> {
     let dir = std::env::var_os(DATA_ENV)
@@ -41,41 +43,8 @@ fn all_levels_run_deterministically() {
     }
 }
 
-/// A Practice solution: `(tick, lemming, skill, turner side)` assignments,
-/// or one skill for every lemming as it appears.
-enum Plan {
-    At(&'static [(u64, usize, u8, Option<bool>)]),
-    Each(u8),
-}
-
-/// Solutions found in our simulation for each Practice level (and Fun 1),
-/// with the number they save. Turner sides: `Some(true)` clockwise.
-const SOLUTIONS: &[(u32, Plan, u32)] = &[
-    (80, Plan::At(&[(140, 0, 0, None)]), 0),
-    (81, Plan::At(&[(175, 0, 1, Some(true))]), 0),
-    (82, Plan::At(&[(125, 0, 2, None)]), 0),
-    (83, Plan::At(&[(185, 0, 3, None)]), 0),
-    (84, Plan::At(&[(235, 0, 4, None)]), 0),
-    (85, Plan::At(&[(150, 0, 5, None)]), 0),
-    (86, Plan::At(&[(100, 0, 6, None)]), 0),
-    (87, Plan::Each(7), 0),
-    (88, Plan::Each(8), 0),
-    (89, Plan::At(&[(66, 0, 4, None)]), 0),
-    (90, Plan::At(&[(410, 0, 1, Some(true))]), 0),
-    (91, Plan::At(&[(570, 0, 4, None)]), 0),
-    (92, Plan::At(&[(100, 0, 3, None), (277, 0, 3, None)]), 0),
-    (93, Plan::At(&[(122, 0, 4, None)]), 0),
-    (94, Plan::At(&[(190, 0, 1, Some(false))]), 0),
-    (95, Plan::At(&[(245, 0, 1, Some(true))]), 0),
-    (96, Plan::At(&[(200, 0, 1, Some(false))]), 0),
-    (97, Plan::At(&[(170, 0, 0, None)]), 0),
-    (98, Plan::At(&[(343, 1, 1, Some(false))]), 18),
-    (99, Plan::At(&[(1040, 0, 4, None)]), 0),
-    (0, Plan::At(&[(1943, 0, 1, Some(false))]), 0),
-];
-
-/// Every Practice level (and Fun 1) is solvable: guards the mechanics the
-/// solutions rely on. A save count of 0 means "at least the requirement".
+/// Every Practice level (and Fun 1) is solvable, and each solution's
+/// command log replays to the same result (the demos play these logs).
 #[test]
 fn practice_solutions_still_work() {
     let Some(dir) = data_dir() else {
@@ -84,39 +53,35 @@ fn practice_solutions_still_work() {
     };
     let mut data = GameData::open(&dir).expect("open game data");
     let mut failures = Vec::new();
-    for (n, plan, expect) in SOLUTIONS {
-        let level = data.level(*n).expect("level");
-        let blocks = data.blocks(*n).expect("blocks");
-        let mut sim = Simulation::new(&level, &blocks);
-        while !sim.finished() {
-            sim.step();
-            match plan {
-                Plan::At(steps) => {
-                    for &(t, i, s, side) in *steps {
-                        if t != sim.tick {
-                            continue;
-                        }
-                        let ok = match (side, sim.lemmings.get(i).map(|l| l.dir)) {
-                            (Some(cw), Some(d)) => sim.assign_turner(i, if cw { d.clockwise() } else { d.anticlockwise() }),
-                            _ => sim.assign(i, Skill::from_id(s).expect("skill")),
-                        };
-                        assert!(ok, "LEVEL.{n:03}: assignment at tick {t} rejected");
-                    }
-                }
-                Plan::Each(s) => {
-                    let skill = Skill::from_id(*s).expect("skill");
-                    for i in 0..sim.lemmings.len() {
-                        sim.assign(i, skill);
-                    }
-                }
-            }
+    for s in demos::SOLUTIONS {
+        let level = data.level(s.level).expect("level");
+        let blocks = data.blocks(s.level).expect("blocks");
+        let played = demos::play(s, &level, &blocks);
+        let need = if s.saves > 0 { s.saves } else { level.save_requirement as u32 };
+        if played.counts.saved < need {
+            failures.push(format!("LEVEL.{:03} saved {} of {need}", s.level, played.counts.saved));
         }
-        let need = if *expect > 0 { *expect } else { level.save_requirement as u32 };
-        if sim.counts.saved < need {
-            failures.push(format!("LEVEL.{n:03} saved {} of {need}", sim.counts.saved));
+        let replayed = replay(&level, &blocks, &played.log, played.tick);
+        if replayed.counts != played.counts {
+            failures.push(format!("LEVEL.{:03}: replay differs", s.level));
         }
     }
     assert!(failures.is_empty(), "{}", failures.join("; "));
+}
+
+/// Runs a fresh simulation for `ticks`, applying `log`'s commands before
+/// the step after the tick each was given on.
+fn replay(level: &Level, blocks: &BlockSet, log: &[(u64, Command)], ticks: u64) -> Simulation {
+    let mut sim = Simulation::new(level, blocks);
+    let mut next = 0;
+    while sim.tick < ticks {
+        while let Some(&(t, c)) = log.get(next).filter(|(t, _)| *t <= sim.tick) {
+            assert!(sim.apply(c), "command at tick {t} rejected on replay");
+            next += 1;
+        }
+        sim.step();
+    }
+    sim
 }
 
 /// Replaying a game's command log from the start reproduces it exactly.
@@ -139,15 +104,7 @@ fn replaying_the_log_reproduces_the_game() {
         }
     }
     assert_eq!(played.log.len(), 3);
-    let mut replayed = Simulation::new(&level, &blocks);
-    let mut next = 0;
-    while replayed.tick < played.tick {
-        replayed.step();
-        while let Some(&(t, c)) = played.log.get(next).filter(|(t, _)| *t == replayed.tick) {
-            assert!(replayed.apply(c), "command at tick {t} rejected on replay");
-            next += 1;
-        }
-    }
+    let replayed = replay(&level, &blocks, &played.log, played.tick);
     assert_eq!(replayed.log, played.log);
     assert_eq!((replayed.counts, fingerprint(&replayed)), (played.counts, fingerprint(&played)));
 }

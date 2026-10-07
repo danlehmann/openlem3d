@@ -4,6 +4,7 @@
 //! Behaviour constants are provisional until measured against the original
 //! game; see `docs/spec/behaviour.md`.
 
+pub mod demos;
 pub mod objects;
 pub mod world;
 

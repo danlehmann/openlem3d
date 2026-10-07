@@ -513,6 +513,14 @@ consistent with thirds of a 308×168 view (estimated). Over a lemming the
 pointer becomes a bracket (cell 8, from the navigation document; not
 re-measured: no lemming was under the pointer in these runs).
 
+**Demos.** Practice briefings offer "Enter = Demo" (verified), which plays a
+recorded solution with "Demo" at the bottom left; it ends with a nuke and
+returns to the briefing (observed). The original's recordings
+(`REPLAYS/REPLAY.080`–`099`) are its own input and can't drive our
+simulation, so our demos replay solutions found in it
+(`l3d_sim::demos`), end when the level does, and any key or click returns
+to the briefing.
+
 **Caption.** Hovering over a lemming names its state in large lettering at
 the bottom left ("Walker", "Sliding"; verified, from the navigation
 document; the other names and the position, above the arrow and face at

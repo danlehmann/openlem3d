@@ -347,11 +347,18 @@ pub struct Replay {
     /// The length of the simulation's own log after the last command
     /// applied; anything beyond it is the player acting.
     logged: usize,
+    /// A Practice demo rather than the player's own attempt: any input ends
+    /// it, back to the briefing.
+    pub demo: bool,
 }
 
 impl Replay {
     pub fn new(log: Vec<(u64, l3d_sim::Command)>) -> Self {
-        Replay { log, next: 0, logged: 0 }
+        Replay { log, next: 0, logged: 0, demo: false }
+    }
+
+    pub fn demo(log: Vec<(u64, l3d_sim::Command)>) -> Self {
+        Replay { demo: true, ..Replay::new(log) }
     }
 
     /// Applies the commands due before the simulation's next step. Returns

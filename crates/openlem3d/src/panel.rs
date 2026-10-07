@@ -575,7 +575,9 @@ fn caption(
 ) {
     let Some(font) = art.as_ref().and_then(|a| a.large.as_ref()) else { return };
     let Ok((entity, mut shown)) = captions.single_mut() else { return };
-    let text = if game.replay.is_some() {
+    let text = if game.replay.as_ref().is_some_and(|r| r.demo) {
+        "Demo"
+    } else if game.replay.is_some() {
         if ((time.elapsed_secs() / REPLAY_BLINK) as u32).is_multiple_of(2) { "Replaying" } else { "Click to Play" }
     } else {
         (|| {

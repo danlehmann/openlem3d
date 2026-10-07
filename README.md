@@ -61,7 +61,7 @@ See `docs/spec/` for what has been verified and how.
 | Nuke | Alt+Q, or click the bomb | tap the bomb |
 | Mute music and sounds | M | — |
 | Options | F12 (also during a level, which waits) or the Options button on the title | tap Options |
-| Briefing | click or Space: play; Enter or click Preview: preview; right click, Esc or click Menu: back | tap to play, or tap Preview or Menu |
+| Briefing | click or Space: play; Enter or click Preview: preview (on Practice levels: Demo, a solution played for you; any key or click returns); right click, Esc or click Menu: back | tap to play, or tap Preview/Demo or Menu |
 | Results | click, Space or Enter: next level (or retry); right click or Esc: level list | tap; or tap Menu |
 | Level list | click a level; wheel, ↑/↓ or Page Up/Down to scroll; ←/→ change rating; Esc: title | tap a level; drag to scroll |
 | Replay your attempt | Esc restarts the level and replays what you did ("Replaying"); click to take over ("Click to Play") | tap to take over |

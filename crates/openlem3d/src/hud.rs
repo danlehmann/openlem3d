@@ -64,7 +64,7 @@ fn skill_keys(keys: Res<ButtonInput<KeyCode>>, mut selected: ResMut<SelectedSkil
 
 /// During a replay, a click or tap on the view hands control back to the
 /// player ("Click to Play"); the click itself does nothing else.
-fn take_over(
+pub(crate) fn take_over(
     mut mouse: ResMut<ButtonInput<MouseButton>>,
     touches: Res<Touches>,
     ui: Query<&Interaction>,

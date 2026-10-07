@@ -45,7 +45,7 @@ const LEVELS: u32 = 100;
 fn level_over(
     mut commands: Commands,
     game: Res<Game>,
-    current: Res<CurrentLevel>,
+    mut current: ResMut<CurrentLevel>,
     mut next: ResMut<NextState<AppState>>,
     mut sfx: MessageWriter<crate::sfx::Sfx>,
     mut settings: ResMut<crate::settings::Settings>,
@@ -53,6 +53,12 @@ fn level_over(
     let Some(sim) = &game.sim else { return };
     // Until the chosen level has loaded, the simulation is the last one's.
     if current.loaded != Some(current.number) || !sim.finished() || game.terrain.is_none() {
+        return;
+    }
+    // A demo ends back on the briefing, unrecorded.
+    if game.replay.as_ref().is_some_and(|r| r.demo) {
+        current.loaded = None;
+        next.set(AppState::Briefing);
         return;
     }
     let outcome = Outcome { level: current.number, saved: sim.counts.saved, total: sim.to_release.max(1), needed: game.save_requirement };

@@ -29,7 +29,7 @@ pub enum AppState {
 /// The difficulty ratings in file order; level `n` (1-based) of rating `r`
 /// is `LEVEL.(20·r + n − 1)`.
 pub const RATINGS: [&str; 5] = ["Fun", "Tricky", "Taxing", "Mayhem", "Practice"];
-const LEVELS_PER_RATING: u32 = 20;
+pub const LEVELS_PER_RATING: u32 = 20;
 /// The Practice rating's index in [`RATINGS`].
 pub const PRACTICE: usize = 4;
 
