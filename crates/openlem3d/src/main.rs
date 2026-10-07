@@ -735,6 +735,8 @@ fn key_code(name: &str) -> Option<KeyCode> {
         "Escape" => KeyCode::Escape,
         "Enter" => KeyCode::Enter,
         "Space" => KeyCode::Space,
+        "ArrowUp" => KeyCode::ArrowUp,
+        "ArrowDown" => KeyCode::ArrowDown,
         "F1" => KeyCode::F1,
         "F2" => KeyCode::F2,
         "F12" => KeyCode::F12,

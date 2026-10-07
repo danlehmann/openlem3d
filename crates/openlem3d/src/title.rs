@@ -195,8 +195,10 @@ fn load_art(mut commands: Commands, mut data: ResMut<Data>, mut images: ResMut<A
     commands.insert_resource(Art { backdrop, logo, buttons, faces, ratings, rating_labels, winder, banner, large, letters });
 }
 
-/// The rating label's box is at least wide enough to cover x 213–231.
-const LABEL_MIN_WIDTH: usize = 19;
+/// The rating label's box: every label is drawn this wide, black with its
+/// name centred, so it covers the "PRACTICE" printed in the card's own
+/// box (x 207–239) whatever the rating.
+const LABEL_WIDTH: usize = 33;
 
 /// Our own 3×5 capitals for the rating label (the original's lettering is
 /// drawn by the program, not stored in the data files). One string per
@@ -230,7 +232,7 @@ fn letter_rows(c: char) -> [&'static str; 5] {
 /// 214–230) under short names.
 fn rating_label(name: &str) -> IndexedImage {
     let n = name.chars().count();
-    let (w, h) = ((4 * n + 1).max(LABEL_MIN_WIDTH), 7);
+    let (w, h) = ((4 * n + 1).max(LABEL_WIDTH), 7);
     let pad = (w - (4 * n + 1)) / 2;
     let mut pixels = vec![0u8; w * h];
     // Index 0 is black and drawn opaque here.
@@ -506,7 +508,7 @@ fn show_rating(
                 node.image = h.clone();
             }
             // Text rows y 179–183; "PRACTICE" spans x 208–238 (measured).
-            let left = if size.x as usize > LABEL_MIN_WIDTH { 223.0 - (size.x / 2.0).floor() } else { 213.0 };
+            let left = 223.0 - (size.x / 2.0).floor();
             *a = at(left, 178.0, size.x, size.y);
         }
     }
