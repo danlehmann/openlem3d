@@ -551,7 +551,7 @@ fn lemming_atlas(data: &mut GameData, pal: &Palette, traps: Option<&[u8]>, door:
             put_sized(BOMBNUMB_ATLAS_FIRST + k as u32, &d.pixels, d.width as u32);
         }
     }
-    for (k, f) in door.chunks_exact(64 * 64).take(DOOR_FRAMES as usize).enumerate() {
+    for (k, f) in door.as_chunks::<{ 64 * 64 }>().0.iter().take(DOOR_FRAMES as usize).enumerate() {
         put_sized(DOOR_ATLAS_FIRST + k as u32, f, 64);
     }
     Ok(indexed_to_rgba(&pixels, w, pal))
