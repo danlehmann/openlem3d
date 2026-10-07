@@ -43,7 +43,8 @@ jobs:
           key: ${{ matrix.target }}
 
       - name: Test
-        run: cargo test --workspace --target ${{ matrix.target }}
+        # In release, so the tests share the release build's compiled crates.
+        run: cargo test --workspace --release --target ${{ matrix.target }}
 
       - name: Build
         run: cargo build --release --target ${{ matrix.target }} -p openlem3d -p l3d-tool
