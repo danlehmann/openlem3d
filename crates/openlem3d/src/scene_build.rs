@@ -128,7 +128,7 @@ impl LayerBuilder {
     /// Adds a fixed quad with corners bottom-left, bottom-right, top-right,
     /// top-left as seen from its front, showing texel rectangle `rect`
     /// (`[x, y, w, h]`) of a texture of `tex_size`.
-    fn quad(&mut self, corners: [[f32; 3]; 4], rect: [f32; 4], tex_size: [f32; 2], brightness: f32) {
+    pub fn quad(&mut self, corners: [[f32; 3]; 4], rect: [f32; 4], tex_size: [f32; 2], brightness: f32) {
         let [x, y, w, h] = rect;
         let (u0, u1) = (x / tex_size[0], (x + w) / tex_size[0]);
         let (v0, v1) = (y / tex_size[1], (y + h) / tex_size[1]);

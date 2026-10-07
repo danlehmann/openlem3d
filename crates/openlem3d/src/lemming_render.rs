@@ -220,9 +220,24 @@ fn objects(b: &mut LayerBuilder, sim: &Simulation, tex: [f32; 2]) {
         // Progress through the busy time, 0 → frames − 1.
         let step = |frames: u32| ((l3d_sim::TRAP_BUSY_TICKS - o.busy) * frames / l3d_sim::TRAP_BUSY_TICKS).min(frames - 1);
         let frame = match kind {
-            // Trampolines are pads in the static scene; rope-slide ends are not
-            // drawn at all ([L3DEdit]).
-            ObjectKind::Trampoline | ObjectKind::RopeSlide => continue,
+            // Trampolines are pads in the static scene; one a lemming has just
+            // touched plays its dip (frames 1–3 of its colour) on top, flat
+            // just above the static pad. Rope-slide ends are not drawn at
+            // all ([L3DEdit]).
+            ObjectKind::Trampoline => {
+                if o.busy > 0 {
+                    let colour = if o.value >= 0x64 { 4 } else { 0 };
+                    let cell = TRAP_ATLAS_FIRST + colour + (l3d_sim::PAD_BUSY_TICKS - o.busy + 1).min(3);
+                    let (cx, cy) = ((cell % ATLAS_COLUMNS) * LEMMING_CELL, (cell / ATLAS_COLUMNS) * LEMMING_CELL);
+                    let y = o.surface as f32 / SUB as f32 + 0.008;
+                    let (x0, z0) = (o.cell[0] as f32, o.cell[2] as f32);
+                    let (x1, z1) = (x0 + 1.0, z0 + 1.0);
+                    let s = TRAP_FRAME as f32;
+                    b.quad([[x0, y, z1], [x1, y, z1], [x1, y, z0], [x0, y, z0]], [cx as f32, cy as f32, s, s], tex, 1.0);
+                }
+                continue;
+            }
+            ObjectKind::RopeSlide => continue,
             ObjectKind::BearTrap | ObjectKind::Squasher => if firing { 1 + step(last) } else { 0 },
             ObjectKind::WeirdTrap => if firing { step(TRAP_ATLAS_CELLS) } else { last },
             ObjectKind::FlameBlower | ObjectKind::Laser if !firing => continue,

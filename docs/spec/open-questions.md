@@ -6,7 +6,7 @@ Each names where it shows up, so a run can go straight there.
 
 ## Mechanics
 
-- **Trampoline bounces beyond the third hop** and the strongest bounce, and whether a long drop bounces differently (Fun 1).
+- **Trampolines:** the largest hop, what blue pads do (inferred: shorten the next hop), and how a drop onto a pad picks its hop (inferred: the shortest one rising higher than the drop).
 - **Skills on sliding lemmings.** Whether a turner or blocker can be given
   to a lemming on ice (Practice "Slippery", `LEVEL.095`). We refuse them.
 - **Turned walkers.** Whether walkers turn at a turner's arm's length or on
