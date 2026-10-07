@@ -10,25 +10,45 @@ run time.
 
 ## Status
 
-Early development:
+Playable, and still being checked against the original:
 
-- **Working:** all 100 levels load and render, with blocks, sky, sea, land,
-  objects, signs, wall decorations and traps. Lemmings walk, fall, climb,
-  float, block, dig and explode. There's a level-select screen, a skill
-  bar, level timers, nuke, and CD music.
-- **Not yet done:** builder, basher and miner. Lemming sprites don't use
-  the correct frames for their direction yet. Behaviour timings are still
-  being measured against the original.
+- **Working:** all 100 levels and the 20 Practice levels, with every skill
+  and every trap, trampolines, teleporters, springs, rope slides and
+  slippery blocks. There are the original's title, code, options, level
+  list, briefing and results screens, level codes, Practice demos, replays
+  of your own attempts, the lemming view, the minimap, sound effects and CD
+  music.
+- **Still provisional:** some behaviour that couldn't yet be measured in
+  the original; `docs/spec/open-questions.md` lists it.
 
 See `docs/spec/` for what has been verified and how.
+
+## Game data
+
+openlem3d needs an image of the original *Lemmings 3D* CD (the DOS
+release). It reads everything from the image at run time, including the
+music from the CD's audio tracks, so nothing needs installing or
+extracting.
+
+- **Format:** a `.cue` sheet with the `.bin` file(s) it names. Rip your own
+  disc with any tool that writes BIN/CUE with audio tracks, for example
+  ImgBurn ("Create image file from disc") on Windows or `cdrdao` on Linux.
+  Data tracks may be `MODE1/2352`, `MODE1/2048` or `MODE2/2352`. A plain
+  `.iso` holds no music; it works with a hand-written `.cue` naming it as
+  a `MODE1/2048` track.
+- **Where:** put the `.cue` and its `.bin` file(s) into a `gamedata/`
+  folder in the directory you run the game from; with `cargo run` that is
+  the top of the repository. File names don't matter, but the folder must
+  contain exactly one `.cue`.
+  Alternatively, pass `--data DIR` or set the `OPENLEM3D_DATA` environment
+  variable to a directory holding them.
+- `gamedata/` is git-ignored. Never commit game data, extracted files or
+  screenshots of the original (see `docs/GROUNDRULES.md`).
 
 ## Getting started
 
 1. **Install Rust** (latest stable): <https://rustup.rs>.
-2. **Put the CD image in `gamedata/`:** copy your *Lemmings 3D* image, a
-   `.cue` file plus its `.bin`, into `gamedata/` at the top of the
-   repository. The file names don't matter. Alternatively, pass
-   `--data DIR` or set `OPENLEM3D_DATA`.
+2. **Add the game data** as described above.
 3. **Run:**
 
    ```
