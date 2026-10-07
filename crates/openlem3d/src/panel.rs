@@ -415,7 +415,9 @@ fn animate(
         let image = match *anim {
             Animated::Skill(s) => {
                 let cells = SKILL_BUTTONS[s as usize].1;
-                let frame = if selected.0 == Some(s) { (t * SKILL_FPS / 4.0) as usize % cells.len() } else { 0 };
+                // The selected skill animates while any are left.
+                let left = game.sim.as_ref().is_some_and(|sim| sim.skills_left[s as usize] > 0);
+                let frame = if selected.0 == Some(s) && left { (t * SKILL_FPS / 4.0) as usize % cells.len() } else { 0 };
                 art.skills[cells[frame]].clone()
             }
             Animated::FastForward => art.panel[if game.fast_forward { icon::FAST_FORWARD } else { icon::PLAY }].clone(),
