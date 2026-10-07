@@ -251,7 +251,20 @@ pub enum State {
     /// `to` (feet positions) over `ticks` ticks, rising `peak`
     /// sub-units above the straight line at mid-flight.
     Flying { from: [i32; 3], to: [i32; 3], ticks: u32, peak: i32 },
+    /// Standing on a teleporter pad, vanishing, away, and reappearing on
+    /// the partner pad `to` (feet position); see [`TELEPORT_TICKS`].
+    Teleporting { to: [i32; 3] },
 }
+
+/// Teleporting, in ticks from stopping on the pad centre (observed in the
+/// original's Practice "Teleporter" demo, about 2 s in all): stands, is
+/// squeezed to nothing, is away while sparkles show at both pads, stretches
+/// out again on the partner, stands, and walks on.
+pub const TELEPORT_STAND: u32 = 4;
+pub const TELEPORT_VANISH: u32 = 3;
+pub const TELEPORT_AWAY: u32 = 12;
+pub const TELEPORT_APPEAR: u32 = 4;
+pub const TELEPORT_TICKS: u32 = 2 * TELEPORT_STAND + TELEPORT_VANISH + TELEPORT_AWAY + TELEPORT_APPEAR;
 
 impl State {
     /// Whether the lemming is finished and only playing a last animation.
@@ -697,6 +710,15 @@ impl Simulation {
             State::Mining => self.mine(l),
             // The lemming first hangs on the handle for a moment (observed).
             State::OnRope { .. } if l.state_ticks <= ROPE_GRAB_TICKS => {}
+            State::Teleporting { to } => {
+                if l.state_ticks == TELEPORT_STAND + TELEPORT_VANISH + TELEPORT_AWAY {
+                    l.pos = to;
+                    l.teleported = true;
+                }
+                if l.state_ticks >= TELEPORT_TICKS {
+                    l.set_state(State::Walking);
+                }
+            }
             State::OnRope { to } => {
                 let d = [0, 1, 2].map(|i| to[i] - l.pos[i]);
                 let len = ((d[0] as i64).pow(2) + (d[1] as i64).pow(2) + (d[2] as i64).pow(2)).isqrt() as i32;
@@ -752,9 +774,10 @@ impl Simulation {
         }
     }
 
-    /// Teleporters: a walker stepping onto one appears on its partner (the
-    /// other object with the same value; with more, the last two pair up
-    /// [L3DEdit]) and walks on in the same direction (provisional: instant).
+    /// Teleporters: a walker reaching the centre of one stops there and,
+    /// after [`TELEPORT_TICKS`], walks on in the same direction from its
+    /// partner (the other object with the same value; with more, the last
+    /// two pair up [L3DEdit]).
     fn teleport(&mut self, l: &mut Lemming) {
         if self.object_kind != Some(objects::ObjectKind::Teleporter) || !matches!(l.state, State::Walking | State::Sliding) {
             return;
@@ -774,9 +797,17 @@ impl Simulation {
             h if h == b => a,
             _ => return,
         };
+        // Wait for the centre of the pad.
+        let pad = self.objects[here];
+        let centre = [pad.cell[0] * SUB + SUB / 2, pad.cell[2] * SUB + SUB / 2];
+        let d = l.dir.delta();
+        if (centre[0] - l.pos[0]) * d[0] + (centre[1] - l.pos[2]) * d[2] > 0 {
+            return;
+        }
+        l.pos[0] = centre[0];
+        l.pos[2] = centre[1];
         let o = self.objects[to];
-        l.pos = [o.cell[0] * SUB + SUB / 2, o.surface, o.cell[2] * SUB + SUB / 2];
-        l.teleported = true;
+        l.set_state(State::Teleporting { to: [o.cell[0] * SUB + SUB / 2, o.surface, o.cell[2] * SUB + SUB / 2] });
     }
 
     /// Rope slides: a lemming reaching a sender (an even value) rides to its

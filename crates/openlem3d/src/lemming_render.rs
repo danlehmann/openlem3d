@@ -176,6 +176,8 @@ fn anim_for(state: State) -> Anim {
         State::Splatting => once(429, 3, Five),
         State::Zapped | State::Trapped => anim(514, 2, Five),
         State::Climbing => anim(538, 5, Five),
+        // Standing on the pad facing the camera (observed); see `build`.
+        State::Teleporting { .. } => once(0, 1, One),
     }
 }
 
@@ -236,6 +238,22 @@ fn objects(b: &mut LayerBuilder, sim: &Simulation, tex: [f32; 2]) {
     }
 }
 
+/// How wide a teleporting lemming is drawn, `state_ticks` into it.
+fn teleport_width(t: u32) -> f32 {
+    use l3d_sim::{TELEPORT_APPEAR as APPEAR, TELEPORT_AWAY as AWAY, TELEPORT_STAND as STAND, TELEPORT_VANISH as VANISH};
+    if t < STAND {
+        1.0
+    } else if t < STAND + VANISH {
+        1.0 - (t - STAND + 1) as f32 / (VANISH + 1) as f32
+    } else if t < STAND + VANISH + AWAY {
+        0.0
+    } else if t < STAND + VANISH + AWAY + APPEAR {
+        (t - STAND - VANISH - AWAY + 1) as f32 / (APPEAR + 1) as f32
+    } else {
+        1.0
+    }
+}
+
 /// Builds this frame's lemming sprites for a camera facing `camera_yaw`.
 pub fn build(sim: &Simulation, atlas_rows: u32, camera_yaw: f32) -> SceneSprites {
     let lemmings = &sim.lemmings;
@@ -276,7 +294,16 @@ pub fn build(sim: &Simulation, atlas_rows: u32, camera_yaw: f32) -> SceneSprites
         let size = LEMMING_CELL as f32;
         let rect = if mirror { [cx as f32 + size, cy as f32, -size, size] } else { [cx as f32, cy as f32, size, size] };
         let anchor = l.pos.map(|v| v as f32 / SUB as f32);
-        b.sprite_scaled(anchor, rect, tex, 1, 0.0, LEMMING_TEXELS_PER_UNIT);
+        // Teleporting: squeezed to a sliver, away, then stretched out again
+        // (observed).
+        let width = match l.state {
+            State::Teleporting { .. } => teleport_width(l.state_ticks),
+            _ => 1.0,
+        };
+        if width <= 0.0 {
+            continue;
+        }
+        b.sprite_squeezed(anchor, rect, tex, 1, 0.0, LEMMING_TEXELS_PER_UNIT, width);
         // The bomber's countdown, 5…1, over its head (`BOMBNUMB` digits).
         if let Some(fuse) = l.fuse.filter(|_| !l.state.is_terminal()) {
             let digit = 5u32.saturating_sub((l3d_sim::FUSE_TICKS - fuse) / l3d_sim::FUSE_DIGIT_TICKS);

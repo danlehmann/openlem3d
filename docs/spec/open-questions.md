@@ -10,7 +10,6 @@ Each names where it shows up, so a run can go straight there.
 - **Skills on sliding lemmings.** Whether a turner or blocker can be given
   to a lemming on ice (Practice "Slippery", `LEVEL.095`). We refuse them.
 - **Splitter.** Whether the very first lemming goes right (the first one seen did).
-- **Teleporter.** The delay (Practice "Teleporter", `LEVEL.099`).
 - **Turned walkers.** Whether walkers turn at a turner's arm's length or on
   its line (we use its line; Practice "Claustrophobic" needs that).
 - **Hanging deflectors.** "Team Work" (`LEVEL.051`) has a deflector hanging
