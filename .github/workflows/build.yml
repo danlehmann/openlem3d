@@ -1,0 +1,79 @@
+# Builds openlem3d for Windows on x86-64 and ARM64, runs the tests (those
+# that need the game's CD image skip themselves), and uploads each build as
+# an artifact. Pushing a tag `v*` also attaches the zips to a GitHub release.
+
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  windows:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: windows-latest
+            target: x86_64-pc-windows-msvc
+          - arch: arm64
+            runner: windows-11-arm
+            target: aarch64-pc-windows-msvc
+    name: windows-${{ matrix.arch }}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Test
+        run: cargo test --workspace --target ${{ matrix.target }}
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }} -p openlem3d -p l3d-tool
+
+      - name: Package
+        shell: pwsh
+        run: |
+          $dir = "openlem3d-windows-${{ matrix.arch }}"
+          New-Item -ItemType Directory $dir | Out-Null
+          Copy-Item target/${{ matrix.target }}/release/openlem3d.exe, target/${{ matrix.target }}/release/l3d-tool.exe, README.md, LICENSE $dir
+          New-Item -ItemType Directory "$dir/gamedata" | Out-Null
+          Set-Content "$dir/gamedata/PUT-YOUR-CD-IMAGE-HERE.txt" "Copy your Lemmings 3D CD image (a .cue file and its .bin) into this folder. See README.md, 'Game data'."
+          Compress-Archive -Path "$dir/*" -DestinationPath "$dir.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openlem3d-windows-${{ matrix.arch }}
+          path: openlem3d-windows-${{ matrix.arch }}.zip
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: windows
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.zip

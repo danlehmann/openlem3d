@@ -47,6 +47,14 @@ extracting.
 
 ## Getting started
 
+**Prebuilt for Windows (x86-64 and ARM64):** every push to `main` builds a
+zip, downloadable from the run's page under
+[Actions](https://github.com/danlehmann/openlem3d/actions) (you need to be
+signed in to GitHub); tagged versions are under Releases. Unpack it, put your
+CD image into its `gamedata` folder and run `openlem3d.exe`.
+
+**From source:**
+
 1. **Install Rust** (latest stable): <https://rustup.rs>.
 2. **Add the game data** as described above.
 3. **Run:**
