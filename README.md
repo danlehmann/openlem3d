@@ -104,3 +104,8 @@ extracting.
 The file-format work builds on reverse engineering published by the
 Lemmings community (Pooty, GuyPerfect, namida, ccexplore and others); see
 `docs/spec/REFERENCES.md`.
+
+## Licence
+
+openlem3d is released under the MIT licence; see `LICENSE`. It covers this
+repository's code and documentation only, not the original game or its data.
