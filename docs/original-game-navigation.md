@@ -97,7 +97,7 @@ Boot to the main menu, start the first Fun level paused, and take a
 screenshot:
 
 ```powershell
-$o = 'C:\Users\danle\source\openlem3d\tools\original'
+$o = '.\tools\original'   # from the repository root
 & $o\launch.ps1 -SkipIntro
 & $o\start-level.ps1 -Rating Fun -Paused        # menu card starts on Practice after boot
 & $o\shot.ps1 -Name fun01 -Width 640
