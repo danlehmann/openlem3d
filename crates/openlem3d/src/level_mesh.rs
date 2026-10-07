@@ -377,7 +377,10 @@ pub fn build(level: &Level, blocks: &BlockSet, art_on_top: &dyn Fn(u32) -> bool)
                     // Faces show the part of their tile matching their height;
                     // flaps show its bottom part, or the top (below) when the
                     // art is there.
-                    let ly = if is_flap(cell, p.src) { v[1] * (y1 - y0) } else { y0 + v[1] * (y1 - y0) };
+                    // A flap is upside down once open (its top edge swings out and
+                    // down), so its picture is flipped to keep the hinges at the
+                    // hinge.
+                    let ly = if is_flap(cell, p.src) { (1.0 - v[1]) * (y1 - y0) } else { y0 + v[1] * (y1 - y0) };
                     tile_uv(p.src, [v[0], ly, v[2]])
                 })
                 .collect();
@@ -450,7 +453,8 @@ pub fn build(level: &Level, blocks: &BlockSet, art_on_top: &dyn Fn(u32) -> bool)
             };
             let brightness = 1.0 - (face.shading.min(8) as f32) * 0.07;
             let transparent = face.modifiers & (modifiers::COLOR0_TRANSPARENT | modifiers::REVERSE_SIDE) != 0;
-            let double = def.flags & flags::DOUBLE_SIDED != 0 || flap;
+            // An open hatch shows the inside of its walls too.
+            let double = def.flags & flags::DOUBLE_SIDED != 0 || flap || (cell.id == 0 && cell.shape == 0);
             let target = if transparent { &mut out.cutout } else { &mut out.opaque };
             target.push_poly(&verts, &strip(front), brightness, false, anim);
             if double {
