@@ -59,6 +59,9 @@ const DIG_TICKS: u32 = 40;
 pub const BUILD_TICKS: u32 = 25;
 /// Bricks per builder (verified: 6).
 const BRICKS: u8 = 6;
+/// How long a builder out of bricks shrugs (cells 474–488, three frames;
+/// two ticks each, unmeasured).
+const SHRUG_TICKS: u32 = 6;
 /// Each brick moves the builder this far forward and ¼ unit up (verified
 /// ±10%); bricks reach from [`BRICK_START`] to [`BRICK_END`] ahead of the
 /// feet, about 0.55 unit long (measured), so consecutive bricks overlap.
@@ -247,6 +250,8 @@ pub enum State {
     Digging,
     /// Laying steps; the count is the bricks still to lay.
     Building { bricks_left: u8 },
+    /// A builder out of bricks, shrugging before it walks on.
+    Shrugging,
     /// Removing terrain straight ahead.
     Bashing,
     /// Removing terrain diagonally ahead and down.
@@ -627,7 +632,7 @@ impl Simulation {
                 State::Floating => Some(Event::UmbrellaOpened),
                 State::Bouncing { .. } => Some(Event::Bounced),
                 State::Flying { .. } => Some(Event::Catapulted),
-                State::Walking if matches!(b, State::Building { .. }) => Some(Event::BuilderDone),
+                State::Shrugging => Some(Event::BuilderDone),
                 _ => None,
             };
         }
@@ -728,6 +733,11 @@ impl Simulation {
             State::Climbing => self.climb(l),
             State::Digging => self.dig(l),
             State::Building { bricks_left } => self.build(l, bricks_left),
+            State::Shrugging => {
+                if l.state_ticks >= SHRUG_TICKS {
+                    l.set_state(State::Walking);
+                }
+            }
             State::Bashing => self.bash(l),
             State::Mining => self.mine(l),
             // The lemming first hangs on the handle for a moment (observed).
@@ -1104,7 +1114,7 @@ impl Simulation {
             return;
         }
         if bricks_left == 0 {
-            l.set_state(State::Walking);
+            l.set_state(State::Shrugging);
             return;
         }
         let d = l.dir.delta();

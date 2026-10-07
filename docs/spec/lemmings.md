@@ -101,7 +101,7 @@ else is **guessed** from the contact sheet's appearance.
 | 424–428 | Feet up, seen from above or below | 5 × 1, or 1 × 5 | Guessed. |
 | 429–443 | Lying on the back, feet up: probably splat | 5 × 3 | Guessed. |
 | 444–473 | Builder walking between bricks (sack on the back) | 5 × 6 | **Verified by eye**: the Mayhem 1 builder walked between bricks with this sack (side view, as in 450–461). |
-| 474–488 | Builder out of bricks (shrug) | 5 × 3 | Guessed. |
+| 474–488 | Builder out of bricks (shrug) | 5 × 3 | Owner recalls the builder shrugging when out of bricks; drawn for 6 ticks (unmeasured) before it walks on. |
 | 489–513 | Standing, arms out, falling over onto the back | 5 × 5 | Guessed: splat, stunned or "oh no". |
 | 514–523 | Electrocution: normal and X-ray skeleton frames alternating | 5 × 2 | Guessed (pairs 514/515 front … 522/523 back). |
 | 524–533 | Electrocution cloud (gathers, lightning, shrinks) | 1 × 10 | Guessed. View-independent. |

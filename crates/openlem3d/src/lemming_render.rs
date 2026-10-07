@@ -172,6 +172,8 @@ fn anim_for(state: State) -> Anim {
         State::OnRope { .. } => anim(296, 5, Eight),
         State::Flying { .. } | State::Bouncing { .. } => Anim { first: 399, frames: 5, angles: Five, playback: Playback::MirroredCycle(FALL_CYCLE) },
         State::Building { .. } => anim(344, 5, Five),
+        // Out of bricks: a shrug with the empty sack (cells 474–488).
+        State::Shrugging => once(474, 3, Five),
         State::Drowning => once(369, 6, Five),
         State::Splatting => once(429, 3, Five),
         State::Zapped | State::Trapped => anim(514, 2, Five),
