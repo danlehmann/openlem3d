@@ -514,7 +514,12 @@ Verified (match at 15 points, plus boundary probes). The boundaries lie at
 about x ≈ 100 and ≈ 200 and y ≈ 55 and ≈ 115 (pointer cell centre),
 consistent with thirds of a 308×168 view (estimated). Over a lemming the
 pointer becomes a bracket (cell 8, from the navigation document; not
-re-measured: no lemming was under the pointer in these runs).
+re-measured: no lemming was under the pointer in these runs). What holding a
+button there does in the original is unrecorded. Ours: holding the camera
+button (right, or left when left-handed) still over the view moves the
+camera as the arrow shows (up: forward; down: back; left and right:
+sideways; the turn arrows turn; the diagonal turns move forward while
+turning); a drag of more than 6 pixels turns the view instead.
 
 **Demos.** Practice briefings offer "Enter = Demo" (verified), which plays a
 recorded solution with "Demo" at the bottom left; it ends with a nuke and

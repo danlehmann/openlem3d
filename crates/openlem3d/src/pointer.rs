@@ -89,8 +89,7 @@ fn update(
         } else if game.sim.as_ref().and_then(|sim| crate::hud::lemming_at(sim, &camera, Vec2::new(window.width(), window.height()), p)).is_some() {
             BRACKET
         } else {
-            let col = ((p.x / window.width() * 3.0) as usize).min(2);
-            let row = ((p.y / window.height() * 3.0) as usize).min(2);
+            let [col, row] = crate::pointer_region(p, Vec2::new(window.width(), window.height()));
             GRID[row][col]
         }),
         (_, Some(_)) => Some(CROSS_HAIR),

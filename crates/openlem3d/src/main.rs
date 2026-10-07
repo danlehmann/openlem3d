@@ -32,7 +32,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use bevy::core_pipeline::tonemapping::Tonemapping;
-use bevy::input::mouse::AccumulatedMouseMotion;
+use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseScrollUnit};
 use bevy::prelude::*;
 use bevy::render::RenderPlugin;
 use bevy::render::settings::{Backends, RenderCreation, WgpuSettings};
@@ -497,7 +497,25 @@ fn camera_controls(
     game: Res<Game>,
     mut last_free: Local<Option<Vec3>>,
     mut q: Query<&mut ViewCamera>,
+    (scroll, ui, mut held_drag): (Res<AccumulatedMouseScroll>, Query<&Interaction>, Local<Option<f32>>),
 ) {
+    // Holding the camera button: a drag turns the view; held still over the
+    // view, the camera moves as the pointer's arrow shows (see `pointer`).
+    let turn_button = settings.turn_button();
+    if mouse.just_pressed(turn_button) {
+        *held_drag = (!ui.iter().any(|i| *i != Interaction::None)).then_some(0.0);
+    }
+    if !mouse.pressed(turn_button) {
+        *held_drag = None;
+    }
+    if let Some(d) = held_drag.as_mut() {
+        *d += motion.delta.length();
+    }
+    let dragging = held_drag.is_some_and(|d| d > DRAG_SLOP);
+    let region = held_drag
+        .filter(|_| !dragging)
+        .and(windows.iter().next().and_then(|w| Some((w.cursor_position()?, Vec2::new(w.width(), w.height())))))
+        .map(|(p, size)| pointer_region(p, size));
     // Riding along with a lemming: no manual movement.
     let dt = if lemming_cam.following().is_some() { 0.0 } else { time.delta_secs() };
     for mut cam in &mut q {
@@ -513,16 +531,39 @@ fn camera_controls(
         let held = |a: KeyCode, b: KeyCode| (keys.pressed(a) || keys.pressed(b)) as i32 as f32;
         let turn = held(KeyCode::KeyE, KeyCode::KeyE) - held(KeyCode::KeyQ, KeyCode::KeyQ);
         cam.yaw += turn * 1.8 * dt;
-        if mouse.pressed(settings.turn_button()) && dt > 0.0 {
+        if dragging && dt > 0.0 {
             cam.yaw += motion.delta.x * 0.005;
         }
+        // Region moves: forward, sideways and turning, from the 3×3 grid.
+        let (ahead, side, spin) = region.map_or((0.0, 0.0, 0.0), |[c, r]| match (c, r) {
+            (1, 0) => (1.0, 0.0, 0.0),
+            (1, 2) => (-1.0, 0.0, 0.0),
+            (0, 2) => (0.0, -1.0, 0.0),
+            (2, 2) => (0.0, 1.0, 0.0),
+            (0, 1) => (0.0, 0.0, -1.0),
+            (2, 1) => (0.0, 0.0, 1.0),
+            (0, 0) => (1.0, 0.0, -1.0),
+            (2, 0) => (1.0, 0.0, 1.0),
+            _ => (0.0, 0.0, 0.0),
+        });
+        cam.yaw += spin * 1.8 * dt;
         let fwd = cam.forward();
         let right = Vec3::new(-fwd.z, 0.0, fwd.x);
         let speed = if keys.pressed(KeyCode::ShiftLeft) { 16.0 } else { 6.0 } * settings.camera_factor();
         let mv = fwd * (held(KeyCode::KeyW, KeyCode::ArrowUp) - held(KeyCode::KeyS, KeyCode::ArrowDown))
             + right * (held(KeyCode::KeyD, KeyCode::ArrowRight) - held(KeyCode::KeyA, KeyCode::ArrowLeft))
-            + Vec3::Y * (held(KeyCode::KeyR, KeyCode::PageUp) - held(KeyCode::KeyF, KeyCode::PageDown));
+            + Vec3::Y * (held(KeyCode::KeyR, KeyCode::PageUp) - held(KeyCode::KeyF, KeyCode::PageDown))
+            + fwd * ahead
+            + right * side;
         cam.pos += mv * speed * dt;
+        // The wheel raises and lowers the camera.
+        if dt > 0.0 {
+            let notches = match scroll.unit {
+                MouseScrollUnit::Line => scroll.delta.y,
+                MouseScrollUnit::Pixel => scroll.delta.y / 50.0,
+            };
+            cam.pos.y += notches * WHEEL_STEP;
+        }
         // The camera can't enter blocks (unless they are marked passable for
         // it); it slides along them. Preset jumps and the lemming view are
         // exempt.
@@ -686,4 +727,15 @@ fn key_code(name: &str) -> Option<KeyCode> {
         "Digit4" => KeyCode::Digit4,
         _ => return None,
     })
+}
+
+/// Pointer travel (logical pixels) after which holding the camera button is
+/// a drag that turns the view rather than a hold that moves it.
+const DRAG_SLOP: f32 = 6.0;
+/// Camera rise per wheel notch (grid units).
+const WHEEL_STEP: f32 = 0.25;
+
+/// The cell `[column, row]` of the 3×3 grid over the view that `p` is in.
+pub fn pointer_region(p: Vec2, size: Vec2) -> [usize; 2] {
+    [((p.x / size.x * 3.0) as usize).min(2), ((p.y / size.y * 3.0) as usize).min(2)]
 }

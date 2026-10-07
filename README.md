@@ -47,9 +47,9 @@ See `docs/spec/` for what has been verified and how.
 
 | Action | Keyboard / mouse | Touch |
 |---|---|---|
-| Move | W A S D or the arrow keys | one-finger drag (up/down) |
-| Turn | Q / E, right-drag, or hold the turn arrows | one-finger drag (left/right), or hold the turn arrows |
-| Up / down | R / F | two-finger drag |
+| Move | W A S D or the arrow keys; or hold the right button still over the view: the pointer's arrow shows the way (top: forward, bottom: back, bottom corners: sideways, top corners: forward while turning); click the minimap | one-finger drag (up/down) |
+| Turn | Q / E, right-drag, hold the right button at the left or right edge, or hold the turn arrows | one-finger drag (left/right), or hold the turn arrows |
+| Up / down | R / F, or the mouse wheel | two-finger drag |
 | Preset cameras | 1–4, or click the camera to cycle | tap the camera to cycle |
 | Pause | P, or click the paws | tap the paws |
 | Fast-forward | click the ▶ icon | tap the ▶ icon |
