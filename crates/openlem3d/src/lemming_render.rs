@@ -323,6 +323,11 @@ fn sparkle_at(t: u32, from: [i32; 3], to: [i32; 3]) -> Option<[i32; 3]> {
     Some(if away < AWAY / 2 { from } else { to })
 }
 
+/// Ticks over which a lemming going into an exit shrinks away (observed:
+/// about 0.45 s), and how far it moves on meanwhile, in units.
+const EXIT_SHRINK_TICKS: u32 = 6;
+const EXIT_SHRINK_DEPTH: f32 = 0.2;
+
 /// Builds this frame's lemming sprites for a camera facing `camera_yaw`.
 pub fn build(sim: &Simulation, atlas_rows: u32, camera_yaw: f32, doors: &[Door]) -> SceneSprites {
     let lemmings = &sim.lemmings;
@@ -384,10 +389,20 @@ pub fn build(sim: &Simulation, atlas_rows: u32, camera_yaw: f32, doors: &[Door])
             }
             _ => 1.0,
         };
-        if width <= 0.0 {
+        // Exiting: shrinking into the doorway (observed), walking on into it.
+        let (scale, anchor) = match l.state {
+            State::Exiting => {
+                let s = 1.0 - (l.state_ticks + 1).min(EXIT_SHRINK_TICKS) as f32 / EXIT_SHRINK_TICKS as f32;
+                let [dx, _, dz] = l.dir.delta();
+                let ahead = (1.0 - s) * EXIT_SHRINK_DEPTH;
+                (s, [anchor[0] + dx as f32 * ahead, anchor[1], anchor[2] + dz as f32 * ahead])
+            }
+            _ => (1.0, anchor),
+        };
+        if width <= 0.0 || scale <= 0.0 {
             continue;
         }
-        b.sprite_squeezed(anchor, rect, tex, 1, 0.0, LEMMING_TEXELS_PER_UNIT, width);
+        b.sprite_squeezed(anchor, rect, tex, 1, 0.0, LEMMING_TEXELS_PER_UNIT / scale, width);
         // The bomber's countdown, 5…1, over its head (`BOMBNUMB` digits).
         if let Some(fuse) = l.fuse.filter(|_| !l.state.is_terminal()) {
             let digit = 5u32.saturating_sub((l3d_sim::FUSE_TICKS - fuse) / l3d_sim::FUSE_DIGIT_TICKS);
