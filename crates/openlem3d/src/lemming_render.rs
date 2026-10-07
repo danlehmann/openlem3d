@@ -370,8 +370,11 @@ pub fn build(sim: &Simulation, atlas_rows: u32, camera_yaw: f32, doors: &[Door],
         // A turner stands facing the walkers coming up behind it, the way it
         // came (seen in the original's "Turner" demo; drawn the other way,
         // turners showed their backs to the cameras of "Take a Dive").
+        // A blocker stands side-on, its outstretched arms pointing back the
+        // way it came and on the way it was going (owner's observation).
         let facing = match l.state {
             State::Turning { .. } => l.dir.reverse(),
+            State::Blocking => l.dir.clockwise(),
             _ => l.dir,
         };
         let view = ViewAngle::from_yaws(facing.yaw(), camera_yaw);
