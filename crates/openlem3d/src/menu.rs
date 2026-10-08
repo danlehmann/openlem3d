@@ -403,21 +403,44 @@ fn menu_input(
     }
 }
 /// Esc restarts the level as a replay of the player's actions, as in the
-/// original; Esc during a replay leaves for the menu.
+/// original (in Enhanced mode once the player confirms it); Esc during a
+/// replay leaves for the menu.
 pub(crate) fn back_to_menu(
     keys: Res<ButtonInput<KeyCode>>,
+    settings: Res<crate::settings::Settings>,
+    mut confirm: ResMut<crate::confirm::RestartConfirm>,
     mut current: ResMut<crate::CurrentLevel>,
     mut game: ResMut<crate::Game>,
     mut next: ResMut<NextState<AppState>>,
 ) {
+    let restart = |game: &mut crate::Game, current: &mut crate::CurrentLevel| {
+        if let Some(sim) = &game.sim {
+            game.replay = Some(crate::Replay::new(sim.log.clone()));
+            current.loaded = None;
+        }
+    };
+    if let Some(was_paused) = confirm.0 {
+        if keys.any_just_pressed([KeyCode::KeyY, KeyCode::Enter, KeyCode::NumpadEnter]) {
+            confirm.0 = None;
+            restart(&mut game, &mut current);
+        } else if keys.any_just_pressed([KeyCode::KeyN, KeyCode::Escape]) {
+            confirm.0 = None;
+            game.paused = was_paused;
+        } else {
+            game.paused = true;
+        }
+        return;
+    }
     if !keys.just_pressed(KeyCode::Escape) {
         return;
     }
     if game.replay.is_some() {
         next.set(level_menu(current.number));
-    } else if let Some(sim) = &game.sim {
-        game.replay = Some(crate::Replay::new(sim.log.clone()));
-        current.loaded = None;
+    } else if settings.enhanced && game.sim.is_some() {
+        confirm.0 = Some(game.paused);
+        game.paused = true;
+    } else {
+        restart(&mut game, &mut current);
     }
 }
 

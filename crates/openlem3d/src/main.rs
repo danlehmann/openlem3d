@@ -9,6 +9,7 @@
 
 mod briefing;
 mod codes;
+mod confirm;
 mod fade;
 mod hud;
 mod lemming_cam;
@@ -241,7 +242,7 @@ fn main() {
             options::OptionsPlugin,
             practice::PracticePlugin,
         ))
-        .add_plugins((fade::FadePlugin, style::StylePlugin))
+        .add_plugins((fade::FadePlugin, style::StylePlugin, confirm::ConfirmPlugin))
         .insert_resource(ClearColor(Color::srgb(0.35, 0.55, 0.85)))
         .insert_resource(opts.clone())
         .insert_resource(Data(data))
@@ -573,13 +574,17 @@ impl Replay {
 const FAST_FORWARD_TICKS: u32 = 3;
 
 /// P or Space pauses and resumes the level (not during the preview, which
-/// keeps it waiting itself).
+/// keeps it waiting itself, nor while the restart question is open).
 fn pause_keys(
     keys: Res<ButtonInput<KeyCode>>,
     preview: Res<briefing::Preview>,
+    confirm: Res<confirm::RestartConfirm>,
     mut game: ResMut<Game>,
 ) {
-    if !preview.active && keys.any_just_pressed([KeyCode::KeyP, KeyCode::Space]) {
+    if !preview.active
+        && confirm.0.is_none()
+        && keys.any_just_pressed([KeyCode::KeyP, KeyCode::Space])
+    {
         game.paused = !game.paused;
     }
 }

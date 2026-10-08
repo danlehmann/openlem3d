@@ -1,5 +1,5 @@
 //! The presentation mode: Original (the game as it was) or Enhanced (ours:
-//! smooth camera moves). A label at the top right of the
+//! smooth camera moves, a question before Esc restarts a level). A label at the top right of the
 //! title screen shows it and switches it when clicked; Tab switches it on
 //! the title and during a level, where the new mode is named briefly.
 

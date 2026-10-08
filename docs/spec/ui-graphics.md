@@ -565,7 +565,7 @@ player's actions, showing "Replaying"; a click takes over ("Click to Play")
 (verified). Whether the two messages alternate or show together is
 unrecorded; we alternate them every 1.5 s. Our replay keeps the player's
 commands (skills, turner sides, release rate, nuke) with their ticks; any
-command of the player's own also ends it.
+command of the player's own also ends it. In Enhanced mode ours first asks "Restart level? Y / N" over the paused level (Y or Return restarts, N or Esc carries on); the original asks nothing.
 
 **Video modes.** The options screen offers "Video Mode" 1 and 2 only (a
 left click toggles; a right click does nothing). Both run at 320×200 with
