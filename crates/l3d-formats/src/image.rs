@@ -13,7 +13,10 @@ pub const VGA_PALETTE_LEN: usize = 768;
 /// 0–63) to 8 bits per component.
 pub fn vga_palette(raw: &[u8]) -> Result<Palette, Error> {
     if raw.len() != VGA_PALETTE_LEN {
-        return Err(Error::Format(format!("VGA palette is {} bytes, expected {VGA_PALETTE_LEN}", raw.len())));
+        return Err(Error::Format(format!(
+            "VGA palette is {} bytes, expected {VGA_PALETTE_LEN}",
+            raw.len()
+        )));
     }
     Ok(std::array::from_fn(|i| {
         std::array::from_fn(|c| {
@@ -36,9 +39,16 @@ impl IndexedImage {
     /// Wraps `pixels`, which must hold exactly `width × height` indices.
     pub fn new(width: usize, height: usize, pixels: Vec<u8>) -> Result<Self, Error> {
         if pixels.len() != width * height {
-            return Err(Error::Format(format!("{} pixels for a {width}×{height} image", pixels.len())));
+            return Err(Error::Format(format!(
+                "{} pixels for a {width}×{height} image",
+                pixels.len()
+            )));
         }
-        Ok(IndexedImage { width, height, pixels })
+        Ok(IndexedImage {
+            width,
+            height,
+            pixels,
+        })
     }
 
     /// The palette index at (`x`, `y`).
@@ -49,9 +59,19 @@ impl IndexedImage {
     /// The `w × h` rectangle with its top-left corner at (`x`, `y`), which
     /// must lie inside the image.
     pub fn crop(&self, x: usize, y: usize, w: usize, h: usize) -> IndexedImage {
-        assert!(x + w <= self.width && y + h <= self.height, "crop outside the image");
-        let pixels = (y..y + h).flat_map(|r| &self.pixels[r * self.width + x..r * self.width + x + w]).copied().collect();
-        IndexedImage { width: w, height: h, pixels }
+        assert!(
+            x + w <= self.width && y + h <= self.height,
+            "crop outside the image"
+        );
+        let pixels = (y..y + h)
+            .flat_map(|r| &self.pixels[r * self.width + x..r * self.width + x + w])
+            .copied()
+            .collect();
+        IndexedImage {
+            width: w,
+            height: h,
+            pixels,
+        }
     }
 
     /// The image as RGBA8, with palette index 0 fully transparent when
@@ -69,12 +89,28 @@ impl IndexedImage {
 
 /// Cuts `count` images of `width × height` that are stored one after another
 /// (each one row-major) from the start of `data`.
-pub fn cells(data: &[u8], width: usize, height: usize, count: usize) -> Result<Vec<IndexedImage>, Error> {
+pub fn cells(
+    data: &[u8],
+    width: usize,
+    height: usize,
+    count: usize,
+) -> Result<Vec<IndexedImage>, Error> {
     let len = width * height;
     if data.len() < len * count {
-        return Err(Error::Format(format!("{} bytes hold fewer than {count} cells of {width}×{height}", data.len())));
+        return Err(Error::Format(format!(
+            "{} bytes hold fewer than {count} cells of {width}×{height}",
+            data.len()
+        )));
     }
-    Ok(data.chunks_exact(len).take(count).map(|c| IndexedImage { width, height, pixels: c.to_vec() }).collect())
+    Ok(data
+        .chunks_exact(len)
+        .take(count)
+        .map(|c| IndexedImage {
+            width,
+            height,
+            pixels: c.to_vec(),
+        })
+        .collect())
 }
 
 #[cfg(test)]

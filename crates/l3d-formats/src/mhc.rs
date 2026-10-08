@@ -48,26 +48,42 @@ impl<'a> MhcFile<'a> {
             .map(|e| {
                 let animation = e[0];
                 let rel = u16::from_le_bytes([e[2], e[3]]) as usize;
-                CellEntry { animation, flags: e[1], offset: MANIFEST_LEN + animation as usize * ANIMATION_STRIDE + rel }
+                CellEntry {
+                    animation,
+                    flags: e[1],
+                    offset: MANIFEST_LEN + animation as usize * ANIMATION_STRIDE + rel,
+                }
             })
             .collect();
-        Ok(MhcFile { data, size, entries })
+        Ok(MhcFile {
+            data,
+            size,
+            entries,
+        })
     }
 
     /// Decodes the cell of manifest entry `i`.
     pub fn cell(&self, i: usize) -> Result<Cell, Error> {
-        let e = self.entries.get(i).ok_or_else(|| Error::Format(format!("no MHC entry {i}")))?;
+        let e = self
+            .entries
+            .get(i)
+            .ok_or_else(|| Error::Format(format!("no MHC entry {i}")))?;
         let bad = || Error::Format(format!("MHC cell {i} out of bounds"));
         let n = self.size;
         let mut pixels = vec![0u8; n * n];
         for row in 0..n {
             let o = e.offset + row * 2;
-            let rel = u16::from_le_bytes([*self.data.get(o).ok_or_else(bad)?, *self.data.get(o + 1).ok_or_else(bad)?]);
+            let rel = u16::from_le_bytes([
+                *self.data.get(o).ok_or_else(bad)?,
+                *self.data.get(o + 1).ok_or_else(bad)?,
+            ]);
             let line = e.offset + rel as usize;
             let lead = *self.data.get(line).ok_or_else(bad)? as usize;
             let trail = *self.data.get(line + 1).ok_or_else(bad)? as usize;
             if lead + trail > n {
-                return Err(Error::Format(format!("MHC cell {i} row {row}: lead {lead} + trail {trail} > {n}")));
+                return Err(Error::Format(format!(
+                    "MHC cell {i} row {row}: lead {lead} + trail {trail} > {n}"
+                )));
             }
             let count = n - lead - trail;
             let src = self.data.get(line + 2..line + 2 + count).ok_or_else(bad)?;

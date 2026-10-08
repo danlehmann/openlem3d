@@ -44,14 +44,34 @@ struct Cells {
 
 fn load(mut commands: Commands, mut data: ResMut<Data>) {
     let d = &mut data.0;
-    let (Ok(pal), Ok(raw)) = (d.palette("GFX/LM3D.PAL"), d.read(sheets::MOUSE.path)) else { return };
-    let Ok(cells) = sheets::MOUSE.cut(&raw) else { return };
-    let rgba = cells.iter().map(|c| (c.to_rgba(&pal, true), UVec2::new(c.width as u32, c.height as u32))).collect();
-    commands.insert_resource(Cells { rgba, scaled: HashMap::new() });
+    let (Ok(pal), Ok(raw)) = (d.palette("GFX/LM3D.PAL"), d.read(sheets::MOUSE.path)) else {
+        return;
+    };
+    let Ok(cells) = sheets::MOUSE.cut(&raw) else {
+        return;
+    };
+    let rgba = cells
+        .iter()
+        .map(|c| {
+            (
+                c.to_rgba(&pal, true),
+                UVec2::new(c.width as u32, c.height as u32),
+            )
+        })
+        .collect();
+    commands.insert_resource(Cells {
+        rgba,
+        scaled: HashMap::new(),
+    });
 }
 
 /// Cell `cell` scaled (nearest neighbour) to `size`×`size` pixels.
-fn scaled(cells: &mut Cells, cell: usize, size: u32, images: &mut Assets<Image>) -> Option<Handle<Image>> {
+fn scaled(
+    cells: &mut Cells,
+    cell: usize,
+    size: u32,
+    images: &mut Assets<Image>,
+) -> Option<Handle<Image>> {
     if let Some(h) = cells.scaled.get(&(cell, size)) {
         return Some(h.clone());
     }
@@ -66,7 +86,11 @@ fn scaled(cells: &mut Cells, cell: usize, size: u32, images: &mut Assets<Image>)
         }
     }
     let image = Image::new(
-        Extent3d { width: size, height: size, depth_or_array_layers: 1 },
+        Extent3d {
+            width: size,
+            height: size,
+            depth_or_array_layers: 1,
+        },
         TextureDimension::D2,
         px,
         TextureFormat::Rgba8UnormSrgb,
@@ -90,21 +114,32 @@ fn update(
     windows: Query<(Entity, &Window, Option<&CursorIcon>)>,
     mut images: ResMut<Assets<Image>>,
 ) {
-    let (Some(mut cells), Ok((entity, window, icon))) = (cells, windows.single()) else { return };
-    let position = window.cursor_position().filter(|_| touches.iter().next().is_none());
+    let (Some(mut cells), Ok((entity, window, icon))) = (cells, windows.single()) else {
+        return;
+    };
+    let position = window
+        .cursor_position()
+        .filter(|_| touches.iter().next().is_none());
     let size = Vec2::new(window.width(), window.height());
     let cell = match (state.get(), position) {
         (AppState::Code, _) | (_, None) => None,
-        (AppState::Playing, Some(p)) => Some(if ui.iter().any(|i| *i != Interaction::None) || lemming_cam.following().is_some() {
-            // Riding along a click acts on the lemming ridden with, so the
-            // pointer stays the cross-hair.
-            CROSS_HAIR
-        } else if game.sim.as_ref().and_then(|sim| crate::hud::lemming_at(sim, &camera, size, p)).is_some() {
-            BRACKET
-        } else {
-            let [col, row] = crate::pointer_region(p, size);
-            GRID[row][col]
-        }),
+        (AppState::Playing, Some(p)) => Some(
+            if ui.iter().any(|i| *i != Interaction::None) || lemming_cam.following().is_some() {
+                // Riding along a click acts on the lemming ridden with, so the
+                // pointer stays the cross-hair.
+                CROSS_HAIR
+            } else if game
+                .sim
+                .as_ref()
+                .and_then(|sim| crate::hud::lemming_at(sim, &camera, size, p))
+                .is_some()
+            {
+                BRACKET
+            } else {
+                let [col, row] = crate::pointer_region(p, size);
+                GRID[row][col]
+            },
+        ),
         (_, Some(_)) => Some(CROSS_HAIR),
     };
     // Physical pixels: the cursor image is not scaled by the system.

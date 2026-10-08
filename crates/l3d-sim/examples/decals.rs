@@ -15,7 +15,10 @@ fn main() {
         println!("flags {:#06x} walls set {}", level.flags, level.walls_set);
         for (x, y, z, b, o) in level.cells() {
             if (0x20..=0xEF).contains(&o.kind) {
-                println!("({x:2},{y:2},{z:2}) object {:#04x} block id {} shape {} segs {:04b}", o.kind, b.id, b.shape, b.segments);
+                println!(
+                    "({x:2},{y:2},{z:2}) object {:#04x} block id {} shape {} segs {:04b}",
+                    o.kind, b.id, b.shape, b.segments
+                );
             }
         }
         return;
@@ -25,7 +28,10 @@ fn main() {
     for n in 0..100 {
         let Ok(level) = data.level(n) else { continue };
         let solid = |x: i32, y: i32, z: i32| {
-            (0..32).contains(&x) && (0..32).contains(&z) && (0..16).contains(&y) && !level.block(x as usize, y as usize, z as usize).is_empty()
+            (0..32).contains(&x)
+                && (0..32).contains(&z)
+                && (0..16).contains(&y)
+                && !level.block(x as usize, y as usize, z as usize).is_empty()
         };
         for (x, y, z, b, o) in level.cells() {
             if let 0x70..=0xAF = o.kind {
@@ -34,7 +40,11 @@ fn main() {
                 let next = solid(x + s[0], y, z + s[1]);
                 *counts.entry((!b.is_empty(), next)).or_insert(0) += 1;
                 if b.is_empty() {
-                    println!("LEVEL.{n:03} ({x},{y},{z}) {:#04x}: own empty, neighbour {}", o.kind, if next { "solid" } else { "empty" });
+                    println!(
+                        "LEVEL.{n:03} ({x},{y},{z}) {:#04x}: own empty, neighbour {}",
+                        o.kind,
+                        if next { "solid" } else { "empty" }
+                    );
                 }
             }
         }

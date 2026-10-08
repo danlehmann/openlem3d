@@ -21,10 +21,16 @@ pub const HIGH_RES: (usize, usize) = (640, 480);
 /// `GFX/INTROn.RNC` is 320×200 and `GFX/INTROn.SVG` 640×480.
 pub fn intro(data: &[u8], (width, height): (usize, usize)) -> Result<Picture, Error> {
     if data.len() != VGA_PALETTE_LEN + width * height {
-        return Err(Error::Format(format!("intro slide is {} bytes, expected palette + {width}×{height}", data.len())));
+        return Err(Error::Format(format!(
+            "intro slide is {} bytes, expected palette + {width}×{height}",
+            data.len()
+        )));
     }
     let (pal, px) = data.split_at(VGA_PALETTE_LEN);
-    Ok(Picture { image: IndexedImage::new(width, height, px.to_vec())?, palette: vga_palette(pal)? })
+    Ok(Picture {
+        image: IndexedImage::new(width, height, px.to_vec())?,
+        palette: vga_palette(pal)?,
+    })
 }
 
 /// Width of the `GFX/LOADING.RNC` banner.
@@ -37,7 +43,11 @@ pub const LOADING_HEIGHT: usize = 60;
 pub fn loading(data: &[u8]) -> Result<Picture, Error> {
     let n = LOADING_WIDTH * LOADING_HEIGHT;
     if data.len() != n + VGA_PALETTE_LEN {
-        return Err(Error::Format(format!("LOADING.RNC is {} bytes, expected {}", data.len(), n + VGA_PALETTE_LEN)));
+        return Err(Error::Format(format!(
+            "LOADING.RNC is {} bytes, expected {}",
+            data.len(),
+            n + VGA_PALETTE_LEN
+        )));
     }
     Ok(Picture {
         image: IndexedImage::new(LOADING_WIDTH, LOADING_HEIGHT, data[..n].to_vec())?,
@@ -65,9 +75,18 @@ pub fn scene(data: &[u8], (width, height): (usize, usize)) -> Result<Scene, Erro
     let prompts = match data.len().checked_sub(n) {
         Some(0) => Vec::new(),
         Some(extra) if extra == 4 * side * side => cells(&data[n..], side, side, 4)?,
-        _ => return Err(Error::Format(format!("scene is {} bytes, expected {n} or {}", data.len(), n + 4 * side * side))),
+        _ => {
+            return Err(Error::Format(format!(
+                "scene is {} bytes, expected {n} or {}",
+                data.len(),
+                n + 4 * side * side
+            )));
+        }
     };
-    Ok(Scene { image: IndexedImage::new(width, height, data[..n].to_vec())?, prompts })
+    Ok(Scene {
+        image: IndexedImage::new(width, height, data[..n].to_vec())?,
+        prompts,
+    })
 }
 
 /// Reads an uncompressed 8-bit Windows BMP (`BITMAPINFOHEADER`), as found in
@@ -76,7 +95,10 @@ pub fn scene(data: &[u8], (width, height): (usize, usize)) -> Result<Scene, Erro
 pub fn bmp(data: &[u8]) -> Result<Picture, Error> {
     let bad = |m: &str| Error::Format(format!("BMP: {m}"));
     let u16_at = |o: usize| data.get(o..o + 2).map(|b| u16::from_le_bytes([b[0], b[1]]));
-    let u32_at = |o: usize| data.get(o..o + 4).map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]));
+    let u32_at = |o: usize| {
+        data.get(o..o + 4)
+            .map(|b| u32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+    };
     if data.get(..2) != Some(b"BM") {
         return Err(bad("missing BM signature"));
     }
@@ -92,20 +114,27 @@ pub fn bmp(data: &[u8]) -> Result<Picture, Error> {
     }
     let colours = if used == 0 { 256 } else { used.min(256) };
     let pal_at = 14 + header;
-    let pal_raw = data.get(pal_at..pal_at + colours * 4).ok_or_else(|| bad("palette cut short"))?;
+    let pal_raw = data
+        .get(pal_at..pal_at + colours * 4)
+        .ok_or_else(|| bad("palette cut short"))?;
     let mut palette = [[0u8; 3]; 256];
     for (p, c) in palette.iter_mut().zip(pal_raw.as_chunks::<4>().0) {
         *p = [c[2], c[1], c[0]];
     }
     let (w, h) = (width as usize, height.unsigned_abs() as usize);
     let stride = w.div_ceil(4) * 4;
-    let rows = data.get(offset..offset + stride * h).ok_or_else(|| bad("pixel data cut short"))?;
+    let rows = data
+        .get(offset..offset + stride * h)
+        .ok_or_else(|| bad("pixel data cut short"))?;
     let mut pixels = Vec::with_capacity(w * h);
     for y in 0..h {
         let src = if height > 0 { h - 1 - y } else { y };
         pixels.extend_from_slice(&rows[src * stride..src * stride + w]);
     }
-    Ok(Picture { image: IndexedImage::new(w, h, pixels)?, palette })
+    Ok(Picture {
+        image: IndexedImage::new(w, h, pixels)?,
+        palette,
+    })
 }
 
 #[cfg(test)]

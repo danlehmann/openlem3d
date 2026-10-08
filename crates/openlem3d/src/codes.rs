@@ -13,7 +13,10 @@ pub const LEVEL_CODES: &[(&str, u32)] = &[
 /// The level a code opens, if it is a known code (case-insensitive).
 pub fn level_for_code(code: &str) -> Option<u32> {
     let code = code.trim();
-    LEVEL_CODES.iter().find(|(c, _)| c.eq_ignore_ascii_case(code)).map(|&(_, n)| n)
+    LEVEL_CODES
+        .iter()
+        .find(|(c, _)| c.eq_ignore_ascii_case(code))
+        .map(|&(_, n)| n)
 }
 
 /// The code that starts level `n` (0-based), if known.

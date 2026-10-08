@@ -17,16 +17,29 @@ pub struct Font {
 
 impl Font {
     /// Reads a font whose glyphs fill `data` exactly.
-    pub fn parse(data: &[u8], glyph_width: usize, glyph_height: usize, first: u8) -> Result<Self, Error> {
+    pub fn parse(
+        data: &[u8],
+        glyph_width: usize,
+        glyph_height: usize,
+        first: u8,
+    ) -> Result<Self, Error> {
         let len = glyph_width * glyph_height;
         if data.is_empty() || !data.len().is_multiple_of(len) {
-            return Err(Error::Format(format!("{} bytes is not a whole number of {glyph_width}×{glyph_height} glyphs", data.len())));
+            return Err(Error::Format(format!(
+                "{} bytes is not a whole number of {glyph_width}×{glyph_height} glyphs",
+                data.len()
+            )));
         }
         let glyphs = cells(data, glyph_width, glyph_height, data.len() / len)?;
         if first as usize + glyphs.len() > 256 {
             return Err(Error::Format("font runs past character code 255".into()));
         }
-        Ok(Font { glyph_width, glyph_height, first, glyphs })
+        Ok(Font {
+            glyph_width,
+            glyph_height,
+            first,
+            glyphs,
+        })
     }
 
     /// The glyph for character code `c`, if the font has one.

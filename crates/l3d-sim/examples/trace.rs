@@ -5,7 +5,9 @@ use l3d_formats::gamedata::{GameData, locate_data_dir};
 use l3d_sim::{SUB, Simulation};
 
 fn main() {
-    let mut args = std::env::args().skip(1).map(|a| a.parse::<u32>().unwrap_or(0));
+    let mut args = std::env::args()
+        .skip(1)
+        .map(|a| a.parse::<u32>().unwrap_or(0));
     let n = args.next().unwrap_or(0);
     let which = args.next().unwrap_or(0) as usize;
     let ticks = args.next().filter(|&t| t > 0).unwrap_or(400);
@@ -18,13 +20,20 @@ fn main() {
     // Optional assignments from the environment, comma-separated:
     // ASSIGN=tick:lemming:skill[:cw|acw],...
     let spec = std::env::var("ASSIGN").unwrap_or_default();
-    let assigns: Vec<Vec<&str>> = spec.split(',').filter(|a| !a.is_empty()).map(|a| a.split(':').collect()).collect();
+    let assigns: Vec<Vec<&str>> = spec
+        .split(',')
+        .filter(|a| !a.is_empty())
+        .map(|a| a.split(':').collect())
+        .collect();
     for t in 1..=ticks {
         sim.step();
         let now = sim.tick;
         for a in assigns.iter().filter(|a| a[0].parse() == Ok(now)) {
-            let (i, s): (usize, u8) = (a[1].parse().expect("lemming"), a[2].parse().expect("skill"));
-            let Some(skill) = l3d_sim::Skill::from_id(s) else { continue };
+            let (i, s): (usize, u8) =
+                (a[1].parse().expect("lemming"), a[2].parse().expect("skill"));
+            let Some(skill) = l3d_sim::Skill::from_id(s) else {
+                continue;
+            };
             let dir = sim.lemmings[i].dir;
             let ok = match a.get(3).copied() {
                 Some("cw") => sim.assign_turner(i, dir.clockwise()),
@@ -33,7 +42,9 @@ fn main() {
             };
             println!("assign {} to lemming {i}: {ok}", skill.name());
         }
-        let Some(l) = sim.lemmings.get(which) else { continue };
+        let Some(l) = sim.lemmings.get(which) else {
+            continue;
+        };
         let p = l.pos.map(|v| v as f32 / SUB as f32);
         let line = format!("{:?} {:?}", l.dir, l.state);
         if t % every == 0 || line != last {

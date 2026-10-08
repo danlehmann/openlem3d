@@ -141,7 +141,9 @@ fn hop_height(n: u32, k: i32) -> i32 {
 /// onto the first pad, and the published solution of Fun 1 "Take a Dive"
 /// (a 10-unit drop must carry lemmings about 11–12 units on).
 fn hop_after_drop(fallen: i32) -> u32 {
-    (1..MAX_HOP).find(|&n| hop_height(n, hop_ticks(n) as i32 / 2) > fallen).unwrap_or(MAX_HOP)
+    (1..MAX_HOP)
+        .find(|&n| hop_height(n, hop_ticks(n) as i32 / 2) > fallen)
+        .unwrap_or(MAX_HOP)
 }
 /// Speed on slippery blocks, sub-units per tick.
 const ICE_SPEED: i32 = WALK_SPEED * 3;
@@ -259,7 +261,9 @@ impl Skill {
 /// What a lemming is doing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum State {
-    Falling { from_y: i32 },
+    Falling {
+        from_y: i32,
+    },
     /// Falling slowly under an umbrella.
     Floating,
     Walking,
@@ -267,10 +271,14 @@ pub enum State {
     Blocking,
     /// Standing and pointing one arm sideways; walkers that reach it leave in
     /// the direction it points.
-    Turning { to: Dir },
+    Turning {
+        to: Dir,
+    },
     Digging,
     /// Laying steps; the count is the bricks still to lay.
-    Building { bricks_left: u8 },
+    Building {
+        bricks_left: u8,
+    },
     /// A builder out of bricks, shrugging before it walks on.
     Shrugging,
     /// Removing terrain straight ahead.
@@ -287,21 +295,34 @@ pub enum State {
     Trapped,
     /// Hanging from a rope slide, riding towards its far end (feet
     /// position, sub-units).
-    OnRope { to: [i32; 3] },
+    OnRope {
+        to: [i32; 3],
+    },
     /// Walking on a slippery block: faster, and no skill that needs a
     /// standing lemming can be given (the original shows "Sliding").
     Sliding,
     /// Bouncing on trampolines: `k` ticks into hop `hop` (see
     /// [`hop_height`]), taken off at height `y0`; before tick 1 it stands on
     /// the pad (`k` below 0: ticks still to wait there).
-    Bouncing { hop: u32, k: i32, y0: i32 },
+    Bouncing {
+        hop: u32,
+        k: i32,
+        y0: i32,
+    },
     /// Thrown through the air by a spring from `from` to
     /// `to` (feet positions) over `ticks` ticks, rising `peak`
     /// sub-units above the straight line at mid-flight.
-    Flying { from: [i32; 3], to: [i32; 3], ticks: u32, peak: i32 },
+    Flying {
+        from: [i32; 3],
+        to: [i32; 3],
+        ticks: u32,
+        peak: i32,
+    },
     /// Standing on a teleporter pad, vanishing, away, and reappearing on
     /// the partner pad `to` (feet position); see [`TELEPORT_TICKS`].
-    Teleporting { to: [i32; 3] },
+    Teleporting {
+        to: [i32; 3],
+    },
 }
 
 /// Teleporting, in ticks from stopping on the pad centre (observed in the
@@ -312,12 +333,21 @@ pub const TELEPORT_STAND: u32 = 4;
 pub const TELEPORT_VANISH: u32 = 3;
 pub const TELEPORT_AWAY: u32 = 12;
 pub const TELEPORT_APPEAR: u32 = 4;
-pub const TELEPORT_TICKS: u32 = 2 * TELEPORT_STAND + TELEPORT_VANISH + TELEPORT_AWAY + TELEPORT_APPEAR;
+pub const TELEPORT_TICKS: u32 =
+    2 * TELEPORT_STAND + TELEPORT_VANISH + TELEPORT_AWAY + TELEPORT_APPEAR;
 
 impl State {
     /// Whether the lemming is finished and only playing a last animation.
     pub fn is_terminal(self) -> bool {
-        matches!(self, State::Exiting | State::Exploding | State::Splatting | State::Drowning | State::Zapped | State::Trapped)
+        matches!(
+            self,
+            State::Exiting
+                | State::Exploding
+                | State::Splatting
+                | State::Drowning
+                | State::Zapped
+                | State::Trapped
+        )
     }
 }
 
@@ -457,7 +487,11 @@ impl Simulation {
                 for _ in 0..b.rotation {
                     dir = dir.clockwise();
                 }
-                let spawn = [x as i32 * SUB + SUB / 2, y as i32 * SUB + SUB / 2 - 1, z as i32 * SUB + SUB / 2];
+                let spawn = [
+                    x as i32 * SUB + SUB / 2,
+                    y as i32 * SUB + SUB / 2 - 1,
+                    z as i32 * SUB + SUB / 2,
+                ];
                 entrances.push(Entrance { spawn, dir });
             }
         }
@@ -477,7 +511,8 @@ impl Simulation {
             skills_left,
             release_rate: (level.release_rate as i32).clamp(1, 99),
             min_release_rate: (level.release_rate as i32).clamp(1, 99),
-            time_left: (level.time_minutes as u32 * 60 + level.time_seconds as u32) * TICKS_PER_SECOND,
+            time_left: (level.time_minutes as u32 * 60 + level.time_seconds as u32)
+                * TICKS_PER_SECOND,
             nuked: false,
             tick: 0,
             log: Vec::new(),
@@ -485,7 +520,9 @@ impl Simulation {
             next_entrance: 0,
             events: Vec::new(),
             object_kind: objects::level_objects(level).map(|(k, _)| k),
-            objects: objects::level_objects(level).map(|(_, o)| o).unwrap_or_default(),
+            objects: objects::level_objects(level)
+                .map(|(_, o)| o)
+                .unwrap_or_default(),
             splitters: level
                 .cells()
                 .filter(|(_, _, _, b, _)| b.id == SPLITTER_ID && !b.is_empty())
@@ -504,7 +541,9 @@ impl Simulation {
 
     /// Whether `skill` can be given to lemming `i` right now.
     pub fn can_assign(&self, i: usize, skill: Skill) -> bool {
-        let Some(l) = self.lemmings.get(i) else { return false };
+        let Some(l) = self.lemmings.get(i) else {
+            return false;
+        };
         if l.gone || l.state.is_terminal() || self.skills_left[skill as usize] == 0 {
             return false;
         }
@@ -528,7 +567,8 @@ impl Simulation {
     pub fn assign(&mut self, i: usize, skill: Skill) -> bool {
         let ok = self.give(i, skill);
         if ok {
-            self.log.push((self.tick, Command::Assign { lemming: i, skill }));
+            self.log
+                .push((self.tick, Command::Assign { lemming: i, skill }));
         }
         ok
     }
@@ -547,9 +587,15 @@ impl Simulation {
             // to the next cell first (measured).
             Skill::Blocker => l.pending = Some(State::Blocking),
             // The turner's own left (the one verified case; see `assign_turner`).
-            Skill::Turner => l.pending = Some(State::Turning { to: l.dir.anticlockwise() }),
+            Skill::Turner => {
+                l.pending = Some(State::Turning {
+                    to: l.dir.anticlockwise(),
+                })
+            }
             Skill::Digger => l.set_state(State::Digging),
-            Skill::Builder => l.set_state(State::Building { bricks_left: BRICKS }),
+            Skill::Builder => l.set_state(State::Building {
+                bricks_left: BRICKS,
+            }),
             Skill::Basher => l.pending = Some(State::Bashing),
             Skill::Miner => l.pending = Some(State::Mining),
         }
@@ -560,12 +606,15 @@ impl Simulation {
     /// from its heading. In the original the player picks the side with a
     /// second click (`docs/spec/behaviour.md`, "A turner takes two clicks").
     pub fn assign_turner(&mut self, i: usize, to: Dir) -> bool {
-        let Some(l) = self.lemmings.get(i) else { return false };
+        let Some(l) = self.lemmings.get(i) else {
+            return false;
+        };
         if to == l.dir || to == l.dir.reverse() || !self.give(i, Skill::Turner) {
             return false;
         }
         self.lemmings[i].pending = Some(State::Turning { to });
-        self.log.push((self.tick, Command::Turner { lemming: i, to }));
+        self.log
+            .push((self.tick, Command::Turner { lemming: i, to }));
         true
     }
 
@@ -625,8 +674,14 @@ impl Simulation {
             .iter()
             .filter(|l| !l.gone)
             .filter_map(|l| match l.state {
-                State::Blocking => Some(Obstacle { pos: l.pos, turn_to: None }),
-                State::Turning { to } => Some(Obstacle { pos: l.pos, turn_to: Some(to) }),
+                State::Blocking => Some(Obstacle {
+                    pos: l.pos,
+                    turn_to: None,
+                }),
+                State::Turning { to } => Some(Obstacle {
+                    pos: l.pos,
+                    turn_to: Some(to),
+                }),
                 _ => None,
             })
             .collect();
@@ -646,7 +701,8 @@ impl Simulation {
     /// What a lemming's update did that a player would hear.
     fn event_for(&self, before: &Lemming, after: &Lemming) -> Option<Event> {
         let (b, a) = (before.state, after.state);
-        let changed = std::mem::discriminant(&a) != std::mem::discriminant(&b) || after.state_ticks == 0;
+        let changed =
+            std::mem::discriminant(&a) != std::mem::discriminant(&b) || after.state_ticks == 0;
         if !before.teleported && after.teleported {
             return Some(Event::Teleported);
         }
@@ -668,9 +724,13 @@ impl Simulation {
         }
         let on = |n: u32| after.state_ticks.is_multiple_of(n);
         match a {
-            State::Building { bricks_left } if matches!(b, State::Building { bricks_left: was } if was > bricks_left) => Some(Event::Brick),
+            State::Building { bricks_left } if matches!(b, State::Building { bricks_left: was } if was > bricks_left) => {
+                Some(Event::Brick)
+            }
             State::Digging if on(DIG_TICKS) => Some(Event::Dug),
-            State::Bashing if on(BASH_SWING_TICKS) && self.bash_cell_full(after) => Some(Event::Bashed),
+            State::Bashing if on(BASH_SWING_TICKS) && self.bash_cell_full(after) => {
+                Some(Event::Bashed)
+            }
             State::Mining if on(MINE_TICKS) => Some(Event::Mined),
             _ => None,
         }
@@ -686,7 +746,8 @@ impl Simulation {
     pub fn adjust_release_rate(&mut self, delta: i32) {
         let rate = (self.release_rate + delta).clamp(self.min_release_rate, 99);
         if rate != self.release_rate {
-            self.log.push((self.tick, Command::ReleaseRate(rate - self.release_rate)));
+            self.log
+                .push((self.tick, Command::ReleaseRate(rate - self.release_rate)));
             self.release_rate = rate;
         }
     }
@@ -701,7 +762,11 @@ impl Simulation {
         self.log.push((self.tick, Command::Nuke));
         self.to_release = self.counts.released;
         let mut stagger = 0;
-        for l in self.lemmings.iter_mut().filter(|l| !l.gone && !l.state.is_terminal()) {
+        for l in self
+            .lemmings
+            .iter_mut()
+            .filter(|l| !l.gone && !l.state.is_terminal())
+        {
             if l.fuse.is_none() {
                 l.fuse = Some(FUSE_TICKS + stagger);
                 stagger += 1;
@@ -740,7 +805,14 @@ impl Simulation {
             // still (owner's observation); one in the air keeps moving.
             let on_feet = matches!(
                 l.state,
-                State::Walking | State::Sliding | State::Building { .. } | State::Shrugging | State::Bashing | State::Mining | State::Digging | State::Climbing
+                State::Walking
+                    | State::Sliding
+                    | State::Building { .. }
+                    | State::Shrugging
+                    | State::Bashing
+                    | State::Mining
+                    | State::Digging
+                    | State::Climbing
             );
             if *f <= SWELL_TICKS && on_feet {
                 return;
@@ -773,9 +845,21 @@ impl Simulation {
                 // fall beyond it).
                 let d = l.dir.delta();
                 let (x, z) = (l.pos[0] + d[0] * WALK_SPEED, l.pos[2] + d[2] * WALK_SPEED);
-                let crossing = x.div_euclid(SUB) != l.pos[0].div_euclid(SUB) || z.div_euclid(SUB) != l.pos[2].div_euclid(SUB);
-                if l.state == State::Walking && crossing && let Some(s) = l.pending.take() {
-                    let edge = |v: i32, step: i32| if step > 0 { (v.div_euclid(SUB) + 1) * SUB - 1 } else if step < 0 { v.div_euclid(SUB) * SUB } else { v };
+                let crossing = x.div_euclid(SUB) != l.pos[0].div_euclid(SUB)
+                    || z.div_euclid(SUB) != l.pos[2].div_euclid(SUB);
+                if l.state == State::Walking
+                    && crossing
+                    && let Some(s) = l.pending.take()
+                {
+                    let edge = |v: i32, step: i32| {
+                        if step > 0 {
+                            (v.div_euclid(SUB) + 1) * SUB - 1
+                        } else if step < 0 {
+                            v.div_euclid(SUB) * SUB
+                        } else {
+                            v
+                        }
+                    };
                     l.pos[0] = edge(l.pos[0], d[0]);
                     l.pos[2] = edge(l.pos[2], d[2]);
                     l.set_state(s);
@@ -818,7 +902,8 @@ impl Simulation {
             }
             State::OnRope { to } => {
                 let d = [0, 1, 2].map(|i| to[i] - l.pos[i]);
-                let len = ((d[0] as i64).pow(2) + (d[1] as i64).pow(2) + (d[2] as i64).pow(2)).isqrt() as i32;
+                let len = ((d[0] as i64).pow(2) + (d[1] as i64).pow(2) + (d[2] as i64).pow(2))
+                    .isqrt() as i32;
                 if len <= ROPE_SPEED {
                     l.pos = to;
                     l.set_state(State::Walking);
@@ -829,7 +914,12 @@ impl Simulation {
                     }
                 }
             }
-            State::Flying { from, to, ticks, peak } => {
+            State::Flying {
+                from,
+                to,
+                ticks,
+                peak,
+            } => {
                 let f = (l.state_ticks as f32 / ticks as f32).min(1.0);
                 let lerp = |i: usize| from[i] + ((to[i] - from[i]) as f32 * f) as i32;
                 let arc = (peak as f32 * 4.0 * f * (1.0 - f)) as i32;
@@ -861,10 +951,17 @@ impl Simulation {
     /// Killing traps take a lemming that steps on them, then are busy for a
     /// while, letting others pass (provisional, as in the 2D games).
     fn spring_traps(&mut self, l: &mut Lemming) {
-        if !self.object_kind.is_some_and(|k| k.kills()) || l.state.is_terminal() || matches!(l.state, State::Falling { .. } | State::Floating) {
+        if !self.object_kind.is_some_and(|k| k.kills())
+            || l.state.is_terminal()
+            || matches!(l.state, State::Falling { .. } | State::Floating)
+        {
             return;
         }
-        if let Some(o) = self.objects.iter_mut().find(|o| o.busy == 0 && o.touches(l.pos)) {
+        if let Some(o) = self
+            .objects
+            .iter_mut()
+            .find(|o| o.busy == 0 && o.touches(l.pos))
+        {
             o.busy = TRAP_BUSY_TICKS;
             l.fuse = None;
             l.set_state(State::Trapped);
@@ -876,7 +973,9 @@ impl Simulation {
     /// partner (the other object with the same value; with more, the last
     /// two pair up [L3DEdit]).
     fn teleport(&mut self, l: &mut Lemming) {
-        if self.object_kind != Some(objects::ObjectKind::Teleporter) || !matches!(l.state, State::Walking | State::Sliding) {
+        if self.object_kind != Some(objects::ObjectKind::Teleporter)
+            || !matches!(l.state, State::Walking | State::Sliding)
+        {
             return;
         }
         let Some(here) = self.objects.iter().position(|o| o.touches(l.pos)) else {
@@ -887,7 +986,13 @@ impl Simulation {
             return;
         }
         let value = self.objects[here].value;
-        let pair: Vec<usize> = self.objects.iter().enumerate().filter(|(_, o)| o.value == value).map(|(i, _)| i).collect();
+        let pair: Vec<usize> = self
+            .objects
+            .iter()
+            .enumerate()
+            .filter(|(_, o)| o.value == value)
+            .map(|(i, _)| i)
+            .collect();
         let [.., a, b] = pair[..] else { return };
         let to = match here {
             h if h == a => b,
@@ -904,7 +1009,13 @@ impl Simulation {
         l.pos[0] = centre[0];
         l.pos[2] = centre[1];
         let o = self.objects[to];
-        l.set_state(State::Teleporting { to: [o.cell[0] * SUB + SUB / 2, o.surface, o.cell[2] * SUB + SUB / 2] });
+        l.set_state(State::Teleporting {
+            to: [
+                o.cell[0] * SUB + SUB / 2,
+                o.surface,
+                o.cell[2] * SUB + SUB / 2,
+            ],
+        });
     }
 
     /// Rope slides: a lemming reaching a sender (an even value) rides to its
@@ -912,18 +1023,37 @@ impl Simulation {
     /// works [L3DEdit]. Provisional: a straight line at [`ROPE_SPEED`],
     /// then it walks on in its old direction.
     fn board_rope_slide(&mut self, l: &mut Lemming) {
-        if self.object_kind != Some(objects::ObjectKind::RopeSlide) || !matches!(l.state, State::Walking | State::Sliding | State::Falling { .. }) {
+        if self.object_kind != Some(objects::ObjectKind::RopeSlide)
+            || !matches!(
+                l.state,
+                State::Walking | State::Sliding | State::Falling { .. }
+            )
+        {
             return;
         }
         let last = |v: u8| self.objects.iter().rposition(|o| o.value == v);
-        let Some(sender) = self.objects.iter().position(|o| o.value % 2 == 0 && o.touches(l.pos)) else { return };
+        let Some(sender) = self
+            .objects
+            .iter()
+            .position(|o| o.value % 2 == 0 && o.touches(l.pos))
+        else {
+            return;
+        };
         let value = self.objects[sender].value;
         if last(value) != Some(sender) {
             return;
         }
-        let Some(receiver) = last(value + 1) else { return };
+        let Some(receiver) = last(value + 1) else {
+            return;
+        };
         let o = self.objects[receiver];
-        l.set_state(State::OnRope { to: [o.cell[0] * SUB + SUB / 2, o.surface, o.cell[2] * SUB + SUB / 2] });
+        l.set_state(State::OnRope {
+            to: [
+                o.cell[0] * SUB + SUB / 2,
+                o.surface,
+                o.cell[2] * SUB + SUB / 2,
+            ],
+        });
     }
 
     /// Springs: a walker stepping onto a sender (an even value) is thrown in
@@ -931,20 +1061,39 @@ impl Simulation {
     /// works [L3DEdit]) and lands unhurt, walking on in its old direction.
     /// Flight time and arc height are unmeasured.
     fn spring(&mut self, l: &mut Lemming) {
-        if self.object_kind != Some(objects::ObjectKind::Spring) || !matches!(l.state, State::Walking | State::Sliding) {
+        if self.object_kind != Some(objects::ObjectKind::Spring)
+            || !matches!(l.state, State::Walking | State::Sliding)
+        {
             return;
         }
         let last = |v: u8| self.objects.iter().rposition(|o| o.value == v);
-        let Some(sender) = self.objects.iter().position(|o| o.value % 2 == 0 && o.touches(l.pos)) else { return };
+        let Some(sender) = self
+            .objects
+            .iter()
+            .position(|o| o.value % 2 == 0 && o.touches(l.pos))
+        else {
+            return;
+        };
         let value = self.objects[sender].value;
-        let (Some(receiver), true) = (last(value + 1), last(value) == Some(sender)) else { return };
+        let (Some(receiver), true) = (last(value + 1), last(value) == Some(sender)) else {
+            return;
+        };
         let o = self.objects[receiver];
-        let to = [o.cell[0] * SUB + SUB / 2, o.surface, o.cell[2] * SUB + SUB / 2];
+        let to = [
+            o.cell[0] * SUB + SUB / 2,
+            o.surface,
+            o.cell[2] * SUB + SUB / 2,
+        ];
         let span = ((to[0] - l.pos[0]) as f32).hypot((to[2] - l.pos[2]) as f32) / SUB as f32;
         let ticks = ((span * SPRING_TICKS_PER_UNIT) as u32).max(8);
         let peak = (span * SPRING_ARC * SUB as f32) as i32;
         self.objects[sender].busy = SPRING_BUSY_TICKS;
-        l.set_state(State::Flying { from: l.pos, to, ticks, peak });
+        l.set_state(State::Flying {
+            from: l.pos,
+            to,
+            ticks,
+            peak,
+        });
     }
 
     /// Starts the dip of the trampoline pad under `p` (played only on
@@ -960,11 +1109,17 @@ impl Simulation {
     /// tick on the pad (measured: a walker stepping down onto the first pad
     /// stands there two ticks). Returns whether it bounced.
     fn bounce(&mut self, l: &mut Lemming, height: i32) -> bool {
-        if self.object_kind != Some(objects::ObjectKind::Trampoline) || !self.objects.iter().any(|o| o.touches(l.pos)) {
+        if self.object_kind != Some(objects::ObjectKind::Trampoline)
+            || !self.objects.iter().any(|o| o.touches(l.pos))
+        {
             return false;
         }
         self.press_pad(l.pos);
-        l.set_state(State::Bouncing { hop: hop_after_drop(height), k: -1, y0: l.pos[1] });
+        l.set_state(State::Bouncing {
+            hop: hop_after_drop(height),
+            k: -1,
+            y0: l.pos[1],
+        });
         true
     }
 
@@ -977,7 +1132,11 @@ impl Simulation {
             // Still on the pad, stepping on at walking speed (measured: the
             // first pad's take-off is about 8 sub-units past the touch).
             let d = l.dir.delta();
-            let ahead = [l.pos[0] + d[0] * WALK_SPEED, l.pos[1], l.pos[2] + d[2] * WALK_SPEED];
+            let ahead = [
+                l.pos[0] + d[0] * WALK_SPEED,
+                l.pos[1],
+                l.pos[2] + d[2] * WALK_SPEED,
+            ];
             if !self.world.solid([ahead[0], ahead[1] + SUB / 8, ahead[2]]) {
                 l.pos = ahead;
             }
@@ -991,7 +1150,10 @@ impl Simulation {
         let next = [l.pos[0] + d[0] * BOUNCE_VX, y, l.pos[2] + d[2] * BOUNCE_VX];
         let body = next[1] + SUB / 8;
         let advance = |l: &mut Lemming| l.state = State::Bouncing { hop, k: k1, y0 };
-        if let Some(n) = self.deflector_across(next[0], next[1], next[2]).filter(|n| d[0] * n[0] + d[2] * n[1] < 0) {
+        if let Some(n) = self
+            .deflector_across(next[0], next[1], next[2])
+            .filter(|n| d[0] * n[0] + d[2] * n[1] < 0)
+        {
             let k = d[0] * n[0] + d[2] * n[1];
             l.dir = match [d[0] - k * n[0], d[2] - k * n[1]] {
                 [1, 0] => Dir::PosX,
@@ -1009,7 +1171,8 @@ impl Simulation {
             advance(l);
             return;
         }
-        let wall = |w: &World, y: i32| w.solid([next[0], y, next[2]]) && !w.solid([l.pos[0], y, l.pos[2]]);
+        let wall =
+            |w: &World, y: i32| w.solid([next[0], y, next[2]]) && !w.solid([l.pos[0], y, l.pos[2]]);
         if rising && (wall(&self.world, body) || wall(&self.world, next[1] + HEAD_HEIGHT - 1)) {
             l.dir = l.dir.reverse();
             l.pos[1] = y;
@@ -1017,9 +1180,13 @@ impl Simulation {
             return;
         }
         if !rising {
-            let (ground, on_block) = self.world.surface_below(next[0], l.pos[1] + STEP_UP, next[2]);
+            let (ground, on_block) = self
+                .world
+                .surface_below(next[0], l.pos[1] + STEP_UP, next[2]);
             // Terrain at body height ahead (a slope's side) turns it back.
-            if self.world.solid([next[0], ground + STEP_UP + 1, next[2]]) || ground > l.pos[1] + STEP_UP {
+            if self.world.solid([next[0], ground + STEP_UP + 1, next[2]])
+                || ground > l.pos[1] + STEP_UP
+            {
                 l.dir = l.dir.reverse();
                 l.pos[1] = y.max(ground);
                 advance(l);
@@ -1029,7 +1196,10 @@ impl Simulation {
                 // The touching tick: down onto the surface without moving on.
                 let apex = y0 + hop_height(hop, hop_ticks(hop) as i32 / 2);
                 l.pos[1] = ground;
-                let pad = (self.object_kind == Some(objects::ObjectKind::Trampoline)).then(|| self.objects.iter().find(|o| o.touches(l.pos))).flatten().copied();
+                let pad = (self.object_kind == Some(objects::ObjectKind::Trampoline))
+                    .then(|| self.objects.iter().find(|o| o.touches(l.pos)))
+                    .flatten()
+                    .copied();
                 if let Some(pad) = pad {
                     self.press_pad(l.pos);
                     // Red pads (0x60–0x63) throw the next hop one longer, blue
@@ -1037,9 +1207,17 @@ impl Simulation {
                     // the shortest hop the lemming walks on (inferred: the
                     // Practice "Trampoline" demo's lemmings bounce up a red row,
                     // then come down along blue ones to walk into the exit).
-                    let next = if pad.value >= 0x64 { hop.checked_sub(1).filter(|&n| n > 0) } else { Some(hop_after_drop(apex - ground)) };
+                    let next = if pad.value >= 0x64 {
+                        hop.checked_sub(1).filter(|&n| n > 0)
+                    } else {
+                        Some(hop_after_drop(apex - ground))
+                    };
                     match next {
-                        Some(n) => l.set_state(State::Bouncing { hop: n, k: 0, y0: ground }),
+                        Some(n) => l.set_state(State::Bouncing {
+                            hop: n,
+                            k: 0,
+                            y0: ground,
+                        }),
                         None => l.set_state(State::Walking),
                     }
                 } else {
@@ -1056,7 +1234,11 @@ impl Simulation {
         } else if self.world.solid([next[0], next[1] + HEAD_HEIGHT, next[2]]) {
             // A ceiling stops the rise: the hop goes on from its way down.
             let mirrored = hop_ticks(hop) as i32 - k;
-            l.state = State::Bouncing { hop, k: mirrored.max(k1), y0 };
+            l.state = State::Bouncing {
+                hop,
+                k: mirrored.max(k1),
+                y0,
+            };
             return;
         }
         l.pos = next;
@@ -1074,7 +1256,8 @@ impl Simulation {
         let cell = |v: i32| v.div_euclid(SUB);
         for cx in cell(l.pos[0] - r)..=cell(l.pos[0] + r) {
             for cz in cell(l.pos[2] - r)..=cell(l.pos[2] + r) {
-                let d = [cx * SUB + SUB / 2 - l.pos[0], cz * SUB + SUB / 2 - l.pos[2]].map(|v| v as i64);
+                let d = [cx * SUB + SUB / 2 - l.pos[0], cz * SUB + SUB / 2 - l.pos[2]]
+                    .map(|v| v as i64);
                 if d[0] * d[0] + d[1] * d[1] > (r as i64) * (r as i64) {
                     continue;
                 }
@@ -1096,7 +1279,11 @@ impl Simulation {
         if self.bounce(l, fell) {
             return;
         }
-        let ground_flags = if on_block { self.world.flags_at([l.pos[0], l.pos[1] - 1, l.pos[2]]) } else { None };
+        let ground_flags = if on_block {
+            self.world.flags_at([l.pos[0], l.pos[1] - 1, l.pos[2]])
+        } else {
+            None
+        };
         let liquid = ground_flags.is_some_and(|f| f & flags::LIQUID != 0);
         let water = !on_block && self.world.floor(l.pos[0], l.pos[2]) == Floor::Water;
         if liquid || water {
@@ -1111,9 +1298,21 @@ impl Simulation {
     fn fall(&mut self, l: &mut Lemming, from_y: i32) {
         // Drifting forward at walking speed for the first ticks, unless
         // something solid is in the way.
-        let d = if l.state_ticks <= FALL_DRIFT_TICKS { l.dir.delta() } else { [0; 3] };
-        let ahead = [l.pos[0] + d[0] * WALK_SPEED, l.pos[1], l.pos[2] + d[2] * WALK_SPEED];
-        if !self.world.solid([ahead[0], ahead[1] + SUB / 8, ahead[2]]) && !self.world.solid([ahead[0], ahead[1] + HEAD_HEIGHT - 1, ahead[2]]) {
+        let d = if l.state_ticks <= FALL_DRIFT_TICKS {
+            l.dir.delta()
+        } else {
+            [0; 3]
+        };
+        let ahead = [
+            l.pos[0] + d[0] * WALK_SPEED,
+            l.pos[1],
+            l.pos[2] + d[2] * WALK_SPEED,
+        ];
+        if !self.world.solid([ahead[0], ahead[1] + SUB / 8, ahead[2]])
+            && !self
+                .world
+                .solid([ahead[0], ahead[1] + HEAD_HEIGHT - 1, ahead[2]])
+        {
             l.pos[0] = ahead[0];
             l.pos[2] = ahead[2];
         }
@@ -1145,7 +1344,10 @@ impl Simulation {
     fn climb(&mut self, l: &mut Lemming) {
         let d = l.dir.delta();
         let ahead = [l.pos[0] + d[0] * REACH, l.pos[2] + d[2] * REACH];
-        if self.world.solid([l.pos[0], l.pos[1] + HEAD_HEIGHT + CLIMB_SPEED, l.pos[2]]) {
+        if self
+            .world
+            .solid([l.pos[0], l.pos[1] + HEAD_HEIGHT + CLIMB_SPEED, l.pos[2]])
+        {
             // Ceiling: let go and fall back.
             l.dir = l.dir.reverse();
             let from = l.pos[1];
@@ -1153,11 +1355,17 @@ impl Simulation {
             return;
         }
         l.pos[1] += CLIMB_SPEED;
-        if !self.world.solid([ahead[0], l.pos[1], ahead[1]]) && !self.world.solid([ahead[0], l.pos[1] + HEAD_HEIGHT - 1, ahead[1]]) {
+        if !self.world.solid([ahead[0], l.pos[1], ahead[1]])
+            && !self
+                .world
+                .solid([ahead[0], l.pos[1] + HEAD_HEIGHT - 1, ahead[1]])
+        {
             // Reached the top edge, with room for the body: step onto it.
             l.pos[0] = ahead[0];
             l.pos[2] = ahead[1];
-            let (ground, _) = self.world.surface_below(l.pos[0], l.pos[1] + STEP_UP, l.pos[2]);
+            let (ground, _) = self
+                .world
+                .surface_below(l.pos[0], l.pos[1] + STEP_UP, l.pos[2]);
             l.pos[1] = ground.max(l.pos[1]);
             l.set_state(State::Walking);
         }
@@ -1170,7 +1378,9 @@ impl Simulation {
 
     /// Falls or stands depending on the ground now under the feet.
     fn settle(&mut self, l: &mut Lemming) -> bool {
-        let (ground, _) = self.world.surface_below(l.pos[0], l.pos[1] + STEP_UP, l.pos[2]);
+        let (ground, _) = self
+            .world
+            .surface_below(l.pos[0], l.pos[1] + STEP_UP, l.pos[2]);
         if ground < l.pos[1] - STEP_DOWN {
             let from = l.pos[1];
             l.set_state(State::Falling { from_y: from });
@@ -1185,7 +1395,9 @@ impl Simulation {
     /// onto it (provisional: one segment per cell, inheriting the block id
     /// of the cell stood on).
     fn build(&mut self, l: &mut Lemming, bricks_left: u8) {
-        if l.state_ticks < FIRST_BRICK_TICKS || !(l.state_ticks - FIRST_BRICK_TICKS).is_multiple_of(BUILD_TICKS) {
+        if l.state_ticks < FIRST_BRICK_TICKS
+            || !(l.state_ticks - FIRST_BRICK_TICKS).is_multiple_of(BUILD_TICKS)
+        {
             return;
         }
         if bricks_left == 0 {
@@ -1193,7 +1405,10 @@ impl Simulation {
             return;
         }
         let d = l.dir.delta();
-        let template = match self.world.block(Self::cell_of([l.pos[0], l.pos[1] - 1, l.pos[2]])) {
+        let template = match self
+            .world
+            .block(Self::cell_of([l.pos[0], l.pos[1] - 1, l.pos[2]]))
+        {
             Some((b, _)) if b.id >= 9 => b.id,
             _ => self.world.common_id,
         };
@@ -1201,17 +1416,31 @@ impl Simulation {
         // point, one segment thick, a unit wide (width unmeasured).
         let along = |from: i32, to: i32, axis: usize| {
             let (a, b) = (l.pos[axis] + d[axis] * from, l.pos[axis] + d[axis] * to);
-            if d[axis] == 0 { (l.pos[axis] - SUB / 2, l.pos[axis] + SUB / 2) } else { (a.min(b), a.max(b)) }
+            if d[axis] == 0 {
+                (l.pos[axis] - SUB / 2, l.pos[axis] + SUB / 2)
+            } else {
+                (a.min(b), a.max(b))
+            }
         };
-        let next = [l.pos[0] + d[0] * BRICK_RUN, l.pos[1] + SUB / 4, l.pos[2] + d[2] * BRICK_RUN];
-        let head_blocked = [next[1] + 1, next[1] + HEAD_HEIGHT - 1].iter().any(|&y| self.world.solid([next[0], y, next[2]]));
+        let next = [
+            l.pos[0] + d[0] * BRICK_RUN,
+            l.pos[1] + SUB / 4,
+            l.pos[2] + d[2] * BRICK_RUN,
+        ];
+        let head_blocked = [next[1] + 1, next[1] + HEAD_HEIGHT - 1]
+            .iter()
+            .any(|&y| self.world.solid([next[0], y, next[2]]));
         // A brick that would run into terrain is cut short at it, filling
         // the gap up to the wall; the builder then stops (provisional).
         let mut end = BRICK_END;
         let laid = loop {
             let (x0, x1) = along(BRICK_START, end, 0);
             let (z0, z1) = along(BRICK_START, end, 2);
-            let brick = world::Brick { min: [x0, l.pos[1], z0], max: [x1, l.pos[1] + SUB / 4, z1], id: template };
+            let brick = world::Brick {
+                min: [x0, l.pos[1], z0],
+                max: [x1, l.pos[1] + SUB / 4, z1],
+                id: template,
+            };
             if !head_blocked && self.world.add_brick(brick) {
                 break Some(end);
             }
@@ -1223,9 +1452,11 @@ impl Simulation {
         if laid != Some(BRICK_END) || head_blocked {
             l.set_state(State::Walking);
             return;
-        }        // Climb onto the new brick.
+        } // Climb onto the new brick.
         l.pos = next;
-        l.state = State::Building { bricks_left: bricks_left - 1 };
+        l.state = State::Building {
+            bricks_left: bricks_left - 1,
+        };
     }
     /// For a basher at work: the cell it is bashing, the segments it will
     /// remove there (the lower half-unit from its feet up), and the ticks
@@ -1237,13 +1468,23 @@ impl Simulation {
         }
         let (cell, mask) = Self::bash_cell(l);
         let present = self.world.block(cell).map_or(0, |(b, _)| b.segments) & mask;
-        (present != 0).then(|| (cell, present, (l.state_ticks - BASH_CRACK_START) % BASH_TICKS))
+        (present != 0).then(|| {
+            (
+                cell,
+                present,
+                (l.state_ticks - BASH_CRACK_START) % BASH_TICKS,
+            )
+        })
     }
 
     /// The cell a basher works on and the segments it removes there.
     fn bash_cell(l: &Lemming) -> ([i32; 3], u8) {
         let d = l.dir.delta();
-        let ahead = [l.pos[0] + d[0] * (SUB / 2), l.pos[1], l.pos[2] + d[2] * (SUB / 2)];
+        let ahead = [
+            l.pos[0] + d[0] * (SUB / 2),
+            l.pos[1],
+            l.pos[2] + d[2] * (SUB / 2),
+        ];
         let cell = Self::cell_of(ahead);
         // Segments from the feet up to about head height.
         let first = ((l.pos[1] - cell[1] * SUB) / (SUB / 4)).clamp(0, 3);
@@ -1254,12 +1495,15 @@ impl Simulation {
     /// Whether anything is left in the segments a basher works on.
     fn bash_cell_full(&self, l: &Lemming) -> bool {
         let (cell, mask) = Self::bash_cell(l);
-        self.world.block(cell).is_some_and(|(b, _)| b.segments & mask != 0)
+        self.world
+            .block(cell)
+            .is_some_and(|(b, _)| b.segments & mask != 0)
     }
 
     /// Whether a basher `ticks` into bashing ends a stroke now.
     fn bash_stroke_ends(ticks: u32) -> bool {
-        ticks >= BASH_CRACK_START + BASH_TICKS && (ticks - BASH_CRACK_START).is_multiple_of(BASH_TICKS)
+        ticks >= BASH_CRACK_START + BASH_TICKS
+            && (ticks - BASH_CRACK_START).is_multiple_of(BASH_TICKS)
     }
 
     /// Removes body-height terrain in the cell ahead and moves into the gap;
@@ -1324,7 +1568,9 @@ impl Simulation {
                 }
             }
             for (c, mask) in cells {
-                let Some((b, f)) = self.world.block(c) else { continue };
+                let Some((b, f)) = self.world.block(c) else {
+                    continue;
+                };
                 if b.segments & mask == 0 {
                     continue;
                 }
@@ -1350,7 +1596,11 @@ impl Simulation {
         if !l.state_ticks.is_multiple_of(DIG_TICKS) {
             return;
         }
-        let c = [l.pos[0].div_euclid(SUB), (l.pos[1] - 1).div_euclid(SUB), l.pos[2].div_euclid(SUB)];
+        let c = [
+            l.pos[0].div_euclid(SUB),
+            (l.pos[1] - 1).div_euclid(SUB),
+            l.pos[2].div_euclid(SUB),
+        ];
         match self.world.block(c) {
             Some((b, f)) if f & flags::STEEL == 0 => {
                 // Remove the highest present segment under the feet.
@@ -1372,7 +1622,9 @@ impl Simulation {
     /// standing at `(x, feet, z)`, anywhere from its feet to its head (a
     /// deflector may hang above the floor).
     fn deflector_across(&self, x: i32, feet: i32, z: i32) -> Option<[i32; 2]> {
-        [SUB / 8, HEAD_HEIGHT / 2, HEAD_HEIGHT - 1].into_iter().find_map(|h| self.world.deflector_normal([x, feet + h, z]))
+        [SUB / 8, HEAD_HEIGHT / 2, HEAD_HEIGHT - 1]
+            .into_iter()
+            .find_map(|h| self.world.deflector_normal([x, feet + h, z]))
     }
 
     fn walk(&mut self, l: &mut Lemming, obstacles: &[Obstacle]) {
@@ -1382,9 +1634,17 @@ impl Simulation {
         // Probe as far ahead as the wall check below (one step plus REACH), so a
         // doorway is recognised before the walker would bounce off it.
         // On ice lemmings move about 3× as fast (observed: 3.1 ± 0.3).
-        let speed = if l.state == State::Sliding { ICE_SPEED } else { WALK_SPEED };
+        let speed = if l.state == State::Sliding {
+            ICE_SPEED
+        } else {
+            WALK_SPEED
+        };
         let reach = REACH + speed;
-        let probe = [l.pos[0] + d[0] * reach, l.pos[1] + SUB / 8, l.pos[2] + d[2] * reach];
+        let probe = [
+            l.pos[0] + d[0] * reach,
+            l.pos[1] + SUB / 8,
+            l.pos[2] + d[2] * reach,
+        ];
         if let Some(b) = self.world.block_at(probe)
             && b.id == EXIT_ID
         {
@@ -1410,7 +1670,11 @@ impl Simulation {
             let centre = here[axis] * SUB + SUB / 2;
             if (centre - l.pos[axis]) * d[axis] > 0 && (centre - next[axis]) * d[axis] <= 0 {
                 l.pos[axis] = centre;
-                l.dir = if s.1 { l.dir.anticlockwise() } else { l.dir.clockwise() };
+                l.dir = if s.1 {
+                    l.dir.anticlockwise()
+                } else {
+                    l.dir.clockwise()
+                };
                 s.1 = !s.1;
                 return;
             }
@@ -1434,7 +1698,9 @@ impl Simulation {
                 Some(to) if to != l.dir && (Self::cell_of(o.pos) == here || near(next)) => {
                     let axis = if d[0] != 0 { 0 } else { 2 };
                     let centre = o.pos[axis].div_euclid(SUB) * SUB + SUB / 2;
-                    let crosses = |at: i32| (at - l.pos[axis]) * d[axis] > 0 && (at - next[axis]) * d[axis] <= 0;
+                    let crosses = |at: i32| {
+                        (at - l.pos[axis]) * d[axis] > 0 && (at - next[axis]) * d[axis] <= 0
+                    };
                     let at = if Self::cell_of(o.pos) == here && crosses(centre) {
                         Some(centre)
                     } else if near(next) && crosses(o.pos[axis]) {
@@ -1456,7 +1722,10 @@ impl Simulation {
         // quarter, as if reflected, once its centre reaches the face
         // (provisional). Their square backs are ordinary walls.
         let facing = |n: [i32; 2]| d[0] * n[0] + d[2] * n[1] < 0;
-        if let Some(n) = self.deflector_across(ahead[0], l.pos[1], ahead[1]).filter(|&n| facing(n)) {
+        if let Some(n) = self
+            .deflector_across(ahead[0], l.pos[1], ahead[1])
+            .filter(|&n| facing(n))
+        {
             if self.deflector_across(next[0], l.pos[1], next[2]).is_some() {
                 let k = d[0] * n[0] + d[2] * n[1];
                 let out = [d[0] - k * n[0], d[2] - k * n[1]];
@@ -1475,7 +1744,9 @@ impl Simulation {
         // The surface where the feet will be after this step: a step up of
         // more than STEP_UP there is a wall. (Probing further ahead would
         // read a 45° ramp as a wall.)
-        let (surface, _) = self.world.surface_below(next[0], l.pos[1] + STEP_UP + 1, next[2]);
+        let (surface, _) = self
+            .world
+            .surface_below(next[0], l.pos[1] + STEP_UP + 1, next[2]);
         // Body clearance ahead: solid at step height above that surface is a
         // wall (a ramp rises at most REACH over the probe distance, which stays
         // below this), and a ceiling lower than the walker's head blocks too.
@@ -1486,7 +1757,11 @@ impl Simulation {
         // Stepping off an edge, the walker is still at its own height when
         // it moves on (then falls), so that is where it needs room: walls
         // down by a lower surface don't turn it round.
-        let body = if surface < l.pos[1] - STEP_DOWN { l.pos[1] } else { surface };
+        let body = if surface < l.pos[1] - STEP_DOWN {
+            l.pos[1]
+        } else {
+            surface
+        };
         let blocked = surface > l.pos[1] + STEP_UP
             || wall(&self.world, body + STEP_UP + 2)
             || wall(&self.world, body + HEAD_HEIGHT - 1);
@@ -1503,17 +1778,27 @@ impl Simulation {
         }
         l.pos[0] = next[0];
         l.pos[2] = next[2];
-        let (ground, on_block) = self.world.surface_below(l.pos[0], l.pos[1] + STEP_UP, l.pos[2]);
+        let (ground, on_block) = self
+            .world
+            .surface_below(l.pos[0], l.pos[1] + STEP_UP, l.pos[2]);
         if ground >= l.pos[1] - STEP_DOWN {
             l.pos[1] = ground;
-            let ground_flags = if on_block { self.world.flags_at([l.pos[0], ground - 1, l.pos[2]]) } else { None };
+            let ground_flags = if on_block {
+                self.world.flags_at([l.pos[0], ground - 1, l.pos[2]])
+            } else {
+                None
+            };
             let liquid = ground_flags.is_some_and(|f| f & flags::LIQUID != 0);
             if liquid || (!on_block && self.world.floor(l.pos[0], l.pos[2]) == Floor::Water) {
                 l.set_state(State::Drowning);
             } else if !self.bounce(l, 0) {
                 // Slippery tops make walkers slide; leaving them, they walk.
                 let slippery = ground_flags.is_some_and(|f| f & flags::SLIPPERY != 0);
-                l.state = if slippery { State::Sliding } else { State::Walking };
+                l.state = if slippery {
+                    State::Sliding
+                } else {
+                    State::Walking
+                };
             }
         } else {
             let from = l.pos[1];
@@ -1523,7 +1808,11 @@ impl Simulation {
 }
 
 /// Grid extents in sub-units, for callers that clamp cameras or cursors.
-pub const EXTENT: [i32; 3] = [SIZE_X as i32 * SUB, SIZE_Y as i32 * SUB, SIZE_Z as i32 * SUB];
+pub const EXTENT: [i32; 3] = [
+    SIZE_X as i32 * SUB,
+    SIZE_Y as i32 * SUB,
+    SIZE_Z as i32 * SUB,
+];
 
 #[cfg(test)]
 mod tests {

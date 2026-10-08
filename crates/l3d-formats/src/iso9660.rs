@@ -1,8 +1,8 @@
 //! Minimal read-only ISO 9660 filesystem (no Joliet/Rock Ridge extensions,
 //! single-extent files).
 
-use crate::disc::{DataTrackReader, SECTOR_SIZE};
 use crate::Error;
+use crate::disc::{DataTrackReader, SECTOR_SIZE};
 
 /// A file or directory in the filesystem.
 #[derive(Debug, Clone)]
@@ -43,7 +43,12 @@ fn parse_record(rec: &[u8]) -> Option<Entry> {
             s.strip_suffix('.').unwrap_or(s).to_string()
         }
     };
-    Some(Entry { name, is_dir, lba, size })
+    Some(Entry {
+        name,
+        is_dir,
+        lba,
+        size,
+    })
 }
 
 impl IsoFs {
@@ -52,12 +57,18 @@ impl IsoFs {
         let mut pvd = vec![0u8; SECTOR_SIZE];
         reader.read_sectors(16, &mut pvd)?;
         if pvd[0] != 1 || &pvd[1..6] != b"CD001" {
-            return Err(Error::Format("no ISO 9660 primary volume descriptor".into()));
+            return Err(Error::Format(
+                "no ISO 9660 primary volume descriptor".into(),
+            ));
         }
         let volume_id = String::from_utf8_lossy(&pvd[40..72]).trim_end().to_string();
         let root = parse_record(&pvd[156..190])
             .ok_or_else(|| Error::Format("bad root directory record".into()))?;
-        Ok(IsoFs { reader, root, volume_id })
+        Ok(IsoFs {
+            reader,
+            root,
+            volume_id,
+        })
     }
 
     pub fn root(&self) -> &Entry {
@@ -120,7 +131,11 @@ impl IsoFs {
             let mut entries = self.read_dir(&dir)?;
             entries.sort_by(|a, b| a.name.cmp(&b.name));
             for e in entries.into_iter().rev() {
-                let path = if prefix.is_empty() { e.name.clone() } else { format!("{prefix}/{}", e.name) };
+                let path = if prefix.is_empty() {
+                    e.name.clone()
+                } else {
+                    format!("{prefix}/{}", e.name)
+                };
                 if e.is_dir {
                     stack.push((path.clone(), e.clone()));
                 }

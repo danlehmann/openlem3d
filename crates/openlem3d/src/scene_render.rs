@@ -100,14 +100,18 @@ impl Plugin for SceneRenderPlugin {
                 ExtractResourcePlugin::<SceneCamera>::default(),
                 ExtractResourcePlugin::<SceneSprites>::default(),
             ));
-        let Some(render_app) = app.get_sub_app_mut(RenderApp) else { return };
+        let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
+            return;
+        };
         render_app
             .add_systems(Render, prepare_scene.in_set(RenderSystems::Prepare))
             .add_systems(Core2d, draw_scene.before(Core2dSystems::MainPass));
     }
 
     fn finish(&self, app: &mut App) {
-        let Some(render_app) = app.get_sub_app_mut(RenderApp) else { return };
+        let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
+            return;
+        };
         render_app.init_resource::<SceneGpu>();
     }
 }
@@ -127,7 +131,11 @@ struct SceneGpu {
     sampler: wgpu::Sampler,
     uniforms: wgpu::Buffer,
     /// Geometry and sky pipelines and the colour format they were built for.
-    pipelines: Option<(wgpu::TextureFormat, wgpu::RenderPipeline, wgpu::RenderPipeline)>,
+    pipelines: Option<(
+        wgpu::TextureFormat,
+        wgpu::RenderPipeline,
+        wgpu::RenderPipeline,
+    )>,
     /// Version of the uploaded [`SceneContent`].
     version: Option<u64>,
     layers: Vec<UploadedLayer>,
@@ -299,7 +307,11 @@ impl SceneGpu {
             let view = device
                 .create_texture(&wgpu::TextureDescriptor {
                     label: Some("scene depth"),
-                    size: wgpu::Extent3d { width: size.0, height: size.1, depth_or_array_layers: 1 },
+                    size: wgpu::Extent3d {
+                        width: size.0,
+                        height: size.1,
+                        depth_or_array_layers: 1,
+                    },
                     mip_level_count: 1,
                     sample_count: 1,
                     dimension: wgpu::TextureDimension::D2,
@@ -313,12 +325,21 @@ impl SceneGpu {
         self.depth.as_ref().unwrap().1.clone()
     }
 
-    fn bind_texture(&self, device: &wgpu::Device, queue: &wgpu::Queue, img: &RgbaImage) -> wgpu::BindGroup {
+    fn bind_texture(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        img: &RgbaImage,
+    ) -> wgpu::BindGroup {
         let texture = device.create_texture_with_data(
             queue,
             &wgpu::TextureDescriptor {
                 label: Some("scene texture"),
-                size: wgpu::Extent3d { width: img.width, height: img.height, depth_or_array_layers: 1 },
+                size: wgpu::Extent3d {
+                    width: img.width,
+                    height: img.height,
+                    depth_or_array_layers: 1,
+                },
                 mip_level_count: 1,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
@@ -334,9 +355,18 @@ impl SceneGpu {
             label: Some("scene"),
             layout: &self.layout,
             entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: self.uniforms.as_entire_binding() },
-                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&view) },
-                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&self.sampler) },
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.uniforms.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&self.sampler),
+                },
             ],
         })
     }
@@ -358,9 +388,23 @@ fn prepare_scene(
     // screens show more sky around the same centre.
     let extra = (w as f32 / scale - 640.0) / 2.0;
     let surround = content.data.as_ref().is_some_and(|d| d.sky_surround);
-    let column = if surround { camera.sky_column * SURROUND_SKY_TURN / 1024.0 } else { camera.sky_column };
-    uniforms.extend([column - extra / 2.0, camera.horizon * h as f32, scale, camera.time]);
-    uniforms.extend([camera.right.x, camera.right.y, camera.right.z, if surround { 1.0 } else { 0.0 }]);
+    let column = if surround {
+        camera.sky_column * SURROUND_SKY_TURN / 1024.0
+    } else {
+        camera.sky_column
+    };
+    uniforms.extend([
+        column - extra / 2.0,
+        camera.horizon * h as f32,
+        scale,
+        camera.time,
+    ]);
+    uniforms.extend([
+        camera.right.x,
+        camera.right.y,
+        camera.right.z,
+        if surround { 1.0 } else { 0.0 },
+    ]);
     uniforms.extend([camera.roll, w as f32 / 2.0, 0.0, 0.0]);
     queue.write_buffer(&gpu.uniforms, 0, &f32_bytes(&uniforms));
     upload_sprites(device, &queue, &mut gpu, &sprites);
@@ -398,7 +442,11 @@ fn prepare_scene(
             }),
             indices: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("scene indices"),
-                contents: &l.indices.iter().flat_map(|i| i.to_le_bytes()).collect::<Vec<_>>(),
+                contents: &l
+                    .indices
+                    .iter()
+                    .flat_map(|i| i.to_le_bytes())
+                    .collect::<Vec<_>>(),
                 usage: wgpu::BufferUsages::INDEX,
             }),
             index_count: l.indices.len() as u32,
@@ -412,7 +460,12 @@ fn prepare_scene(
 
 /// Copies this frame's sprite geometry into GPU buffers, growing them when
 /// they are too small.
-fn upload_sprites(device: &wgpu::Device, queue: &wgpu::Queue, gpu: &mut SceneGpu, sprites: &SceneSprites) {
+fn upload_sprites(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    gpu: &mut SceneGpu,
+    sprites: &SceneSprites,
+) {
     let count = sprites.indices.len() as u32;
     if count == 0 {
         if let Some(s) = &mut gpu.sprites {
@@ -421,11 +474,14 @@ fn upload_sprites(device: &wgpu::Device, queue: &wgpu::Queue, gpu: &mut SceneGpu
         return;
     }
     let vbytes = f32_bytes(&sprites.vertices);
-    let ibytes: Vec<u8> = sprites.indices.iter().flat_map(|i| i.to_le_bytes()).collect();
-    let fits = gpu
-        .sprites
-        .as_ref()
-        .is_some_and(|(v, i, _)| v.size() >= vbytes.len() as u64 && i.size() >= ibytes.len() as u64);
+    let ibytes: Vec<u8> = sprites
+        .indices
+        .iter()
+        .flat_map(|i| i.to_le_bytes())
+        .collect();
+    let fits = gpu.sprites.as_ref().is_some_and(|(v, i, _)| {
+        v.size() >= vbytes.len() as u64 && i.size() >= ibytes.len() as u64
+    });
     if !fits {
         let alloc = |len: usize, usage| {
             device.create_buffer(&wgpu::BufferDescriptor {
@@ -435,7 +491,11 @@ fn upload_sprites(device: &wgpu::Device, queue: &wgpu::Queue, gpu: &mut SceneGpu
                 mapped_at_creation: false,
             })
         };
-        gpu.sprites = Some((alloc(vbytes.len(), wgpu::BufferUsages::VERTEX), alloc(ibytes.len(), wgpu::BufferUsages::INDEX), 0));
+        gpu.sprites = Some((
+            alloc(vbytes.len(), wgpu::BufferUsages::VERTEX),
+            alloc(ibytes.len(), wgpu::BufferUsages::INDEX),
+            0,
+        ));
     }
     let (v, i, n) = gpu.sprites.as_mut().unwrap();
     queue.write_buffer(v, 0, &vbytes);
@@ -462,7 +522,10 @@ fn draw_scene(view: ViewQuery<&ViewTarget>, mut gpu: ResMut<SceneGpu>, mut ctx: 
         color_attachments: &[Some(color)],
         depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
             view: &depth,
-            depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Discard }),
+            depth_ops: Some(wgpu::Operations {
+                load: wgpu::LoadOp::Clear(1.0),
+                store: wgpu::StoreOp::Discard,
+            }),
             stencil_ops: None,
         }),
         ..Default::default()

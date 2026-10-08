@@ -20,7 +20,10 @@ impl Plugin for SfxPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<Sfx>()
             .init_resource::<Sounds>()
-            .add_systems(Update, (sim_events, watch_play).run_if(in_state(AppState::Playing)))
+            .add_systems(
+                Update,
+                (sim_events, watch_play).run_if(in_state(AppState::Playing)),
+            )
             .add_systems(Update, watch_rating.run_if(in_state(AppState::Title)))
             .add_systems(
                 OnEnter(AppState::Playing),
@@ -40,15 +43,35 @@ pub struct Sfx(pub &'static str);
 
 /// The voice naming each skill, in [`Skill::ALL`] order.
 pub fn skill_voice(s: Skill) -> &'static str {
-    ["VOXFX/BLOCKER1", "VOXFX/TURNER1", "VOXFX/BOMBER", "VOXFX/BUILDER2", "VOXFX/BASHER2", "VOXFX/MINER2", "VOXFX/DIGGER2", "VOXFX/CLIMBER2", "VOXFX/FLOATER1"]
-        [s as usize]
+    [
+        "VOXFX/BLOCKER1",
+        "VOXFX/TURNER1",
+        "VOXFX/BOMBER",
+        "VOXFX/BUILDER2",
+        "VOXFX/BASHER2",
+        "VOXFX/MINER2",
+        "VOXFX/DIGGER2",
+        "VOXFX/CLIMBER2",
+        "VOXFX/FLOATER1",
+    ][s as usize]
 }
 
 /// The voice for each rating, in `menu::RATINGS` order.
-pub const RATING_VOICES: [&str; 5] = ["VOXFX/FUN2", "VOXFX/TRICKY1", "VOXFX/TAXING1", "VOXFX/MAYHEM1", "VOXFX/PRACTISE"];
+pub const RATING_VOICES: [&str; 5] = [
+    "VOXFX/FUN2",
+    "VOXFX/TRICKY1",
+    "VOXFX/TAXING1",
+    "VOXFX/MAYHEM1",
+    "VOXFX/PRACTISE",
+];
 
 /// The voice for each preset camera.
-pub const CAMERA_VOICES: [&str; 4] = ["VOXFX/CAMRAONE", "VOXFX/CAMRATWO", "VOXFX/CAMRA3", "VOXFX/CAMRA4"];
+pub const CAMERA_VOICES: [&str; 4] = [
+    "VOXFX/CAMRAONE",
+    "VOXFX/CAMRATWO",
+    "VOXFX/CAMRA3",
+    "VOXFX/CAMRA4",
+];
 
 /// Uploaded samples, loaded on first use (`None` when missing or empty).
 #[derive(Resource, Default)]
@@ -74,18 +97,35 @@ fn play(
         }
         played.push(name);
         let handle = sounds.0.entry(name).or_insert_with(|| {
-            let sample = data.0.read(&format!("SOUND/{name}.U8")).ok().and_then(|b| Sample::parse(&b).ok())?;
-            (!sample.data.is_empty()).then(|| sources.add(AudioSource { bytes: Arc::from(sample.to_wav()) }))
+            let sample = data
+                .0
+                .read(&format!("SOUND/{name}.U8"))
+                .ok()
+                .and_then(|b| Sample::parse(&b).ok())?;
+            (!sample.data.is_empty()).then(|| {
+                sources.add(AudioSource {
+                    bytes: Arc::from(sample.to_wav()),
+                })
+            })
         });
         if let Some(h) = handle {
-            commands.spawn((AudioPlayer::new(h.clone()), PlaybackSettings::DESPAWN.with_volume(Volume::Linear(VOLUME * settings.effects_volume()))));
+            commands.spawn((
+                AudioPlayer::new(h.clone()),
+                PlaybackSettings::DESPAWN
+                    .with_volume(Volume::Linear(VOLUME * settings.effects_volume())),
+            ));
         }
     }
 }
 
 /// The skill's name when one is selected, and the camera's number when
 /// another preset is chosen (not when a level sets them up).
-fn watch_play(selected: Res<crate::hud::SelectedSkill>, preset: Res<crate::PresetIndex>, game: Res<Game>, mut out: MessageWriter<Sfx>) {
+fn watch_play(
+    selected: Res<crate::hud::SelectedSkill>,
+    preset: Res<crate::PresetIndex>,
+    game: Res<Game>,
+    mut out: MessageWriter<Sfx>,
+) {
     if game.sim.as_ref().is_none_or(|s| s.tick == 0) {
         return;
     }
@@ -107,7 +147,11 @@ fn watch_rating(rating: Res<crate::menu::MenuRating>, mut out: MessageWriter<Sfx
 }
 
 /// Sounds for what the lemmings did this frame.
-fn sim_events(mut game: ResMut<Game>, mut out: MessageWriter<Sfx>, mut fanfare_played: Local<bool>) {
+fn sim_events(
+    mut game: ResMut<Game>,
+    mut out: MessageWriter<Sfx>,
+    mut fanfare_played: Local<bool>,
+) {
     let needed = game.save_requirement;
     let Some(sim) = &mut game.sim else { return };
     if sim.tick <= 1 {

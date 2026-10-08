@@ -9,14 +9,28 @@ use l3d_formats::gamedata::{GameData, locate_data_dir};
 use l3d_sim::demos::{Plan, Solution, play};
 
 fn main() {
-    let a: Vec<u64> = std::env::args().skip(1).map(|s| s.parse().expect("numbers")).collect();
-    let (&[n, skill, lemmings, from, to, step], first) = a.split_at(6.min(a.len())) else { panic!("LEVEL SKILL LEMMINGS FROM TO STEP [TICK LEMMING SKILL]...") };
-    let (first, []) = first.as_chunks::<3>() else { panic!("each fixed assignment takes TICK LEMMING SKILL") };
-    let first: Vec<_> = first.iter().map(|&[t, i, s]| (t, i as usize, s as u8, None)).collect();
+    let a: Vec<u64> = std::env::args()
+        .skip(1)
+        .map(|s| s.parse().expect("numbers"))
+        .collect();
+    let (&[n, skill, lemmings, from, to, step], first) = a.split_at(6.min(a.len())) else {
+        panic!("LEVEL SKILL LEMMINGS FROM TO STEP [TICK LEMMING SKILL]...")
+    };
+    let (first, []) = first.as_chunks::<3>() else {
+        panic!("each fixed assignment takes TICK LEMMING SKILL")
+    };
+    let first: Vec<_> = first
+        .iter()
+        .map(|&[t, i, s]| (t, i as usize, s as u8, None))
+        .collect();
     let mut data = GameData::open(&locate_data_dir(None)).expect("open game data");
     let level = data.level(n as u32).expect("level");
     let blocks = data.blocks(n as u32).expect("blocks");
-    let sides: &[Option<bool>] = if skill == 1 { &[Some(true), Some(false)] } else { &[None] };
+    let sides: &[Option<bool>] = if skill == 1 {
+        &[Some(true), Some(false)]
+    } else {
+        &[None]
+    };
     let mut best = Vec::new();
     for t in (from..=to).step_by(step as usize) {
         for i in 0..lemmings as usize {
@@ -24,8 +38,17 @@ fn main() {
                 let mut steps = first.clone();
                 steps.push((t, i, skill as u8, side));
                 steps.sort_by_key(|s| s.0);
-                let steps: &'static [(u64, usize, u8, Option<bool>)] = Box::leak(steps.into_boxed_slice());
-                let sim = play(&Solution { level: n as u32, plan: Plan::At(steps), saves: 0 }, &level, &blocks);
+                let steps: &'static [(u64, usize, u8, Option<bool>)] =
+                    Box::leak(steps.into_boxed_slice());
+                let sim = play(
+                    &Solution {
+                        level: n as u32,
+                        plan: Plan::At(steps),
+                        saves: 0,
+                    },
+                    &level,
+                    &blocks,
+                );
                 best.push((sim.counts.saved, t, i, side));
             }
         }

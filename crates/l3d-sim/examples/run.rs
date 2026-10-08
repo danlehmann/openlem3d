@@ -24,7 +24,12 @@ fn main() {
     let level = data.level(n).expect("level");
     let blocks = data.blocks(n).expect("blocks");
     let mut sim = Simulation::new(&level, &blocks);
-    println!("LEVEL.{n:03} {:?}: {} entrances {:?}", level.title, sim.entrances.len(), sim.entrances);
+    println!(
+        "LEVEL.{n:03} {:?}: {} entrances {:?}",
+        level.title,
+        sim.entrances.len(),
+        sim.entrances
+    );
     for s in 1..=seconds {
         for _ in 0..TICKS_PER_SECOND {
             sim.step();
@@ -35,12 +40,21 @@ fn main() {
                         (Some("acw"), Some(d)) => sim.assign_turner(i, d.anticlockwise()),
                         _ => sim.assign(i, skill),
                     };
-                    println!("tick {t}: assign {} to lemming {i}: {}", skill.name(), if ok { "ok" } else { "rejected" });
+                    println!(
+                        "tick {t}: assign {} to lemming {i}: {}",
+                        skill.name(),
+                        if ok { "ok" } else { "rejected" }
+                    );
                 }
             }
         }
         let c = sim.counts;
-        let states = |f: fn(&State) -> bool| sim.lemmings.iter().filter(|l| !l.gone && f(&l.state)).count();
+        let states = |f: fn(&State) -> bool| {
+            sim.lemmings
+                .iter()
+                .filter(|l| !l.gone && f(&l.state))
+                .count()
+        };
         println!(
             "t={s:3}s released {:2} out {:2} saved {:2} dead {:2} | walking {:2} falling {:2}",
             c.released,
@@ -58,6 +72,9 @@ fn main() {
     }
     for (i, l) in sim.lemmings.iter().enumerate().take(10) {
         let p = l.pos.map(|v| v as f32 / SUB as f32);
-        println!("lemming {i}: {:?} at ({:.2}, {:.2}, {:.2}) heading {:?} gone {}", l.state, p[0], p[1], p[2], l.dir, l.gone);
+        println!(
+            "lemming {i}: {:?} at ({:.2}, {:.2}, {:.2}) heading {:?} gone {}",
+            l.state, p[0], p[1], p[2], l.dir, l.gone
+        );
     }
 }

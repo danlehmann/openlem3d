@@ -50,7 +50,11 @@ struct Poly {
 type PlacedPoly<'a> = (Vec<[f32; 3]>, Vec<[f32; 2]>, &'a Poly, bool);
 
 fn poly(verts: &[[f32; 3]], src: FaceDir, on_face: Option<FaceDir>) -> Poly {
-    Poly { verts: verts.to_vec(), src, on_face }
+    Poly {
+        verts: verts.to_vec(),
+        src,
+        on_face,
+    }
 }
 
 fn mirror_y(p: Poly) -> Poly {
@@ -100,27 +104,67 @@ fn shape_polys(shape: u8) -> Option<Vec<Poly>> {
         5 => vec![
             full(NegY),
             full(NegZ),
-            poly(&[[0., 0., 0.], [0., 0., 1.], [0., 1., 0.]], NegX, Some(NegX)),
-            poly(&[[1., 0., 0.], [1., 0., 1.], [1., 1., 0.]], PosX, Some(PosX)),
-            poly(&[[0., 0., 1.], [1., 0., 1.], [1., 1., 0.], [0., 1., 0.]], PosZ, None),
+            poly(
+                &[[0., 0., 0.], [0., 0., 1.], [0., 1., 0.]],
+                NegX,
+                Some(NegX),
+            ),
+            poly(
+                &[[1., 0., 0.], [1., 0., 1.], [1., 1., 0.]],
+                PosX,
+                Some(PosX),
+            ),
+            poly(
+                &[[0., 0., 1.], [1., 0., 1.], [1., 1., 0.], [0., 1., 0.]],
+                PosZ,
+                None,
+            ),
         ],
         6 => shape_polys(5)?.into_iter().map(mirror_y).collect(),
         // Vertical 45° deflector, diagonal face towards +Z/+X.
         7 => vec![
-            poly(&[[0., 0., 0.], [1., 0., 0.], [0., 0., 1.]], NegY, Some(NegY)),
-            poly(&[[0., 1., 0.], [1., 1., 0.], [0., 1., 1.]], PosY, Some(PosY)),
+            poly(
+                &[[0., 0., 0.], [1., 0., 0.], [0., 0., 1.]],
+                NegY,
+                Some(NegY),
+            ),
+            poly(
+                &[[0., 1., 0.], [1., 1., 0.], [0., 1., 1.]],
+                PosY,
+                Some(PosY),
+            ),
             full(NegZ),
             full(NegX),
-            poly(&[[1., 0., 0.], [0., 0., 1.], [0., 1., 1.], [1., 1., 0.]], PosZ, None),
+            poly(
+                &[[1., 0., 0.], [0., 0., 1.], [0., 1., 1.], [1., 1., 0.]],
+                PosZ,
+                None,
+            ),
         ],
         // 22.5° ramp over the upper half, falling towards +Z.
         8 => vec![
             full(NegY),
             full(NegZ),
-            poly(&[[0., 0., 0.], [0., 0., 1.], [0., 0.5, 1.], [0., 1., 0.]], NegX, Some(NegX)),
-            poly(&[[1., 0., 0.], [1., 0., 1.], [1., 0.5, 1.], [1., 1., 0.]], PosX, Some(PosX)),
-            poly(&[[0., 0., 1.], [1., 0., 1.], [1., 0.5, 1.], [0., 0.5, 1.]], PosZ, Some(PosZ)),
-            poly(&[[0., 0.5, 1.], [1., 0.5, 1.], [1., 1., 0.], [0., 1., 0.]], PosY, None),
+            poly(
+                &[[0., 0., 0.], [0., 0., 1.], [0., 0.5, 1.], [0., 1., 0.]],
+                NegX,
+                Some(NegX),
+            ),
+            poly(
+                &[[1., 0., 0.], [1., 0., 1.], [1., 0.5, 1.], [1., 1., 0.]],
+                PosX,
+                Some(PosX),
+            ),
+            poly(
+                &[[0., 0., 1.], [1., 0., 1.], [1., 0.5, 1.], [0., 0.5, 1.]],
+                PosZ,
+                Some(PosZ),
+            ),
+            poly(
+                &[[0., 0.5, 1.], [1., 0.5, 1.], [1., 1., 0.], [0., 1., 0.]],
+                PosY,
+                None,
+            ),
         ],
         9 => shape_polys(8)?.into_iter().map(mirror_y).collect(),
         // Outer corner of two 45° ramps rising towards +X and +Z.
@@ -128,8 +172,16 @@ fn shape_polys(shape: u8) -> Option<Vec<Poly>> {
             full(NegY),
             poly(&[[0., 0., 0.], [1., 0., 0.], [1., 1., 1.]], NegZ, None),
             poly(&[[0., 0., 0.], [0., 0., 1.], [1., 1., 1.]], NegX, None),
-            poly(&[[1., 0., 0.], [1., 0., 1.], [1., 1., 1.]], PosX, Some(PosX)),
-            poly(&[[0., 0., 1.], [1., 0., 1.], [1., 1., 1.]], PosZ, Some(PosZ)),
+            poly(
+                &[[1., 0., 0.], [1., 0., 1.], [1., 1., 1.]],
+                PosX,
+                Some(PosX),
+            ),
+            poly(
+                &[[0., 0., 1.], [1., 0., 1.], [1., 1., 1.]],
+                PosZ,
+                Some(PosZ),
+            ),
         ],
         11 => shape_polys(10)?.into_iter().map(mirror_y).collect(),
         // Corner piece: a tetrahedron with its peak above the −X/−Z corner
@@ -137,10 +189,22 @@ fn shape_polys(shape: u8) -> Option<Vec<Poly>> {
         // ramps falling towards +X and +Z (verified on the platform corners
         // of `LEVEL.006`).
         12 => vec![
-            poly(&[[0., 0., 0.], [1., 0., 0.], [0., 0., 1.]], NegY, Some(NegY)),
+            poly(
+                &[[0., 0., 0.], [1., 0., 0.], [0., 0., 1.]],
+                NegY,
+                Some(NegY),
+            ),
             poly(&[[1., 0., 0.], [0., 0., 1.], [0., 1., 0.]], PosZ, None),
-            poly(&[[0., 0., 0.], [0., 0., 1.], [0., 1., 0.]], NegX, Some(NegX)),
-            poly(&[[0., 0., 0.], [1., 0., 0.], [0., 1., 0.]], NegZ, Some(NegZ)),
+            poly(
+                &[[0., 0., 0.], [0., 0., 1.], [0., 1., 0.]],
+                NegX,
+                Some(NegX),
+            ),
+            poly(
+                &[[0., 0., 0.], [1., 0., 0.], [0., 1., 0.]],
+                NegZ,
+                Some(NegZ),
+            ),
         ],
         13 => shape_polys(12)?.into_iter().map(mirror_y).collect(),
         _ => return None,
@@ -179,7 +243,11 @@ fn is_flap(cell: BlockCell, src: FaceDir) -> bool {
 fn open_flap(p: [f32; 3], src: FaceDir, y0: f32, open: f32) -> [f32; 3] {
     let a = open.clamp(0.0, 1.0) * 0.75 * std::f32::consts::PI;
     let h = p[1] - y0;
-    let x = if src == FaceDir::PosX { 1.0 - a.cos() * h } else { a.cos() * h };
+    let x = if src == FaceDir::PosX {
+        1.0 - a.cos() * h
+    } else {
+        a.cos() * h
+    };
     [x, y0 - a.sin() * h, p[2]]
 }
 
@@ -267,7 +335,11 @@ fn face_tiles(texture: u8, mods: u8) -> (u32, u32) {
         match texture {
             0x08..=0x13 => {
                 let front = 43 + (texture - 0x08) as u32;
-                let back = if (front - 43).is_multiple_of(2) { front + 1 } else { front - 1 };
+                let back = if (front - 43).is_multiple_of(2) {
+                    front + 1
+                } else {
+                    front - 1
+                };
                 return (front, back);
             }
             0x14..=0x16 => return (0, 0),
@@ -295,8 +367,10 @@ struct Grid<'a> {
 impl Grid<'_> {
     fn cell(&self, p: [i32; 3]) -> Option<BlockCell> {
         let in_range = |v: i32, n: usize| v >= 0 && (v as usize) < n;
-        (in_range(p[0], SIZE_X) && in_range(p[1], SIZE_Y) && in_range(p[2], SIZE_Z))
-            .then(|| self.level.block(p[0] as usize, p[1] as usize, p[2] as usize))
+        (in_range(p[0], SIZE_X) && in_range(p[1], SIZE_Y) && in_range(p[2], SIZE_Z)).then(|| {
+            self.level
+                .block(p[0] as usize, p[1] as usize, p[2] as usize)
+        })
     }
 
     /// True if the cell is an opaque full cube, or the face-suppressing block 3.
@@ -314,17 +388,30 @@ impl Grid<'_> {
             && !INVISIBLE_IDS.contains(&c.id)
             && !def.is_placeholder()
             && def.flags & flags::DOUBLE_SIDED == 0
-            && def.faces.iter().all(|f| f.modifiers & (modifiers::COLOR0_TRANSPARENT | modifiers::REVERSE_SIDE) == 0)
+            && def.faces.iter().all(|f| {
+                f.modifiers & (modifiers::COLOR0_TRANSPARENT | modifiers::REVERSE_SIDE) == 0
+            })
     }
 }
 
 impl MeshData {
-    fn push_poly(&mut self, verts: &[[f32; 3]], uvs: &[[f32; 2]], brightness: f32, both_sides: bool, anim: [f32; 2]) {
+    fn push_poly(
+        &mut self,
+        verts: &[[f32; 3]],
+        uvs: &[[f32; 2]],
+        brightness: f32,
+        both_sides: bool,
+        anim: [f32; 2],
+    ) {
         let n = {
             let (a, b, c) = (verts[0], verts[1], verts[2]);
             let u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
             let v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
-            let n = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+            let n = [
+                u[1] * v[2] - u[2] * v[1],
+                u[2] * v[0] - u[0] * v[2],
+                u[0] * v[1] - u[1] * v[0],
+            ];
             let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt().max(1e-6);
             n.map(|c| c / len)
         };
@@ -355,7 +442,12 @@ impl MeshData {
 /// half-height hatch's flaps show the half that has it (texture sets differ:
 /// `TEXTURE.004` and `.006` draw the crate side in the top half of tiles 59
 /// and 60). `hatch_open` (0–1) is how far the hatches' doors are open.
-pub fn build(level: &Level, blocks: &BlockSet, art_on_top: &dyn Fn(u32) -> bool, hatch_open: f32) -> LevelMesh {
+pub fn build(
+    level: &Level,
+    blocks: &BlockSet,
+    art_on_top: &dyn Fn(u32) -> bool,
+    hatch_open: f32,
+) -> LevelMesh {
     let grid = Grid { level, blocks };
     let mut out = LevelMesh::default();
     let mut unsupported = std::collections::BTreeMap::<u8, usize>::new();
@@ -377,7 +469,10 @@ pub fn build(level: &Level, blocks: &BlockSet, art_on_top: &dyn Fn(u32) -> bool,
         let mut placed: Vec<PlacedPoly> = Vec::new();
         // A hatch keeps all its walls; each flap is a second copy of a side
         // wall, swung open below it.
-        let flaps = polys.iter().filter(|p| is_flap(cell, p.src)).map(|p| (p, true));
+        let flaps = polys
+            .iter()
+            .filter(|p| is_flap(cell, p.src))
+            .map(|p| (p, true));
         for (p, flap) in polys.iter().map(|p| (p, false)).chain(flaps) {
             let uvs: Vec<[f32; 2]> = p
                 .verts
@@ -389,7 +484,11 @@ pub fn build(level: &Level, blocks: &BlockSet, art_on_top: &dyn Fn(u32) -> bool,
                     // A flap is upside down once open (its top edge swings out and
                     // down), so its picture is flipped to keep the hinges at the
                     // hinge.
-                    let ly = if flap { (1.0 - v[1]) * (y1 - y0) } else { y0 + v[1] * (y1 - y0) };
+                    let ly = if flap {
+                        (1.0 - v[1]) * (y1 - y0)
+                    } else {
+                        y0 + v[1] * (y1 - y0)
+                    };
                     tile_uv(p.src, [v[0], ly, v[2]])
                 })
                 .collect();
@@ -410,7 +509,9 @@ pub fn build(level: &Level, blocks: &BlockSet, art_on_top: &dyn Fn(u32) -> bool,
         }
         let centre = {
             let n = solid_verts.len() as f32;
-            let s = solid_verts.iter().fold([0.0; 3], |a, v| [a[0] + v[0], a[1] + v[1], a[2] + v[2]]);
+            let s = solid_verts
+                .iter()
+                .fold([0.0; 3], |a, v| [a[0] + v[0], a[1] + v[1], a[2] + v[2]]);
             s.map(|c| c / n)
         };
         for (mut verts, mut uvs, p, flap) in placed {
@@ -436,10 +537,16 @@ pub fn build(level: &Level, blocks: &BlockSet, art_on_top: &dyn Fn(u32) -> bool,
             let (a, b, c) = (verts[0], verts[1], verts[2]);
             let u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
             let v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
-            let n = [u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]];
+            let n = [
+                u[1] * v[2] - u[2] * v[1],
+                u[2] * v[0] - u[0] * v[2],
+                u[0] * v[1] - u[1] * v[0],
+            ];
             let pc = {
                 let k = verts.len() as f32;
-                let s = verts.iter().fold([0.0; 3], |acc, q| [acc[0] + q[0], acc[1] + q[1], acc[2] + q[2]]);
+                let s = verts.iter().fold([0.0; 3], |acc, q| {
+                    [acc[0] + q[0], acc[1] + q[1], acc[2] + q[2]]
+                });
                 s.map(|c| c / k)
             };
             let out_dir = [pc[0] - centre[0], pc[1] - centre[1], pc[2] - centre[2]];
@@ -456,14 +563,31 @@ pub fn build(level: &Level, blocks: &BlockSet, art_on_top: &dyn Fn(u32) -> bool,
                 None => [1.0, 0.0],
             };
             let strip = |tile: u32| -> Vec<[f32; 2]> {
-                let shift = if flap && art_on_top(tile) { y1 - y0 - 1.0 } else { 0.0 };
-                uvs.iter().map(|[u, v]| [*u, (tile as f32 + (v + shift).clamp(0.0, 1.0)) / TILES as f32]).collect()
+                let shift = if flap && art_on_top(tile) {
+                    y1 - y0 - 1.0
+                } else {
+                    0.0
+                };
+                uvs.iter()
+                    .map(|[u, v]| {
+                        [
+                            *u,
+                            (tile as f32 + (v + shift).clamp(0.0, 1.0)) / TILES as f32,
+                        ]
+                    })
+                    .collect()
             };
             let brightness = 1.0 - (face.shading.min(8) as f32) * 0.07;
-            let transparent = face.modifiers & (modifiers::COLOR0_TRANSPARENT | modifiers::REVERSE_SIDE) != 0;
+            let transparent =
+                face.modifiers & (modifiers::COLOR0_TRANSPARENT | modifiers::REVERSE_SIDE) != 0;
             // An open hatch shows the inside of its walls too.
-            let double = def.flags & flags::DOUBLE_SIDED != 0 || flap || (cell.id == 0 && cell.shape == 0);
-            let target = if transparent { &mut out.cutout } else { &mut out.opaque };
+            let double =
+                def.flags & flags::DOUBLE_SIDED != 0 || flap || (cell.id == 0 && cell.shape == 0);
+            let target = if transparent {
+                &mut out.cutout
+            } else {
+                &mut out.opaque
+            };
             target.push_poly(&verts, &strip(front), brightness, false, anim);
             if double {
                 // The inside of a double-sided face: same polygon, opposite
@@ -492,7 +616,10 @@ mod tests {
                 let p = [0.5 + o[0] as f32 * 0.5, 0.5, 0.5 + o[2] as f32 * 0.5];
                 let rp = rotate_point(p, r);
                 let ro = dir_offset(rotate_dir(d, r));
-                assert_eq!(rp, [0.5 + ro[0] as f32 * 0.5, 0.5, 0.5 + ro[2] as f32 * 0.5]);
+                assert_eq!(
+                    rp,
+                    [0.5 + ro[0] as f32 * 0.5, 0.5, 0.5 + ro[2] as f32 * 0.5]
+                );
             }
         }
     }

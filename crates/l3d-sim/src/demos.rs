@@ -27,7 +27,11 @@ pub struct Solution {
 }
 
 const fn at(level: u32, steps: &'static [(u64, usize, u8, Option<bool>)]) -> Solution {
-    Solution { level, plan: Plan::At(steps), saves: 0 }
+    Solution {
+        level,
+        plan: Plan::At(steps),
+        saves: 0,
+    }
 }
 
 pub const SOLUTIONS: &[Solution] = &[
@@ -38,8 +42,16 @@ pub const SOLUTIONS: &[Solution] = &[
     at(84, &[(235, 0, 4, None)]),
     at(85, &[(150, 0, 5, None)]),
     at(86, &[(100, 0, 6, None)]),
-    Solution { level: 87, plan: Plan::Each(7), saves: 0 },
-    Solution { level: 88, plan: Plan::Each(8), saves: 0 },
+    Solution {
+        level: 87,
+        plan: Plan::Each(7),
+        saves: 0,
+    },
+    Solution {
+        level: 88,
+        plan: Plan::Each(8),
+        saves: 0,
+    },
     at(89, &[(41, 1, 4, None)]),
     at(90, &[(406, 0, 1, Some(true))]),
     at(91, &[(538, 0, 4, None)]),
@@ -49,13 +61,27 @@ pub const SOLUTIONS: &[Solution] = &[
     at(95, &[(239, 0, 1, Some(true))]),
     at(96, &[(167, 0, 1, Some(false))]),
     at(97, &[(170, 0, 0, None)]),
-    Solution { level: 98, plan: Plan::At(&[(253, 0, 1, Some(false))]), saves: 18 },
+    Solution {
+        level: 98,
+        plan: Plan::At(&[(253, 0, 1, Some(false))]),
+        saves: 18,
+    },
     at(99, &[(1124, 0, 4, None)]),
     at(0, &[(1409, 0, 1, Some(false))]),
     // Climbers; the first, blown up on the candy cane, opens a way through
     // for the next, which bashes the cane's one-way foot from the far side
     // (the owner's route).
-    at(6, &[(2, 0, 7, None), (53, 1, 7, None), (104, 2, 7, None), (155, 3, 7, None), (240, 0, 2, None), (436, 1, 4, None)]),
+    at(
+        6,
+        &[
+            (2, 0, 7, None),
+            (53, 1, 7, None),
+            (104, 2, 7, None),
+            (155, 3, 7, None),
+            (240, 0, 2, None),
+            (436, 1, 4, None),
+        ],
+    ),
 ];
 
 pub fn solution(level: u32) -> Option<&'static Solution> {
@@ -71,9 +97,14 @@ pub fn play(s: &Solution, level: &Level, blocks: &BlockSet) -> Simulation {
         match s.plan {
             Plan::At(steps) => {
                 let now = sim.tick;
-                for &(t, i, id, side) in steps.iter().filter(|(t, ..)| *t + crate::HATCH_OPEN_TICKS as u64 == now) {
+                for &(t, i, id, side) in steps
+                    .iter()
+                    .filter(|(t, ..)| *t + crate::HATCH_OPEN_TICKS as u64 == now)
+                {
                     let ok = match (side, sim.lemmings.get(i).map(|l| l.dir)) {
-                        (Some(cw), Some(d)) => sim.assign_turner(i, if cw { d.clockwise() } else { d.anticlockwise() }),
+                        (Some(cw), Some(d)) => {
+                            sim.assign_turner(i, if cw { d.clockwise() } else { d.anticlockwise() })
+                        }
                         _ => Skill::from_id(id).is_some_and(|skill| sim.assign(i, skill)),
                     };
                     debug_assert!(ok, "LEVEL.{:03}: assignment at tick {t} rejected", s.level);

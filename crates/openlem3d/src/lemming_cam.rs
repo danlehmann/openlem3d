@@ -17,9 +17,16 @@ impl Plugin for LemmingCamPlugin {
         app.init_resource::<LemmingCam>()
             .add_systems(
                 Update,
-                (toggle_keys.before(crate::menu::back_to_menu), follow.before(crate::camera_controls)).chain().run_if(in_state(AppState::Playing)),
+                (
+                    toggle_keys.before(crate::menu::back_to_menu),
+                    follow.before(crate::camera_controls),
+                )
+                    .chain()
+                    .run_if(in_state(AppState::Playing)),
             )
-            .add_systems(OnExit(AppState::Playing), |mut cam: ResMut<LemmingCam>| *cam = LemmingCam::Off);
+            .add_systems(OnExit(AppState::Playing), |mut cam: ResMut<LemmingCam>| {
+                *cam = LemmingCam::Off
+            });
     }
 }
 
@@ -32,7 +39,10 @@ pub enum LemmingCam {
     Off,
     /// Waiting for a click on a lemming.
     Picking(SavedView),
-    Following { lemming: usize, saved: SavedView },
+    Following {
+        lemming: usize,
+        saved: SavedView,
+    },
 }
 
 impl LemmingCam {
@@ -109,9 +119,20 @@ const SWAY_PERIOD: f32 = 6.0 / l3d_sim::TICKS_PER_SECOND as f32;
 /// How quickly the roll follows the sway, per second.
 const ROLL_RATE: f32 = 12.0;
 
-pub(crate) fn toggle_keys(mut keys: ResMut<ButtonInput<KeyCode>>, mut cam: ResMut<LemmingCam>, mut views: Query<&mut ViewCamera>) {
-    let Ok(mut view) = views.single_mut() else { return };
-    let presets = [KeyCode::Digit1, KeyCode::Digit2, KeyCode::Digit3, KeyCode::Digit4];
+pub(crate) fn toggle_keys(
+    mut keys: ResMut<ButtonInput<KeyCode>>,
+    mut cam: ResMut<LemmingCam>,
+    mut views: Query<&mut ViewCamera>,
+) {
+    let Ok(mut view) = views.single_mut() else {
+        return;
+    };
+    let presets = [
+        KeyCode::Digit1,
+        KeyCode::Digit2,
+        KeyCode::Digit3,
+        KeyCode::Digit4,
+    ];
     if keys.just_pressed(KeyCode::KeyV) || keys.just_pressed(KeyCode::KeyI) {
         cam.toggle(&mut view);
     } else if keys.just_pressed(KeyCode::Escape) && *cam != LemmingCam::Off {
@@ -135,21 +156,30 @@ fn follow(
     mut cam: ResMut<LemmingCam>,
     mut views: Query<&mut ViewCamera>,
 ) {
-    let Ok(mut view) = views.single_mut() else { return };
+    let Ok(mut view) = views.single_mut() else {
+        return;
+    };
     // `--follow N`: ride with lemming N as soon as it appears.
     if let Some(i) = opts.follow
         && !*started
         && game.sim.as_ref().is_some_and(|s| s.lemmings.len() > i)
     {
         *started = true;
-        *cam = LemmingCam::Following { lemming: i, saved: (view.pos, view.yaw) };
+        *cam = LemmingCam::Following {
+            lemming: i,
+            saved: (view.pos, view.yaw),
+        };
     }
     let Some(i) = cam.following() else {
         view.roll = 0.0;
         *entered = None;
         return;
     };
-    let lemming = game.sim.as_ref().and_then(|s| s.lemmings.get(i)).filter(|l| !l.gone);
+    let lemming = game
+        .sim
+        .as_ref()
+        .and_then(|s| s.lemmings.get(i))
+        .filter(|l| !l.gone);
     let Some(l) = lemming else {
         cam.turn_off(&mut view);
         *entered = None;
@@ -173,12 +203,18 @@ fn follow(
     // walks, levelling out otherwise.
     let walking = l.state == l3d_sim::State::Walking;
     if walking {
-        *sway = (*sway + time.delta_secs() * std::f32::consts::TAU / SWAY_PERIOD).rem_euclid(std::f32::consts::TAU);
+        *sway = (*sway + time.delta_secs() * std::f32::consts::TAU / SWAY_PERIOD)
+            .rem_euclid(std::f32::consts::TAU);
     }
-    let roll = if walking { SWAY_ROLL.to_radians() * sway.sin() } else { 0.0 };
+    let roll = if walking {
+        SWAY_ROLL.to_radians() * sway.sin()
+    } else {
+        0.0
+    };
     view.roll += (roll - view.roll) * (1.0 - (-ROLL_RATE * time.delta_secs()).exp());
     // Turn the short way round.
-    let turn = (yaw - view.yaw + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
+    let turn = (yaw - view.yaw + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU)
+        - std::f32::consts::PI;
     view.yaw += turn * k;
     view.pos = target;
 }

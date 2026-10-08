@@ -137,12 +137,27 @@ impl CueSheet {
                         .and_then(|m| TrackMode::parse(m))
                         .ok_or_else(|| bad(ln, "unsupported track mode"))?;
                     let file = file.clone().ok_or_else(|| bad(ln, "TRACK before FILE"))?;
-                    tracks.push(CueTrack { number, mode, file, index0: None, index1: 0, pregap: 0 });
+                    tracks.push(CueTrack {
+                        number,
+                        mode,
+                        file,
+                        index0: None,
+                        index1: 0,
+                        pregap: 0,
+                    });
                 }
                 "INDEX" => {
-                    let t = tracks.last_mut().ok_or_else(|| bad(ln, "INDEX before TRACK"))?;
-                    let n: u32 = words.get(1).and_then(|n| n.parse().ok()).ok_or_else(|| bad(ln, "bad index"))?;
-                    let at = words.get(2).and_then(|s| parse_msf(s)).ok_or_else(|| bad(ln, "bad time"))?;
+                    let t = tracks
+                        .last_mut()
+                        .ok_or_else(|| bad(ln, "INDEX before TRACK"))?;
+                    let n: u32 = words
+                        .get(1)
+                        .and_then(|n| n.parse().ok())
+                        .ok_or_else(|| bad(ln, "bad index"))?;
+                    let at = words
+                        .get(2)
+                        .and_then(|s| parse_msf(s))
+                        .ok_or_else(|| bad(ln, "bad time"))?;
                     match n {
                         0 => t.index0 = Some(at),
                         1 => t.index1 = at,
@@ -150,8 +165,13 @@ impl CueSheet {
                     }
                 }
                 "PREGAP" => {
-                    let t = tracks.last_mut().ok_or_else(|| bad(ln, "PREGAP before TRACK"))?;
-                    t.pregap = words.get(1).and_then(|s| parse_msf(s)).ok_or_else(|| bad(ln, "bad time"))?;
+                    let t = tracks
+                        .last_mut()
+                        .ok_or_else(|| bad(ln, "PREGAP before TRACK"))?;
+                    t.pregap = words
+                        .get(1)
+                        .and_then(|s| parse_msf(s))
+                        .ok_or_else(|| bad(ln, "bad time"))?;
                 }
                 _ => {}
             }

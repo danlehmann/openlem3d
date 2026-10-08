@@ -37,7 +37,19 @@ pub const SLIDER_STEPS: u8 = 10;
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { land: true, sea: true, sky: true, left_handed: false, fullscreen: false, enhanced: true, music: 8, effects: 8, camera: 5, completed: Default::default(), best: Default::default() }
+        Settings {
+            land: true,
+            sea: true,
+            sky: true,
+            left_handed: false,
+            fullscreen: false,
+            enhanced: true,
+            music: 8,
+            effects: 8,
+            camera: 5,
+            completed: Default::default(),
+            best: Default::default(),
+        }
     }
 }
 
@@ -45,7 +57,14 @@ impl Settings {
     /// Records a finished level; returns whether anything improved.
     pub fn record(&mut self, level: u32, saved: u32, seconds_left: u32, passed: bool) -> bool {
         let old = self.best.get(&level).copied().unwrap_or((0, 0));
-        let new = (old.0.max(saved), if passed { old.1.max(seconds_left) } else { old.1 });
+        let new = (
+            old.0.max(saved),
+            if passed {
+                old.1.max(seconds_left)
+            } else {
+                old.1
+            },
+        );
         let completed = passed && self.completed.insert(level);
         if new != old {
             self.best.insert(level, new);
@@ -55,7 +74,11 @@ impl Settings {
 
     /// The scene parts and style to draw.
     pub fn show(&self) -> crate::scene_build::Show {
-        crate::scene_build::Show { land: self.land, sea: self.sea, sky: self.sky }
+        crate::scene_build::Show {
+            land: self.land,
+            sea: self.sea,
+            sky: self.sky,
+        }
     }
 
     /// Music volume as a linear factor.
@@ -74,12 +97,20 @@ impl Settings {
 
     /// The mouse button that gives skills and picks lemmings.
     pub fn action_button(&self) -> MouseButton {
-        if self.left_handed { MouseButton::Right } else { MouseButton::Left }
+        if self.left_handed {
+            MouseButton::Right
+        } else {
+            MouseButton::Left
+        }
     }
 
     /// The mouse button that turns the camera when dragged.
     pub fn turn_button(&self) -> MouseButton {
-        if self.left_handed { MouseButton::Left } else { MouseButton::Right }
+        if self.left_handed {
+            MouseButton::Left
+        } else {
+            MouseButton::Right
+        }
     }
 
     fn path() -> Option<PathBuf> {
@@ -92,9 +123,13 @@ impl Settings {
 
     pub fn load() -> Self {
         let mut s = Settings::default();
-        let Some(text) = Self::path().and_then(|p| std::fs::read_to_string(p).ok()) else { return s };
+        let Some(text) = Self::path().and_then(|p| std::fs::read_to_string(p).ok()) else {
+            return s;
+        };
         for line in text.lines() {
-            let Some((k, v)) = line.split_once('=') else { continue };
+            let Some((k, v)) = line.split_once('=') else {
+                continue;
+            };
             let (k, v) = (k.trim(), v.trim());
             let flag = v == "on";
             let level = v.parse::<u8>().ok().map(|n| n.min(SLIDER_STEPS));
@@ -108,13 +143,16 @@ impl Settings {
                 "music" => s.music = level.unwrap_or(s.music),
                 "effects" => s.effects = level.unwrap_or(s.effects),
                 "camera" => s.camera = level.unwrap_or(s.camera),
-                "completed" => s.completed = v.split(',').filter_map(|n| n.trim().parse().ok()).collect(),
+                "completed" => {
+                    s.completed = v.split(',').filter_map(|n| n.trim().parse().ok()).collect()
+                }
                 // best = level:saved:seconds, …
                 "best" => {
                     s.best = v
                         .split(',')
                         .filter_map(|e| {
-                            let p: Vec<u32> = e.split(':').filter_map(|n| n.trim().parse().ok()).collect();
+                            let p: Vec<u32> =
+                                e.split(':').filter_map(|n| n.trim().parse().ok()).collect();
                             (p.len() == 3).then(|| (p[0], (p[1], p[2])))
                         })
                         .collect()
@@ -139,8 +177,16 @@ impl Settings {
             self.music,
             self.effects,
             self.camera,
-            self.completed.iter().map(u32::to_string).collect::<Vec<_>>().join(","),
-            self.best.iter().map(|(l, (s, t))| format!("{l}:{s}:{t}")).collect::<Vec<_>>().join(",")
+            self.completed
+                .iter()
+                .map(u32::to_string)
+                .collect::<Vec<_>>()
+                .join(","),
+            self.best
+                .iter()
+                .map(|(l, (s, t))| format!("{l}:{s}:{t}"))
+                .collect::<Vec<_>>()
+                .join(",")
         );
         if let Some(dir) = path.parent() {
             let _ = std::fs::create_dir_all(dir);

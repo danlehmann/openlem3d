@@ -27,9 +27,19 @@ pub struct BriefingPlugin;
 impl Plugin for BriefingPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Preview>()
-            .add_systems(Update, (spawn_briefing, briefing_input).chain().run_if(in_state(AppState::Briefing)))
+            .add_systems(
+                Update,
+                (spawn_briefing, briefing_input)
+                    .chain()
+                    .run_if(in_state(AppState::Briefing)),
+            )
             .add_systems(OnExit(AppState::Briefing), despawn_briefing)
-            .add_systems(Update, preview.before(crate::camera_controls).run_if(in_state(AppState::Playing)))
+            .add_systems(
+                Update,
+                preview
+                    .before(crate::camera_controls)
+                    .run_if(in_state(AppState::Playing)),
+            )
             .add_systems(Update, preview_overlay.after(preview))
             .add_systems(
                 Update,
@@ -60,9 +70,18 @@ pub(crate) struct ScenePics {
     pub(crate) prompts: Vec<Handle<Image>>,
 }
 
-fn upload(img: &IndexedImage, pal: &l3d_formats::gamedata::Palette, transparent0: bool, images: &mut Assets<Image>) -> Handle<Image> {
+fn upload(
+    img: &IndexedImage,
+    pal: &l3d_formats::gamedata::Palette,
+    transparent0: bool,
+    images: &mut Assets<Image>,
+) -> Handle<Image> {
     let mut image = Image::new(
-        Extent3d { width: img.width as u32, height: img.height as u32, depth_or_array_layers: 1 },
+        Extent3d {
+            width: img.width as u32,
+            height: img.height as u32,
+            depth_or_array_layers: 1,
+        },
         TextureDimension::D2,
         img.to_rgba(pal, transparent0),
         TextureFormat::Rgba8UnormSrgb,
@@ -73,15 +92,27 @@ fn upload(img: &IndexedImage, pal: &l3d_formats::gamedata::Palette, transparent0
 }
 
 /// Loads `SCENEnnn.SVG` (640×480) with its palette.
-pub(crate) fn load_scene(data: &mut Data, theme: u8, images: &mut Assets<Image>) -> Option<ScenePics> {
+pub(crate) fn load_scene(
+    data: &mut Data,
+    theme: u8,
+    images: &mut Assets<Image>,
+) -> Option<ScenePics> {
     let d = &mut data.0;
-    let scene = screen::scene(&d.read(&format!("GFX/SCENE{theme:03}.SVG")).ok()?, screen::HIGH_RES).ok()?;
+    let scene = screen::scene(
+        &d.read(&format!("GFX/SCENE{theme:03}.SVG")).ok()?,
+        screen::HIGH_RES,
+    )
+    .ok()?;
     let pal = d.palette(&format!("GFX/SCENE{theme:03}.SVP")).ok()?;
     Some(ScenePics {
         picture: upload(&scene.image, &pal, false, images),
         // The prompts are drawn over the picture, index 0 transparent (as seen
         // in the original: the mice show the picture around them).
-        prompts: scene.prompts.iter().map(|p| upload(p, &pal, true, images)).collect(),
+        prompts: scene
+            .prompts
+            .iter()
+            .map(|p| upload(p, &pal, true, images))
+            .collect(),
     })
 }
 
@@ -104,27 +135,52 @@ fn spawn_briefing(
     // A Practice briefing is the flyover itself, with the details and the
     // Demo prompt over it, not the theme picture (`docs/spec/camera.md`).
     if has_demo(current.number) {
-        *preview = Preview { active: true, practice: true, ..default() };
+        *preview = Preview {
+            active: true,
+            practice: true,
+            ..default()
+        };
         next.set(AppState::Playing);
         return;
     }
-    let Ok(level) = data.0.level(current.number) else { return };
-    let pics = cache.entry(level.theme).or_insert_with(|| load_scene(&mut data, level.theme, &mut images)).clone();
+    let Ok(level) = data.0.level(current.number) else {
+        return;
+    };
+    let pics = cache
+        .entry(level.theme)
+        .or_insert_with(|| load_scene(&mut data, level.theme, &mut images))
+        .clone();
     let root = commands
         .spawn((
             BriefingRoot,
-            Node { position_type: PositionType::Absolute, width: percent(100), height: percent(100), ..default() },
+            Node {
+                position_type: PositionType::Absolute,
+                width: percent(100),
+                height: percent(100),
+                ..default()
+            },
             BackgroundColor(Color::BLACK),
         ))
         .id();
-    let canvas = commands.spawn((Canvas(SCREEN), Node { position_type: PositionType::Absolute, ..default() })).id();
+    let canvas = commands
+        .spawn((
+            Canvas(SCREEN),
+            Node {
+                position_type: PositionType::Absolute,
+                ..default()
+            },
+        ))
+        .id();
     commands.entity(root).add_child(canvas);
     let add = |commands: &mut Commands, bundle: (ImageNode, At, Node)| {
         let e = commands.spawn(bundle).id();
         commands.entity(canvas).add_child(e);
     };
     if let Some(p) = &pics {
-        add(&mut commands, image_at(p.picture.clone(), at(0.0, 0.0, SCREEN.x, SCREEN.y)));
+        add(
+            &mut commands,
+            image_at(p.picture.clone(), at(0.0, 0.0, SCREEN.x, SCREEN.y)),
+        );
         // Left button, right button, the two halves of the ENTER key.
         let prompt = |i: usize| p.prompts.get(i).cloned();
         for (i, x) in [(0, 25.0), (2, 268.0), (3, 300.0), (1, 522.0)] {
@@ -133,24 +189,64 @@ fn spawn_briefing(
             }
         }
     }
-    let Some(font) = art.as_ref().and_then(|a| a.large.as_ref()) else { return };
+    let Some(font) = art.as_ref().and_then(|a| a.large.as_ref()) else {
+        return;
+    };
     let text = |commands: &mut Commands, s: &str, x: f32, y: f32, right_aligned: bool| {
         let (glyphs, width) = font.layout(s);
-        let left = if right_aligned { x - width * TEXT_SCALE } else { x };
+        let left = if right_aligned {
+            x - width * TEXT_SCALE
+        } else {
+            x
+        };
         for (gx, image) in glyphs {
-            let r = at(left + gx * TEXT_SCALE, y, font.size.x * TEXT_SCALE, font.size.y * TEXT_SCALE);
+            let r = at(
+                left + gx * TEXT_SCALE,
+                y,
+                font.size.x * TEXT_SCALE,
+                font.size.y * TEXT_SCALE,
+            );
             add(commands, image_at(image, r));
         }
     };
     text(&mut commands, "Level", 21.0, TOP_Y, false);
-    text(&mut commands, &(current.number + 1).to_string(), 158.0, TOP_Y, true);
+    text(
+        &mut commands,
+        &(current.number + 1).to_string(),
+        158.0,
+        TOP_Y,
+        true,
+    );
     text(&mut commands, level.title.trim(), 169.0, TOP_Y, false);
     text(&mut commands, "Continue", 61.0, LABEL_Y, false);
-    text(&mut commands, if has_demo(current.number) { "Demo" } else { "Preview" }, 342.0, LABEL_Y, false);
+    text(
+        &mut commands,
+        if has_demo(current.number) {
+            "Demo"
+        } else {
+            "Preview"
+        },
+        342.0,
+        LABEL_Y,
+        false,
+    );
     text(&mut commands, "Menu", 561.0, LABEL_Y, false);
     // Clicking or tapping a prompt picks it; anywhere else continues.
-    for (choice, x, w) in [(Choice::Preview, 268.0, 150.0), (Choice::Menu, 522.0, 110.0)] {
-        let e = commands.spawn((choice, Button, at(x, PROMPT_Y, w, 32.0), Node { position_type: PositionType::Absolute, ..default() })).id();
+    for (choice, x, w) in [
+        (Choice::Preview, 268.0, 150.0),
+        (Choice::Menu, 522.0, 110.0),
+    ] {
+        let e = commands
+            .spawn((
+                choice,
+                Button,
+                at(x, PROMPT_Y, w, 32.0),
+                Node {
+                    position_type: PositionType::Absolute,
+                    ..default()
+                },
+            ))
+            .id();
         commands.entity(canvas).add_child(e);
     }
 }
@@ -178,18 +274,31 @@ fn briefing_input(
     current: Res<CurrentLevel>,
     mut next: ResMut<NextState<AppState>>,
 ) {
-    let on = |c: Choice| choices.iter().any(|(i, k)| *i == Interaction::Pressed && *k == c);
+    let on = |c: Choice| {
+        choices
+            .iter()
+            .any(|(i, k)| *i == Interaction::Pressed && *k == c)
+    };
     let on_prompt = choices.iter().any(|(i, _)| *i != Interaction::None);
-    let back = mouse.just_pressed(MouseButton::Right) || keys.just_pressed(KeyCode::Escape) || on(Choice::Menu);
-    let show = keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::NumpadEnter) || on(Choice::Preview);
+    let back = mouse.just_pressed(MouseButton::Right)
+        || keys.just_pressed(KeyCode::Escape)
+        || on(Choice::Menu);
+    let show = keys.just_pressed(KeyCode::Enter)
+        || keys.just_pressed(KeyCode::NumpadEnter)
+        || on(Choice::Preview);
     let go = (mouse.just_pressed(MouseButton::Left) && !on_prompt)
         || keys.just_pressed(KeyCode::Space)
         || (touches.any_just_released() && !on_prompt)
-        || keys.get_just_pressed().any(|k| !matches!(k, KeyCode::Escape | KeyCode::Enter | KeyCode::NumpadEnter));
+        || keys
+            .get_just_pressed()
+            .any(|k| !matches!(k, KeyCode::Escape | KeyCode::Enter | KeyCode::NumpadEnter));
     if back {
         next.set(crate::menu::level_menu(current.number));
     } else if show {
-        *preview = Preview { active: true, ..default() };
+        *preview = Preview {
+            active: true,
+            ..default()
+        };
         next.set(AppState::Playing);
     } else if go {
         next.set(AppState::Playing);
@@ -229,7 +338,12 @@ fn preview_centre(level: &l3d_formats::level::Level, blocks: &l3d_formats::blk::
     if [py, pz, px] != [0, 0, 0] {
         return Vec3::new(px as f32, py as f32, pz as f32);
     }
-    let visible = |id: u8| blocks.defs.get(id as usize).is_some_and(|d| !d.is_placeholder() && d.faces.iter().any(|f| f.texture != 0xFF));
+    let visible = |id: u8| {
+        blocks
+            .defs
+            .get(id as usize)
+            .is_some_and(|d| !d.is_placeholder() && d.faces.iter().any(|f| f.texture != 0xFF))
+    };
     let (mut lo, mut hi) = (Vec2::splat(f32::MAX), Vec2::splat(f32::MIN));
     for (x, _, z, b, _) in level.cells() {
         if !b.is_empty() && visible(b.id) {
@@ -237,7 +351,11 @@ fn preview_centre(level: &l3d_formats::level::Level, blocks: &l3d_formats::blk::
             hi = hi.max(Vec2::new(x as f32 + 1.0, z as f32 + 1.0));
         }
     }
-    let mid = if lo.x <= hi.x { (lo + hi) / 2.0 } else { Vec2::splat(16.0) };
+    let mid = if lo.x <= hi.x {
+        (lo + hi) / 2.0
+    } else {
+        Vec2::splat(16.0)
+    };
     Vec3::new(mid.x, UNSET_HEIGHT, mid.y)
 }
 
@@ -260,10 +378,18 @@ fn preview(
     if !state.active {
         return;
     }
-    let on = |c: Choice| choices.iter().any(|(i, k)| *i == Interaction::Pressed && *k == c);
+    let on = |c: Choice| {
+        choices
+            .iter()
+            .any(|(i, k)| *i == Interaction::Pressed && *k == c)
+    };
     // Right click (or Esc) goes back to the level list, as in the original;
     // any other key, click or tap starts the level.
-    if state.started && (mouse.just_pressed(MouseButton::Right) || keys.just_pressed(KeyCode::Escape) || on(Choice::Menu)) {
+    if state.started
+        && (mouse.just_pressed(MouseButton::Right)
+            || keys.just_pressed(KeyCode::Escape)
+            || on(Choice::Menu))
+    {
         state.active = false;
         game.paused = false;
         current.loaded = None;
@@ -278,7 +404,12 @@ fn preview(
         keys.reset_all();
         mouse.reset_all();
         let n = current.number;
-        let log = data.0.level(n).ok().zip(data.0.blocks(n).ok()).and_then(|(level, blocks)| l3d_sim::demos::demo(n, &level, &blocks));
+        let log = data
+            .0
+            .level(n)
+            .ok()
+            .zip(data.0.blocks(n).ok())
+            .and_then(|(level, blocks)| l3d_sim::demos::demo(n, &level, &blocks));
         state.active = false;
         game.paused = false;
         game.replay = log.map(|log| crate::Replay::demo(log, AppState::Briefing));
@@ -286,8 +417,12 @@ fn preview(
         return;
     }
     let on_prompt = choices.iter().any(|(i, _)| *i != Interaction::None);
-    let any = keys.get_just_pressed().next().is_some() || (mouse.get_just_pressed().next().is_some() && !on_prompt) || (touches.any_just_released() && !on_prompt);
-    let Ok(mut view) = views.single_mut() else { return };
+    let any = keys.get_just_pressed().next().is_some()
+        || (mouse.get_just_pressed().next().is_some() && !on_prompt)
+        || (touches.any_just_released() && !on_prompt);
+    let Ok(mut view) = views.single_mut() else {
+        return;
+    };
     // The level starts from camera 1: the camera glides there from where
     // the flyover left it, the level still waiting; input meanwhile skips
     // the rest.
@@ -314,11 +449,17 @@ fn preview(
     let first = !state.started;
     // Input that started the preview doesn't end it.
     state.started = true;
-    let Some((level, blocks, _)) = game.terrain.as_ref() else { return };
+    let Some((level, blocks, _)) = game.terrain.as_ref() else {
+        return;
+    };
     if centre.is_none_or(|(n, ..)| n != current.number) || first {
         // It starts where camera 1 looks from.
         state.angle = level.cameras[0].rotation as f32 * std::f32::consts::FRAC_PI_2;
-        *centre = Some((current.number, preview_centre(level, blocks), level.flags & FLAG_PREVIEW_STATIC != 0));
+        *centre = Some((
+            current.number,
+            preview_centre(level, blocks),
+            level.flags & FLAG_PREVIEW_STATIC != 0,
+        ));
     }
     let Some((_, c, still)) = *centre else { return };
     if still {
@@ -336,7 +477,8 @@ fn preview(
 /// Practice levels offer a demo (as the original's "Enter = Demo") instead
 /// of the preview.
 fn has_demo(level: u32) -> bool {
-    level >= crate::menu::PRACTICE as u32 * crate::menu::LEVELS_PER_RATING && l3d_sim::demos::solution(level).is_some()
+    level >= crate::menu::PRACTICE as u32 * crate::menu::LEVELS_PER_RATING
+        && l3d_sim::demos::solution(level).is_some()
 }
 
 /// Any key, click or tap ends a demo, back to where it was started.
@@ -348,8 +490,13 @@ fn end_demo(
     mut current: ResMut<CurrentLevel>,
     mut next: ResMut<NextState<AppState>>,
 ) {
-    let Some(back_to) = game.replay.as_ref().and_then(|r| r.demo) else { return };
-    if keys.get_just_pressed().next().is_some() || mouse.get_just_pressed().next().is_some() || touches.any_just_released() {
+    let Some(back_to) = game.replay.as_ref().and_then(|r| r.demo) else {
+        return;
+    };
+    if keys.get_just_pressed().next().is_some()
+        || mouse.get_just_pressed().next().is_some()
+        || touches.any_just_released()
+    {
         keys.clear();
         mouse.clear();
         game.replay = None;
@@ -367,13 +514,19 @@ struct PreviewRoot;
 /// Lines of the preview's details (wording from the original; where the
 /// numbers sit in each line is estimated).
 fn preview_lines(n: u32, level: &l3d_formats::level::Level) -> [String; 6] {
-    let rating = crate::menu::RATINGS.get((n / crate::menu::LEVELS_PER_RATING) as usize).copied().unwrap_or("");
+    let rating = crate::menu::RATINGS
+        .get((n / crate::menu::LEVELS_PER_RATING) as usize)
+        .copied()
+        .unwrap_or("");
     [
         format!("Level {}  {}", n + 1, level.title.trim()),
         format!("Number Of Lemmings {}", level.lemmings),
         format!("{} To Be Saved", level.save_requirement),
         format!("Release Rate {}", level.release_rate),
-        format!("Time {}:{:02} Minutes", level.time_minutes, level.time_seconds),
+        format!(
+            "Time {}:{:02} Minutes",
+            level.time_minutes, level.time_seconds
+        ),
         format!("Rating {rating}"),
     ]
 }
@@ -399,11 +552,34 @@ fn preview_overlay(
     if !roots.is_empty() {
         return;
     }
-    let (Some(font), Some((level, ..))) = (art.as_ref().and_then(|a| a.large.as_ref()), game.terrain.as_ref()) else { return };
+    let (Some(font), Some((level, ..))) = (
+        art.as_ref().and_then(|a| a.large.as_ref()),
+        game.terrain.as_ref(),
+    ) else {
+        return;
+    };
     let root = commands
-        .spawn((PreviewRoot, Node { position_type: PositionType::Absolute, width: percent(100), height: percent(100), ..default() }, Pickable::IGNORE))
+        .spawn((
+            PreviewRoot,
+            Node {
+                position_type: PositionType::Absolute,
+                width: percent(100),
+                height: percent(100),
+                ..default()
+            },
+            Pickable::IGNORE,
+        ))
         .id();
-    let canvas = commands.spawn((Canvas(SCREEN), Node { position_type: PositionType::Absolute, ..default() }, Pickable::IGNORE)).id();
+    let canvas = commands
+        .spawn((
+            Canvas(SCREEN),
+            Node {
+                position_type: PositionType::Absolute,
+                ..default()
+            },
+            Pickable::IGNORE,
+        ))
+        .id();
     commands.entity(root).add_child(canvas);
     let add = |commands: &mut Commands, mut bundle: (ImageNode, At, Node), shade: Option<Color>| {
         if let Some(c) = shade {
@@ -417,7 +593,12 @@ fn preview_overlay(
         // The shadow first, then the text.
         for (shadow, dx) in [(Some(Color::srgba(0.0, 0.0, 0.0, 0.7)), 2.0), (None, 0.0)] {
             for (gx, image) in glyphs.iter() {
-                let r = at(x + gx * TEXT_SCALE + dx, y + dx, font.size.x * TEXT_SCALE, font.size.y * TEXT_SCALE);
+                let r = at(
+                    x + gx * TEXT_SCALE + dx,
+                    y + dx,
+                    font.size.x * TEXT_SCALE,
+                    font.size.y * TEXT_SCALE,
+                );
                 add(commands, image_at(image.clone(), r), shadow);
             }
         }
@@ -425,14 +606,25 @@ fn preview_overlay(
     for (k, line) in preview_lines(current.number, level).iter().enumerate() {
         text(&mut commands, line, 21.0, TOP_Y + 26.0 * k as f32);
     }
-    let pics = cache.entry(level.theme).or_insert_with(|| load_scene(&mut data, level.theme, &mut images)).clone();
+    let pics = cache
+        .entry(level.theme)
+        .or_insert_with(|| load_scene(&mut data, level.theme, &mut images))
+        .clone();
     if let Some(p) = &pics {
         // Left button, right button and, on a Practice level, the two halves
         // of the ENTER key.
-        let enter: &[(usize, f32)] = if state.practice { &[(2, 268.0), (3, 300.0)] } else { &[] };
+        let enter: &[(usize, f32)] = if state.practice {
+            &[(2, 268.0), (3, 300.0)]
+        } else {
+            &[]
+        };
         for &(i, x) in [(0, 25.0), (1, 522.0)].iter().chain(enter) {
             if let Some(h) = p.prompts.get(i).cloned() {
-                add(&mut commands, image_at(h, at(x, PROMPT_Y, 32.0, 32.0)), None);
+                add(
+                    &mut commands,
+                    image_at(h, at(x, PROMPT_Y, 32.0, 32.0)),
+                    None,
+                );
             }
         }
     }
@@ -442,9 +634,26 @@ fn preview_overlay(
         text(&mut commands, "Demo", 342.0, LABEL_Y);
     }
     // Clicking or tapping a prompt picks it; anywhere else continues.
-    let buttons: &[(Choice, f32, f32)] = if state.practice { &[(Choice::Preview, 268.0, 150.0), (Choice::Menu, 522.0, 110.0)] } else { &[(Choice::Menu, 522.0, 110.0)] };
+    let buttons: &[(Choice, f32, f32)] = if state.practice {
+        &[
+            (Choice::Preview, 268.0, 150.0),
+            (Choice::Menu, 522.0, 110.0),
+        ]
+    } else {
+        &[(Choice::Menu, 522.0, 110.0)]
+    };
     for &(choice, x, w) in buttons {
-        let e = commands.spawn((choice, Button, at(x, PROMPT_Y, w, 32.0), Node { position_type: PositionType::Absolute, ..default() })).id();
+        let e = commands
+            .spawn((
+                choice,
+                Button,
+                at(x, PROMPT_Y, w, 32.0),
+                Node {
+                    position_type: PositionType::Absolute,
+                    ..default()
+                },
+            ))
+            .id();
         commands.entity(canvas).add_child(e);
     }
 }

@@ -22,10 +22,18 @@ pub struct MusicPlugin;
 impl Plugin for MusicPlugin {
     fn build(&self, app: &mut App) {
         use crate::menu::AppState;
-        app.init_resource::<MusicMuted>().add_systems(Update, toggle_mute);
+        app.init_resource::<MusicMuted>()
+            .add_systems(Update, toggle_mute);
         // Music plays only in levels, not on the briefing or in the menus
         // (verified); the options screen opened from a level keeps it.
-        for state in [AppState::Title, AppState::Code, AppState::Menu, AppState::Practice, AppState::Briefing, AppState::Results] {
+        for state in [
+            AppState::Title,
+            AppState::Code,
+            AppState::Menu,
+            AppState::Practice,
+            AppState::Briefing,
+            AppState::Results,
+        ] {
             app.add_systems(OnEnter(state), stop);
         }
     }
@@ -101,7 +109,14 @@ fn wav_bytes(samples: &[i16]) -> Vec<u8> {
 
 /// Replaces the playing music with CD track `track` (1-based), looping at
 /// `volume` (linear).
-pub fn play_track(commands: &mut Commands, sources: &mut Assets<AudioSource>, existing: &[Entity], disc: &Disc, track: u8, volume: f32) {
+pub fn play_track(
+    commands: &mut Commands,
+    sources: &mut Assets<AudioSource>,
+    existing: &[Entity],
+    disc: &Disc,
+    track: u8,
+    volume: f32,
+) {
     for e in existing {
         commands.entity(*e).despawn();
     }
@@ -116,8 +131,14 @@ pub fn play_track(commands: &mut Commands, sources: &mut Assets<AudioSource>, ex
             return;
         }
     };
-    let handle = sources.add(AudioSource { bytes: Arc::from(wav_bytes(&samples)) });
-    commands.spawn((AudioPlayer::new(handle), PlaybackSettings::LOOP.with_volume(Volume::Linear(volume)), LevelMusic));
+    let handle = sources.add(AudioSource {
+        bytes: Arc::from(wav_bytes(&samples)),
+    });
+    commands.spawn((
+        AudioPlayer::new(handle),
+        PlaybackSettings::LOOP.with_volume(Volume::Linear(volume)),
+        LevelMusic,
+    ));
     info!("playing CD track {track}");
 }
 
@@ -130,7 +151,11 @@ pub type MusicQuery<'w, 's> = Query<'w, 's, Entity, With<LevelMusic>>;
 
 /// The music volume: the setting, or silence while muted.
 pub fn volume(muted: &MusicMuted, settings: &crate::settings::Settings) -> f32 {
-    if muted.0 { 0.0 } else { settings.music_volume() }
+    if muted.0 {
+        0.0
+    } else {
+        settings.music_volume()
+    }
 }
 
 /// M mutes; the playing music follows the mute and the volume setting.

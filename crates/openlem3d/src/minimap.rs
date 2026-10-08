@@ -23,7 +23,12 @@ pub struct MinimapPlugin;
 
 impl Plugin for MinimapPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (build_base, draw, click).chain().run_if(in_state(AppState::Playing)));
+        app.add_systems(
+            Update,
+            (build_base, draw, click)
+                .chain()
+                .run_if(in_state(AppState::Playing)),
+        );
     }
 }
 
@@ -71,12 +76,21 @@ pub fn frame_image() -> Image {
                 // A little grain along the planks.
                 let grain = ((x * 7 + y * 13) % 5) as u8 * 6;
                 let i = (y * N + x) * 4;
-                px[i..i + 4].copy_from_slice(&[r.saturating_add(grain), g.saturating_add(grain / 2), b, 255]);
+                px[i..i + 4].copy_from_slice(&[
+                    r.saturating_add(grain),
+                    g.saturating_add(grain / 2),
+                    b,
+                    255,
+                ]);
             }
         }
     }
     let mut image = Image::new(
-        Extent3d { width: N as u32, height: N as u32, depth_or_array_layers: 1 },
+        Extent3d {
+            width: N as u32,
+            height: N as u32,
+            depth_or_array_layers: 1,
+        },
         TextureDimension::D2,
         px,
         TextureFormat::Rgba8UnormSrgb,
@@ -95,7 +109,11 @@ fn average(pixels: &[u8], pal: &Palette) -> [u8; 3] {
         }
         n += 1;
     }
-    if n == 0 { [0, 0, 0] } else { sum.map(|s| (s / n) as u8) }
+    if n == 0 {
+        [0, 0, 0]
+    } else {
+        sum.map(|s| (s / n) as u8)
+    }
 }
 
 /// Builds the static map when a level has loaded.
@@ -111,9 +129,13 @@ fn build_base(
     if existing.as_ref().is_some_and(|m| m.level == n) {
         return;
     }
-    let Some((level, blocks, _)) = &game.terrain else { return };
+    let Some((level, blocks, _)) = &game.terrain else {
+        return;
+    };
     let d = &mut data.0;
-    let Ok(pal) = d.palette("GFX/LM3D.PAL") else { return };
+    let Ok(pal) = d.palette("GFX/LM3D.PAL") else {
+        return;
+    };
     let tex = d.gfx("TEXTURE", level.texture_set).unwrap_or_default();
     let tile = |t: u8| -> Option<[u8; 3]> {
         let s = t as usize * 64 * 64;
@@ -122,13 +144,21 @@ fn build_base(
     let sea = (level.sea_gfx != 0xFF)
         .then(|| d.gfx("SEA", level.sea_gfx).ok())
         .flatten()
-        .map_or([0, 70, 200], |s| average(&s[..(64 * 64).min(s.len())], &pal));
+        .map_or([0, 70, 200], |s| {
+            average(&s[..(64 * 64).min(s.len())], &pal)
+        });
     let land = (level.land_gfx != 0xFF)
         .then(|| d.gfx("LAND", level.land_gfx).ok())
         .flatten()
-        .map_or([40, 140, 40], |s| average(&s[..(64 * 64).min(s.len())], &pal));
-    let polys: Vec<Vec<(f32, f32)>> =
-        level.land_polygons.iter().filter(|p| p.len() >= 3).map(|p| p.iter().map(|v| (v.x as f32, v.z as f32)).collect()).collect();
+        .map_or([40, 140, 40], |s| {
+            average(&s[..(64 * 64).min(s.len())], &pal)
+        });
+    let polys: Vec<Vec<(f32, f32)>> = level
+        .land_polygons
+        .iter()
+        .filter(|p| p.len() >= 3)
+        .map(|p| p.iter().map(|v| (v.x as f32, v.z as f32)).collect())
+        .collect();
     let on_land = |x: f32, z: f32| {
         polys.iter().any(|poly| {
             let mut sign = 0.0f32;
@@ -147,7 +177,11 @@ fn build_base(
     let mut base = vec![sea; MAP * MAP];
     for z in 0..SIZE_Z {
         for x in 0..SIZE_X {
-            let mut colour = if on_land(x as f32 + 0.5, z as f32 + 0.5) { land } else { sea };
+            let mut colour = if on_land(x as f32 + 0.5, z as f32 + 0.5) {
+                land
+            } else {
+                sea
+            };
             for y in (0..SIZE_Y).rev() {
                 let b = level.block(x, y, z);
                 if b.is_empty() || b.id == 3 || b.id == 4 {
@@ -156,7 +190,11 @@ fn build_base(
                 colour = match b.id {
                     0 => HATCH,
                     1 => EXIT,
-                    id => blocks.defs.get(id as usize).and_then(|def| tile(def.face(FaceDir::PosY).texture)).unwrap_or(colour),
+                    id => blocks
+                        .defs
+                        .get(id as usize)
+                        .and_then(|def| tile(def.face(FaceDir::PosY).texture))
+                        .unwrap_or(colour),
                 };
                 break;
             }
@@ -168,7 +206,11 @@ fn build_base(
         }
     }
     let mut image = Image::new(
-        Extent3d { width: MAP as u32, height: MAP as u32, depth_or_array_layers: 1 },
+        Extent3d {
+            width: MAP as u32,
+            height: MAP as u32,
+            depth_or_array_layers: 1,
+        },
         TextureDimension::D2,
         vec![255; MAP * MAP * 4],
         TextureFormat::Rgba8UnormSrgb,
@@ -192,10 +234,21 @@ fn build_base(
 }
 
 /// Redraws the map with the lemmings and the camera.
-fn draw(map: Option<Res<Minimap>>, game: Res<Game>, views: Query<&ViewCamera>, mut images: ResMut<Assets<Image>>) {
-    let (Some(map), Some(sim)) = (map, &game.sim) else { return };
-    let Some(mut image) = images.get_mut(&map.image) else { return };
-    let Some(px) = image.data.as_mut() else { return };
+fn draw(
+    map: Option<Res<Minimap>>,
+    game: Res<Game>,
+    views: Query<&ViewCamera>,
+    mut images: ResMut<Assets<Image>>,
+) {
+    let (Some(map), Some(sim)) = (map, &game.sim) else {
+        return;
+    };
+    let Some(mut image) = images.get_mut(&map.image) else {
+        return;
+    };
+    let Some(px) = image.data.as_mut() else {
+        return;
+    };
     for (i, c) in map.base.iter().enumerate() {
         px[i * 4..i * 4 + 3].copy_from_slice(c);
     }
@@ -207,7 +260,11 @@ fn draw(map: Option<Res<Minimap>>, game: Res<Game>, views: Query<&ViewCamera>, m
         }
     };
     for l in sim.lemmings.iter().filter(|l| !l.gone) {
-        dot(l.pos[0] as f32 / SUB as f32, l.pos[2] as f32 / SUB as f32, LEMMING);
+        dot(
+            l.pos[0] as f32 / SUB as f32,
+            l.pos[2] as f32 / SUB as f32,
+            LEMMING,
+        );
     }
     if let Ok(v) = views.single() {
         dot(v.pos.x, v.pos.z, CAMERA);
@@ -236,7 +293,11 @@ fn click(
     } else {
         touches.iter_just_released().map(|t| t.position()).next()
     };
-    let (Some(point), Ok((node, transform)), Ok(mut view)) = (point, nodes.single(), views.single_mut()) else { return };
+    let (Some(point), Ok((node, transform)), Ok(mut view)) =
+        (point, nodes.single(), views.single_mut())
+    else {
+        return;
+    };
     let scale = node.inverse_scale_factor();
     let size = node.size() * scale;
     let centre = transform.translation * scale;

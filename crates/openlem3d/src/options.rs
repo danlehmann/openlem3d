@@ -24,7 +24,12 @@ impl Plugin for OptionsPlugin {
             .init_resource::<OptionsFrom>()
             .add_systems(Update, open_in_level.run_if(in_state(AppState::Playing)))
             .add_systems(Startup, (load_lights, apply_window).chain())
-            .add_systems(Update, (spawn_options, options_input, show_lights).chain().run_if(in_state(AppState::Options)))
+            .add_systems(
+                Update,
+                (spawn_options, options_input, show_lights)
+                    .chain()
+                    .run_if(in_state(AppState::Options)),
+            )
             .add_systems(Update, apply_window.run_if(resource_changed::<Settings>));
     }
 }
@@ -40,11 +45,22 @@ struct Lights {
 
 fn load_lights(mut commands: Commands, mut data: ResMut<Data>, mut images: ResMut<Assets<Image>>) {
     let d = &mut data.0;
-    let (Ok(pal), Some(icons)) = (d.palette("GFX/LM3D.PAL"), d.read("GFX/ICONS.RNC").ok().and_then(|raw| Icons::parse(&raw).ok())) else { return };
+    let (Ok(pal), Some(icons)) = (
+        d.palette("GFX/LM3D.PAL"),
+        d.read("GFX/ICONS.RNC")
+            .ok()
+            .and_then(|raw| Icons::parse(&raw).ok()),
+    ) else {
+        return;
+    };
     let mut add = |c: u8| {
         let g = icons.small_font.glyph(c)?;
         let mut image = Image::new(
-            Extent3d { width: g.width as u32, height: g.height as u32, depth_or_array_layers: 1 },
+            Extent3d {
+                width: g.width as u32,
+                height: g.height as u32,
+                depth_or_array_layers: 1,
+            },
             TextureDimension::D2,
             g.to_rgba(&pal, true),
             TextureFormat::Rgba8UnormSrgb,
@@ -102,28 +118,62 @@ const TOGGLES: [(Item, &str, usize, usize); 5] = [
     (Item::LeftHanded, "Left Handed", 0, 3),
     (Item::Fullscreen, "Fullscreen", 1, 0),
 ];
-const SLIDERS: [(Item, &str, usize, usize); 3] =
-    [(Item::Music, "CD Music", 0, 0), (Item::Effects, "Effects", 1, 0), (Item::Camera, "Camera", 0, 1)];
+const SLIDERS: [(Item, &str, usize, usize); 3] = [
+    (Item::Music, "CD Music", 0, 0),
+    (Item::Effects, "Effects", 1, 0),
+    (Item::Camera, "Camera", 0, 1),
+];
 
 fn panel_box(commands: &mut Commands, parent: Entity, x: f32, y: f32, w: f32, h: f32) -> Entity {
     let e = commands
-        .spawn((at(x, y, w, h), Node { position_type: PositionType::Absolute, border: UiRect::all(px(1)), ..default() }, BackgroundColor(Color::srgba(0.0, 0.02, 0.2, 0.7)), BorderColor::all(Color::srgb(0.25, 0.35, 0.8))))
+        .spawn((
+            at(x, y, w, h),
+            Node {
+                position_type: PositionType::Absolute,
+                border: UiRect::all(px(1)),
+                ..default()
+            },
+            BackgroundColor(Color::srgba(0.0, 0.02, 0.2, 0.7)),
+            BorderColor::all(Color::srgb(0.25, 0.35, 0.8)),
+        ))
         .id();
     commands.entity(parent).add_child(e);
     e
 }
 
-fn spawn_options(mut commands: Commands, art: Option<Res<Art>>, lights: Option<Res<Lights>>, roots: Query<(), With<ScreenRoot>>) {
-    let (Some(art), Some(lights)) = (art, lights) else { return };
+fn spawn_options(
+    mut commands: Commands,
+    art: Option<Res<Art>>,
+    lights: Option<Res<Lights>>,
+    roots: Query<(), With<ScreenRoot>>,
+) {
+    let (Some(art), Some(lights)) = (art, lights) else {
+        return;
+    };
     if !roots.is_empty() {
         return;
     }
-    let canvas = spawn_screen(&mut commands, &art, 0.0, Color::LinearRgba(LinearRgba::new(0.5, 0.9, 3.0, 1.0)));
+    let canvas = spawn_screen(
+        &mut commands,
+        &art,
+        0.0,
+        Color::LinearRgba(LinearRgba::new(0.5, 0.9, 3.0, 1.0)),
+    );
     let font = &lights.font;
     let text = |commands: &mut Commands, s: &str, x: f32, y: f32| {
         let (glyphs, _) = font.layout(s);
         for (gx, image) in glyphs {
-            let e = commands.spawn(image_at(image, at(x + gx * TEXT_SCALE, y, font.size.x * TEXT_SCALE, font.size.y * TEXT_SCALE))).id();
+            let e = commands
+                .spawn(image_at(
+                    image,
+                    at(
+                        x + gx * TEXT_SCALE,
+                        y,
+                        font.size.x * TEXT_SCALE,
+                        font.size.y * TEXT_SCALE,
+                    ),
+                ))
+                .id();
             commands.entity(canvas).add_child(e);
         }
     };
@@ -138,7 +188,13 @@ fn spawn_options(mut commands: Commands, art: Option<Res<Art>>, lights: Option<R
         let b = panel_box(&mut commands, canvas, x, y, 80.0, BOX_HEIGHT);
         commands.entity(b).insert((Button, Target::Toggle(item)));
         text(&mut commands, &label.to_uppercase(), x + 5.0, y + 3.0);
-        let l = commands.spawn((Light(item, 1), image_at(lights.off.clone(), at(x + 67.0, y + 3.0, 7.0, 8.0)), Pickable::IGNORE)).id();
+        let l = commands
+            .spawn((
+                Light(item, 1),
+                image_at(lights.off.clone(), at(x + 67.0, y + 3.0, 7.0, 8.0)),
+                Pickable::IGNORE,
+            ))
+            .id();
         commands.entity(canvas).add_child(l);
     }
     for (item, label, row, col) in SLIDERS {
@@ -147,11 +203,21 @@ fn spawn_options(mut commands: Commands, art: Option<Res<Art>>, lights: Option<R
         text(&mut commands, &label.to_uppercase(), lx + 5.0, y + 3.0);
         for i in 1..=SLIDER_STEPS {
             let r = at(x0 + 8.0 * (i - 1) as f32, y + 3.0, 7.0, 8.0);
-            let l = commands.spawn((Light(item, i), Button, Target::Light(item, i), image_at(lights.off.clone(), r))).id();
+            let l = commands
+                .spawn((
+                    Light(item, i),
+                    Button,
+                    Target::Light(item, i),
+                    image_at(lights.off.clone(), r),
+                ))
+                .id();
             commands.entity(canvas).add_child(l);
         }
     }
-    for (target, label, x) in [(Target::Default, "Default Config", 0.0), (Target::Exit, "Exit and Save", 240.0)] {
+    for (target, label, x) in [
+        (Target::Default, "Default Config", 0.0),
+        (Target::Exit, "Exit and Save", 240.0),
+    ] {
         let b = panel_box(&mut commands, canvas, x, 180.0, 80.0, 15.0);
         commands.entity(b).insert((Button, target));
         centred(&mut commands, &label.to_uppercase(), x + 40.0, 184.0);
@@ -210,7 +276,11 @@ fn options_input(
     }
 }
 
-fn show_lights(settings: Res<Settings>, lights: Option<Res<Lights>>, mut nodes: Query<(&Light, &mut ImageNode)>) {
+fn show_lights(
+    settings: Res<Settings>,
+    lights: Option<Res<Lights>>,
+    mut nodes: Query<(&Light, &mut ImageNode)>,
+) {
     let Some(lights) = lights else { return };
     for (l, mut node) in &mut nodes {
         let mut s = settings.clone();
@@ -232,7 +302,11 @@ fn show_lights(settings: Res<Settings>, lights: Option<Res<Lights>>, mut nodes: 
 fn apply_window(settings: Res<Settings>, mut windows: Query<&mut Window>) {
     use bevy::window::{MonitorSelection, WindowMode};
     for mut w in &mut windows {
-        let mode = if settings.fullscreen { WindowMode::BorderlessFullscreen(MonitorSelection::Current) } else { WindowMode::Windowed };
+        let mode = if settings.fullscreen {
+            WindowMode::BorderlessFullscreen(MonitorSelection::Current)
+        } else {
+            WindowMode::Windowed
+        };
         if w.mode != mode {
             w.mode = mode;
         }
@@ -244,7 +318,11 @@ fn apply_window(settings: Res<Settings>, mut windows: Query<&mut Window>) {
 #[derive(Resource, Default)]
 pub struct OptionsFrom(pub AppState);
 
-fn open_in_level(keys: Res<ButtonInput<KeyCode>>, mut from: ResMut<OptionsFrom>, mut next: ResMut<NextState<AppState>>) {
+fn open_in_level(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut from: ResMut<OptionsFrom>,
+    mut next: ResMut<NextState<AppState>>,
+) {
     if keys.just_pressed(KeyCode::F12) {
         from.0 = AppState::Playing;
         next.set(AppState::Options);

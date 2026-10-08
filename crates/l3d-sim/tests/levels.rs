@@ -3,8 +3,8 @@
 
 use std::path::{Path, PathBuf};
 
-use l3d_formats::gamedata::{DATA_ENV, GameData};
 use l3d_formats::blk::BlockSet;
+use l3d_formats::gamedata::{DATA_ENV, GameData};
 use l3d_formats::level::Level;
 use l3d_sim::{Command, Simulation, TICKS_PER_SECOND, demos};
 
@@ -17,7 +17,10 @@ fn data_dir() -> Option<PathBuf> {
 
 /// A compact fingerprint of a simulation's state.
 fn fingerprint(sim: &Simulation) -> Vec<(i32, i32, i32, bool)> {
-    sim.lemmings.iter().map(|l| (l.pos[0], l.pos[1], l.pos[2], l.gone)).collect()
+    sim.lemmings
+        .iter()
+        .map(|l| (l.pos[0], l.pos[1], l.pos[2], l.gone))
+        .collect()
 }
 
 #[test]
@@ -39,7 +42,10 @@ fn all_levels_run_deterministically() {
         };
         let (a, b) = (run(), run());
         assert_eq!(a, b, "LEVEL.{n:03} is not deterministic");
-        assert!(a.0.released > 0 || level.lemmings == 0, "LEVEL.{n:03} released no lemmings");
+        assert!(
+            a.0.released > 0 || level.lemmings == 0,
+            "LEVEL.{n:03} released no lemmings"
+        );
     }
 }
 
@@ -57,9 +63,16 @@ fn practice_solutions_still_work() {
         let level = data.level(s.level).expect("level");
         let blocks = data.blocks(s.level).expect("blocks");
         let played = demos::play(s, &level, &blocks);
-        let need = if s.saves > 0 { s.saves } else { level.save_requirement as u32 };
+        let need = if s.saves > 0 {
+            s.saves
+        } else {
+            level.save_requirement as u32
+        };
         if played.counts.saved < need {
-            failures.push(format!("LEVEL.{:03} saved {} of {need}", s.level, played.counts.saved));
+            failures.push(format!(
+                "LEVEL.{:03} saved {} of {need}",
+                s.level, played.counts.saved
+            ));
         }
         let replayed = replay(&level, &blocks, &played.log, played.tick);
         if replayed.counts != played.counts {
@@ -92,14 +105,20 @@ fn replaying_the_log_reproduces_the_game() {
         return;
     };
     let mut data = GameData::open(&dir).expect("open game data");
-    let (level, blocks) = (data.level(98).expect("level"), data.blocks(98).expect("blocks"));
+    let (level, blocks) = (
+        data.level(98).expect("level"),
+        data.blocks(98).expect("blocks"),
+    );
     let mut played = Simulation::new(&level, &blocks);
     for _ in 0..600 {
         played.step();
         match played.tick {
             40 => played.adjust_release_rate(30),
             // The first moment lemming 1 can take a turner after tick 300.
-            t if t >= 300 && played.log.len() == 1 && played.can_assign(1, l3d_sim::Skill::Turner) => {
+            t if t >= 300
+                && played.log.len() == 1
+                && played.can_assign(1, l3d_sim::Skill::Turner) =>
+            {
                 assert!(played.assign_turner(1, played.lemmings[1].dir.anticlockwise()))
             }
             500 => played.nuke(),
@@ -109,5 +128,8 @@ fn replaying_the_log_reproduces_the_game() {
     assert_eq!(played.log.len(), 3);
     let replayed = replay(&level, &blocks, &played.log, played.tick);
     assert_eq!(replayed.log, played.log);
-    assert_eq!((replayed.counts, fingerprint(&replayed)), (played.counts, fingerprint(&played)));
+    assert_eq!(
+        (replayed.counts, fingerprint(&replayed)),
+        (played.counts, fingerprint(&played))
+    );
 }

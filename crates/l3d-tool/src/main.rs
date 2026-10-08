@@ -303,12 +303,20 @@ enum Cmd {
 fn load_palette(fs: &mut IsoFs, path: &str) -> Result<Vec<[u8; 3]>> {
     let raw = fs.read_path(path)?;
     anyhow::ensure!(raw.len() == 768, "palette is {} bytes", raw.len());
-    Ok(raw.as_chunks::<3>().0.iter().map(|c| [c[0], c[1], c[2]].map(|v| (v << 2) | (v >> 4))).collect())
+    Ok(raw
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .map(|c| [c[0], c[1], c[2]].map(|v| (v << 2) | (v >> 4)))
+        .collect())
 }
 
 fn write_png(path: &Path, width: u32, pixels: &[u8], pal: &[[u8; 3]]) -> Result<()> {
     let height = pixels.len() as u32 / width;
-    let rgb: Vec<u8> = pixels[..(width * height) as usize].iter().flat_map(|&i| pal[i as usize]).collect();
+    let rgb: Vec<u8> = pixels[..(width * height) as usize]
+        .iter()
+        .flat_map(|&i| pal[i as usize])
+        .collect();
     write_rgb_png(path, width, &rgb)
 }
 
@@ -317,9 +325,14 @@ fn write_rgb_png(path: &Path, width: u32, rgb: &[u8]) -> Result<()> {
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
-    let mut enc = png::Encoder::new(std::io::BufWriter::new(std::fs::File::create(path)?), width, height);
+    let mut enc = png::Encoder::new(
+        std::io::BufWriter::new(std::fs::File::create(path)?),
+        width,
+        height,
+    );
     enc.set_color(png::ColorType::Rgb);
-    enc.write_header()?.write_image_data(&rgb[..(width * height * 3) as usize])?;
+    enc.write_header()?
+        .write_image_data(&rgb[..(width * height * 3) as usize])?;
     Ok(())
 }
 
@@ -346,7 +359,10 @@ struct Canvas {
 
 impl Canvas {
     fn new(width: usize, height: usize, fill: [u8; 3]) -> Self {
-        Canvas { width, rgb: fill.repeat(width * height) }
+        Canvas {
+            width,
+            rgb: fill.repeat(width * height),
+        }
     }
 
     fn fill_rect(&mut self, x: usize, y: usize, w: usize, h: usize, c: [u8; 3]) {
@@ -379,12 +395,18 @@ fn load_level(fs: &mut IsoFs, n: u32) -> Result<Level> {
 }
 
 fn load_blk(fs: &mut IsoFs, n: u32) -> Result<BlockSet> {
-    Ok(BlockSet::parse(&fs.read_path(&format!("LEVELS/BLK.{n:03}"))?)?)
+    Ok(BlockSet::parse(
+        &fs.read_path(&format!("LEVELS/BLK.{n:03}"))?,
+    )?)
 }
 
 /// Block ids that occur in the level's non-empty cells.
 fn used_ids(level: &Level) -> BTreeSet<u8> {
-    level.cells().filter(|c| !c.3.is_empty()).map(|c| c.3.id).collect()
+    level
+        .cells()
+        .filter(|c| !c.3.is_empty())
+        .map(|c| c.3.id)
+        .collect()
 }
 
 fn data_dir(cli: &Cli) -> PathBuf {
@@ -408,15 +430,28 @@ fn read_rgb(path: &Path) -> Result<(u32, u32, Vec<u8>)> {
     let ch = info.color_type.samples();
     let rgb = buf[..info.buffer_size()]
         .chunks(ch)
-        .flat_map(|p| if ch < 3 { [p[0]; 3] } else { [p[0], p[1], p[2]] })
+        .flat_map(|p| {
+            if ch < 3 {
+                [p[0]; 3]
+            } else {
+                [p[0], p[1], p[2]]
+            }
+        })
         .collect();
     Ok((info.width, info.height, rgb))
 }
 
 /// Parses X,Y,W,H.
 fn parse_rect(s: &str) -> Result<[i32; 4]> {
-    let v: Vec<i32> = s.split(',').map(|p| p.trim().parse()).collect::<Result<_, _>>().context("rect must be X,Y,W,H")?;
-    v.try_into().ok().filter(|r: &[i32; 4]| r[2] > 0 && r[3] > 0).context("rect must be X,Y,W,H with W, H > 0")
+    let v: Vec<i32> = s
+        .split(',')
+        .map(|p| p.trim().parse())
+        .collect::<Result<_, _>>()
+        .context("rect must be X,Y,W,H")?;
+    v.try_into()
+        .ok()
+        .filter(|r: &[i32; 4]| r[2] > 0 && r[3] > 0)
+        .context("rect must be X,Y,W,H with W, H > 0")
 }
 
 /// The RGB8 pixels of rectangle X,Y,W,H of an image; pixels outside the
@@ -455,7 +490,13 @@ fn cell_range(arg: Option<&str>, len: usize) -> Result<std::ops::Range<usize>> {
 
 /// Mean absolute RGB difference between `a[x, y]` and `b[x + dx, y]` over the
 /// region, or `None` if the shifted region leaves image B.
-fn region_diff(a: &(u32, u32, Vec<u8>), b: &(u32, u32, Vec<u8>), rows: &std::ops::Range<i32>, cols: &std::ops::Range<i32>, dx: i32) -> Option<f64> {
+fn region_diff(
+    a: &(u32, u32, Vec<u8>),
+    b: &(u32, u32, Vec<u8>),
+    rows: &std::ops::Range<i32>,
+    cols: &std::ops::Range<i32>,
+    dx: i32,
+) -> Option<f64> {
     let (mut sum, mut n) = (0u64, 0u64);
     for y in rows.clone() {
         for x in cols.clone() {
@@ -488,11 +529,18 @@ enum Placement {
 /// MIN, MIN × 1.03, … up to MAX.
 fn parse_scales(s: &str) -> Result<Vec<f64>> {
     let Some((a, b)) = s.split_once("..") else {
-        return Ok(vec![s.parse().context("scale must be a number or MIN..MAX")?]);
+        return Ok(vec![
+            s.parse().context("scale must be a number or MIN..MAX")?,
+        ]);
     };
     let (min, max): (f64, f64) = (a.parse()?, b.parse()?);
-    anyhow::ensure!(min > 0.0 && min <= max, "scale range must be MIN..MAX with 0 < MIN <= MAX");
-    Ok(std::iter::successors(Some(min), |s| Some(s * 1.03)).take_while(|s| *s <= max * 1.0001).collect())
+    anyhow::ensure!(
+        min > 0.0 && min <= max,
+        "scale range must be MIN..MAX with 0 < MIN <= MAX"
+    );
+    Ok(std::iter::successors(Some(min), |s| Some(s * 1.03))
+        .take_while(|s| *s <= max * 1.0001)
+        .collect())
 }
 
 /// How far cell `b`, mirrored left to right and shifted by up to 4 pixels,
@@ -506,14 +554,21 @@ fn mirror_diff(a: &[u8], b: &[u8], size: usize, pal: &[[u8; 3]]) -> Option<(f64,
             for y in 0..size {
                 for x in 0..size {
                     let mx = size as i32 - 1 - x as i32 + dx;
-                    let pb = if (0..size as i32).contains(&mx) { b[y * size + mx as usize] } else { 0 };
+                    let pb = if (0..size as i32).contains(&mx) {
+                        b[y * size + mx as usize]
+                    } else {
+                        0
+                    };
                     let pa = a[y * size + x];
                     match (pa, pb) {
                         (0, 0) => continue,
                         (0, _) | (_, 0) => sum += 255,
                         _ => {
                             let (ca, cb) = (pal[pa as usize], pal[pb as usize]);
-                            sum += (0..3).map(|k| u64::from(ca[k].abs_diff(cb[k]))).sum::<u64>() / 3;
+                            sum += (0..3)
+                                .map(|k| u64::from(ca[k].abs_diff(cb[k])))
+                                .sum::<u64>()
+                                / 3;
                         }
                     }
                     opaque += 1;
@@ -537,10 +592,25 @@ struct CellFit {
 /// Best (lowest-scoring) fit of a cell to the screenshot over all mirrorings
 /// and positions the placement allows; `None` if the cell is empty or never
 /// fits.
-fn best_cell_fit(pixels: &[u8], size: usize, pal: &[[u8; 3]], img: &(u32, u32, Vec<u8>), placement: &Placement) -> Option<CellFit> {
-    let opaque: Vec<(usize, usize)> = (0..size * size).filter(|&k| pixels[k] != 0).map(|k| (k % size, k / size)).collect();
-    let (bx0, by0) = (opaque.iter().map(|p| p.0).min()?, opaque.iter().map(|p| p.1).min()?);
-    let (bx1, by1) = (opaque.iter().map(|p| p.0).max()? + 1, opaque.iter().map(|p| p.1).max()? + 1);
+fn best_cell_fit(
+    pixels: &[u8],
+    size: usize,
+    pal: &[[u8; 3]],
+    img: &(u32, u32, Vec<u8>),
+    placement: &Placement,
+) -> Option<CellFit> {
+    let opaque: Vec<(usize, usize)> = (0..size * size)
+        .filter(|&k| pixels[k] != 0)
+        .map(|k| (k % size, k / size))
+        .collect();
+    let (bx0, by0) = (
+        opaque.iter().map(|p| p.0).min()?,
+        opaque.iter().map(|p| p.1).min()?,
+    );
+    let (bx1, by1) = (
+        opaque.iter().map(|p| p.0).max()? + 1,
+        opaque.iter().map(|p| p.1).max()? + 1,
+    );
     let (bw, bh) = ((bx1 - bx0) as f64, (by1 - by0) as f64);
     // Compare at most about 400 evenly spread opaque pixels.
     let step = opaque.len().div_ceil(400);
@@ -548,7 +618,10 @@ fn best_cell_fit(pixels: &[u8], size: usize, pal: &[[u8; 3]], img: &(u32, u32, V
     // Candidate placements as (x0, y0, x scale, y scale).
     let mut candidates: Vec<(i32, i32, f64, f64)> = Vec::new();
     match *placement {
-        Placement::Fit { rect: [x, y, w, h], jitter } => {
+        Placement::Fit {
+            rect: [x, y, w, h],
+            jitter,
+        } => {
             for dx0 in -jitter..=jitter {
                 for dx1 in -jitter..=jitter {
                     for dy0 in -jitter..=jitter {
@@ -562,7 +635,10 @@ fn best_cell_fit(pixels: &[u8], size: usize, pal: &[[u8; 3]], img: &(u32, u32, V
                 }
             }
         }
-        Placement::Search { rect: [x, y, w, h], ref scales } => {
+        Placement::Search {
+            rect: [x, y, w, h],
+            ref scales,
+        } => {
             for &scale in scales {
                 let (sw, sh) = ((bw * scale).ceil() as i32, (bh * scale).ceil() as i32);
                 for y0 in y..=y + h - sh {
@@ -584,12 +660,19 @@ fn best_cell_fit(pixels: &[u8], size: usize, pal: &[[u8; 3]], img: &(u32, u32, V
                 let py = y0 + (((cy - by0) as f64 + 0.5) * sy) as i32;
                 let c = pal[pixels[cy * size + cx] as usize];
                 let i = ((py.clamp(0, ih - 1) * iw + px.clamp(0, iw - 1)) * 3) as usize;
-                sum += (0..3).map(|k| (img.2[i + k] as i32 - c[k] as i32).unsigned_abs() as u64).sum::<u64>();
+                sum += (0..3)
+                    .map(|k| (img.2[i + k] as i32 - c[k] as i32).unsigned_abs() as u64)
+                    .sum::<u64>();
             }
             let score = sum as f64 / (samples.len() * 3) as f64;
             if best.as_ref().is_none_or(|b| score < b.score) {
                 let size = ((bw * sx).round() as i32, (bh * sy).round() as i32);
-                best = Some(CellFit { score, mirrored, at: (x0, y0), size });
+                best = Some(CellFit {
+                    score,
+                    mirrored,
+                    at: (x0, y0),
+                    size,
+                });
             }
         }
     }
@@ -598,26 +681,48 @@ fn best_cell_fit(pixels: &[u8], size: usize, pal: &[[u8; 3]], img: &(u32, u32, V
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    if let Cmd::ImgShift { a, b, rows, cols, max } = &cli.cmd {
+    if let Cmd::ImgShift {
+        a,
+        b,
+        rows,
+        cols,
+        max,
+    } = &cli.cmd
+    {
         let (ia, ib) = (read_rgb(a)?, read_rgb(b)?);
         let (rows, cols) = (parse_range(rows)?, parse_range(cols)?);
-        let mut scores: Vec<(i32, f64)> =
-            (-max..=*max).filter_map(|dx| region_diff(&ia, &ib, &rows, &cols, dx).map(|d| (dx, d))).collect();
+        let mut scores: Vec<(i32, f64)> = (-max..=*max)
+            .filter_map(|dx| region_diff(&ia, &ib, &rows, &cols, dx).map(|d| (dx, d)))
+            .collect();
         scores.sort_by(|p, q| p.1.total_cmp(&q.1));
         for (dx, d) in scores.iter().take(5) {
             println!("shift {dx:+4}: mean abs diff {d:.2}");
         }
         return Ok(());
     }
-    if let Cmd::ImgFind { a, b, rows, cols, sx, sy } = &cli.cmd {
+    if let Cmd::ImgFind {
+        a,
+        b,
+        rows,
+        cols,
+        sx,
+        sy,
+    } = &cli.cmd
+    {
         let (ia, src) = (read_rgb(a)?, read_rgb(b)?);
         let (rows, cols) = (parse_range(rows)?, parse_range(cols)?);
         let ib = {
-            let (w, h) = ((src.0 as f64 * sx).round() as u32, (src.1 as f64 * sy).round() as u32);
+            let (w, h) = (
+                (src.0 as f64 * sx).round() as u32,
+                (src.1 as f64 * sy).round() as u32,
+            );
             let mut px = Vec::with_capacity((w * h * 3) as usize);
             for y in 0..h {
                 for x in 0..w {
-                    let (u, v) = (((x as f64 / sx) as u32).min(src.0 - 1), ((y as f64 / sy) as u32).min(src.1 - 1));
+                    let (u, v) = (
+                        ((x as f64 / sx) as u32).min(src.0 - 1),
+                        ((y as f64 / sy) as u32).min(src.1 - 1),
+                    );
                     let i = ((v * src.0 + u) * 3) as usize;
                     px.extend_from_slice(&src.2[i..i + 3]);
                 }
@@ -636,7 +741,11 @@ fn main() -> Result<()> {
                 for y in rows.clone() {
                     for x in cols.clone() {
                         let p = px(&ia, x, y);
-                        let q = px(&ib, (ox + x - cols.start).rem_euclid(bw), oy + y - rows.start);
+                        let q = px(
+                            &ib,
+                            (ox + x - cols.start).rem_euclid(bw),
+                            oy + y - rows.start,
+                        );
                         sum += (0..3).map(|c| (p[c] - q[c]).abs() as i64).sum::<i64>();
                     }
                 }
@@ -645,11 +754,21 @@ fn main() -> Result<()> {
         }
         best.sort_by(|p, q| p.0.total_cmp(&q.0));
         for (d, x, y) in best.iter().take(5) {
-            println!("A({},{}) ~ B({x},{y}): mean abs diff {d:.2}", cols.start, rows.start);
+            println!(
+                "A({},{}) ~ B({x},{y}): mean abs diff {d:.2}",
+                cols.start, rows.start
+            );
         }
         return Ok(());
     }
-    if let Cmd::ImgMontage { shots, rect, per_row, scale, out } = &cli.cmd {
+    if let Cmd::ImgMontage {
+        shots,
+        rect,
+        per_row,
+        scale,
+        out,
+    } = &cli.cmd
+    {
         let [x, y, w, h] = parse_rect(rect)?;
         let (gap, label) = (2, 8);
         let (cw, ch) = (w as usize * scale + gap, h as usize * scale + gap + label);
@@ -671,9 +790,19 @@ fn main() -> Result<()> {
         write_rgb_png(out, sheet.width as u32, &sheet.rgb)?;
         return Ok(());
     }
-    if let Cmd::ImgBlobs { shots, rect, margin, min_size, background } = &cli.cmd {
+    if let Cmd::ImgBlobs {
+        shots,
+        rect,
+        margin,
+        min_size,
+        background,
+    } = &cli.cmd
+    {
         let [rx, ry, rw, rh] = parse_rect(rect)?;
-        let bg = background.as_ref().map(|p| read_rgb(p).map(|img| crop_rgb(&img, [rx, ry, rw, rh]))).transpose()?;
+        let bg = background
+            .as_ref()
+            .map(|p| read_rgb(p).map(|img| crop_rgb(&img, [rx, ry, rw, rh])))
+            .transpose()?;
         let (w, h) = (rw as usize, rh as usize);
         for (k, shot) in shots.iter().enumerate() {
             let crop = crop_rgb(&read_rgb(shot)?, [rx, ry, rw, rh]);
@@ -681,7 +810,12 @@ fn main() -> Result<()> {
                 .chunks(3)
                 .enumerate()
                 .map(|(i, p)| match &bg {
-                    Some(bg) => (0..3).map(|c| (p[c] as i32 - bg[i * 3 + c] as i32).abs()).sum::<i32>() > *margin,
+                    Some(bg) => {
+                        (0..3)
+                            .map(|c| (p[c] as i32 - bg[i * 3 + c] as i32).abs())
+                            .sum::<i32>()
+                            > *margin
+                    }
                     None => {
                         let (r, g, b) = (p[0] as i32, p[1] as i32, p[2] as i32);
                         b - r >= *margin && b - g >= *margin
@@ -695,7 +829,8 @@ fn main() -> Result<()> {
                 }
                 mask[start] = false;
                 let mut stack = vec![start];
-                let (mut x0, mut y0, mut x1, mut y1, mut n, mut sx, mut sy) = (w, h, 0, 0, 0usize, 0usize, 0usize);
+                let (mut x0, mut y0, mut x1, mut y1, mut n, mut sx, mut sy) =
+                    (w, h, 0, 0, 0usize, 0usize, 0usize);
                 while let Some(i) = stack.pop() {
                     let (x, y) = (i % w, i / w);
                     (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x), y1.max(y));
@@ -714,7 +849,15 @@ fn main() -> Result<()> {
                     }
                 }
                 if n >= *min_size {
-                    blobs.push((x0, y0, x1, y1, n, sx as f64 / n as f64, sy as f64 / n as f64));
+                    blobs.push((
+                        x0,
+                        y0,
+                        x1,
+                        y1,
+                        n,
+                        sx as f64 / n as f64,
+                        sy as f64 / n as f64,
+                    ));
                 }
             }
             blobs.sort_by(|a, b| a.5.total_cmp(&b.5));
@@ -722,21 +865,43 @@ fn main() -> Result<()> {
                 .iter()
                 .map(|&(x0, y0, x1, y1, n, cx, cy)| {
                     let (ox, oy) = (rx as usize, ry as usize);
-                    format!("[{}..{} x {}..{} n{n} c({:.1},{:.1})]", x0 + ox, x1 + ox, y0 + oy, y1 + oy, cx + ox as f64, cy + oy as f64)
+                    format!(
+                        "[{}..{} x {}..{} n{n} c({:.1},{:.1})]",
+                        x0 + ox,
+                        x1 + ox,
+                        y0 + oy,
+                        y1 + oy,
+                        cx + ox as f64,
+                        cy + oy as f64
+                    )
                 })
                 .collect();
             println!("{k:4}: {}", list.join(" "));
         }
         return Ok(());
     }
-    if let Cmd::ImgChanges { shots, rect, tolerance } = &cli.cmd {
+    if let Cmd::ImgChanges {
+        shots,
+        rect,
+        tolerance,
+    } = &cli.cmd
+    {
         let r = parse_rect(rect)?;
-        let mean_diff = |a: &[u8], b: &[u8]| a.iter().zip(b).map(|(p, q)| u64::from(p.abs_diff(*q))).sum::<u64>() as f64 / a.len() as f64;
+        let mean_diff = |a: &[u8], b: &[u8]| {
+            a.iter()
+                .zip(b)
+                .map(|(p, q)| u64::from(p.abs_diff(*q)))
+                .sum::<u64>() as f64
+                / a.len() as f64
+        };
         let mut seen: Vec<(Vec<u8>, usize)> = Vec::new();
         let mut prev: Option<usize> = None;
         for (k, shot) in shots.iter().enumerate() {
             let crop = crop_rgb(&read_rgb(shot)?, r);
-            let id = match seen.iter().position(|s| mean_diff(&s.0, &crop) <= *tolerance) {
+            let id = match seen
+                .iter()
+                .position(|s| mean_diff(&s.0, &crop) <= *tolerance)
+            {
                 Some(i) => i,
                 None => {
                     seen.push((crop, k));
@@ -744,21 +909,36 @@ fn main() -> Result<()> {
                 }
             };
             if prev != Some(id) {
-                println!("frame {k:4}: content #{id} (first seen at frame {})", seen[id].1);
+                println!(
+                    "frame {k:4}: content #{id} (first seen at frame {})",
+                    seen[id].1
+                );
                 prev = Some(id);
             }
         }
         return Ok(());
     }
     let dir = data_dir(&cli);
-    let disc = Disc::open_dir(&dir).with_context(|| format!("opening CD image in {}", dir.display()))?;
+    let disc =
+        Disc::open_dir(&dir).with_context(|| format!("opening CD image in {}", dir.display()))?;
     match &cli.cmd {
-        Cmd::ImgShift { .. } | Cmd::ImgFind { .. } | Cmd::ImgMontage { .. } | Cmd::ImgChanges { .. } | Cmd::ImgBlobs { .. } => {
+        Cmd::ImgShift { .. }
+        | Cmd::ImgFind { .. }
+        | Cmd::ImgMontage { .. }
+        | Cmd::ImgChanges { .. }
+        | Cmd::ImgBlobs { .. } => {
             unreachable!("handled before opening the disc")
         }
         Cmd::Tracks => {
             for t in &disc.tracks {
-                println!("{:2} {:?} {} sectors ({:.1}s) at byte {}", t.number, t.mode, t.sectors, t.seconds(), t.byte_offset);
+                println!(
+                    "{:2} {:?} {} sectors ({:.1}s) at byte {}",
+                    t.number,
+                    t.mode,
+                    t.sectors,
+                    t.seconds(),
+                    t.byte_offset
+                );
             }
         }
         Cmd::Ls => {
@@ -772,7 +952,11 @@ fn main() -> Result<()> {
                 }
             }
         }
-        Cmd::Extract { prefix, out, unpack } => {
+        Cmd::Extract {
+            prefix,
+            out,
+            unpack,
+        } => {
             let mut fs = open_fs(&disc)?;
             let prefix = prefix.to_ascii_uppercase();
             for (path, e) in fs.walk()? {
@@ -804,7 +988,13 @@ fn main() -> Result<()> {
                 match rnc::unpack(&data) {
                     Ok(u) => {
                         ok += 1;
-                        println!("ok   {path}: {} -> {} (blocks {}, leeway {})", data.len(), u.len(), h.blocks, h.leeway);
+                        println!(
+                            "ok   {path}: {} -> {} (blocks {}, leeway {})",
+                            data.len(),
+                            u.len(),
+                            h.blocks,
+                            h.leeway
+                        );
                     }
                     Err(err) => {
                         bad += 1;
@@ -816,14 +1006,31 @@ fn main() -> Result<()> {
         }
         Cmd::Levels => {
             let mut fs = open_fs(&disc)?;
-            println!("num title                            tex land obj sgn sea ani trp sky wal thm mus lem save time  rr  flags");
+            println!(
+                "num title                            tex land obj sgn sea ani trp sky wal thm mus lem save time  rr  flags"
+            );
             for n in 0..100 {
                 let l = load_level(&mut fs, n)?;
                 println!(
                     "{n:03} {:32} {:3} {:3} {:3} {:3} {:3} {:3} {:3} {:3} {:3} {:3} {:3} {:3} {:4} {:2}:{:02} {:3} {:04x}",
-                    l.title, l.texture_set, l.land_gfx, l.object_set, l.sign_set, l.sea_gfx, l.anim_object,
-                    l.trap_type, l.sky_gfx, l.walls_set, l.theme, l.music, l.lemmings, l.save_requirement,
-                    l.time_minutes, l.time_seconds, l.release_rate, l.flags
+                    l.title,
+                    l.texture_set,
+                    l.land_gfx,
+                    l.object_set,
+                    l.sign_set,
+                    l.sea_gfx,
+                    l.anim_object,
+                    l.trap_type,
+                    l.sky_gfx,
+                    l.walls_set,
+                    l.theme,
+                    l.music,
+                    l.lemmings,
+                    l.save_requirement,
+                    l.time_minutes,
+                    l.time_seconds,
+                    l.release_rate,
+                    l.flags
                 );
             }
         }
@@ -832,8 +1039,11 @@ fn main() -> Result<()> {
             let mut fs = open_fs(&disc)?;
             let level = load_level(&mut fs, *number)?;
             let blk = load_blk(&mut fs, *number)?;
-            let is_steel = |id: u8| blk.defs[id as usize].flags & l3d_formats::blk::flags::STEEL != 0;
-            let header: String = (0..SIZE_X).map(|x| char::from_digit((x % 10) as u32, 10).unwrap()).collect();
+            let is_steel =
+                |id: u8| blk.defs[id as usize].flags & l3d_formats::blk::flags::STEEL != 0;
+            let header: String = (0..SIZE_X)
+                .map(|x| char::from_digit((x % 10) as u32, 10).unwrap())
+                .collect();
             for y in 0..SIZE_Y {
                 if (0..SIZE_X).all(|x| (0..SIZE_Z).all(|z| level.block(x, y, z).is_empty())) {
                     continue;
@@ -864,8 +1074,14 @@ fn main() -> Result<()> {
             println!("skills: {:?}", l.skills);
             println!("land polygons: {:?}", l.land_polygons);
             println!("cameras: {:?}", l.cameras);
-            println!("border kill {:?} ceiling {} pivot {:?} flags2 {:02x}", l.border_kill, l.ceiling_kill, l.preview_pivot, l.flags2);
-            println!("flags {:04x} water speed x {} z {}", l.flags, l.water_speed_x, l.water_speed_z);
+            println!(
+                "border kill {:?} ceiling {} pivot {:?} flags2 {:02x}",
+                l.border_kill, l.ceiling_kill, l.preview_pivot, l.flags2
+            );
+            println!(
+                "flags {:04x} water speed x {} z {}",
+                l.flags, l.water_speed_x, l.water_speed_z
+            );
             let mut counts: BTreeMap<(u8, u8), usize> = BTreeMap::new();
             let mut objs: BTreeMap<u8, usize> = BTreeMap::new();
             for (_, _, _, b, o) in l.cells() {
@@ -881,19 +1097,29 @@ fn main() -> Result<()> {
                 let d = &blk.defs[id as usize];
                 let tex: Vec<u8> = d.faces.iter().map(|f| f.texture).collect();
                 let shade: Vec<u8> = d.faces.iter().map(|f| f.shading).collect();
-                println!("  ({id:2},{shape:2}) x{c:4}  flags {:02x} tex {tex:?} shade {shade:?}", d.flags);
+                println!(
+                    "  ({id:2},{shape:2}) x{c:4}  flags {:02x} tex {tex:?} shade {shade:?}",
+                    d.flags
+                );
             }
             println!("object kinds: {objs:?}");
             for (x, y, z, b, _) in l.cells().filter(|c| !c.3.is_empty() && c.3.id <= 2) {
                 // Side neighbours at the same height that are empty cells.
-                let open: Vec<&str> = [(1i32, 0i32, "+X"), (-1, 0, "-X"), (0, 1, "+Z"), (0, -1, "-Z")]
-                    .iter()
-                    .filter(|(dx, dz, _)| {
-                        let (nx, nz) = (x as i32 + dx, z as i32 + dz);
-                        (0..32).contains(&nx) && (0..32).contains(&nz) && l.block(nx as usize, y, nz as usize).is_empty()
-                    })
-                    .map(|(_, _, name)| *name)
-                    .collect();
+                let open: Vec<&str> = [
+                    (1i32, 0i32, "+X"),
+                    (-1, 0, "-X"),
+                    (0, 1, "+Z"),
+                    (0, -1, "-Z"),
+                ]
+                .iter()
+                .filter(|(dx, dz, _)| {
+                    let (nx, nz) = (x as i32 + dx, z as i32 + dz);
+                    (0..32).contains(&nx)
+                        && (0..32).contains(&nz)
+                        && l.block(nx as usize, y, nz as usize).is_empty()
+                })
+                .map(|(_, _, name)| *name)
+                .collect();
                 println!(
                     "  special block {} at ({x},{y},{z}) rot {} segs {:04b} open sides {}",
                     b.id,
@@ -903,11 +1129,21 @@ fn main() -> Result<()> {
                 );
             }
             for (x, y, z, _, o) in l.cells().filter(|c| (0x60..=0x67).contains(&c.4.kind)) {
-                println!("  interactive object {:#04x} at ({x},{y},{z}) extra {:#04x}", o.kind, o.extra);
+                println!(
+                    "  interactive object {:#04x} at ({x},{y},{z}) extra {:#04x}",
+                    o.kind, o.extra
+                );
             }
             println!("header:");
             for (i, row) in l.header.chunks(16).enumerate() {
-                println!("  {:04x}: {}", i * 16, row.iter().map(|b| format!("{b:02x}")).collect::<Vec<_>>().join(" "));
+                println!(
+                    "  {:04x}: {}",
+                    i * 16,
+                    row.iter()
+                        .map(|b| format!("{b:02x}"))
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                );
             }
         }
         Cmd::BlkMatch => {
@@ -917,28 +1153,55 @@ fn main() -> Result<()> {
                 let l = load_level(&mut fs, n)?;
                 let used = used_ids(&l);
                 let own = load_blk(&mut fs, n)?;
-                let own_missing_ids: Vec<u8> =
-                    used.iter().copied().filter(|&i| own.defs[i as usize].is_placeholder()).collect();
+                let own_missing_ids: Vec<u8> = used
+                    .iter()
+                    .copied()
+                    .filter(|&i| own.defs[i as usize].is_placeholder())
+                    .collect();
                 let own_missing = own_missing_ids.len();
                 let tex_missing = match load_blk(&mut fs, l.texture_set as u32) {
-                    Ok(b) => used.iter().filter(|&&i| b.defs[i as usize].is_placeholder()).count().to_string(),
+                    Ok(b) => used
+                        .iter()
+                        .filter(|&&i| b.defs[i as usize].is_placeholder())
+                        .count()
+                        .to_string(),
                     Err(_) => "n/a".into(),
                 };
                 own_bad += (own_missing > 0) as u32;
                 tex_bad += (tex_missing != "0") as u32;
-                println!("{n:03} tex {:3} used {:2}  missing in own BLK: {own_missing_ids:?}  in BLK.<tex>: {tex_missing}", l.texture_set, used.len());
+                println!(
+                    "{n:03} tex {:3} used {:2}  missing in own BLK: {own_missing_ids:?}  in BLK.<tex>: {tex_missing}",
+                    l.texture_set,
+                    used.len()
+                );
             }
             println!("levels with undefined used ids: own {own_bad}, by texture set {tex_bad}");
         }
         Cmd::PalInfo { path } => {
             let mut fs = open_fs(&disc)?;
             let raw = fs.read_path(path)?;
-            println!("{} bytes, max component {}", raw.len(), raw.iter().max().unwrap_or(&0));
-            for (i, c) in raw.chunks(3).enumerate().filter(|(i, _)| i % 16 == 0 || *i < 16) {
+            println!(
+                "{} bytes, max component {}",
+                raw.len(),
+                raw.iter().max().unwrap_or(&0)
+            );
+            for (i, c) in raw
+                .chunks(3)
+                .enumerate()
+                .filter(|(i, _)| i % 16 == 0 || *i < 16)
+            {
                 println!("  {i:3}: {c:?}");
             }
         }
-        Cmd::Mhc { path, size, cells, per_row, scale, labels, out } => {
+        Cmd::Mhc {
+            path,
+            size,
+            cells,
+            per_row,
+            scale,
+            labels,
+            out,
+        } => {
             let mut fs = open_fs(&disc)?;
             let pal = load_palette(&mut fs, "GFX/LM3D.PAL")?;
             let data = rnc::unpack_if_packed(fs.read_path(path)?)?;
@@ -954,7 +1217,10 @@ fn main() -> Result<()> {
                 println!("animation {a:3}: {n:3} cells, flags {flags:02x?}");
             }
             let range = cell_range(cells.as_deref(), mhc.entries.len())?;
-            anyhow::ensure!(!range.is_empty() && *per_row > 0 && *scale > 0, "nothing to draw");
+            anyhow::ensure!(
+                !range.is_empty() && *per_row > 0 && *scale > 0,
+                "nothing to draw"
+            );
             // Layout: each slot is a label strip (if any) above the scaled cell,
             // plus a gap to the right and below (if labelled).
             let cell_px = size * scale;
@@ -975,7 +1241,13 @@ fn main() -> Result<()> {
                             for x in 0..cell_px {
                                 let p = cell.pixels[(y / scale) * size + x / scale];
                                 if p != 0 || !*labels {
-                                    sheet.fill_rect(ox + x, oy + label_h + y, 1, 1, pal[p as usize]);
+                                    sheet.fill_rect(
+                                        ox + x,
+                                        oy + label_h + y,
+                                        1,
+                                        1,
+                                        pal[p as usize],
+                                    );
                                 }
                             }
                         }
@@ -987,15 +1259,26 @@ fn main() -> Result<()> {
                 }
             }
             write_rgb_png(out, sheet.width as u32, &sheet.rgb)?;
-            println!("{} cells, {failed} failed -> {}", range.len(), out.display());
+            println!(
+                "{} cells, {failed} failed -> {}",
+                range.len(),
+                out.display()
+            );
         }
-        Cmd::MhcMirrors { path, size, cells, max_diff } => {
+        Cmd::MhcMirrors {
+            path,
+            size,
+            cells,
+            max_diff,
+        } => {
             let mut fs = open_fs(&disc)?;
             let pal = load_palette(&mut fs, "GFX/LM3D.PAL")?;
             let data = rnc::unpack_if_packed(fs.read_path(path)?)?;
             let mhc = l3d_formats::mhc::MhcFile::parse(&data, *size)?;
             let range = cell_range(cells.as_deref(), mhc.entries.len())?;
-            let decoded: Vec<(usize, Vec<u8>)> = range.map(|i| Ok((i, mhc.cell(i)?.pixels))).collect::<Result<_>>()?;
+            let decoded: Vec<(usize, Vec<u8>)> = range
+                .map(|i| Ok((i, mhc.cell(i)?.pixels)))
+                .collect::<Result<_>>()?;
             for (i, a) in &decoded {
                 let best = decoded
                     .iter()
@@ -1003,35 +1286,67 @@ fn main() -> Result<()> {
                     .filter_map(|(j, b)| mirror_diff(a, b, *size, &pal).map(|(d, dx)| (*j, d, dx)))
                     .min_by(|p, q| p.1.total_cmp(&q.1));
                 if let Some((j, d, dx)) = best.filter(|b| b.1 <= *max_diff) {
-                    println!("cell {i:3} ~ mirrored cell {j:3} shifted {dx:+2}: mean abs diff {d:.1}");
+                    println!(
+                        "cell {i:3} ~ mirrored cell {j:3} shifted {dx:+2}: mean abs diff {d:.1}"
+                    );
                 }
             }
         }
-        Cmd::MhcMatch { shots, rect, scale, cells, path, size, jitter, top } => {
+        Cmd::MhcMatch {
+            shots,
+            rect,
+            scale,
+            cells,
+            path,
+            size,
+            jitter,
+            top,
+        } => {
             let mut fs = open_fs(&disc)?;
             let pal = load_palette(&mut fs, "GFX/LM3D.PAL")?;
             let data = rnc::unpack_if_packed(fs.read_path(path)?)?;
             let mhc = l3d_formats::mhc::MhcFile::parse(&data, *size)?;
-            let r: Vec<i32> = rect.split(',').map(str::parse).collect::<Result<_, _>>().context("rect must be X,Y,W,H")?;
-            let rect: [i32; 4] = r.try_into().ok().filter(|r: &[i32; 4]| r[2] > 0 && r[3] > 0).context("rect must be X,Y,W,H")?;
+            let r: Vec<i32> = rect
+                .split(',')
+                .map(str::parse)
+                .collect::<Result<_, _>>()
+                .context("rect must be X,Y,W,H")?;
+            let rect: [i32; 4] = r
+                .try_into()
+                .ok()
+                .filter(|r: &[i32; 4]| r[2] > 0 && r[3] > 0)
+                .context("rect must be X,Y,W,H")?;
             let placement = match scale {
-                Some(scale) => Placement::Search { rect, scales: parse_scales(scale)? },
-                None => Placement::Fit { rect, jitter: *jitter },
+                Some(scale) => Placement::Search {
+                    rect,
+                    scales: parse_scales(scale)?,
+                },
+                None => Placement::Fit {
+                    rect,
+                    jitter: *jitter,
+                },
             };
             let range = cell_range(cells.as_deref(), mhc.entries.len())?;
-            let decoded: Vec<(usize, Vec<u8>)> = range.map(|i| Ok((i, mhc.cell(i)?.pixels))).collect::<Result<_>>()?;
+            let decoded: Vec<(usize, Vec<u8>)> = range
+                .map(|i| Ok((i, mhc.cell(i)?.pixels)))
+                .collect::<Result<_>>()?;
             for shot in shots {
                 let img = read_rgb(shot)?;
                 let mut results: Vec<(usize, CellFit)> = decoded
                     .iter()
-                    .filter_map(|(i, px)| best_cell_fit(px, *size, &pal, &img, &placement).map(|f| (*i, f)))
+                    .filter_map(|(i, px)| {
+                        best_cell_fit(px, *size, &pal, &img, &placement).map(|f| (*i, f))
+                    })
                     .collect();
                 results.sort_by(|a, b| a.1.score.total_cmp(&b.1.score));
                 println!("{}:", shot.display());
                 for (i, f) in results.iter().take(*top) {
                     let m = if f.mirrored { " mirrored" } else { "" };
                     let (x, y, (w, h)) = (f.at.0, f.at.1, f.size);
-                    println!("  cell {i:3}{m:9} at {x:4},{y:4} size {w:3}x{h:3}: mean abs diff {:.1}", f.score);
+                    println!(
+                        "  cell {i:3}{m:9} at {x:4},{y:4} size {w:3}x{h:3}: mean abs diff {:.1}",
+                        f.score
+                    );
                 }
             }
         }
@@ -1039,7 +1354,21 @@ fn main() -> Result<()> {
             anyhow::ensure!(*scale > 0, "scale must be at least 1");
             ui::render(&mut open_fs(&disc)?, out, parts, *scale)?;
         }
-        Cmd::UiFind { shots, set, cells, rect, screen, game, palette, tol, max_miss, min_opaque, mirrored, save, top } => {
+        Cmd::UiFind {
+            shots,
+            set,
+            cells,
+            rect,
+            screen,
+            game,
+            palette,
+            tol,
+            max_miss,
+            min_opaque,
+            mirrored,
+            save,
+            top,
+        } => {
             let mut fs = open_fs(&disc)?;
             let all = ui::sprite_set(&mut fs, set)?;
             let pal = ui::palette(&mut fs, palette)?;
@@ -1047,10 +1376,18 @@ fn main() -> Result<()> {
                 .map(|k| {
                     let c = &all[k];
                     let px = match mirrored {
-                        true => c.pixels.chunks(c.width).flat_map(|r| r.iter().rev()).copied().collect(),
+                        true => c
+                            .pixels
+                            .chunks(c.width)
+                            .flat_map(|r| r.iter().rev())
+                            .copied()
+                            .collect(),
                         false => c.pixels.clone(),
                     };
-                    Ok((k, l3d_formats::image::IndexedImage::new(c.width, c.height, px)?))
+                    Ok((
+                        k,
+                        l3d_formats::image::IndexedImage::new(c.width, c.height, px)?,
+                    ))
                 })
                 .collect::<Result<_>>()?;
             let game = game.as_deref().map(parse_size).transpose()?;
@@ -1065,27 +1402,63 @@ fn main() -> Result<()> {
                 for y in 0..gh {
                     for x in 0..gw {
                         // The screenshot pixel at the centre of game pixel (x, y).
-                        let (u, v) = (sx + (2 * x + 1) * sw / (2 * gw), sy + (2 * y + 1) * sh / (2 * gh));
+                        let (u, v) = (
+                            sx + (2 * x + 1) * sw / (2 * gw),
+                            sy + (2 * y + 1) * sh / (2 * gh),
+                        );
                         px.extend_from_slice(&crop_rgb(&img, [u, v, 1, 1]));
                     }
                 }
                 let resampled = (gw as u32, gh as u32, px);
                 if let Some(dir) = save {
-                    write_rgb_png(&dir.join(shot.file_name().context("screenshot path")?), resampled.0, &resampled.2)?;
+                    write_rgb_png(
+                        &dir.join(shot.file_name().context("screenshot path")?),
+                        resampled.0,
+                        &resampled.2,
+                    )?;
                 }
-                let area = rect.as_deref().map(parse_rect).transpose()?.unwrap_or([0, 0, gw, gh]);
+                let area = rect
+                    .as_deref()
+                    .map(parse_rect)
+                    .transpose()?
+                    .unwrap_or([0, 0, gw, gh]);
                 println!("{}", shot.display());
-                for p in ui::find(&resampled, &chosen, &pal, area, *tol, *max_miss, *min_opaque).iter().take(*top) {
-                    println!("  cell {:3} at ({},{}) {}x{}: {}/{} opaque pixels differ", p.cell, p.x, p.y, p.w, p.h, p.misses, p.opaque);
+                for p in ui::find(
+                    &resampled,
+                    &chosen,
+                    &pal,
+                    area,
+                    *tol,
+                    *max_miss,
+                    *min_opaque,
+                )
+                .iter()
+                .take(*top)
+                {
+                    println!(
+                        "  cell {:3} at ({},{}) {}x{}: {}/{} opaque pixels differ",
+                        p.cell, p.x, p.y, p.w, p.h, p.misses, p.opaque
+                    );
                 }
             }
         }
-        Cmd::Png { path, width, palette, skip, out } => {
+        Cmd::Png {
+            path,
+            width,
+            palette,
+            skip,
+            out,
+        } => {
             let mut fs = open_fs(&disc)?;
             let pal = load_palette(&mut fs, palette)?;
             let data = rnc::unpack_if_packed(fs.read_path(path)?)?;
             write_png(out, *width, &data[*skip..], &pal)?;
-            println!("{} bytes -> {}x{}", data.len() - skip, width, (data.len() - skip) as u32 / width);
+            println!(
+                "{} bytes -> {}x{}",
+                data.len() - skip,
+                width,
+                (data.len() - skip) as u32 / width
+            );
         }
     }
     Ok(())

@@ -8,14 +8,27 @@ use l3d_formats::iso9660::IsoFs;
 use l3d_formats::{font::Font, icons::Icons, rnc, screen, sheets, title};
 
 /// Names accepted by `l3d-tool ui`, in rendering order.
-pub const PARTS: [&str; 10] =
-    ["title-mhc", "title-menu", "title-font", "lemmings-font", "icons", "sheets", "loading", "intro", "scene", "bmps"];
+pub const PARTS: [&str; 10] = [
+    "title-mhc",
+    "title-menu",
+    "title-font",
+    "lemmings-font",
+    "icons",
+    "sheets",
+    "loading",
+    "intro",
+    "scene",
+    "bmps",
+];
 
 /// Background of contact sheets, chosen to stand apart from the game colours.
 const BACKDROP: [u8; 3] = [64, 0, 64];
 
 fn read(fs: &mut IsoFs, path: &str) -> Result<Vec<u8>> {
-    Ok(rnc::unpack_if_packed(fs.read_path(path).with_context(|| format!("reading {path}"))?)?)
+    Ok(rnc::unpack_if_packed(
+        fs.read_path(path)
+            .with_context(|| format!("reading {path}"))?,
+    )?)
 }
 
 pub fn palette(fs: &mut IsoFs, path: &str) -> Result<Palette> {
@@ -25,7 +38,14 @@ pub fn palette(fs: &mut IsoFs, path: &str) -> Result<Palette> {
 /// Lays `cells` out `per_row` across, each slot as large as the largest
 /// cell, `scale`× enlarged, with a 1-pixel (scaled) gap; draws index 0 as
 /// the backdrop when `transparent`, and writes the result to `out`.
-fn contact(out: &Path, cells: &[IndexedImage], per_row: usize, scale: usize, pal: &Palette, transparent: bool) -> Result<()> {
+fn contact(
+    out: &Path,
+    cells: &[IndexedImage],
+    per_row: usize,
+    scale: usize,
+    pal: &Palette,
+    transparent: bool,
+) -> Result<()> {
     anyhow::ensure!(!cells.is_empty(), "nothing to draw");
     let cw = cells.iter().map(|c| c.width).max().unwrap_or(0) + 1;
     let ch = cells.iter().map(|c| c.height).max().unwrap_or(0) + 1;
@@ -57,24 +77,51 @@ fn font_sheet(out: &Path, font: &Font, scale: usize, pal: &Palette) -> Result<()
 
 pub fn render(fs: &mut IsoFs, out: &Path, only: &[String], scale: usize) -> Result<()> {
     for name in only {
-        anyhow::ensure!(PARTS.contains(&name.as_str()), "unknown part {name}; expected one of {PARTS:?}");
+        anyhow::ensure!(
+            PARTS.contains(&name.as_str()),
+            "unknown part {name}; expected one of {PARTS:?}"
+        );
     }
     let want = |p: &str| only.is_empty() || only.iter().any(|o| o == p);
     let main = palette(fs, "GFX/LM3D.PAL")?;
     let o = |f: &str| out.join(f);
     if want("title-mhc") {
         let frames = title::decode_rle_cells(&read(fs, "GFX/TITLE.MHC")?, title::LOGO_WIDTH)?;
-        println!("TITLE.MHC: {} frames of {}x{}", frames.len(), frames[0].width, frames[0].height);
+        println!(
+            "TITLE.MHC: {} frames of {}x{}",
+            frames.len(),
+            frames[0].width,
+            frames[0].height
+        );
         contact(&o("title-mhc.png"), &frames, 4, scale, &main, true)?;
     }
     if want("title-menu") {
         let menu = title::MenuArt::parse(&read(fs, "GFX/TITLE.RNC")?)?;
-        contact(&o("title-buttons.png"), &menu.buttons, 5, scale, &main, false)?;
-        contact(&o("title-ratings.png"), &menu.ratings, 5, scale, &main, false)?;
+        contact(
+            &o("title-buttons.png"),
+            &menu.buttons,
+            5,
+            scale,
+            &main,
+            false,
+        )?;
+        contact(
+            &o("title-ratings.png"),
+            &menu.ratings,
+            5,
+            scale,
+            &main,
+            false,
+        )?;
         contact(&o("title-faces.png"), &menu.faces, 3, scale, &main, false)?;
     }
     if want("title-font") {
-        font_sheet(&o("title-font.png"), &l3d_formats::font::title_font(&read(fs, "GFX/TITLE.FNT")?)?, scale, &main)?;
+        font_sheet(
+            &o("title-font.png"),
+            &l3d_formats::font::title_font(&read(fs, "GFX/TITLE.FNT")?)?,
+            scale,
+            &main,
+        )?;
     }
     if want("lemmings-font") {
         let l = title::LemmingLetters::parse(&read(fs, "GFX/LEMMINGS.FNT")?)?;
@@ -85,7 +132,14 @@ pub fn render(fs: &mut IsoFs, out: &Path, only: &[String], scale: usize) -> Resu
         for c in b'A'..=b'Z' {
             cells.extend_from_slice(l.letter(c).unwrap_or_default());
         }
-        contact(&o("lemmings-font.png"), &cells, title::LETTER_FRAMES, scale, &main, false)?;
+        contact(
+            &o("lemmings-font.png"),
+            &cells,
+            title::LETTER_FRAMES,
+            scale,
+            &main,
+            false,
+        )?;
     }
     if want("icons") {
         let icons = Icons::parse(&read(fs, "GFX/ICONS.RNC")?)?;
@@ -96,14 +150,28 @@ pub fn render(fs: &mut IsoFs, out: &Path, only: &[String], scale: usize) -> Resu
         contact(&o("icons-labels.png"), &labels, 4, scale, &main, false)?;
         let rows = icons.unknown.len() / 12;
         let strip = IndexedImage::new(12, rows, icons.unknown[..rows * 12].to_vec())?;
-        contact(&o("icons-unknown-w12.png"), &[strip], 1, scale, &main, false)?;
+        contact(
+            &o("icons-unknown-w12.png"),
+            &[strip],
+            1,
+            scale,
+            &main,
+            false,
+        )?;
         font_sheet(&o("icons-font-small.png"), &icons.small_font, scale, &main)?;
         font_sheet(&o("icons-font-large.png"), &icons.large_font, scale, &main)?;
     }
     if want("sheets") || want("loading") {
         let loading = screen::loading(&read(fs, "GFX/LOADING.RNC")?)?;
         if want("loading") {
-            contact(&o("loading.png"), std::slice::from_ref(&loading.image), 1, scale, &loading.palette, false)?;
+            contact(
+                &o("loading.png"),
+                std::slice::from_ref(&loading.image),
+                1,
+                scale,
+                &loading.palette,
+                false,
+            )?;
         }
         if want("sheets") {
             for s in sheets::ALL {
@@ -112,28 +180,72 @@ pub fn render(fs: &mut IsoFs, out: &Path, only: &[String], scale: usize) -> Resu
                     None => loading.palette,
                 };
                 let cells = s.cut(&read(fs, s.path)?)?;
-                let name = s.path.trim_start_matches("GFX/").split('.').next().unwrap_or(s.path).to_lowercase();
-                contact(&o(&format!("{name}.png")), &cells, 16.min(512 / s.cell_width), scale, &pal, false)?;
+                let name = s
+                    .path
+                    .trim_start_matches("GFX/")
+                    .split('.')
+                    .next()
+                    .unwrap_or(s.path)
+                    .to_lowercase();
+                contact(
+                    &o(&format!("{name}.png")),
+                    &cells,
+                    16.min(512 / s.cell_width),
+                    scale,
+                    &pal,
+                    false,
+                )?;
             }
         }
     }
     if want("intro") {
         for n in 1..=7 {
             let lo = screen::intro(&read(fs, &format!("GFX/INTRO{n}.RNC"))?, screen::LOW_RES)?;
-            contact(&o(&format!("intro{n}.png")), &[lo.image], 1, 1, &lo.palette, false)?;
+            contact(
+                &o(&format!("intro{n}.png")),
+                &[lo.image],
+                1,
+                1,
+                &lo.palette,
+                false,
+            )?;
             let hi = screen::intro(&read(fs, &format!("GFX/INTRO{n}.SVG"))?, screen::HIGH_RES)?;
-            contact(&o(&format!("intro{n}-svg.png")), &[hi.image], 1, 1, &hi.palette, false)?;
+            contact(
+                &o(&format!("intro{n}-svg.png")),
+                &[hi.image],
+                1,
+                1,
+                &hi.palette,
+                false,
+            )?;
         }
     }
     if want("scene") {
         for n in 0..=10 {
-            for (ext, pal_ext, size) in [("RNC", "PAL", screen::LOW_RES), ("SVG", "SVP", screen::HIGH_RES)] {
+            for (ext, pal_ext, size) in [
+                ("RNC", "PAL", screen::LOW_RES),
+                ("SVG", "SVP", screen::HIGH_RES),
+            ] {
                 let pal = palette(fs, &format!("GFX/SCENE{n:03}.{pal_ext}"))?;
                 let s = screen::scene(&read(fs, &format!("GFX/SCENE{n:03}.{ext}"))?, size)?;
                 let tag = ext.to_lowercase();
-                contact(&o(&format!("scene{n:03}-{tag}.png")), &[s.image], 1, 1, &pal, false)?;
+                contact(
+                    &o(&format!("scene{n:03}-{tag}.png")),
+                    &[s.image],
+                    1,
+                    1,
+                    &pal,
+                    false,
+                )?;
                 if !s.prompts.is_empty() {
-                    contact(&o(&format!("scene{n:03}-{tag}-prompts.png")), &s.prompts, 4, scale, &pal, false)?;
+                    contact(
+                        &o(&format!("scene{n:03}-{tag}-prompts.png")),
+                        &s.prompts,
+                        4,
+                        scale,
+                        &pal,
+                        false,
+                    )?;
                 }
             }
         }
@@ -148,7 +260,11 @@ pub fn render(fs: &mut IsoFs, out: &Path, only: &[String], scale: usize) -> Resu
         for p in paths {
             let pic = screen::bmp(&read(fs, &p)?)?;
             println!("{p}: {}x{}", pic.image.width, pic.image.height);
-            let name = p.trim_start_matches("BMPS/").replace('/', "-").to_lowercase().replace(".bmp", ".png");
+            let name = p
+                .trim_start_matches("BMPS/")
+                .replace('/', "-")
+                .to_lowercase()
+                .replace(".bmp", ".png");
             contact(&o(&name), &[pic.image], 1, 1, &pic.palette, false)?;
         }
     }
@@ -157,14 +273,37 @@ pub fn render(fs: &mut IsoFs, out: &Path, only: &[String], scale: usize) -> Resu
 
 /// Names of the sprite sets accepted by `l3d-tool ui-find`.
 pub const SETS: [&str; 19] = [
-    "logo", "buttons", "ratings", "faces", "title-font", "letters", "icons-small", "panel", "labels", "font-small",
-    "font-large", "minilemm", "bombnumb", "cogs", "mouse", "deflicon", "pracicon", "endlemms", "winder",
+    "logo",
+    "buttons",
+    "ratings",
+    "faces",
+    "title-font",
+    "letters",
+    "icons-small",
+    "panel",
+    "labels",
+    "font-small",
+    "font-large",
+    "minilemm",
+    "bombnumb",
+    "cogs",
+    "mouse",
+    "deflicon",
+    "pracicon",
+    "endlemms",
+    "winder",
 ];
 
 /// The sprite sheet whose file name, lower-cased and without extension, is
 /// `name`.
 fn sheet_named(name: &str) -> Option<sheets::Sheet> {
-    sheets::ALL.into_iter().find(|s| s.path.trim_start_matches("GFX/").split('.').next().is_some_and(|n| n.eq_ignore_ascii_case(name)))
+    sheets::ALL.into_iter().find(|s| {
+        s.path
+            .trim_start_matches("GFX/")
+            .split('.')
+            .next()
+            .is_some_and(|n| n.eq_ignore_ascii_case(name))
+    })
 }
 
 /// The cells of sprite set `name` (see [`SETS`]), in file order: for
@@ -172,8 +311,11 @@ fn sheet_named(name: &str) -> Option<sheets::Sheet> {
 /// is character code `33 + i`. `raw:PATH:WIDTH` is the whole file PATH as
 /// one image WIDTH pixels wide.
 pub fn sprite_set(fs: &mut IsoFs, name: &str) -> Result<Vec<IndexedImage>> {
-    let icons = |fs: &mut IsoFs| -> Result<Icons> { Ok(Icons::parse(&read(fs, "GFX/ICONS.RNC")?)?) };
-    let menu = |fs: &mut IsoFs| -> Result<title::MenuArt> { Ok(title::MenuArt::parse(&read(fs, "GFX/TITLE.RNC")?)?) };
+    let icons =
+        |fs: &mut IsoFs| -> Result<Icons> { Ok(Icons::parse(&read(fs, "GFX/ICONS.RNC")?)?) };
+    let menu = |fs: &mut IsoFs| -> Result<title::MenuArt> {
+        Ok(title::MenuArt::parse(&read(fs, "GFX/TITLE.RNC")?)?)
+    };
     Ok(match name {
         "logo" => title::decode_rle_cells(&read(fs, "GFX/TITLE.MHC")?, title::LOGO_WIDTH)?,
         "buttons" => menu(fs)?.buttons,
@@ -190,16 +332,24 @@ pub fn sprite_set(fs: &mut IsoFs, name: &str) -> Result<Vec<IndexedImage>> {
         "font-small" => icons(fs)?.small_font.glyphs,
         "font-large" => icons(fs)?.large_font.glyphs,
         _ if name.starts_with("raw:") => {
-            let (path, width) = name[4..].rsplit_once(':').context("expected raw:PATH:WIDTH")?;
+            let (path, width) = name[4..]
+                .rsplit_once(':')
+                .context("expected raw:PATH:WIDTH")?;
             let width: usize = width.parse().context("raw width")?;
             anyhow::ensure!(width > 0, "raw width must be positive");
             let data = read(fs, path)?;
             let height = data.len() / width;
-            vec![IndexedImage::new(width, height, data[..width * height].to_vec())?]
+            vec![IndexedImage::new(
+                width,
+                height,
+                data[..width * height].to_vec(),
+            )?]
         }
         _ => match sheet_named(name) {
             Some(s) => s.cut(&read(fs, s.path)?)?,
-            None => anyhow::bail!("unknown sprite set {name}; expected one of {SETS:?} or raw:PATH:WIDTH"),
+            None => anyhow::bail!(
+                "unknown sprite set {name}; expected one of {SETS:?} or raw:PATH:WIDTH"
+            ),
         },
     })
 }
@@ -254,7 +404,13 @@ pub fn find(
         let opaque: Vec<(i32, i32, [i32; 3])> = (0..cell.height)
             .flat_map(|y| (0..cell.width).map(move |x| (x, y)))
             .filter(|&(x, y)| cell.get(x, y) != 0)
-            .map(|(x, y)| (x as i32, y as i32, pal[cell.get(x, y) as usize].map(i32::from)))
+            .map(|(x, y)| {
+                (
+                    x as i32,
+                    y as i32,
+                    pal[cell.get(x, y) as usize].map(i32::from),
+                )
+            })
             .collect();
         if opaque.len() < min_opaque.max(1) {
             continue;
@@ -266,7 +422,11 @@ pub fn find(
                 let mut misses = 0;
                 for &(dx, dy, c) in &opaque {
                     let i = (((y + dy) * iw + x + dx) * 3) as usize;
-                    if (0..3).map(|j| (img.2[i + j] as i32 - c[j]).abs()).sum::<i32>() > tol {
+                    if (0..3)
+                        .map(|j| (img.2[i + j] as i32 - c[j]).abs())
+                        .sum::<i32>()
+                        > tol
+                    {
                         misses += 1;
                         if misses > limit {
                             break;
@@ -274,15 +434,30 @@ pub fn find(
                     }
                 }
                 if misses <= limit {
-                    found.push(Placement { cell: *k, x, y, w, h, misses, opaque: opaque.len() });
+                    found.push(Placement {
+                        cell: *k,
+                        x,
+                        y,
+                        w,
+                        h,
+                        misses,
+                        opaque: opaque.len(),
+                    });
                 }
             }
         }
     }
-    found.sort_by(|a, b| a.miss_ratio().total_cmp(&b.miss_ratio()).then(b.opaque.cmp(&a.opaque)));
+    found.sort_by(|a, b| {
+        a.miss_ratio()
+            .total_cmp(&b.miss_ratio())
+            .then(b.opaque.cmp(&a.opaque))
+    });
     let mut kept: Vec<Placement> = Vec::new();
     for p in found {
-        if kept.iter().all(|q| 2 * p.overlap(q) <= (p.w * p.h).min(q.w * q.h)) {
+        if kept
+            .iter()
+            .all(|q| 2 * p.overlap(q) <= (p.w * p.h).min(q.w * q.h))
+        {
             kept.push(p);
         }
     }

@@ -5,8 +5,8 @@
 
 use bevy::prelude::*;
 
-use crate::menu::AppState;
 use crate::ViewCamera;
+use crate::menu::AppState;
 
 /// Finger travel (logical pixels) below which a touch counts as a tap.
 pub const TAP_SLOP: f32 = 12.0;
@@ -20,7 +20,12 @@ pub struct TouchPlugin;
 
 impl Plugin for TouchPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, touch_camera.before(crate::camera_controls).run_if(in_state(AppState::Playing)));
+        app.add_systems(
+            Update,
+            touch_camera
+                .before(crate::camera_controls)
+                .run_if(in_state(AppState::Playing)),
+        );
     }
 }
 

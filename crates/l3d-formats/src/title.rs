@@ -27,13 +27,18 @@ pub fn decode_rle_cells(data: &[u8], width: usize) -> Result<Vec<IndexedImage>, 
             .get(pos..pos + 2)
             .map(|b| u16::from_le_bytes([b[0], b[1]]) as usize)
             .ok_or_else(|| Error::Format(format!("RLE cell header at {pos} cut short")))?;
-        let body = data
-            .get(pos + 2..pos + size.max(2))
-            .ok_or_else(|| Error::Format(format!("RLE cell at {pos} ({size} bytes) runs past the end")))?;
+        let body = data.get(pos + 2..pos + size.max(2)).ok_or_else(|| {
+            Error::Format(format!(
+                "RLE cell at {pos} ({size} bytes) runs past the end"
+            ))
+        })?;
         if size < 2 {
             return Err(Error::Format(format!("RLE cell at {pos} has size {size}")));
         }
-        out.push(decode_rle(body, width).map_err(|e| Error::Format(format!("RLE cell {}: {e}", out.len())))?);
+        out.push(
+            decode_rle(body, width)
+                .map_err(|e| Error::Format(format!("RLE cell {}: {e}", out.len())))?,
+        );
         pos += size;
     }
     Ok(out)
@@ -57,10 +62,17 @@ fn decode_rle(body: &[u8], width: usize) -> Result<IndexedImage, String> {
         px.resize(px.len() + n, 0);
     }
     if !px.len().is_multiple_of(width) {
-        return Err(format!("{} pixels is not a whole number of {width}-pixel rows", px.len()));
+        return Err(format!(
+            "{} pixels is not a whole number of {width}-pixel rows",
+            px.len()
+        ));
     }
     let height = px.len() / width;
-    Ok(IndexedImage { width, height, pixels: px })
+    Ok(IndexedImage {
+        width,
+        height,
+        pixels: px,
+    })
 }
 
 /// Size of `GFX/TITLE.RNC` once unpacked.
@@ -83,11 +95,18 @@ pub struct MenuArt {
 impl MenuArt {
     pub fn parse(data: &[u8]) -> Result<Self, Error> {
         if data.len() != MENU_LEN {
-            return Err(Error::Format(format!("TITLE.RNC is {} bytes, expected {MENU_LEN}", data.len())));
+            return Err(Error::Format(format!(
+                "TITLE.RNC is {} bytes, expected {MENU_LEN}",
+                data.len()
+            )));
         }
         let (b, rest) = data.split_at(5 * 64 * 64);
         let (r, f) = rest.split_at(5 * 32 * 32);
-        Ok(MenuArt { buttons: cells(b, 64, 64, 5)?, ratings: cells(r, 32, 32, 5)?, faces: cells(f, 16, 16, 15)? })
+        Ok(MenuArt {
+            buttons: cells(b, 64, 64, 5)?,
+            ratings: cells(r, 32, 32, 5)?,
+            faces: cells(f, 16, 16, 15)?,
+        })
     }
 }
 
@@ -112,9 +131,14 @@ impl LemmingLetters {
     pub fn parse(data: &[u8]) -> Result<Self, Error> {
         let len = LETTER_TOTAL * LETTER_SIZE * LETTER_SIZE;
         if data.len() != len {
-            return Err(Error::Format(format!("LEMMINGS.FNT is {} bytes, expected {len}", data.len())));
+            return Err(Error::Format(format!(
+                "LEMMINGS.FNT is {} bytes, expected {len}",
+                data.len()
+            )));
         }
-        Ok(LemmingLetters { frames: cells(data, LETTER_SIZE, LETTER_SIZE, LETTER_TOTAL)? })
+        Ok(LemmingLetters {
+            frames: cells(data, LETTER_SIZE, LETTER_SIZE, LETTER_TOTAL)?,
+        })
     }
 
     /// The idle frames: the lemmings standing in a row, shuffling.
@@ -125,7 +149,10 @@ impl LemmingLetters {
     /// The 20 frames of letter `c` (`A`–`Z`, either case): from standing in a
     /// row, through forming the letter, back to the row.
     pub fn letter(&self, c: u8) -> Option<&[IndexedImage]> {
-        let i = c.to_ascii_uppercase().checked_sub(b'A').filter(|&i| i < 26)? as usize;
+        let i = c
+            .to_ascii_uppercase()
+            .checked_sub(b'A')
+            .filter(|&i| i < 26)? as usize;
         let start = LETTER_IDLE_FRAMES + i * LETTER_FRAMES;
         Some(&self.frames[start..start + LETTER_FRAMES])
     }

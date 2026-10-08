@@ -13,9 +13,17 @@ pub struct StylePlugin;
 
 impl Plugin for StylePlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (toggle_on_title, title_label).chain().run_if(in_state(AppState::Title)))
-            .add_systems(Update, toggle_in_level.run_if(in_state(AppState::Playing)))
-            .add_systems(OnExit(AppState::Playing), crate::title::despawn::<NoticeRoot>);
+        app.add_systems(
+            Update,
+            (toggle_on_title, title_label)
+                .chain()
+                .run_if(in_state(AppState::Title)),
+        )
+        .add_systems(Update, toggle_in_level.run_if(in_state(AppState::Playing)))
+        .add_systems(
+            OnExit(AppState::Playing),
+            crate::title::despawn::<NoticeRoot>,
+        );
     }
 }
 
@@ -41,7 +49,11 @@ fn switch(settings: &mut Settings) {
 #[derive(Component)]
 struct ModeLabel;
 
-fn toggle_on_title(keys: Res<ButtonInput<KeyCode>>, labels: Query<&Interaction, (With<ModeLabel>, Changed<Interaction>)>, mut settings: ResMut<Settings>) {
+fn toggle_on_title(
+    keys: Res<ButtonInput<KeyCode>>,
+    labels: Query<&Interaction, (With<ModeLabel>, Changed<Interaction>)>,
+    mut settings: ResMut<Settings>,
+) {
     if keys.just_pressed(KeyCode::Tab) || labels.iter().any(|i| *i == Interaction::Pressed) {
         switch(&mut settings);
     }
@@ -56,20 +68,39 @@ fn title_label(
     roots: Query<(), With<ScreenRoot>>,
     labels: Query<Entity, With<ModeLabel>>,
 ) {
-    let Some(font) = art.as_ref().and_then(|a| a.large.as_ref()) else { return };
+    let Some(font) = art.as_ref().and_then(|a| a.large.as_ref()) else {
+        return;
+    };
     if roots.is_empty() || (!labels.is_empty() && !settings.is_changed()) {
         return;
     }
-    let Some((canvas, _)) = canvases.iter().find(|(_, c)| c.0 == TITLE_SCREEN) else { return };
+    let Some((canvas, _)) = canvases.iter().find(|(_, c)| c.0 == TITLE_SCREEN) else {
+        return;
+    };
     for e in &labels {
         commands.entity(e).despawn();
     }
     let (glyphs, width) = font.layout(&format!("Mode: {}", name(settings.enhanced)));
     let left = TITLE_SCREEN.x - 2.0 - width;
-    let label = commands.spawn((ModeLabel, Button, at(left, 0.0, width, font.size.y), Node { position_type: PositionType::Absolute, ..default() })).id();
+    let label = commands
+        .spawn((
+            ModeLabel,
+            Button,
+            at(left, 0.0, width, font.size.y),
+            Node {
+                position_type: PositionType::Absolute,
+                ..default()
+            },
+        ))
+        .id();
     commands.entity(canvas).add_child(label);
     for (x, image) in glyphs {
-        let g = commands.spawn((image_at(image, at(x, 0.0, font.size.x, font.size.y)), Pickable::IGNORE)).id();
+        let g = commands
+            .spawn((
+                image_at(image, at(x, 0.0, font.size.x, font.size.y)),
+                Pickable::IGNORE,
+            ))
+            .id();
         commands.entity(label).add_child(g);
     }
 }
@@ -99,19 +130,46 @@ fn toggle_in_level(
     if !changed {
         return;
     }
-    let Some(font) = art.as_ref().and_then(|a| a.large.as_ref()) else { return };
+    let Some(font) = art.as_ref().and_then(|a| a.large.as_ref()) else {
+        return;
+    };
     let root = commands
-        .spawn((NoticeRoot(now), Node { position_type: PositionType::Absolute, width: percent(100), height: percent(100), ..default() }, Pickable::IGNORE))
+        .spawn((
+            NoticeRoot(now),
+            Node {
+                position_type: PositionType::Absolute,
+                width: percent(100),
+                height: percent(100),
+                ..default()
+            },
+            Pickable::IGNORE,
+        ))
         .id();
-    let canvas = commands.spawn((Canvas(NOTICE_SCREEN), Node { position_type: PositionType::Absolute, ..default() }, Pickable::IGNORE)).id();
+    let canvas = commands
+        .spawn((
+            Canvas(NOTICE_SCREEN),
+            Node {
+                position_type: PositionType::Absolute,
+                ..default()
+            },
+            Pickable::IGNORE,
+        ))
+        .id();
     commands.entity(root).add_child(canvas);
     let (glyphs, width) = font.layout(name(settings.enhanced));
     let left = (NOTICE_SCREEN.x - width * NOTICE_SCALE) / 2.0;
     // A dark shadow, then the text.
     for (shade, d) in [(Some(Color::srgba(0.0, 0.0, 0.0, 0.7)), 2.0), (None, 0.0)] {
         for (x, image) in &glyphs {
-            let mut bundle: (ImageNode, At, Node) =
-                image_at(image.clone(), at(left + x * NOTICE_SCALE + d, NOTICE_Y + d, font.size.x * NOTICE_SCALE, font.size.y * NOTICE_SCALE));
+            let mut bundle: (ImageNode, At, Node) = image_at(
+                image.clone(),
+                at(
+                    left + x * NOTICE_SCALE + d,
+                    NOTICE_Y + d,
+                    font.size.x * NOTICE_SCALE,
+                    font.size.y * NOTICE_SCALE,
+                ),
+            );
             if let Some(c) = shade {
                 bundle.0.color = c;
             }

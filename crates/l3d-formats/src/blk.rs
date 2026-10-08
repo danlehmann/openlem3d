@@ -19,8 +19,14 @@ pub enum FaceDir {
 }
 
 impl FaceDir {
-    pub const ALL: [FaceDir; 6] =
-        [FaceDir::PosZ, FaceDir::NegZ, FaceDir::PosX, FaceDir::NegX, FaceDir::PosY, FaceDir::NegY];
+    pub const ALL: [FaceDir; 6] = [
+        FaceDir::PosZ,
+        FaceDir::NegZ,
+        FaceDir::PosX,
+        FaceDir::NegX,
+        FaceDir::PosY,
+        FaceDir::NegY,
+    ];
 }
 
 /// Block behaviour flags (byte 2 of a definition).
@@ -74,7 +80,9 @@ impl BlockDef {
 
     /// True for the placeholder pattern found in unused slots.
     pub fn is_placeholder(&self) -> bool {
-        self.faces.iter().all(|f| f.texture == 0xFF && f.modifiers == 0xFF)
+        self.faces
+            .iter()
+            .all(|f| f.texture == 0xFF && f.modifiers == 0xFF)
     }
 }
 
@@ -87,7 +95,10 @@ pub struct BlockSet {
 impl BlockSet {
     pub fn parse(data: &[u8]) -> Result<Self, Error> {
         if data.len() != FILE_LEN {
-            return Err(Error::Format(format!("BLK is {} bytes, expected {FILE_LEN}", data.len())));
+            return Err(Error::Format(format!(
+                "BLK is {} bytes, expected {FILE_LEN}",
+                data.len()
+            )));
         }
         let defs = std::array::from_fn(|i| {
             let d = &data[i * DEF_LEN..(i + 1) * DEF_LEN];
@@ -98,7 +109,11 @@ impl BlockSet {
                 unknown3: d[3],
                 faces: std::array::from_fn(|f| {
                     let o = 4 + f * 3;
-                    Face { texture: d[o], modifiers: d[o + 1], shading: d[o + 2] }
+                    Face {
+                        texture: d[o],
+                        modifiers: d[o + 1],
+                        shading: d[o + 2],
+                    }
                 }),
             }
         });

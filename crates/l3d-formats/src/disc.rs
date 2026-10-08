@@ -5,8 +5,8 @@ use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
-use crate::cue::{CueSheet, TrackMode};
 use crate::Error;
+use crate::cue::{CueSheet, TrackMode};
 
 /// Size of the user-data portion of a data sector.
 pub const SECTOR_SIZE: usize = 2048;
@@ -49,9 +49,9 @@ impl Disc {
                 Some(next) => next.index0.unwrap_or(next.index1) as u64,
                 None => std::fs::metadata(&t.file)?.len() / sector_size,
             };
-            let sectors = end.checked_sub(t.index1 as u64).ok_or_else(|| {
-                Error::Cue(format!("track {} has a negative length", t.number))
-            })?;
+            let sectors = end
+                .checked_sub(t.index1 as u64)
+                .ok_or_else(|| Error::Cue(format!("track {} has a negative length", t.number)))?;
             tracks.push(Track {
                 number: t.number,
                 mode: t.mode,
@@ -74,8 +74,14 @@ impl Disc {
         }
         match cues.as_slice() {
             [one] => Self::open(one),
-            [] => Err(Error::NotFound(format!("no .cue file in {}", dir.display()))),
-            _ => Err(Error::Cue(format!("more than one .cue file in {}", dir.display()))),
+            [] => Err(Error::NotFound(format!(
+                "no .cue file in {}",
+                dir.display()
+            ))),
+            _ => Err(Error::Cue(format!(
+                "more than one .cue file in {}",
+                dir.display()
+            ))),
         }
     }
 
@@ -91,20 +97,33 @@ impl Disc {
 
     /// Opens a reader over the user data of the first data track.
     pub fn data_reader(&self) -> Result<DataTrackReader, Error> {
-        let track = self.data_track().ok_or_else(|| Error::NotFound("no data track".into()))?;
-        Ok(DataTrackReader { file: File::open(&track.file)?, track: track.clone() })
+        let track = self
+            .data_track()
+            .ok_or_else(|| Error::NotFound("no data track".into()))?;
+        Ok(DataTrackReader {
+            file: File::open(&track.file)?,
+            track: track.clone(),
+        })
     }
 
     /// Reads a whole audio track as interleaved 16-bit stereo samples at 44.1 kHz.
     pub fn read_audio(&self, track: &Track) -> Result<Vec<i16>, Error> {
         if track.mode != TrackMode::Audio {
-            return Err(Error::Format(format!("track {} is not audio", track.number)));
+            return Err(Error::Format(format!(
+                "track {} is not audio",
+                track.number
+            )));
         }
         let mut f = File::open(&track.file)?;
         f.seek(SeekFrom::Start(track.byte_offset))?;
         let mut bytes = vec![0u8; track.sectors as usize * 2352];
         f.read_exact(&mut bytes)?;
-        Ok(bytes.as_chunks::<2>().0.iter().map(|b| i16::from_le_bytes([b[0], b[1]])).collect())
+        Ok(bytes
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|b| i16::from_le_bytes([b[0], b[1]]))
+            .collect())
     }
 }
 
@@ -124,21 +143,35 @@ impl DataTrackReader {
     pub fn read_sectors(&mut self, lba: u32, buf: &mut [u8]) -> Result<(), Error> {
         assert!(buf.len().is_multiple_of(SECTOR_SIZE));
         let count = (buf.len() / SECTOR_SIZE) as u32;
-        if lba.checked_add(count).is_none_or(|end| end > self.track.sectors) {
-            return Err(Error::Format(format!("sector {lba}+{count} outside data track")));
+        if lba
+            .checked_add(count)
+            .is_none_or(|end| end > self.track.sectors)
+        {
+            return Err(Error::Format(format!(
+                "sector {lba}+{count} outside data track"
+            )));
         }
         let mode = self.track.mode;
         let stride = mode.sector_size() as u64;
         if stride as usize == SECTOR_SIZE {
-            self.file.seek(SeekFrom::Start(self.track.byte_offset + lba as u64 * stride))?;
+            self.file.seek(SeekFrom::Start(
+                self.track.byte_offset + lba as u64 * stride,
+            ))?;
             self.file.read_exact(buf)?;
             return Ok(());
         }
         let mut raw = vec![0u8; stride as usize * count as usize];
-        self.file.seek(SeekFrom::Start(self.track.byte_offset + lba as u64 * stride))?;
+        self.file.seek(SeekFrom::Start(
+            self.track.byte_offset + lba as u64 * stride,
+        ))?;
         self.file.read_exact(&mut raw)?;
         let off = mode.user_data_offset() as usize;
-        for (dst, src) in buf.as_chunks_mut::<SECTOR_SIZE>().0.iter_mut().zip(raw.chunks_exact(stride as usize)) {
+        for (dst, src) in buf
+            .as_chunks_mut::<SECTOR_SIZE>()
+            .0
+            .iter_mut()
+            .zip(raw.chunks_exact(stride as usize))
+        {
             dst.copy_from_slice(&src[off..off + SECTOR_SIZE]);
         }
         Ok(())

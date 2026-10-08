@@ -51,7 +51,11 @@ pub fn crc16(data: &[u8]) -> u16 {
     for &b in data {
         crc ^= b as u16;
         for _ in 0..8 {
-            crc = if crc & 1 != 0 { (crc >> 1) ^ 0xA001 } else { crc >> 1 };
+            crc = if crc & 1 != 0 {
+                (crc >> 1) ^ 0xA001
+            } else {
+                crc >> 1
+            };
         }
     }
     crc
@@ -74,7 +78,12 @@ impl<'a> Bits<'a> {
     }
 
     fn new(data: &'a [u8]) -> Self {
-        let mut s = Bits { data, pos: 0, buf: 0, count: 16 };
+        let mut s = Bits {
+            data,
+            pos: 0,
+            buf: 0,
+            count: 16,
+        };
         s.buf = s.word(0);
         s
     }
@@ -149,7 +158,10 @@ impl Huffman {
 pub fn unpack(data: &[u8]) -> Result<Vec<u8>, Error> {
     let h = parse_header(data)?;
     if h.method != 1 {
-        return Err(Error::Format(format!("RNC method {} unsupported", h.method)));
+        return Err(Error::Format(format!(
+            "RNC method {} unsupported",
+            h.method
+        )));
     }
     let packed = data
         .get(HEADER_LEN..HEADER_LEN + h.packed_len as usize)
@@ -188,7 +200,10 @@ pub fn unpack(data: &[u8]) -> Result<Vec<u8>, Error> {
         }
     }
     if out.len() != out_len {
-        return Err(Error::Format(format!("RNC: unpacked {} bytes, expected {out_len}", out.len())));
+        return Err(Error::Format(format!(
+            "RNC: unpacked {} bytes, expected {out_len}",
+            out.len()
+        )));
     }
     if crc16(&out) != h.unpacked_crc {
         return Err(Error::Format("RNC: unpacked CRC mismatch".into()));
@@ -198,7 +213,11 @@ pub fn unpack(data: &[u8]) -> Result<Vec<u8>, Error> {
 
 /// Returns `data` decompressed if it is RNC-packed, or unchanged otherwise.
 pub fn unpack_if_packed(data: Vec<u8>) -> Result<Vec<u8>, Error> {
-    if is_packed(&data) { unpack(&data) } else { Ok(data) }
+    if is_packed(&data) {
+        unpack(&data)
+    } else {
+        Ok(data)
+    }
 }
 
 #[cfg(test)]

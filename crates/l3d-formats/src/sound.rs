@@ -24,7 +24,10 @@ fn u32_at(b: &[u8], i: usize) -> u32 {
 impl Sample {
     pub fn parse(bytes: &[u8]) -> Result<Self, Error> {
         if bytes.len() < HEADER_LEN {
-            return Err(Error::Format(format!("sample of {} bytes is shorter than its header", bytes.len())));
+            return Err(Error::Format(format!(
+                "sample of {} bytes is shorter than its header",
+                bytes.len()
+            )));
         }
         let start = u32_at(bytes, 0) as usize;
         // The second field is the offset of the last byte.
@@ -32,7 +35,9 @@ impl Sample {
         let (loop_start, loop_end) = (u32_at(bytes, 8) as usize, u32_at(bytes, 12) as usize);
         let rate = u16::from_le_bytes([bytes[16], bytes[17]]) as u32;
         if start != HEADER_LEN || end < start || rate == 0 {
-            return Err(Error::Format(format!("unexpected sample header (start {start}, end {end}, rate {rate})")));
+            return Err(Error::Format(format!(
+                "unexpected sample header (start {start}, end {end}, rate {rate})"
+            )));
         }
         let data = bytes[start..end].iter().map(|&b| b as i8).collect();
         let looped = (loop_end > loop_start && loop_start >= start)
@@ -80,7 +85,10 @@ mod tests {
         let mut b = header(4, (0, 0), 22050);
         b.extend([0x00, 0x7F, 0x80, 0xFF]);
         let s = Sample::parse(&b).unwrap();
-        assert_eq!((s.rate, s.data.clone(), s.looped), (22050, vec![0, 127, -128, -1], None));
+        assert_eq!(
+            (s.rate, s.data.clone(), s.looped),
+            (22050, vec![0, 127, -128, -1], None)
+        );
         let wav = s.to_wav();
         assert_eq!(&wav[44..], &[128, 255, 0, 127]);
 

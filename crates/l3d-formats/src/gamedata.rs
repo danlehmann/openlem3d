@@ -58,6 +58,7 @@ impl GameData {
 
     /// Reads a 6-bit VGA palette file.
     pub fn palette(&mut self, path: &str) -> Result<Palette, Error> {
-        crate::image::vga_palette(&self.read(path)?).map_err(|e| Error::Format(format!("{path}: {e}")))
+        crate::image::vga_palette(&self.read(path)?)
+            .map_err(|e| Error::Format(format!("{path}: {e}")))
     }
 }

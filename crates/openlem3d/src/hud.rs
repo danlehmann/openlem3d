@@ -25,7 +25,9 @@ impl Plugin for HudPlugin {
                     .run_if(in_state(AppState::Playing)),
             )
             .add_systems(Update, (place_turner_marker, clear_highlight))
-            .add_systems(OnEnter(AppState::Briefing), |mut h: ResMut<Highlight>| *h = Highlight::default());
+            .add_systems(OnEnter(AppState::Briefing), |mut h: ResMut<Highlight>| {
+                *h = Highlight::default()
+            });
     }
 }
 
@@ -35,7 +37,8 @@ pub struct SelectedSkill(pub Option<Skill>);
 
 /// Alt+Q nukes, as in the original.
 fn nuke_key(keys: Res<ButtonInput<KeyCode>>, mut game: ResMut<Game>) {
-    if (keys.pressed(KeyCode::AltLeft) || keys.pressed(KeyCode::AltRight)) && keys.just_pressed(KeyCode::KeyQ)
+    if (keys.pressed(KeyCode::AltLeft) || keys.pressed(KeyCode::AltRight))
+        && keys.just_pressed(KeyCode::KeyQ)
         && let Some(sim) = &mut game.sim
     {
         sim.nuke();
@@ -74,7 +77,10 @@ pub(crate) fn take_over(
     mut game: ResMut<Game>,
 ) {
     let button = settings.action_button();
-    let clicked = mouse.just_pressed(button) || touches.iter_just_released().any(|t| t.distance().length() < crate::touch::TAP_SLOP);
+    let clicked = mouse.just_pressed(button)
+        || touches
+            .iter_just_released()
+            .any(|t| t.distance().length() < crate::touch::TAP_SLOP);
     if game.replay.is_none() || !clicked || ui.iter().any(|i| *i != Interaction::None) {
         return;
     }
@@ -107,13 +113,20 @@ fn lemming_centre(l: &l3d_sim::Lemming) -> Vec3 {
 
 /// The lemming nearest a screen point (logical pixels), if one is close
 /// enough to click.
-pub fn lemming_at(sim: &l3d_sim::Simulation, camera: &SceneCamera, size: Vec2, point: Vec2) -> Option<usize> {
+pub fn lemming_at(
+    sim: &l3d_sim::Simulation,
+    camera: &SceneCamera,
+    size: Vec2,
+    point: Vec2,
+) -> Option<usize> {
     let mut best: Option<(usize, f32)> = None;
     for (i, l) in sim.lemmings.iter().enumerate() {
         if l.gone {
             continue;
         }
-        let Some((screen, px_per_unit)) = to_screen(camera, size, lemming_centre(l)) else { continue };
+        let Some((screen, px_per_unit)) = to_screen(camera, size, lemming_centre(l)) else {
+            continue;
+        };
         let d = screen.distance(point);
         if d < PICK_RADIUS_UNITS * px_per_unit.max(20.0) && best.is_none_or(|(_, bd)| d < bd) {
             best = Some((i, d));
@@ -191,23 +204,35 @@ pub(crate) fn assign_on_pointer(
     // Riding along, a click acts on the lemming ridden with; a turner points
     // to the side of the screen clicked (left half: its left).
     if let Some(f) = lemming_cam.following() {
-        let Some(skill) = selected.0.filter(|_| !paused) else { return };
+        let Some(skill) = selected.0.filter(|_| !paused) else {
+            return;
+        };
         let ok = if skill == Skill::Turner {
             let sides = view_sides(&camera, &sim.lemmings[f]);
             sim.assign_turner(f, sides[(point.x >= size.x / 2.0) as usize])
         } else {
             sim.assign(f, skill)
         };
-        sfx.write(crate::sfx::Sfx(if ok { "VOXFX/OK2" } else { "VOXFX/UH_UH1" }));
+        sfx.write(crate::sfx::Sfx(if ok {
+            "VOXFX/OK2"
+        } else {
+            "VOXFX/UH_UH1"
+        }));
         return;
     }
     if paused && pending.0.is_some() {
         return;
     }
     if let Some(i) = pending.0.take().filter(|_| !picking) {
-        let Some(to) = turner_choice(&camera, size, &sim.lemmings[i], point) else { return };
+        let Some(to) = turner_choice(&camera, size, &sim.lemmings[i], point) else {
+            return;
+        };
         let ok = sim.assign_turner(i, to);
-        sfx.write(crate::sfx::Sfx(if ok { "VOXFX/OK2" } else { "VOXFX/UH_UH1" }));
+        sfx.write(crate::sfx::Sfx(if ok {
+            "VOXFX/OK2"
+        } else {
+            "VOXFX/UH_UH1"
+        }));
         return;
     }
     let best = lemming_at(sim, &camera, size, point);
@@ -229,11 +254,16 @@ pub(crate) fn assign_on_pointer(
         if let Some(i) = best {
             lemming_cam.pick(i);
             // Riding along also highlights it (seen in the original).
-            *highlight = Highlight { on: true, lemming: Some(i) };
+            *highlight = Highlight {
+                on: true,
+                lemming: Some(i),
+            };
         }
         return;
     }
-    let Some(skill) = selected.0.filter(|_| !paused) else { return };
+    let Some(skill) = selected.0.filter(|_| !paused) else {
+        return;
+    };
     if let Some(i) = best {
         if skill == Skill::Turner {
             if sim.can_assign(i, skill) {
@@ -243,22 +273,35 @@ pub(crate) fn assign_on_pointer(
             }
         } else {
             let ok = sim.assign(i, skill);
-            sfx.write(crate::sfx::Sfx(if ok { "VOXFX/OK2" } else { "VOXFX/UH_UH1" }));
+            sfx.write(crate::sfx::Sfx(if ok {
+                "VOXFX/OK2"
+            } else {
+                "VOXFX/UH_UH1"
+            }));
         }
     }
 }
-
 
 /// For a lemming waiting for its turner direction and a screen point: the
 /// screen-space unit vectors of its two possible sides (anticlockwise,
 /// clockwise), its centre on screen, and how well the point lines up with
 /// each side (cosine). `None` if the lemming is behind the camera.
-fn turner_sides(camera: &SceneCamera, size: Vec2, l: &l3d_sim::Lemming, point: Option<Vec2>) -> Option<(Vec2, [Vec2; 2], [f32; 2])> {
+fn turner_sides(
+    camera: &SceneCamera,
+    size: Vec2,
+    l: &l3d_sim::Lemming,
+    point: Option<Vec2>,
+) -> Option<(Vec2, [Vec2; 2], [f32; 2])> {
     let centre = lemming_centre(l);
     let (at, _) = to_screen(camera, size, centre)?;
     let screen = |d: l3d_sim::Dir| {
         let [x, _, z] = d.delta();
-        to_screen(camera, size, centre + Vec3::new(x as f32, 0.0, z as f32) * 0.5).map_or(Vec2::ZERO, |(tip, _)| (tip - at).normalize_or_zero())
+        to_screen(
+            camera,
+            size,
+            centre + Vec3::new(x as f32, 0.0, z as f32) * 0.5,
+        )
+        .map_or(Vec2::ZERO, |(tip, _)| (tip - at).normalize_or_zero())
     };
     let dirs = [screen(l.dir.anticlockwise()), screen(l.dir.clockwise())];
     let towards = point.map_or(Vec2::ZERO, |p| (p - at).normalize_or_zero());
@@ -267,9 +310,18 @@ fn turner_sides(camera: &SceneCamera, size: Vec2, l: &l3d_sim::Lemming, point: O
 
 /// The direction a click at `point` gives a waiting turner: the side, as
 /// seen on screen, the click landed on.
-fn turner_choice(camera: &SceneCamera, size: Vec2, l: &l3d_sim::Lemming, point: Vec2) -> Option<l3d_sim::Dir> {
+fn turner_choice(
+    camera: &SceneCamera,
+    size: Vec2,
+    l: &l3d_sim::Lemming,
+    point: Vec2,
+) -> Option<l3d_sim::Dir> {
     let (_, _, [acw, cw]) = turner_sides(camera, size, l, Some(point))?;
-    Some(if acw >= cw { l.dir.anticlockwise() } else { l.dir.clockwise() })
+    Some(if acw >= cw {
+        l.dir.anticlockwise()
+    } else {
+        l.dir.clockwise()
+    })
 }
 
 /// One of the two arrows beside a lemming waiting for its turner direction
@@ -297,13 +349,19 @@ const ARROW_SWAP: f32 = 0.12;
 const ARROW_CLEAR_MARGIN: f32 = 0.5;
 const ARROW_CLEAR_DISTANCE: f32 = 4.0;
 
-fn spawn_turner_marker(mut commands: Commands, mut data: ResMut<crate::Data>, mut images: ResMut<Assets<Image>>) {
+fn spawn_turner_marker(
+    mut commands: Commands,
+    mut data: ResMut<crate::Data>,
+    mut images: ResMut<Assets<Image>>,
+) {
     use bevy::asset::RenderAssetUsages;
     use bevy::image::ImageSampler;
     use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
     let d = &mut data.0;
     let sheet = &l3d_formats::sheets::MOUSE;
-    let (Ok(pal), Ok(raw)) = (d.palette("GFX/LM3D.PAL"), d.read(sheet.path)) else { return };
+    let (Ok(pal), Ok(raw)) = (d.palette("GFX/LM3D.PAL"), d.read(sheet.path)) else {
+        return;
+    };
     let Ok(cells) = sheet.cut(&raw) else { return };
     let handles = cells
         .iter()
@@ -311,7 +369,11 @@ fn spawn_turner_marker(mut commands: Commands, mut data: ResMut<crate::Data>, mu
         .take(ARROW_DIRECTIONS)
         .map(|c| {
             let mut image = Image::new(
-                Extent3d { width: c.width as u32, height: c.height as u32, depth_or_array_layers: 1 },
+                Extent3d {
+                    width: c.width as u32,
+                    height: c.height as u32,
+                    depth_or_array_layers: 1,
+                },
                 TextureDimension::D2,
                 c.to_rgba(&pal, true),
                 TextureFormat::Rgba8UnormSrgb,
@@ -326,7 +388,10 @@ fn spawn_turner_marker(mut commands: Commands, mut data: ResMut<crate::Data>, mu
         commands.spawn((
             TurnerArrow(side),
             ImageNode::default(),
-            Node { position_type: PositionType::Absolute, ..default() },
+            Node {
+                position_type: PositionType::Absolute,
+                ..default()
+            },
             Pickable::IGNORE,
             Visibility::Hidden,
         ));
@@ -374,9 +439,14 @@ fn place_turner_marker(
         let pointer = window.cursor_position();
         let (at, dirs, fit) = turner_sides(&camera, size, l, pointer)?;
         let scale = size.y / 200.0;
-        let clear = pointer.is_some_and(|p| p.distance(at) > ARROW_CLEAR_DISTANCE * scale) && (fit[0] - fit[1]).abs() > ARROW_CLEAR_MARGIN;
+        let clear = pointer.is_some_and(|p| p.distance(at) > ARROW_CLEAR_DISTANCE * scale)
+            && (fit[0] - fit[1]).abs() > ARROW_CLEAR_MARGIN;
         let first = ((time.elapsed_secs() / ARROW_SWAP) as u32).is_multiple_of(2);
-        let visible = if clear { [fit[0] >= fit[1], fit[1] > fit[0]] } else { [first, !first] };
+        let visible = if clear {
+            [fit[0] >= fit[1], fit[1] > fit[0]]
+        } else {
+            [first, !first]
+        };
         Some((at, dirs, visible, scale))
     })();
     for (arrow, mut image, mut node, mut vis) in &mut arrows {
@@ -387,7 +457,8 @@ fn place_turner_marker(
         let d = dirs[arrow.0];
         // Clockwise from straight up, in the 32 steps of the arrow cells.
         let angle = d.x.atan2(-d.y).rem_euclid(std::f32::consts::TAU);
-        let k = (angle / std::f32::consts::TAU * ARROW_DIRECTIONS as f32).round() as usize % ARROW_DIRECTIONS;
+        let k = (angle / std::f32::consts::TAU * ARROW_DIRECTIONS as f32).round() as usize
+            % ARROW_DIRECTIONS;
         if let Some(h) = cells.as_ref().and_then(|c| c.0.get(k))
             && image.image != *h
         {
@@ -404,12 +475,21 @@ fn place_turner_marker(
 }
 
 /// Drops the highlight when its lemming leaves play or a new level starts.
-fn clear_highlight(game: Res<Game>, current: Res<crate::CurrentLevel>, mut highlight: ResMut<Highlight>) {
+fn clear_highlight(
+    game: Res<Game>,
+    current: Res<crate::CurrentLevel>,
+    mut highlight: ResMut<Highlight>,
+) {
     if current.loaded.is_none() {
         *highlight = Highlight::default();
         return;
     }
-    let alive = |i: usize| game.sim.as_ref().and_then(|s| s.lemmings.get(i)).is_some_and(|l| !l.gone);
+    let alive = |i: usize| {
+        game.sim
+            .as_ref()
+            .and_then(|s| s.lemmings.get(i))
+            .is_some_and(|l| !l.gone)
+    };
     // The highlighted lemming gone, highlighting ends (seen when the
     // lemming ridden with died or left).
     if highlight.lemming.is_some_and(|i| !alive(i)) {
@@ -420,7 +500,11 @@ fn clear_highlight(game: Res<Game>, current: Res<crate::CurrentLevel>, mut highl
 /// The lemming on screen nearest the middle of the view, the one the arrow
 /// highlights when switched on (seen in the original: the one nearest the
 /// view's centre).
-pub fn nearest_to_centre(sim: &l3d_sim::Simulation, camera: &SceneCamera, size: Vec2) -> Option<usize> {
+pub fn nearest_to_centre(
+    sim: &l3d_sim::Simulation,
+    camera: &SceneCamera,
+    size: Vec2,
+) -> Option<usize> {
     let mid = size / 2.0;
     sim.lemmings
         .iter()
@@ -428,7 +512,8 @@ pub fn nearest_to_centre(sim: &l3d_sim::Simulation, camera: &SceneCamera, size: 
         .filter(|(_, l)| !l.gone)
         .filter_map(|(i, l)| {
             let (p, _) = to_screen(camera, size, lemming_centre(l))?;
-            (p.x >= 0.0 && p.y >= 0.0 && p.x <= size.x && p.y <= size.y).then_some((i, p.distance(mid)))
+            (p.x >= 0.0 && p.y >= 0.0 && p.x <= size.x && p.y <= size.y)
+                .then_some((i, p.distance(mid)))
         })
         .min_by(|a, b| a.1.total_cmp(&b.1))
         .map(|(i, _)| i)
@@ -439,5 +524,9 @@ pub fn nearest_to_centre(sim: &l3d_sim::Simulation, camera: &SceneCamera, size: 
 fn view_sides(camera: &SceneCamera, l: &l3d_sim::Lemming) -> [l3d_sim::Dir; 2] {
     let [x, _, z] = l.dir.clockwise().delta();
     let cw_right = Vec3::new(x as f32, 0.0, z as f32).dot(camera.right) > 0.0;
-    if cw_right { [l.dir.anticlockwise(), l.dir.clockwise()] } else { [l.dir.clockwise(), l.dir.anticlockwise()] }
+    if cw_right {
+        [l.dir.anticlockwise(), l.dir.clockwise()]
+    } else {
+        [l.dir.clockwise(), l.dir.anticlockwise()]
+    }
 }

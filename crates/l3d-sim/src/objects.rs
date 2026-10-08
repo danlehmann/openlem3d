@@ -82,7 +82,12 @@ pub fn level_objects(level: &Level) -> Option<(ObjectKind, Vec<Object>)> {
                 None if kind.kills() => y as i32 * SUB,
                 None => return None,
             };
-            Some(Object { cell: [x as i32, y as i32, z as i32], value: o.kind, surface, busy: 0 })
+            Some(Object {
+                cell: [x as i32, y as i32, z as i32],
+                value: o.kind,
+                surface,
+                busy: 0,
+            })
         })
         .collect();
     Some((kind, objects))

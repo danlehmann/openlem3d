@@ -77,10 +77,17 @@ impl Icons {
     pub fn parse(data: &[u8]) -> Result<Self, Error> {
         use offsets::*;
         if data.len() != ICONS_LEN {
-            return Err(Error::Format(format!("ICONS.RNC is {} bytes, expected {ICONS_LEN}", data.len())));
+            return Err(Error::Format(format!(
+                "ICONS.RNC is {} bytes, expected {ICONS_LEN}",
+                data.len()
+            )));
         }
         let mut labels = cells(&data[LABELS..UNKNOWN], 32, 16, 5)?;
-        let umbrella = IndexedImage::new(32, 32, [labels.remove(0).pixels, labels.remove(0).pixels].concat())?;
+        let umbrella = IndexedImage::new(
+            32,
+            32,
+            [labels.remove(0).pixels, labels.remove(0).pixels].concat(),
+        )?;
         Ok(Icons {
             small: cells(&data[SMALL..PANEL], 16, 16, 57)?,
             panel: cells(&data[PANEL..LABELS], 24, 24, 46)?,

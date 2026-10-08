@@ -78,7 +78,10 @@ impl World {
             if def.flags & flags::NON_SOLID_LEMMINGS != 0 {
                 continue;
             }
-            cells[index(x, y, z)] = Some(SolidCell { block: b, flags: def.flags });
+            cells[index(x, y, z)] = Some(SolidCell {
+                block: b,
+                flags: def.flags,
+            });
         }
         let land = level
             .land_polygons
@@ -90,7 +93,9 @@ impl World {
         for c in cells.iter().flatten() {
             counts[c.block.id as usize] += 1;
         }
-        let common_id = (9..64).max_by_key(|&i| (counts[i], std::cmp::Reverse(i))).unwrap_or(9) as u8;
+        let common_id = (9..64)
+            .max_by_key(|&i| (counts[i], std::cmp::Reverse(i)))
+            .unwrap_or(9) as u8;
         World {
             cells,
             land,
@@ -115,9 +120,16 @@ impl World {
     /// the block's rotation like its faces. Non-horizontal digging never
     /// breaks them (provisional).
     /// Bricks overlapping the removed segments go too.
-    pub fn remove_segments_towards(&mut self, c: [i32; 3], mask: u8, toward: Option<[i32; 3]>) -> bool {
+    pub fn remove_segments_towards(
+        &mut self,
+        c: [i32; 3],
+        mask: u8,
+        toward: Option<[i32; 3]>,
+    ) -> bool {
         let bricks_removed = self.remove_bricks(c, mask);
-        let Some(mut cell) = self.cell(c[0], c[1], c[2]) else { return bricks_removed };
+        let Some(mut cell) = self.cell(c[0], c[1], c[2]) else {
+            return bricks_removed;
+        };
         if cell.block.segments & mask == 0 || !self.breakable_towards(c, toward) {
             return bricks_removed;
         }
@@ -132,7 +144,11 @@ impl World {
     /// direction `toward` (as for [`World::remove_segments_towards`]): not
     /// steel, and not a one-way block facing elsewhere. Empty cells do.
     pub fn breakable_towards(&self, c: [i32; 3], toward: Option<[i32; 3]>) -> bool {
-        self.cell(c[0], c[1], c[2]).is_none_or(|cell| cell.flags & flags::STEEL == 0 && (!(5..=8).contains(&cell.block.id) || toward == Some(one_way_direction(cell.block))))
+        self.cell(c[0], c[1], c[2]).is_none_or(|cell| {
+            cell.flags & flags::STEEL == 0
+                && (!(5..=8).contains(&cell.block.id)
+                    || toward == Some(one_way_direction(cell.block)))
+        })
     }
 
     /// Adds the segments in `mask` to cell `c`. An empty cell becomes a cube
@@ -145,7 +161,12 @@ impl World {
         }
         let i = index(c[0] as usize, c[1] as usize, c[2] as usize);
         let mut cell = self.cells[i].unwrap_or(SolidCell {
-            block: BlockCell { id: template.id, shape: 0, rotation: 0, segments: 0 },
+            block: BlockCell {
+                id: template.id,
+                shape: 0,
+                rotation: 0,
+                segments: 0,
+            },
             flags: 0,
         });
         if cell.block.segments & mask == mask {
@@ -179,7 +200,13 @@ impl World {
     pub fn add_brick(&mut self, brick: Brick) -> bool {
         let (lo, hi) = (brick.min, brick.max.map(|v| v - 1));
         let mid = [0, 1, 2].map(|i| (lo[i] + hi[i]) / 2);
-        let samples = [[lo[0], mid[1], lo[2]], [hi[0], mid[1], lo[2]], [lo[0], mid[1], hi[2]], [hi[0], mid[1], hi[2]], mid];
+        let samples = [
+            [lo[0], mid[1], lo[2]],
+            [hi[0], mid[1], lo[2]],
+            [lo[0], mid[1], hi[2]],
+            [hi[0], mid[1], hi[2]],
+            mid,
+        ];
         if samples.iter().any(|&p| self.solid(p)) {
             return false;
         }
@@ -221,7 +248,9 @@ impl World {
     /// Whether the point is inside solid block geometry, bricks aside.
     pub fn terrain_solid(&self, p: [i32; 3]) -> bool {
         let c = p.map(|v| v.div_euclid(SUB));
-        let Some(cell) = self.cell(c[0], c[1], c[2]) else { return false };
+        let Some(cell) = self.cell(c[0], c[1], c[2]) else {
+            return false;
+        };
         let l = [0, 1, 2].map(|i| (p[i] - c[i] * SUB) as f32 / SUB as f32);
         inside_shape(cell.block, l)
     }
@@ -247,13 +276,17 @@ impl World {
     /// The block whose geometry contains the point, if any.
     pub fn block_at(&self, p: [i32; 3]) -> Option<BlockCell> {
         let c = p.map(|v| v.div_euclid(SUB));
-        self.solid(p).then(|| self.cell(c[0], c[1], c[2]).map(|s| s.block)).flatten()
+        self.solid(p)
+            .then(|| self.cell(c[0], c[1], c[2]).map(|s| s.block))
+            .flatten()
     }
 
     /// Block flags at a point, if it is inside solid geometry.
     pub fn flags_at(&self, p: [i32; 3]) -> Option<u8> {
         let c = p.map(|v| v.div_euclid(SUB));
-        self.solid(p).then(|| self.cell(c[0], c[1], c[2]).map(|s| s.flags)).flatten()
+        self.solid(p)
+            .then(|| self.cell(c[0], c[1], c[2]).map(|s| s.flags))
+            .flatten()
     }
 
     /// What the ground plane is at column `(x, z)` (sub-units).
@@ -262,7 +295,11 @@ impl World {
             return Floor::Land;
         }
         let (px, pz) = (x as f32 / SUB as f32, z as f32 / SUB as f32);
-        if self.land.iter().any(|poly| point_in_convex(poly, px, pz)) { Floor::Land } else { Floor::Water }
+        if self.land.iter().any(|poly| point_in_convex(poly, px, pz)) {
+            Floor::Land
+        } else {
+            Floor::Water
+        }
     }
 
     /// The height of the highest walkable surface at column `(x, z)` whose top
@@ -275,7 +312,11 @@ impl World {
         let brick = self
             .bricks
             .iter()
-            .filter(|b| (b.min[0]..b.max[0]).contains(&x) && (b.min[2]..b.max[2]).contains(&z) && b.max[1] <= from_y)
+            .filter(|b| {
+                (b.min[0]..b.max[0]).contains(&x)
+                    && (b.min[2]..b.max[2]).contains(&z)
+                    && b.max[1] <= from_y
+            })
             .map(|b| b.max[1])
             .max();
         match brick {
@@ -332,7 +373,10 @@ fn point_in_convex(poly: &[(i32, i32)], x: f32, z: f32) -> bool {
     let mut sign = 0.0f32;
     for i in 0..poly.len() {
         let (ax, az) = (poly[i].0 as f32, poly[i].1 as f32);
-        let (bx, bz) = (poly[(i + 1) % poly.len()].0 as f32, poly[(i + 1) % poly.len()].1 as f32);
+        let (bx, bz) = (
+            poly[(i + 1) % poly.len()].0 as f32,
+            poly[(i + 1) % poly.len()].1 as f32,
+        );
         let cross = (bx - ax) * (z - az) - (bz - az) * (x - ax);
         if cross != 0.0 {
             if sign != 0.0 && cross.signum() != sign {
@@ -395,7 +439,12 @@ mod tests {
     use super::*;
 
     fn cell(shape: u8, rotation: u8, segments: u8) -> BlockCell {
-        BlockCell { id: 9, shape, rotation, segments }
+        BlockCell {
+            id: 9,
+            shape,
+            rotation,
+            segments,
+        }
     }
 
     #[test]

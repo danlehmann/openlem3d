@@ -5,8 +5,8 @@
 //! the skill row to the bottom left.
 
 use bevy::prelude::*;
-use l3d_formats::gamedata::Palette;
 use l3d_formats::font::Font;
+use l3d_formats::gamedata::Palette;
 use l3d_formats::icons::{Icons, panel as icon};
 use l3d_formats::image::IndexedImage;
 use l3d_formats::sheets;
@@ -24,12 +24,25 @@ impl Plugin for PanelPlugin {
         app.add_systems(Startup, (load_art, spawn_panel).chain())
             .add_systems(
                 Update,
-                (layout, buttons, held_buttons, skill_keys_select, animate, glyph_texts, caption)
+                (
+                    layout,
+                    buttons,
+                    held_buttons,
+                    skill_keys_select,
+                    animate,
+                    glyph_texts,
+                    caption,
+                )
                     .chain()
                     .run_if(in_state(AppState::Playing)),
             )
             .add_systems(Update, (show_in_play, show_minimap))
-            .add_systems(Update, select_first_skill.after(crate::load_level).run_if(in_state(AppState::Playing).and_then(resource_changed::<crate::CurrentLevel>)));
+            .add_systems(
+                Update,
+                select_first_skill.after(crate::load_level).run_if(
+                    in_state(AppState::Playing).and_then(resource_changed::<crate::CurrentLevel>),
+                ),
+            );
     }
 }
 
@@ -88,7 +101,11 @@ impl Glyphs {
     }
 
     fn advance(&self, c: char) -> f32 {
-        if c == ':' { self.colon_advance } else { self.digit_advance }
+        if c == ':' {
+            self.colon_advance
+        } else {
+            self.digit_advance
+        }
     }
 }
 
@@ -97,7 +114,11 @@ fn to_image(img: &IndexedImage, pal: &Palette) -> Image {
     use bevy::image::ImageSampler;
     use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
     let mut image = Image::new(
-        Extent3d { width: img.width as u32, height: img.height as u32, depth_or_array_layers: 1 },
+        Extent3d {
+            width: img.width as u32,
+            height: img.height as u32,
+            depth_or_array_layers: 1,
+        },
         TextureDimension::D2,
         img.to_rgba(pal, true),
         TextureFormat::Rgba8UnormSrgb,
@@ -109,11 +130,28 @@ fn to_image(img: &IndexedImage, pal: &Palette) -> Image {
 
 fn load_art(mut commands: Commands, mut data: ResMut<Data>, mut images: ResMut<Assets<Image>>) {
     let d = &mut data.0;
-    let Ok(pal) = d.palette("GFX/LM3D.PAL") else { return };
-    let Some(icons) = d.read("GFX/ICONS.RNC").ok().and_then(|raw| Icons::parse(&raw).ok()) else { return };
-    let Some(skills) = d.read(sheets::MINILEMM.path).ok().and_then(|raw| sheets::MINILEMM.cut(&raw).ok()) else { return };
+    let Ok(pal) = d.palette("GFX/LM3D.PAL") else {
+        return;
+    };
+    let Some(icons) = d
+        .read("GFX/ICONS.RNC")
+        .ok()
+        .and_then(|raw| Icons::parse(&raw).ok())
+    else {
+        return;
+    };
+    let Some(skills) = d
+        .read(sheets::MINILEMM.path)
+        .ok()
+        .and_then(|raw| sheets::MINILEMM.cut(&raw).ok())
+    else {
+        return;
+    };
     let mut add = |img: &IndexedImage| images.add(to_image(img, &pal));
-    let glyphs = |f: &Font, digit_advance: f32, colon_advance: f32, add: &mut dyn FnMut(&IndexedImage) -> Handle<Image>| Glyphs {
+    let glyphs = |f: &Font,
+                  digit_advance: f32,
+                  colon_advance: f32,
+                  add: &mut dyn FnMut(&IndexedImage) -> Handle<Image>| Glyphs {
         first: f.first,
         images: f.glyphs.iter().map(&mut *add).collect(),
         size: Vec2::new(f.glyph_width as f32, f.glyph_height as f32),
@@ -204,10 +242,31 @@ enum Animated {
 fn spawn_panel(mut commands: Commands, art: Option<Res<Art>>, mut images: ResMut<Assets<Image>>) {
     let Some(art) = art else { return };
     let root = commands
-        .spawn((PanelRoot, Node { position_type: PositionType::Absolute, width: percent(100), height: percent(100), ..default() }, Pickable::IGNORE))
+        .spawn((
+            PanelRoot,
+            Node {
+                position_type: PositionType::Absolute,
+                width: percent(100),
+                height: percent(100),
+                ..default()
+            },
+            Pickable::IGNORE,
+        ))
         .id();
-    let item = |commands: &mut Commands, at: Vec2, size: Vec2, image: Handle<Image>, action: Option<Action>, anim: Option<Animated>| {
-        let mut e = commands.spawn((PanelPos { at, size }, ImageNode::new(image), Node { position_type: PositionType::Absolute, ..default() }));
+    let item = |commands: &mut Commands,
+                at: Vec2,
+                size: Vec2,
+                image: Handle<Image>,
+                action: Option<Action>,
+                anim: Option<Animated>| {
+        let mut e = commands.spawn((
+            PanelPos { at, size },
+            ImageNode::new(image),
+            Node {
+                position_type: PositionType::Absolute,
+                ..default()
+            },
+        ));
         if let Some(a) = action {
             e.insert((Button, a));
         }
@@ -222,13 +281,26 @@ fn spawn_panel(mut commands: Commands, art: Option<Res<Art>>, mut images: ResMut
     let p = |i: usize| art.panel[i].clone();
     // The minimap and its frame (the map image arrives with the level).
     let frame = images.add(crate::minimap::frame_image());
-    let frame = item(&mut commands, Vec2::ZERO, Vec2::splat(70.0), frame, None, None);
+    let frame = item(
+        &mut commands,
+        Vec2::ZERO,
+        Vec2::splat(70.0),
+        frame,
+        None,
+        None,
+    );
     commands.entity(frame).insert(MinimapFrame);
     let map = commands
         .spawn((
-            PanelPos { at: Vec2::splat(3.0), size: Vec2::splat(64.0) },
+            PanelPos {
+                at: Vec2::splat(3.0),
+                size: Vec2::splat(64.0),
+            },
             ImageNode::default(),
-            Node { position_type: PositionType::Absolute, ..default() },
+            Node {
+                position_type: PositionType::Absolute,
+                ..default()
+            },
             Button,
             crate::minimap::MinimapView,
             Visibility::Hidden,
@@ -236,35 +308,165 @@ fn spawn_panel(mut commands: Commands, art: Option<Res<Art>>, mut images: ResMut
         .id();
     commands.entity(root).add_child(map);
     // Right-hand column.
-    item(&mut commands, Vec2::new(260.0, 0.0), Vec2::new(32.0, 16.0), art.labels[0].clone(), None, None);
-    item(&mut commands, Vec2::new(260.0, 16.0), Vec2::new(32.0, 16.0), art.labels[1].clone(), None, None);
-    item(&mut commands, Vec2::new(260.0, 32.0), Vec2::new(32.0, 16.0), art.labels[2].clone(), None, None);
-    item(&mut commands, Vec2::new(260.0, 48.0), icon24, p(icon::BOMB), Some(Action::Nuke), Some(Animated::Nuke));
-    item(&mut commands, Vec2::new(284.0, 48.0), icon24, p(icon::PLAY), Some(Action::FastForward), Some(Animated::FastForward));
-    item(&mut commands, Vec2::new(260.0, 72.0), icon24, p(icon::CAMERA), Some(Action::Camera), None);
-    item(&mut commands, Vec2::new(284.0, 72.0), icon24, p(icon::PAUSE.start), Some(Action::Pause), Some(Animated::Paws));
-    item(&mut commands, Vec2::new(260.0, 96.0), icon24, p(icon::TURN_CLOCKWISE + 1), Some(Action::TurnClockwise), Some(Animated::TurnClockwise));
-    item(&mut commands, Vec2::new(284.0, 96.0), icon24, p(icon::TURN_ANTICLOCKWISE + 1), Some(Action::TurnAnticlockwise), Some(Animated::TurnAnticlockwise));
-    item(&mut commands, Vec2::new(260.0, 120.0), icon24, p(icon::MINUS + 1), Some(Action::Slower), Some(Animated::Slower));
-    item(&mut commands, Vec2::new(284.0, 120.0), icon24, p(icon::PLUS + 1), Some(Action::Faster), Some(Animated::Faster));
-    item(&mut commands, Vec2::new(274.0, 143.0), Vec2::splat(32.0), art.umbrella.clone(), None, None);
+    item(
+        &mut commands,
+        Vec2::new(260.0, 0.0),
+        Vec2::new(32.0, 16.0),
+        art.labels[0].clone(),
+        None,
+        None,
+    );
+    item(
+        &mut commands,
+        Vec2::new(260.0, 16.0),
+        Vec2::new(32.0, 16.0),
+        art.labels[1].clone(),
+        None,
+        None,
+    );
+    item(
+        &mut commands,
+        Vec2::new(260.0, 32.0),
+        Vec2::new(32.0, 16.0),
+        art.labels[2].clone(),
+        None,
+        None,
+    );
+    item(
+        &mut commands,
+        Vec2::new(260.0, 48.0),
+        icon24,
+        p(icon::BOMB),
+        Some(Action::Nuke),
+        Some(Animated::Nuke),
+    );
+    item(
+        &mut commands,
+        Vec2::new(284.0, 48.0),
+        icon24,
+        p(icon::PLAY),
+        Some(Action::FastForward),
+        Some(Animated::FastForward),
+    );
+    item(
+        &mut commands,
+        Vec2::new(260.0, 72.0),
+        icon24,
+        p(icon::CAMERA),
+        Some(Action::Camera),
+        None,
+    );
+    item(
+        &mut commands,
+        Vec2::new(284.0, 72.0),
+        icon24,
+        p(icon::PAUSE.start),
+        Some(Action::Pause),
+        Some(Animated::Paws),
+    );
+    item(
+        &mut commands,
+        Vec2::new(260.0, 96.0),
+        icon24,
+        p(icon::TURN_CLOCKWISE + 1),
+        Some(Action::TurnClockwise),
+        Some(Animated::TurnClockwise),
+    );
+    item(
+        &mut commands,
+        Vec2::new(284.0, 96.0),
+        icon24,
+        p(icon::TURN_ANTICLOCKWISE + 1),
+        Some(Action::TurnAnticlockwise),
+        Some(Animated::TurnAnticlockwise),
+    );
+    item(
+        &mut commands,
+        Vec2::new(260.0, 120.0),
+        icon24,
+        p(icon::MINUS + 1),
+        Some(Action::Slower),
+        Some(Animated::Slower),
+    );
+    item(
+        &mut commands,
+        Vec2::new(284.0, 120.0),
+        icon24,
+        p(icon::PLUS + 1),
+        Some(Action::Faster),
+        Some(Animated::Faster),
+    );
+    item(
+        &mut commands,
+        Vec2::new(274.0, 143.0),
+        Vec2::splat(32.0),
+        art.umbrella.clone(),
+        None,
+        None,
+    );
     // Bottom row.
-    item(&mut commands, Vec2::new(0.0, 172.0), icon24, p(icon::RED_DOWN), Some(Action::Arrow), Some(Animated::Arrow));
-    item(&mut commands, Vec2::new(24.0, 172.0), icon24, p(icon::FACE + 1), Some(Action::LemmingCam), Some(Animated::Face));
+    item(
+        &mut commands,
+        Vec2::new(0.0, 172.0),
+        icon24,
+        p(icon::RED_DOWN),
+        Some(Action::Arrow),
+        Some(Animated::Arrow),
+    );
+    item(
+        &mut commands,
+        Vec2::new(24.0, 172.0),
+        icon24,
+        p(icon::FACE + 1),
+        Some(Action::LemmingCam),
+        Some(Animated::Face),
+    );
     for (skill, (x, cells)) in Skill::ALL.into_iter().zip(SKILL_BUTTONS) {
-        item(&mut commands, Vec2::new(x, SKILL_Y), Vec2::splat(32.0), art.skills[cells[0]].clone(), Some(Action::Skill(skill)), Some(Animated::Skill(skill)));
+        item(
+            &mut commands,
+            Vec2::new(x, SKILL_Y),
+            Vec2::splat(32.0),
+            art.skills[cells[0]].clone(),
+            Some(Action::Skill(skill)),
+            Some(Animated::Skill(skill)),
+        );
     }
     // Numbers.
-    let text = |commands: &mut Commands, large: bool, right: f32, y: f32, value: Value, slots: usize| {
-        let glyphs = if large { &art.large } else { &art.small };
-        let t = commands.spawn((GlyphText { large, right, y, value }, Node::default())).id();
-        commands.entity(root).add_child(t);
-        for i in 0..slots {
-            let at = Vec2::new(right - glyphs.digit_advance * i as f32, y);
-            let s = commands.spawn((GlyphSlot(i), PanelPos { at, size: glyphs.size }, ImageNode::default(), Node { position_type: PositionType::Absolute, ..default() }, Visibility::Hidden)).id();
-            commands.entity(t).add_child(s);
-        }
-    };
+    let text =
+        |commands: &mut Commands, large: bool, right: f32, y: f32, value: Value, slots: usize| {
+            let glyphs = if large { &art.large } else { &art.small };
+            let t = commands
+                .spawn((
+                    GlyphText {
+                        large,
+                        right,
+                        y,
+                        value,
+                    },
+                    Node::default(),
+                ))
+                .id();
+            commands.entity(root).add_child(t);
+            for i in 0..slots {
+                let at = Vec2::new(right - glyphs.digit_advance * i as f32, y);
+                let s = commands
+                    .spawn((
+                        GlyphSlot(i),
+                        PanelPos {
+                            at,
+                            size: glyphs.size,
+                        },
+                        ImageNode::default(),
+                        Node {
+                            position_type: PositionType::Absolute,
+                            ..default()
+                        },
+                        Visibility::Hidden,
+                    ))
+                    .id();
+                commands.entity(t).add_child(s);
+            }
+        };
     text(&mut commands, true, 299.0, 2.0, Value::In, 3);
     text(&mut commands, true, 299.0, 18.0, Value::Out, 3);
     text(&mut commands, true, 299.0, 34.0, Value::Time, 4);
@@ -272,9 +474,24 @@ fn spawn_panel(mut commands: Commands, art: Option<Res<Art>>, mut images: ResMut
     text(&mut commands, false, 296.0, 140.0, Value::Rate, 2);
     text(&mut commands, false, 269.0, 80.0, Value::CameraNumber, 1);
     for (skill, (x, _)) in Skill::ALL.into_iter().zip(SKILL_BUTTONS) {
-        text(&mut commands, false, x + 17.0, 188.0, Value::SkillCount(skill), 2);
+        text(
+            &mut commands,
+            false,
+            x + 17.0,
+            188.0,
+            Value::SkillCount(skill),
+            2,
+        );
     }
-    let c = commands.spawn((Caption::default(), Node { position_type: PositionType::Absolute, ..default() })).id();
+    let c = commands
+        .spawn((
+            Caption::default(),
+            Node {
+                position_type: PositionType::Absolute,
+                ..default()
+            },
+        ))
+        .id();
     commands.entity(root).add_child(c);
 }
 
@@ -290,8 +507,16 @@ fn layout(windows: Query<&Window>, mut items: Query<(&PanelPos, &mut Node)>) {
     let s = scale(window);
     let (w, h) = (window.width(), window.height());
     for (p, mut node) in &mut items {
-        let x = if p.at.y < 160.0 && p.at.x >= 256.0 { w - (SCREEN.x - p.at.x) * s } else { p.at.x * s };
-        let y = if p.at.y >= 160.0 { h - (SCREEN.y - p.at.y) * s } else { p.at.y * s };
+        let x = if p.at.y < 160.0 && p.at.x >= 256.0 {
+            w - (SCREEN.x - p.at.x) * s
+        } else {
+            p.at.x * s
+        };
+        let y = if p.at.y >= 160.0 {
+            h - (SCREEN.y - p.at.y) * s
+        } else {
+            p.at.y * s
+        };
         node.left = px(x);
         node.top = px(y);
         node.width = px(p.size.x * s);
@@ -338,7 +563,11 @@ fn buttons(
                         }
                         Some(i) => {
                             let ok = sim.assign(i, s);
-                            sfx.write(crate::sfx::Sfx(if ok { "VOXFX/OK2" } else { "VOXFX/UH_UH1" }));
+                            sfx.write(crate::sfx::Sfx(if ok {
+                                "VOXFX/OK2"
+                            } else {
+                                "VOXFX/UH_UH1"
+                            }));
                         }
                         None => selected.0 = Some(s),
                     }
@@ -376,8 +605,14 @@ fn buttons(
             Action::Arrow => {
                 if let Some(i) = lemming_cam.following() {
                     let n = sim.lemmings.len();
-                    let next = (1..=n).map(|k| (i + k) % n).find(|&j| !sim.lemmings[j].gone).unwrap_or(i);
-                    *highlight = crate::hud::Highlight { on: true, lemming: Some(next) };
+                    let next = (1..=n)
+                        .map(|k| (i + k) % n)
+                        .find(|&j| !sim.lemmings[j].gone)
+                        .unwrap_or(i);
+                    *highlight = crate::hud::Highlight {
+                        on: true,
+                        lemming: Some(next),
+                    };
                     selected.0 = None;
                     if let Ok(view) = views.single() {
                         lemming_cam.follow(next, view);
@@ -386,8 +621,13 @@ fn buttons(
                     *highlight = crate::hud::Highlight::default();
                 } else {
                     selected.0 = None;
-                    let size = windows.single().map_or(Vec2::ONE, |w| Vec2::new(w.width(), w.height()));
-                    *highlight = crate::hud::Highlight { on: true, lemming: crate::hud::nearest_to_centre(sim, &scene_camera, size) };
+                    let size = windows
+                        .single()
+                        .map_or(Vec2::ONE, |w| Vec2::new(w.width(), w.height()));
+                    *highlight = crate::hud::Highlight {
+                        on: true,
+                        lemming: crate::hud::nearest_to_centre(sim, &scene_camera, size),
+                    };
                 }
             }
             Action::LemmingCam => {
@@ -395,12 +635,15 @@ fn buttons(
                     match highlight.lemming {
                         // Ride along with the highlighted lemming (switching to
                         // it from another); riding with it already, return.
-                        Some(i) if lemming_cam.following() != Some(i) => lemming_cam.follow(i, &view),
+                        Some(i) if lemming_cam.following() != Some(i) => {
+                            lemming_cam.follow(i, &view)
+                        }
                         _ => lemming_cam.toggle(&mut view),
                     }
                 }
             }
-            Action::TurnClockwise | Action::TurnAnticlockwise | Action::Slower | Action::Faster => {}
+            Action::TurnClockwise | Action::TurnAnticlockwise | Action::Slower | Action::Faster => {
+            }
         }
     }
 }
@@ -418,22 +661,33 @@ fn held_buttons(
 ) {
     const RATE_STEPS_PER_SECOND: f32 = 70.0;
     const TURN_SPEED: f32 = 1.8;
-    let down = |a: Action| held.iter().any(|(i, b)| *i == Interaction::Pressed && *b == a);
-    let slower = down(Action::Slower) || keys.pressed(KeyCode::Minus) || keys.pressed(KeyCode::NumpadSubtract);
-    let faster = down(Action::Faster) || keys.pressed(KeyCode::Equal) || keys.pressed(KeyCode::NumpadAdd);
+    let down = |a: Action| {
+        held.iter()
+            .any(|(i, b)| *i == Interaction::Pressed && *b == a)
+    };
+    let slower = down(Action::Slower)
+        || keys.pressed(KeyCode::Minus)
+        || keys.pressed(KeyCode::NumpadSubtract);
+    let faster =
+        down(Action::Faster) || keys.pressed(KeyCode::Equal) || keys.pressed(KeyCode::NumpadAdd);
     if let Some(sim) = &mut game.sim {
         let first = keys.just_pressed(KeyCode::Minus) || keys.just_pressed(KeyCode::Equal);
         if slower != faster {
             *carry += time.delta_secs() * RATE_STEPS_PER_SECOND;
             // A tap changes the rate by at least one.
-            let steps = if first { (*carry as i32).max(1) } else { *carry as i32 };
+            let steps = if first {
+                (*carry as i32).max(1)
+            } else {
+                *carry as i32
+            };
             *carry -= steps as f32;
             sim.adjust_release_rate(if faster { steps } else { -steps });
         } else {
             *carry = 0.0;
         }
     }
-    let turn = down(Action::TurnAnticlockwise) as i32 as f32 - down(Action::TurnClockwise) as i32 as f32;
+    let turn =
+        down(Action::TurnAnticlockwise) as i32 as f32 - down(Action::TurnClockwise) as i32 as f32;
     if turn != 0.0
         && lemming_cam.following().is_none()
         && let Ok(mut view) = views.single_mut()
@@ -456,7 +710,11 @@ fn skill_keys_select(game: Res<Game>, mut selected: ResMut<SelectedSkill>) {
 /// otherwise with nothing selected (level 2 started with the blocker; the
 /// Practice "Bomber", with only bombers, with nothing, owner's observation).
 fn select_first_skill(game: Res<Game>, mut selected: ResMut<SelectedSkill>) {
-    selected.0 = game.sim.as_ref().filter(|sim| sim.skills_left[Skill::Blocker as usize] > 0).map(|_| Skill::Blocker);
+    selected.0 = game
+        .sim
+        .as_ref()
+        .filter(|sim| sim.skills_left[Skill::Blocker as usize] > 0)
+        .map(|_| Skill::Blocker);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -481,24 +739,47 @@ fn animate(
         _ => {}
     }
     let nuked_at = *nuked_at;
-    let down = |a: Action| held.iter().any(|(i, b)| *i == Interaction::Pressed && *b == a);
+    let down = |a: Action| {
+        held.iter()
+            .any(|(i, b)| *i == Interaction::Pressed && *b == a)
+    };
     for (anim, mut node) in &mut items {
         let image = match *anim {
             Animated::Skill(s) => {
                 let cells = SKILL_BUTTONS[s as usize].1;
                 // The selected skill animates while any are left.
-                let left = game.sim.as_ref().is_some_and(|sim| sim.skills_left[s as usize] > 0);
-                let frame = if selected.0 == Some(s) && left { (t * SKILL_FPS / 4.0) as usize % cells.len() } else { 0 };
+                let left = game
+                    .sim
+                    .as_ref()
+                    .is_some_and(|sim| sim.skills_left[s as usize] > 0);
+                let frame = if selected.0 == Some(s) && left {
+                    (t * SKILL_FPS / 4.0) as usize % cells.len()
+                } else {
+                    0
+                };
                 art.skills[cells[frame]].clone()
             }
-            Animated::FastForward => art.panel[if game.fast_forward { icon::FAST_FORWARD } else { icon::PLAY }].clone(),
+            Animated::FastForward => art.panel[if game.fast_forward {
+                icon::FAST_FORWARD
+            } else {
+                icon::PLAY
+            }]
+            .clone(),
             Animated::Paws => {
-                let frame = if game.paused { (t * PAWS_FPS) as usize % icon::PAUSE.len() } else { 0 };
+                let frame = if game.paused {
+                    (t * PAWS_FPS) as usize % icon::PAUSE.len()
+                } else {
+                    0
+                };
                 art.panel[icon::PAUSE.start + frame].clone()
             }
             // Green (the lower cell) while held, red otherwise.
-            Animated::TurnClockwise => art.panel[icon::TURN_CLOCKWISE + !down(Action::TurnClockwise) as usize].clone(),
-            Animated::TurnAnticlockwise => art.panel[icon::TURN_ANTICLOCKWISE + !down(Action::TurnAnticlockwise) as usize].clone(),
+            Animated::TurnClockwise => {
+                art.panel[icon::TURN_CLOCKWISE + !down(Action::TurnClockwise) as usize].clone()
+            }
+            Animated::TurnAnticlockwise => art.panel
+                [icon::TURN_ANTICLOCKWISE + !down(Action::TurnAnticlockwise) as usize]
+                .clone(),
             Animated::Slower => {
                 let on = down(Action::Slower) || keys.pressed(KeyCode::Minus);
                 art.panel[icon::MINUS + !on as usize].clone()
@@ -510,15 +791,21 @@ fn animate(
             // Green, moving, while it waits for a lemming or one is
             // highlighted.
             Animated::Arrow => match highlight.on {
-                true => art.panel[icon::GREEN_DOWN.start + (t * ARROW_FPS) as usize % icon::GREEN_DOWN.len()].clone(),
+                true => art.panel
+                    [icon::GREEN_DOWN.start + (t * ARROW_FPS) as usize % icon::GREEN_DOWN.len()]
+                .clone(),
                 false => art.panel[icon::RED_DOWN].clone(),
             },
             // Squinting when idle, eyes open when armed or riding along.
-            Animated::Face => art.panel[icon::FACE + (*lemming_cam == LemmingCam::Off) as usize].clone(),
+            Animated::Face => {
+                art.panel[icon::FACE + (*lemming_cam == LemmingCam::Off) as usize].clone()
+            }
             // The mushroom cloud, over and over from the nuke until the level
             // ends (owner's recollection).
             Animated::Nuke => match nuked_at {
-                Some(at) => art.panel[icon::EXPLOSION.start + ((t - at) * EXPLOSION_FPS) as usize % icon::EXPLOSION.len()].clone(),
+                Some(at) => art.panel[icon::EXPLOSION.start
+                    + ((t - at) * EXPLOSION_FPS) as usize % icon::EXPLOSION.len()]
+                .clone(),
                 None => art.panel[icon::BOMB].clone(),
             },
         };
@@ -530,7 +817,9 @@ fn animate(
 
 /// The string a counter shows.
 fn value_string(v: Value, game: &Game, preset: usize) -> String {
-    let Some(sim) = &game.sim else { return String::new() };
+    let Some(sim) = &game.sim else {
+        return String::new();
+    };
     match v {
         // Counts down the lemmings still needed, then counts those saved
         // beyond that (observed in the original's demos).
@@ -567,12 +856,19 @@ fn glyph_texts(
         // ("3:53": digits at 281, 292, 299 and the colon at 288).
         let mut placed: Vec<(f32, char)> = Vec::new();
         for c in s.chars().rev() {
-            let x = placed.last().map_or(text.right, |&(next_x, _)| next_x - glyphs.advance(c));
+            let x = placed
+                .last()
+                .map_or(text.right, |&(next_x, _)| next_x - glyphs.advance(c));
             placed.push((x, c));
         }
         for child in children.iter() {
-            let Ok((slot, mut pos, mut node, mut vis)) = slots.get_mut(child) else { continue };
-            match placed.get(slot.0).and_then(|&(x, c)| Some((x, glyphs.get(c)?))) {
+            let Ok((slot, mut pos, mut node, mut vis)) = slots.get_mut(child) else {
+                continue;
+            };
+            match placed
+                .get(slot.0)
+                .and_then(|&(x, c)| Some((x, glyphs.get(c)?)))
+            {
                 Some((x, image)) => {
                     pos.at = Vec2::new(x, text.y);
                     if node.image != image {
@@ -598,7 +894,11 @@ fn show_minimap(
     mut frames: Query<&mut Visibility, (With<MinimapFrame>, Without<crate::minimap::MinimapView>)>,
 ) {
     let Some(map) = map else { return };
-    let v = if map.shown { Visibility::Inherited } else { Visibility::Hidden };
+    let v = if map.shown {
+        Visibility::Inherited
+    } else {
+        Visibility::Hidden
+    };
     for mut vis in &mut frames {
         vis.set_if_neq(v);
     }
@@ -618,7 +918,11 @@ fn show_in_play(
     preview: Res<crate::briefing::Preview>,
     mut roots: Query<&mut Visibility, With<PanelRoot>>,
 ) {
-    let v = if *state.get() == AppState::Playing && !opts.no_hud && !preview.active { Visibility::Inherited } else { Visibility::Hidden };
+    let v = if *state.get() == AppState::Playing && !opts.no_hud && !preview.active {
+        Visibility::Inherited
+    } else {
+        Visibility::Hidden
+    };
     for mut vis in &mut roots {
         if *vis != v {
             *vis = v;
@@ -673,12 +977,20 @@ fn caption(
     ui: Query<&Interaction>,
     mut captions: Query<(Entity, &mut Caption)>,
 ) {
-    let Some(font) = art.as_ref().and_then(|a| a.large.as_ref()) else { return };
-    let Ok((entity, mut shown)) = captions.single_mut() else { return };
+    let Some(font) = art.as_ref().and_then(|a| a.large.as_ref()) else {
+        return;
+    };
+    let Ok((entity, mut shown)) = captions.single_mut() else {
+        return;
+    };
     let text = if game.replay.as_ref().is_some_and(|r| r.demo.is_some()) {
         "Demo"
     } else if game.replay.is_some() {
-        if ((time.elapsed_secs() / REPLAY_BLINK) as u32).is_multiple_of(2) { "Replaying" } else { "Click to Play" }
+        if ((time.elapsed_secs() / REPLAY_BLINK) as u32).is_multiple_of(2) {
+            "Replaying"
+        } else {
+            "Click to Play"
+        }
     } else {
         (|| {
             let window = windows.single().ok()?;
@@ -687,7 +999,12 @@ fn caption(
                 return None;
             }
             let sim = game.sim.as_ref()?;
-            let i = crate::hud::lemming_at(sim, &camera, Vec2::new(window.width(), window.height()), point)?;
+            let i = crate::hud::lemming_at(
+                sim,
+                &camera,
+                Vec2::new(window.width(), window.height()),
+                point,
+            )?;
             state_name(&sim.lemmings[i])
         })()
         .unwrap_or("")
@@ -700,7 +1017,18 @@ fn caption(
     let (glyphs, _) = font.layout(text);
     for (x, image) in glyphs {
         let g = commands
-            .spawn((PanelPos { at: CAPTION_AT + Vec2::X * x, size: font.size }, ImageNode::new(image), Node { position_type: PositionType::Absolute, ..default() }, Pickable::IGNORE))
+            .spawn((
+                PanelPos {
+                    at: CAPTION_AT + Vec2::X * x,
+                    size: font.size,
+                },
+                ImageNode::new(image),
+                Node {
+                    position_type: PositionType::Absolute,
+                    ..default()
+                },
+                Pickable::IGNORE,
+            ))
             .id();
         commands.entity(entity).add_child(g);
     }

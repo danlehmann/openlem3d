@@ -52,7 +52,10 @@ impl BlockCell {
 
     /// The 16-bit grid value of this cell.
     pub fn to_raw(self) -> u16 {
-        (self.id as u16) << 10 | (self.shape as u16 & 0xF) << 6 | (self.rotation as u16 & 3) << 4 | (self.segments as u16 & 0xF)
+        (self.id as u16) << 10
+            | (self.shape as u16 & 0xF) << 6
+            | (self.rotation as u16 & 3) << 4
+            | (self.segments as u16 & 0xF)
     }
 }
 
@@ -136,16 +139,27 @@ impl Level {
     /// Parses an unpacked level file.
     pub fn parse(data: &[u8]) -> Result<Self, Error> {
         if data.len() != FILE_LEN {
-            return Err(Error::Format(format!("level is {} bytes, expected {FILE_LEN}", data.len())));
+            return Err(Error::Format(format!(
+                "level is {} bytes, expected {FILE_LEN}",
+                data.len()
+            )));
         }
         let h = &data[..HEADER_LEN];
         let u16_at = |o: usize| u16::from_le_bytes([h[o], h[o + 1]]);
         let skills = std::array::from_fn(|i| (h[0x0A + 2 * i], h[0x0B + 2 * i]));
         let land_polygons = h[0x22..0xE2]
-            .as_chunks::<24>().0.iter()
+            .as_chunks::<24>()
+            .0
+            .iter()
             .map(|set| {
-                set.as_chunks::<3>().0.iter()
-                    .map(|v| LandVertex { z: v[0], x: v[1], options: v[2] })
+                set.as_chunks::<3>()
+                    .0
+                    .iter()
+                    .map(|v| LandVertex {
+                        z: v[0],
+                        x: v[1],
+                        options: v[2],
+                    })
                     .take_while(|v| v.z != 0)
                     .collect::<Vec<_>>()
             })
@@ -161,12 +175,19 @@ impl Level {
             }
         });
         let blocks = data[HEADER_LEN..HEADER_LEN + CELLS * 2]
-            .as_chunks::<2>().0.iter()
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|b| u16::from_le_bytes([b[0], b[1]]))
             .collect();
         let objects = data[HEADER_LEN + CELLS * 2..]
-            .as_chunks::<2>().0.iter()
-            .map(|b| ObjectCell { kind: b[0], extra: b[1] })
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|b| ObjectCell {
+                kind: b[0],
+                extra: b[1],
+            })
             .collect();
         Ok(Level {
             header: h.to_vec(),
@@ -246,6 +267,14 @@ mod tests {
     fn block_bits() {
         #[allow(clippy::unusual_byte_groupings)] // grouped by field: id, shape, rotation, segments
         let c = BlockCell::from_raw(0b000101_0011_10_1100);
-        assert_eq!(c, BlockCell { id: 5, shape: 3, rotation: 2, segments: 0b1100 });
+        assert_eq!(
+            c,
+            BlockCell {
+                id: 5,
+                shape: 3,
+                rotation: 2,
+                segments: 0b1100
+            }
+        );
     }
 }

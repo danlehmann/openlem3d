@@ -24,8 +24,16 @@ pub struct PracticePlugin;
 impl Plugin for PracticePlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, load)
-            .add_systems(Update, (spawn_grid, hover, pick).chain().run_if(in_state(AppState::Practice)))
-            .add_systems(OnExit(AppState::Practice), crate::title::despawn::<ScreenRoot>);
+            .add_systems(
+                Update,
+                (spawn_grid, hover, pick)
+                    .chain()
+                    .run_if(in_state(AppState::Practice)),
+            )
+            .add_systems(
+                OnExit(AppState::Practice),
+                crate::title::despawn::<ScreenRoot>,
+            );
     }
 }
 
@@ -48,15 +56,19 @@ const FIRST: u32 = 80;
 /// arrow (Hi-Light Lemming, level 89), as in the original (hover labels and
 /// briefings checked).
 fn level_of(item: usize) -> u32 {
-    FIRST + match item {
-        9 => 10,
-        10 => 9,
-        i => i as u32,
-    }
+    FIRST
+        + match item {
+            9 => 10,
+            10 => 9,
+            i => i as u32,
+        }
 }
 const ROW_Y: [f32; 3] = [37.0, 86.0, 136.0];
-const COLUMNS: [[f32; 7]; 3] =
-    [[22.0, 70.0, 115.0, 160.0, 200.0, 238.0, 277.0], [39.0, 78.0, 120.0, 160.0, 200.0, 238.0, 277.0], [36.0, 81.0, 118.0, 160.0, 205.0, 241.0, 281.0]];
+const COLUMNS: [[f32; 7]; 3] = [
+    [22.0, 70.0, 115.0, 160.0, 200.0, 238.0, 277.0],
+    [39.0, 78.0, 120.0, 160.0, 200.0, 238.0, 277.0],
+    [36.0, 81.0, 118.0, 160.0, 205.0, 241.0, 281.0],
+];
 /// Icons in grid order: levels 80–99, then EXIT; each with its voice.
 const ITEMS: [(Source, &str); 21] = [
     (Source::Skill(0), "VOXFX/BLOCKER1"),
@@ -68,7 +80,10 @@ const ITEMS: [(Source, &str); 21] = [
     (Source::Skill(6), "VOXFX/DIGGER2"),
     (Source::Skill(7), "VOXFX/CLIMBER2"),
     (Source::Skill(8), "VOXFX/FLOATER1"),
-    (Source::Panel(&[icon::FACE + 1, icon::FACE]), "VOXFX/VIRTUAL1"),
+    (
+        Source::Panel(&[icon::FACE + 1, icon::FACE]),
+        "VOXFX/VIRTUAL1",
+    ),
     (Source::Panel(&[39, 40, 41, 42, 43, 44]), "VOXFX/HILITE"),
     (Source::Deflicon, "VOXFX/DEFLECT"),
     (Source::Prac(26, 8), "VOXFX/MUD1"),
@@ -91,9 +106,17 @@ struct Pics {
     tick: Handle<Image>,
 }
 
-fn upload(img: &IndexedImage, pal: &l3d_formats::gamedata::Palette, images: &mut Assets<Image>) -> Handle<Image> {
+fn upload(
+    img: &IndexedImage,
+    pal: &l3d_formats::gamedata::Palette,
+    images: &mut Assets<Image>,
+) -> Handle<Image> {
     let mut image = Image::new(
-        Extent3d { width: img.width as u32, height: img.height as u32, depth_or_array_layers: 1 },
+        Extent3d {
+            width: img.width as u32,
+            height: img.height as u32,
+            depth_or_array_layers: 1,
+        },
         TextureDimension::D2,
         img.to_rgba(pal, true),
         TextureFormat::Rgba8UnormSrgb,
@@ -105,19 +128,46 @@ fn upload(img: &IndexedImage, pal: &l3d_formats::gamedata::Palette, images: &mut
 
 fn load(mut commands: Commands, mut data: ResMut<Data>, mut images: ResMut<Assets<Image>>) {
     let d = &mut data.0;
-    let Ok(pal) = d.palette("GFX/LM3D.PAL") else { return };
-    let mut cut = |s: &sheets::Sheet| d.read(s.path).ok().and_then(|raw| s.cut(&raw).ok()).unwrap_or_default();
-    let (mini, defl, prac) = (cut(&sheets::MINILEMM), cut(&sheets::DEFLICON), cut(&sheets::PRACICON));
-    let panel = d.read("GFX/ICONS.RNC").ok().and_then(|raw| Icons::parse(&raw).ok()).map(|i| i.panel).unwrap_or_default();
+    let Ok(pal) = d.palette("GFX/LM3D.PAL") else {
+        return;
+    };
+    let mut cut = |s: &sheets::Sheet| {
+        d.read(s.path)
+            .ok()
+            .and_then(|raw| s.cut(&raw).ok())
+            .unwrap_or_default()
+    };
+    let (mini, defl, prac) = (
+        cut(&sheets::MINILEMM),
+        cut(&sheets::DEFLICON),
+        cut(&sheets::PRACICON),
+    );
+    let panel = d
+        .read("GFX/ICONS.RNC")
+        .ok()
+        .and_then(|raw| Icons::parse(&raw).ok())
+        .map(|i| i.panel)
+        .unwrap_or_default();
     if mini.is_empty() || prac.len() <= TICK {
         return;
     }
-    let mut up = |imgs: &[IndexedImage]| imgs.iter().map(|i| upload(i, &pal, &mut images)).collect::<Vec<_>>();
+    let mut up = |imgs: &[IndexedImage]| {
+        imgs.iter()
+            .map(|i| upload(i, &pal, &mut images))
+            .collect::<Vec<_>>()
+    };
     let items = ITEMS
         .iter()
         .map(|(src, _)| match *src {
-            Source::Skill(s) => up(&crate::panel::SKILL_BUTTONS[s].1.iter().filter_map(|&c| mini.get(c).cloned()).collect::<Vec<_>>()),
-            Source::Panel(cells) => up(&cells.iter().filter_map(|&c| panel.get(c).cloned()).collect::<Vec<_>>()),
+            Source::Skill(s) => up(&crate::panel::SKILL_BUTTONS[s]
+                .1
+                .iter()
+                .filter_map(|&c| mini.get(c).cloned())
+                .collect::<Vec<_>>()),
+            Source::Panel(cells) => up(&cells
+                .iter()
+                .filter_map(|&c| panel.get(c).cloned())
+                .collect::<Vec<_>>()),
             Source::Deflicon => up(&defl),
             Source::Prac(first, n) => up(&prac[first..first + n]),
         })
@@ -134,8 +184,16 @@ struct Item(usize);
 #[derive(Component)]
 struct NameLine;
 
-fn spawn_grid(mut commands: Commands, art: Option<Res<Art>>, pics: Option<Res<Pics>>, settings: Res<Settings>, roots: Query<(), With<ScreenRoot>>) {
-    let (Some(art), Some(pics)) = (art, pics) else { return };
+fn spawn_grid(
+    mut commands: Commands,
+    art: Option<Res<Art>>,
+    pics: Option<Res<Pics>>,
+    settings: Res<Settings>,
+    roots: Query<(), With<ScreenRoot>>,
+) {
+    let (Some(art), Some(pics)) = (art, pics) else {
+        return;
+    };
     if !roots.is_empty() {
         return;
     }
@@ -144,22 +202,55 @@ fn spawn_grid(mut commands: Commands, art: Option<Res<Art>>, pics: Option<Res<Pi
         let (glyphs, w) = font.layout("Select Item to Practice");
         let left = (160.0 - w / 2.0).round();
         for (x, image) in glyphs {
-            let e = commands.spawn(image_at(image, at(left + x, 12.0, font.size.x, font.size.y))).id();
+            let e = commands
+                .spawn(image_at(
+                    image,
+                    at(left + x, 12.0, font.size.x, font.size.y),
+                ))
+                .id();
             commands.entity(canvas).add_child(e);
         }
     }
     for (i, frames) in pics.items.iter().enumerate() {
         let (row, col) = (i / 7, i % 7);
         let (cx, cy) = (COLUMNS[row][col], ROW_Y[row] + 16.0);
-        let size = if matches!(ITEMS[i].0, Source::Panel(_)) { 24.0 } else { 32.0 };
-        let e = commands.spawn((Item(i), Button, image_at(frames[0].clone(), at(cx - size / 2.0, cy - size / 2.0, size, size)))).id();
+        let size = if matches!(ITEMS[i].0, Source::Panel(_)) {
+            24.0
+        } else {
+            32.0
+        };
+        let e = commands
+            .spawn((
+                Item(i),
+                Button,
+                image_at(
+                    frames[0].clone(),
+                    at(cx - size / 2.0, cy - size / 2.0, size, size),
+                ),
+            ))
+            .id();
         commands.entity(canvas).add_child(e);
         if i < 20 && settings.completed.contains(&level_of(i)) {
-            let t = commands.spawn((image_at(pics.tick.clone(), at(cx - 4.0, cy - 16.0, 32.0, 32.0)), Pickable::IGNORE)).id();
+            let t = commands
+                .spawn((
+                    image_at(pics.tick.clone(), at(cx - 4.0, cy - 16.0, 32.0, 32.0)),
+                    Pickable::IGNORE,
+                ))
+                .id();
             commands.entity(canvas).add_child(t);
         }
     }
-    let line = commands.spawn((NameLine, Node { position_type: PositionType::Absolute, ..default() }, at(0.0, 0.0, 320.0, 200.0), Pickable::IGNORE)).id();
+    let line = commands
+        .spawn((
+            NameLine,
+            Node {
+                position_type: PositionType::Absolute,
+                ..default()
+            },
+            at(0.0, 0.0, 320.0, 200.0),
+            Pickable::IGNORE,
+        ))
+        .id();
     commands.entity(canvas).add_child(line);
 }
 
@@ -176,7 +267,9 @@ fn hover(
     mut last: Local<Option<usize>>,
     mut sfx: MessageWriter<crate::sfx::Sfx>,
 ) {
-    let (Some(pics), Some(art)) = (pics, art) else { return };
+    let (Some(pics), Some(art)) = (pics, art) else {
+        return;
+    };
     let mut hovered = None;
     for (item, interaction, mut node) in &mut items {
         let frames = &pics.items[item.0];
@@ -194,18 +287,31 @@ fn hover(
         return;
     }
     *last = hovered;
-    let Ok((line, children)) = lines.single() else { return };
+    let Ok((line, children)) = lines.single() else {
+        return;
+    };
     for c in children.into_iter().flatten() {
         commands.entity(*c).despawn();
     }
     let Some(i) = hovered else { return };
     sfx.write(crate::sfx::Sfx(ITEMS[i].1));
-    let name = if i < 20 { titles.map(|t| crate::menu::title_case(&t.0[level_of(i) as usize])).unwrap_or_default() } else { "Exit".into() };
+    let name = if i < 20 {
+        titles
+            .map(|t| crate::menu::title_case(&t.0[level_of(i) as usize]))
+            .unwrap_or_default()
+    } else {
+        "Exit".into()
+    };
     if let Some(font) = &art.large {
         let (glyphs, w) = font.layout(&name);
         let left = (160.0 - w / 2.0).round();
         for (x, image) in glyphs {
-            let e = commands.spawn(image_at(image, at(left + x, 178.0, font.size.x, font.size.y))).id();
+            let e = commands
+                .spawn(image_at(
+                    image,
+                    at(left + x, 178.0, font.size.x, font.size.y),
+                ))
+                .id();
             commands.entity(line).add_child(e);
         }
     }

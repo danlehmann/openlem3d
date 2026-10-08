@@ -11,10 +11,34 @@ pub struct FadePlugin;
 impl Plugin for FadePlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, spawn)
-            .add_systems(OnTransition { exited: AppState::Title, entered: AppState::Code }, start(CODE_IN))
-            .add_systems(OnTransition { exited: AppState::Code, entered: AppState::Title }, start(TITLE_FROM_CODE_IN))
-            .add_systems(OnTransition { exited: AppState::Options, entered: AppState::Title }, start(TITLE_FROM_OPTIONS_IN))
-            .add_systems(OnTransition { exited: AppState::Briefing, entered: AppState::Playing }, start(LEVEL_IN))
+            .add_systems(
+                OnTransition {
+                    exited: AppState::Title,
+                    entered: AppState::Code,
+                },
+                start(CODE_IN),
+            )
+            .add_systems(
+                OnTransition {
+                    exited: AppState::Code,
+                    entered: AppState::Title,
+                },
+                start(TITLE_FROM_CODE_IN),
+            )
+            .add_systems(
+                OnTransition {
+                    exited: AppState::Options,
+                    entered: AppState::Title,
+                },
+                start(TITLE_FROM_OPTIONS_IN),
+            )
+            .add_systems(
+                OnTransition {
+                    exited: AppState::Briefing,
+                    entered: AppState::Playing,
+                },
+                start(LEVEL_IN),
+            )
             .add_systems(Update, fade);
     }
 }
@@ -40,7 +64,12 @@ struct Fade {
 fn spawn(mut commands: Commands) {
     commands.spawn((
         Fade::default(),
-        Node { position_type: PositionType::Absolute, width: percent(100), height: percent(100), ..default() },
+        Node {
+            position_type: PositionType::Absolute,
+            width: percent(100),
+            height: percent(100),
+            ..default()
+        },
         BackgroundColor(Color::NONE),
         GlobalZIndex(i32::MAX - 1),
         Pickable::IGNORE,
@@ -50,14 +79,21 @@ fn spawn(mut commands: Commands) {
 fn start(duration: f32) -> impl Fn(Res<Time>, Query<&mut Fade>) {
     move |time, mut fades| {
         for mut f in &mut fades {
-            *f = Fade { start: time.elapsed_secs(), duration };
+            *f = Fade {
+                start: time.elapsed_secs(),
+                duration,
+            };
         }
     }
 }
 
 fn fade(time: Res<Time>, mut fades: Query<(&Fade, &mut BackgroundColor)>) {
     for (f, mut bg) in &mut fades {
-        let t = if f.duration > 0.0 { (time.elapsed_secs() - f.start) / f.duration } else { 1.0 };
+        let t = if f.duration > 0.0 {
+            (time.elapsed_secs() - f.start) / f.duration
+        } else {
+            1.0
+        };
         let colour = Color::BLACK.with_alpha((1.0 - t).clamp(0.0, 1.0));
         if bg.0 != colour {
             bg.0 = colour;

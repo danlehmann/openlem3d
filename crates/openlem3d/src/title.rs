@@ -34,7 +34,10 @@ const WINDER_FPS: f32 = 17.5;
 const BANNER_SPEED: f32 = 70.0;
 const BANNER_HOLD: f32 = 0.7;
 /// The banner paper (x 63–256, y 93–127) and its text lines.
-const PAPER: Rect = Rect { min: Vec2::new(63.0, 93.0), max: Vec2::new(257.0, 128.0) };
+const PAPER: Rect = Rect {
+    min: Vec2::new(63.0, 93.0),
+    max: Vec2::new(257.0, 128.0),
+};
 const BANNER_LINES: [f32; 2] = [97.0, 111.0];
 /// Lemming letters and the idle slots: images per second (70 Hz ÷ 6).
 const LETTER_FPS: f32 = 70.0 / 6.0;
@@ -51,12 +54,25 @@ impl Plugin for TitlePlugin {
             .add_systems(Update, attract.run_if(in_state(AppState::Title)))
             .add_systems(
                 Update,
-                (spawn_title, title_input, animate_logo, animate_winders, animate_banner, animate_faces, show_rating)
+                (
+                    spawn_title,
+                    title_input,
+                    animate_logo,
+                    animate_winders,
+                    animate_banner,
+                    animate_faces,
+                    show_rating,
+                )
                     .chain()
                     .run_if(in_state(AppState::Title)),
             )
             .add_systems(OnExit(AppState::Code), despawn::<ScreenRoot>)
-            .add_systems(Update, (spawn_code, code_input, animate_slots).chain().run_if(in_state(AppState::Code)))
+            .add_systems(
+                Update,
+                (spawn_code, code_input, animate_slots)
+                    .chain()
+                    .run_if(in_state(AppState::Code)),
+            )
             .add_systems(
                 Update,
                 scroll_backdrop.run_if(
@@ -87,7 +103,11 @@ impl Glyphs {
         let (mut x, mut out) = (0.0, Vec::new());
         // Characters are glyph codes (picture tiles go up to 198).
         for c in text.chars().map(|c| u8::try_from(c as u32).unwrap_or(b' ')) {
-            match c.checked_sub(self.first).map(|i| i as usize).filter(|&i| i < self.images.len()) {
+            match c
+                .checked_sub(self.first)
+                .map(|i| i as usize)
+                .filter(|&i| i < self.images.len())
+            {
                 Some(i) if c != b' ' => {
                     out.push((x, self.images[i].clone()));
                     x += self.advances[i];
@@ -120,7 +140,11 @@ pub(crate) struct Art {
 
 fn to_image(img: &IndexedImage, pal: &Palette, transparent0: bool) -> Image {
     let mut image = Image::new(
-        Extent3d { width: img.width as u32, height: img.height as u32, depth_or_array_layers: 1 },
+        Extent3d {
+            width: img.width as u32,
+            height: img.height as u32,
+            depth_or_array_layers: 1,
+        },
         TextureDimension::D2,
         img.to_rgba(pal, transparent0),
         TextureFormat::Rgba8UnormSrgb,
@@ -133,18 +157,41 @@ fn to_image(img: &IndexedImage, pal: &Palette, transparent0: bool) -> Image {
 /// Advance of a proportional glyph: one less than its last opaque column,
 /// counted from 1 (measured for the large font on the code screen).
 fn advance(g: &IndexedImage) -> f32 {
-    let last = (0..g.width).rev().find(|&x| (0..g.height).any(|y| g.pixels[y * g.width + x] != 0));
+    let last = (0..g.width)
+        .rev()
+        .find(|&x| (0..g.height).any(|y| g.pixels[y * g.width + x] != 0));
     last.map_or(0.0, |x| x as f32)
 }
 
 /// `gap` is added to each glyph's advance: 0 for the italic fonts, whose
 /// glyphs overlap by a pixel, 1 for the upright small font.
-pub(crate) fn glyphs(f: &Font, pal: &Palette, space: f32, gap: f32, images: &mut Assets<Image>) -> Glyphs {
+pub(crate) fn glyphs(
+    f: &Font,
+    pal: &Palette,
+    space: f32,
+    gap: f32,
+    images: &mut Assets<Image>,
+) -> Glyphs {
     Glyphs {
         first: f.first,
-        images: f.glyphs.iter().map(|g| images.add(to_image(g, pal, true))).collect(),
+        images: f
+            .glyphs
+            .iter()
+            .map(|g| images.add(to_image(g, pal, true)))
+            .collect(),
         // Picture tiles (codes 123 and up in TITLE.FNT) join edge to edge.
-        advances: f.glyphs.iter().enumerate().map(|(i, g)| if f.first as usize + i >= 123 { g.width as f32 } else { advance(g) + gap }).collect(),
+        advances: f
+            .glyphs
+            .iter()
+            .enumerate()
+            .map(|(i, g)| {
+                if f.first as usize + i >= 123 {
+                    g.width as f32
+                } else {
+                    advance(g) + gap
+                }
+            })
+            .collect(),
         size: Vec2::new(f.glyph_width as f32, f.glyph_height as f32),
         space,
     }
@@ -152,16 +199,25 @@ pub(crate) fn glyphs(f: &Font, pal: &Palette, space: f32, gap: f32, images: &mut
 
 fn load_art(mut commands: Commands, mut data: ResMut<Data>, mut images: ResMut<Assets<Image>>) {
     let d = &mut data.0;
-    let Ok(pal) = d.palette("GFX/LM3D.PAL") else { return };
+    let Ok(pal) = d.palette("GFX/LM3D.PAL") else {
+        return;
+    };
     let mut add = |img: &IndexedImage, t: bool| images.add(to_image(img, &pal, t));
-    let backdrop = d.gfx("BGRD", 0).ok().and_then(|raw| IndexedImage::new(320, raw.len() / 320, raw).ok()).map(|i| add(&i, false));
+    let backdrop = d
+        .gfx("BGRD", 0)
+        .ok()
+        .and_then(|raw| IndexedImage::new(320, raw.len() / 320, raw).ok())
+        .map(|i| add(&i, false));
     let logo = d
         .read("GFX/TITLE.MHC")
         .ok()
         .and_then(|raw| title::decode_rle_cells(&raw, title::LOGO_WIDTH).ok())
         .map(|frames| frames.iter().map(|f| add(f, true)).collect())
         .unwrap_or_default();
-    let menu = d.read("GFX/TITLE.RNC").ok().and_then(|raw| title::MenuArt::parse(&raw).ok());
+    let menu = d
+        .read("GFX/TITLE.RNC")
+        .ok()
+        .and_then(|raw| title::MenuArt::parse(&raw).ok());
     let (buttons, faces, ratings) = match &menu {
         Some(m) => (
             m.buttons.iter().map(|b| add(b, true)).collect(),
@@ -177,7 +233,9 @@ fn load_art(mut commands: Commands, mut data: ResMut<Data>, mut images: ResMut<A
         .map(|cells| cells.iter().map(|c| add(c, true)).collect())
         .unwrap_or_default();
     // The card's white: the palette entry nearest pure white.
-    let white = (1..=255u8).max_by_key(|&i| pal[i as usize].iter().map(|&c| c as u32).sum::<u32>()).unwrap_or(15);
+    let white = (1..=255u8)
+        .max_by_key(|&i| pal[i as usize].iter().map(|&c| c as u32).sum::<u32>())
+        .unwrap_or(15);
     let rating_labels = ["PRACTICE", "FUN", "TRICKY", "TAXING", "MAYHEM"]
         .iter()
         .map(|name| {
@@ -192,9 +250,28 @@ fn load_art(mut commands: Commands, mut data: ResMut<Data>, mut images: ResMut<A
         .and_then(|raw| title::LemmingLetters::parse(&raw).ok())
         .map(|l| l.frames.iter().map(|f| add(f, true)).collect())
         .unwrap_or_default();
-    let banner = d.read("GFX/TITLE.FNT").ok().and_then(|raw| title_font(&raw).ok()).map(|f| glyphs(&f, &pal, 5.0, 0.0, &mut images));
-    let large = d.read("GFX/ICONS.RNC").ok().and_then(|raw| Icons::parse(&raw).ok()).map(|i| glyphs(&i.large_font, &pal, 5.0, 0.0, &mut images));
-    commands.insert_resource(Art { backdrop, logo, buttons, faces, ratings, rating_labels, winder, banner, large, letters });
+    let banner = d
+        .read("GFX/TITLE.FNT")
+        .ok()
+        .and_then(|raw| title_font(&raw).ok())
+        .map(|f| glyphs(&f, &pal, 5.0, 0.0, &mut images));
+    let large = d
+        .read("GFX/ICONS.RNC")
+        .ok()
+        .and_then(|raw| Icons::parse(&raw).ok())
+        .map(|i| glyphs(&i.large_font, &pal, 5.0, 0.0, &mut images));
+    commands.insert_resource(Art {
+        backdrop,
+        logo,
+        buttons,
+        faces,
+        ratings,
+        rating_labels,
+        winder,
+        banner,
+        large,
+        letters,
+    });
 }
 
 /// The rating label's box: every label is drawn this wide, on the card's
@@ -255,10 +332,14 @@ fn rating_label(name: &str, white: u8) -> IndexedImage {
     for y in 0..h as i32 {
         for x in 0..w as i32 {
             let p = (y as usize) * w + x as usize;
-            let near = (-1..=1).any(|dy| (-1..=1).any(|dx| {
-                let (nx, ny) = (x + dx, y + dy);
-                (0..w as i32).contains(&nx) && (0..h as i32).contains(&ny) && ink[ny as usize * w + nx as usize]
-            }));
+            let near = (-1..=1).any(|dy| {
+                (-1..=1).any(|dx| {
+                    let (nx, ny) = (x + dx, y + dy);
+                    (0..w as i32).contains(&nx)
+                        && (0..h as i32).contains(&ny)
+                        && ink[ny as usize * w + nx as usize]
+                })
+            });
             if !ink[p] && near {
                 pixels[p] = 0;
             }
@@ -321,12 +402,22 @@ enum TitleButton {
     Exit,
 }
 
-const TITLE_BUTTONS: [TitleButton; 5] =
-    [TitleButton::Play, TitleButton::Code, TitleButton::Options, TitleButton::Rating, TitleButton::Exit];
+const TITLE_BUTTONS: [TitleButton; 5] = [
+    TitleButton::Play,
+    TitleButton::Code,
+    TitleButton::Options,
+    TitleButton::Rating,
+    TitleButton::Exit,
+];
 
 /// Face positions inside their buttons (measured).
-const FACE_OFFSETS: [Vec2; 5] =
-    [Vec2::new(26.0, 5.0), Vec2::new(21.0, 10.0), Vec2::new(17.0, 6.0), Vec2::new(25.0, 4.0), Vec2::new(24.0, 6.0)];
+const FACE_OFFSETS: [Vec2; 5] = [
+    Vec2::new(26.0, 5.0),
+    Vec2::new(21.0, 10.0),
+    Vec2::new(17.0, 6.0),
+    Vec2::new(25.0, 4.0),
+    Vec2::new(24.0, 6.0),
+];
 const BUTTON_Y: f32 = 135.0;
 
 pub(crate) fn despawn<T: Component>(mut commands: Commands, roots: Query<Entity, With<T>>) {
@@ -336,7 +427,14 @@ pub(crate) fn despawn<T: Component>(mut commands: Commands, roots: Query<Entity,
 }
 
 pub(crate) fn image_at(image: Handle<Image>, rect: At) -> (ImageNode, At, Node) {
-    (ImageNode::new(image), rect, Node { position_type: PositionType::Absolute, ..default() })
+    (
+        ImageNode::new(image),
+        rect,
+        Node {
+            position_type: PositionType::Absolute,
+            ..default()
+        },
+    )
 }
 
 /// Spawns the root, the backdrop (tinted by `tint`) and the canvas; returns
@@ -345,20 +443,50 @@ pub(crate) fn spawn_screen(commands: &mut Commands, art: &Art, scroll: f32, tint
     let root = commands
         .spawn((
             ScreenRoot,
-            Node { position_type: PositionType::Absolute, width: percent(100), height: percent(100), overflow: Overflow::clip(), ..default() },
+            Node {
+                position_type: PositionType::Absolute,
+                width: percent(100),
+                height: percent(100),
+                overflow: Overflow::clip(),
+                ..default()
+            },
             BackgroundColor(Color::BLACK),
         ))
         .id();
-    let backdrop = commands.spawn((Backdrop(scroll), Node { position_type: PositionType::Absolute, ..default() })).id();
+    let backdrop = commands
+        .spawn((
+            Backdrop(scroll),
+            Node {
+                position_type: PositionType::Absolute,
+                ..default()
+            },
+        ))
+        .id();
     commands.entity(root).add_child(backdrop);
     if let Some(bg) = &art.backdrop {
         // Enough tiles to cover any window at the canvas scale.
         for _ in 0..(3 * 8) {
-            let tile = commands.spawn((ImageNode::new(bg.clone()).with_color(tint), Node { position_type: PositionType::Absolute, ..default() })).id();
+            let tile = commands
+                .spawn((
+                    ImageNode::new(bg.clone()).with_color(tint),
+                    Node {
+                        position_type: PositionType::Absolute,
+                        ..default()
+                    },
+                ))
+                .id();
             commands.entity(backdrop).add_child(tile);
         }
     }
-    let canvas = commands.spawn((Canvas(SCREEN), Node { position_type: PositionType::Absolute, ..default() })).id();
+    let canvas = commands
+        .spawn((
+            Canvas(SCREEN),
+            Node {
+                position_type: PositionType::Absolute,
+                ..default()
+            },
+        ))
+        .id();
     commands.entity(root).add_child(canvas);
     canvas
 }
@@ -392,18 +520,47 @@ fn spawn_title(mut commands: Commands, art: Option<Res<Art>>, roots: Query<(), W
         commands.entity(canvas).add_child(e);
     };
     if let Some(first) = art.logo.first() {
-        child(&mut commands, &mut |c| c.spawn((Logo, image_at(first.clone(), at(32.0, 10.0, 256.0, 64.0)))).id());
+        child(&mut commands, &mut |c| {
+            c.spawn((Logo, image_at(first.clone(), at(32.0, 10.0, 256.0, 64.0))))
+                .id()
+        });
     }
     // The banner: paper, then a clipped strip of pages, then the winders.
     let paper = at(PAPER.min.x, PAPER.min.y, PAPER.width(), PAPER.height());
-    child(&mut commands, &mut |c| c.spawn((paper, Node { position_type: PositionType::Absolute, ..default() }, BackgroundColor(Color::WHITE))).id());
+    child(&mut commands, &mut |c| {
+        c.spawn((
+            paper,
+            Node {
+                position_type: PositionType::Absolute,
+                ..default()
+            },
+            BackgroundColor(Color::WHITE),
+        ))
+        .id()
+    });
     if let Some(font) = &art.banner {
         let pages = banner_pages();
         let window = commands
-            .spawn((at(PAPER.min.x, 0.0, PAPER.width(), SCREEN.y), Node { position_type: PositionType::Absolute, overflow: Overflow::clip(), ..default() }))
+            .spawn((
+                at(PAPER.min.x, 0.0, PAPER.width(), SCREEN.y),
+                Node {
+                    position_type: PositionType::Absolute,
+                    overflow: Overflow::clip(),
+                    ..default()
+                },
+            ))
             .id();
         commands.entity(canvas).add_child(window);
-        let strip = commands.spawn((BannerStrip { pages: pages.len() }, at(0.0, 0.0, 1.0, 1.0), Node { position_type: PositionType::Absolute, ..default() })).id();
+        let strip = commands
+            .spawn((
+                BannerStrip { pages: pages.len() },
+                at(0.0, 0.0, 1.0, 1.0),
+                Node {
+                    position_type: PositionType::Absolute,
+                    ..default()
+                },
+            ))
+            .id();
         commands.entity(window).add_child(strip);
         let page_w = PAPER.width();
         for (p, lines) in pages.iter().enumerate() {
@@ -412,35 +569,70 @@ fn spawn_title(mut commands: Commands, art: Option<Res<Art>>, roots: Query<(), W
                 // Page p is centred at strip x (p + 1.5)·page width.
                 let left = (p as f32 + 1.5) * page_w - width / 2.0;
                 for (x, image) in glyphs {
-                    let g = commands.spawn(image_at(image, at(left + x, y, font.size.x, font.size.y))).id();
+                    let g = commands
+                        .spawn(image_at(image, at(left + x, y, font.size.x, font.size.y)))
+                        .id();
                     commands.entity(strip).add_child(g);
                 }
             }
         }
     }
     if let Some(cell) = art.winder.first() {
-        child(&mut commands, &mut |c| c.spawn((Winder { mirrored: false }, image_at(cell.clone(), at(0.0, 70.0, 64.0, 64.0)))).id());
+        child(&mut commands, &mut |c| {
+            c.spawn((
+                Winder { mirrored: false },
+                image_at(cell.clone(), at(0.0, 70.0, 64.0, 64.0)),
+            ))
+            .id()
+        });
         child(&mut commands, &mut |c| {
             let mut img = ImageNode::new(cell.clone());
             img.flip_x = true;
-            c.spawn((Winder { mirrored: true }, img, at(256.0, 70.0, 64.0, 64.0), Node { position_type: PositionType::Absolute, ..default() })).id()
+            c.spawn((
+                Winder { mirrored: true },
+                img,
+                at(256.0, 70.0, 64.0, 64.0),
+                Node {
+                    position_type: PositionType::Absolute,
+                    ..default()
+                },
+            ))
+            .id()
         });
     }
     // Faces under the buttons, then the buttons, the sign and its label.
     for (k, offset) in FACE_OFFSETS.iter().enumerate() {
         if let Some(face) = art.faces.get(3 * k) {
             let r = at(64.0 * k as f32 + offset.x, BUTTON_Y + offset.y, 16.0, 16.0);
-            child(&mut commands, &mut |c| c.spawn((Face(k), image_at(face.clone(), r))).id());
+            child(&mut commands, &mut |c| {
+                c.spawn((Face(k), image_at(face.clone(), r))).id()
+            });
         }
     }
     for (k, kind) in TITLE_BUTTONS.iter().enumerate() {
         if let Some(img) = art.buttons.get(k) {
             let r = at(64.0 * k as f32, BUTTON_Y, 64.0, 64.0);
-            child(&mut commands, &mut |c| c.spawn((Button, *kind, image_at(img.clone(), r))).id());
+            child(&mut commands, &mut |c| {
+                c.spawn((Button, *kind, image_at(img.clone(), r))).id()
+            });
         }
     }
-    child(&mut commands, &mut |c| c.spawn((RatingSign, image_at(Handle::default(), at(207.0, 153.0, 32.0, 32.0)), Pickable::IGNORE)).id());
-    child(&mut commands, &mut |c| c.spawn((RatingLabel, image_at(Handle::default(), at(0.0, 0.0, 0.0, 0.0)), Pickable::IGNORE)).id());
+    child(&mut commands, &mut |c| {
+        c.spawn((
+            RatingSign,
+            image_at(Handle::default(), at(207.0, 153.0, 32.0, 32.0)),
+            Pickable::IGNORE,
+        ))
+        .id()
+    });
+    child(&mut commands, &mut |c| {
+        c.spawn((
+            RatingLabel,
+            image_at(Handle::default(), at(0.0, 0.0, 0.0, 0.0)),
+            Pickable::IGNORE,
+        ))
+        .id()
+    });
 }
 
 /// Fits the canvas into the window and places every element on it; tiles
@@ -451,7 +643,9 @@ fn layout(
     mut items: Query<(&At, &mut Node), Without<Canvas>>,
 ) {
     let Ok(window) = windows.single() else { return };
-    let Some((size, _)) = canvases.iter().next().map(|(c, _)| (c.0, ())) else { return };
+    let Some((size, _)) = canvases.iter().next().map(|(c, _)| (c.0, ())) else {
+        return;
+    };
     let (w, h) = (window.width(), window.height());
     let s = (w / size.x).min(h / size.y);
     for (_, mut node) in &mut canvases {
@@ -488,14 +682,20 @@ fn scroll_backdrop(
         let y0 = (origin.y - phase).rem_euclid(size.y) - size.y;
         let cols = ((w - x0) / size.x).ceil().max(1.0) as usize;
         for (i, child) in children.iter().enumerate() {
-            let Ok(mut node) = tiles.get_mut(child) else { continue };
+            let Ok(mut node) = tiles.get_mut(child) else {
+                continue;
+            };
             let (cx, cy) = (i % cols, i / cols);
             let (x, y) = (x0 + cx as f32 * size.x, y0 + cy as f32 * size.y);
             node.left = px(x);
             node.top = px(y);
             node.width = px(size.x);
             node.height = px(size.y);
-            node.display = if cx < cols && y < h { Display::Flex } else { Display::None };
+            node.display = if cx < cols && y < h {
+                Display::Flex
+            } else {
+                Display::None
+            };
         }
     }
 }
@@ -534,14 +734,22 @@ fn show_rating(
 }
 
 /// Frames 0–48 at 35 frames/s, then frame 0 held for 1.4 s.
-fn animate_logo(art: Option<Res<Art>>, time: Res<Time>, mut logos: Query<&mut ImageNode, With<Logo>>) {
+fn animate_logo(
+    art: Option<Res<Art>>,
+    time: Res<Time>,
+    mut logos: Query<&mut ImageNode, With<Logo>>,
+) {
     let Some(art) = art else { return };
     if art.logo.is_empty() {
         return;
     }
     let turn = art.logo.len() as f32 / LOGO_FPS;
     let t = time.elapsed_secs() % (turn + LOGO_HOLD);
-    let frame = if t < turn { (t * LOGO_FPS) as usize % art.logo.len() } else { 0 };
+    let frame = if t < turn {
+        (t * LOGO_FPS) as usize % art.logo.len()
+    } else {
+        0
+    };
     for mut node in &mut logos {
         if node.image != art.logo[frame] {
             node.image = art.logo[frame].clone();
@@ -556,7 +764,10 @@ fn banner_offset(t: f32) -> (f32, bool) {
     let period = travel + BANNER_HOLD;
     let k = (t / period).floor();
     let u = t - k * period;
-    (k * PAPER.width() + BANNER_SPEED * u.min(travel), u >= travel)
+    (
+        k * PAPER.width() + BANNER_SPEED * u.min(travel),
+        u >= travel,
+    )
 }
 
 /// The time since the title screen was entered (the banner restarts then).
@@ -595,7 +806,10 @@ fn animate_winders(
     if art.winder.is_empty() {
         return;
     }
-    let held = strips.iter().next().is_some_and(|s| banner_offset(time.elapsed_secs() - s.0).1);
+    let held = strips
+        .iter()
+        .next()
+        .is_some_and(|s| banner_offset(time.elapsed_secs() - s.0).1);
     if !held {
         last.0 += time.delta_secs() * WINDER_FPS;
         while last.0 >= 1.0 {
@@ -663,8 +877,11 @@ fn title_input(
     mut exit: MessageWriter<AppExit>,
     mut sfx: MessageWriter<crate::sfx::Sfx>,
 ) {
-    let mut pressed: Vec<TitleButton> =
-        buttons.iter().filter(|(i, _)| **i == Interaction::Pressed).map(|(_, b)| *b).collect();
+    let mut pressed: Vec<TitleButton> = buttons
+        .iter()
+        .filter(|(i, _)| **i == Interaction::Pressed)
+        .map(|(_, b)| *b)
+        .collect();
     let keymap = [
         (KeyCode::F1, TitleButton::Play),
         (KeyCode::Enter, TitleButton::Play),
@@ -672,7 +889,12 @@ fn title_input(
         (KeyCode::F12, TitleButton::Options),
         (KeyCode::Escape, TitleButton::Exit),
     ];
-    pressed.extend(keymap.iter().filter(|(k, _)| keys.just_pressed(*k)).map(|(_, b)| *b));
+    pressed.extend(
+        keymap
+            .iter()
+            .filter(|(k, _)| keys.just_pressed(*k))
+            .map(|(_, b)| *b),
+    );
     if keys.just_pressed(KeyCode::ArrowUp) {
         rating.0 = (rating.0 + 1) % 5;
     }
@@ -692,7 +914,11 @@ fn title_input(
         }
         match b {
             // Practice has its own menu.
-            TitleButton::Play => next.set(if rating.0 == crate::menu::PRACTICE { AppState::Practice } else { AppState::Menu }),
+            TitleButton::Play => next.set(if rating.0 == crate::menu::PRACTICE {
+                AppState::Practice
+            } else {
+                AppState::Menu
+            }),
             TitleButton::Code => next.set(AppState::Code),
             TitleButton::Options => next.set(AppState::Options),
             TitleButton::Rating => rating.0 = (rating.0 + 1) % 5,
@@ -723,11 +949,23 @@ struct CorrectText;
 const MAX_CODE_LEN: usize = 8;
 
 /// A line of large-font text centred on x = 160 at height `y`.
-fn centred_line(commands: &mut Commands, parent: Entity, font: &Glyphs, text: &str, y: f32, marker: impl Bundle + Clone) {
+fn centred_line(
+    commands: &mut Commands,
+    parent: Entity,
+    font: &Glyphs,
+    text: &str,
+    y: f32,
+    marker: impl Bundle + Clone,
+) {
     let (glyphs, width) = font.layout(text);
     let left = (160.0 - width / 2.0).round();
     for (x, image) in glyphs {
-        let g = commands.spawn((image_at(image, at(left + x, y, font.size.x, font.size.y)), marker.clone())).id();
+        let g = commands
+            .spawn((
+                image_at(image, at(left + x, y, font.size.x, font.size.y)),
+                marker.clone(),
+            ))
+            .id();
         commands.entity(parent).add_child(g);
     }
 }
@@ -736,7 +974,12 @@ fn centred_line(commands: &mut Commands, parent: Entity, font: &Glyphs, text: &s
 struct Plain;
 
 /// Builds the code screen when it is shown and doesn't exist yet.
-fn spawn_code(mut commands: Commands, art: Option<Res<Art>>, roots: Query<(), With<ScreenRoot>>, mut code: ResMut<CodeText>) {
+fn spawn_code(
+    mut commands: Commands,
+    art: Option<Res<Art>>,
+    roots: Query<(), With<ScreenRoot>>,
+    mut code: ResMut<CodeText>,
+) {
     let Some(art) = art else { return };
     if !roots.is_empty() {
         return;
@@ -745,11 +988,33 @@ fn spawn_code(mut commands: Commands, art: Option<Res<Art>>, roots: Query<(), Wi
     let canvas = spawn_screen(&mut commands, &art, CODE_SCROLL, Color::WHITE);
     if let Some(font) = &art.large {
         centred_line(&mut commands, canvas, font, "Enter Password", 60.0, Plain);
-        centred_line(&mut commands, canvas, font, "Password Correct", 140.0, (CorrectText, Visibility::Hidden));
-        centred_line(&mut commands, canvas, font, "Press Return when finished", 160.0, Plain);
+        centred_line(
+            &mut commands,
+            canvas,
+            font,
+            "Password Correct",
+            140.0,
+            (CorrectText, Visibility::Hidden),
+        );
+        centred_line(
+            &mut commands,
+            canvas,
+            font,
+            "Press Return when finished",
+            160.0,
+            Plain,
+        );
     }
     for k in 0..MAX_CODE_LEN {
-        let s = commands.spawn((Slot(k), image_at(Handle::default(), at(32.0 + 34.0 * k as f32, 90.0, 32.0, 32.0)))).id();
+        let s = commands
+            .spawn((
+                Slot(k),
+                image_at(
+                    Handle::default(),
+                    at(32.0 + 34.0 * k as f32, 90.0, 32.0, 32.0),
+                ),
+            ))
+            .id();
         commands.entity(canvas).add_child(s);
     }
 }
@@ -838,13 +1103,19 @@ fn animate_slots(
     }
     let now = time.elapsed_secs();
     let step = (now * LETTER_FPS) as usize;
-    let letter = |c: u8, f: usize| title::LETTER_IDLE_FRAMES + (c - b'A') as usize * title::LETTER_FRAMES + f;
+    let letter = |c: u8, f: usize| {
+        title::LETTER_IDLE_FRAMES + (c - b'A') as usize * title::LETTER_FRAMES + f
+    };
     for (slot, mut node) in &mut slots {
         let k = slot.0;
         let index = if let Some(&(c, typed)) = code.letters.get(k) {
             let f = ((now - typed) * LETTER_FPS) as usize;
             letter(c, if f < 16 { f } else { 12 + (f - 16) % 4 })
-        } else if let Some(&(_, c, when)) = code.erasing.iter().find(|e| e.0 == k && ((now - e.2) * LETTER_FPS) < 4.0) {
+        } else if let Some(&(_, c, when)) = code
+            .erasing
+            .iter()
+            .find(|e| e.0 == k && ((now - e.2) * LETTER_FPS) < 4.0)
+        {
             letter(c, 16 + ((now - when) * LETTER_FPS) as usize)
         } else {
             (step + k.min(MAX_CODE_LEN - 2)) % (title::LETTER_IDLE_FRAMES + 1)
@@ -856,7 +1127,11 @@ fn animate_slots(
         }
     }
     for mut v in &mut correct {
-        *v = if code.accepted.is_some() { Visibility::Inherited } else { Visibility::Hidden };
+        *v = if code.accepted.is_some() {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
     }
 }
 
@@ -881,16 +1156,35 @@ fn attract(
     mut idle: Local<f32>,
     mut turn: Local<usize>,
 ) {
-    let input = keys.get_pressed().next().is_some() || mouse.get_pressed().next().is_some() || motion.delta != Vec2::ZERO || touches.iter().next().is_some();
-    *idle = if input { 0.0 } else { *idle + time.delta_secs() };
+    let input = keys.get_pressed().next().is_some()
+        || mouse.get_pressed().next().is_some()
+        || motion.delta != Vec2::ZERO
+        || touches.iter().next().is_some();
+    *idle = if input {
+        0.0
+    } else {
+        *idle + time.delta_secs()
+    };
     if *idle < ATTRACT_AFTER {
         return;
     }
     *idle = 0.0;
-    let demos: Vec<u32> = l3d_sim::demos::SOLUTIONS.iter().map(|s| s.level).filter(|&n| n >= crate::menu::PRACTICE as u32 * crate::menu::LEVELS_PER_RATING).collect();
+    let demos: Vec<u32> = l3d_sim::demos::SOLUTIONS
+        .iter()
+        .map(|s| s.level)
+        .filter(|&n| n >= crate::menu::PRACTICE as u32 * crate::menu::LEVELS_PER_RATING)
+        .collect();
     let n = demos[*turn % demos.len()];
     *turn += 1;
-    let Some(log) = data.0.level(n).ok().zip(data.0.blocks(n).ok()).and_then(|(level, blocks)| l3d_sim::demos::demo(n, &level, &blocks)) else { return };
+    let Some(log) = data
+        .0
+        .level(n)
+        .ok()
+        .zip(data.0.blocks(n).ok())
+        .and_then(|(level, blocks)| l3d_sim::demos::demo(n, &level, &blocks))
+    else {
+        return;
+    };
     current.number = n;
     current.loaded = None;
     game.replay = Some(crate::Replay::demo(log, AppState::Title));
