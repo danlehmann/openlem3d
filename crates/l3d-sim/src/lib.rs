@@ -1357,15 +1357,23 @@ impl Simulation {
                     l.dir = l.dir.reverse();
                     return;
                 }
-                // Turners send walkers off along the turner's own line: a
-                // walker turns once it is level with the turner, so it
-                // leaves on the path the turner stands on (provisional).
-                Some(to) if near(next) && to != l.dir => {
+                // Turners send walkers off from the centre of the turner's
+                // cell, ahead of the turner standing at its edge (owner's
+                // observation); a walker already past the centre turns once
+                // it is level with the turner.
+                Some(to) if to != l.dir && (Self::cell_of(o.pos) == here || near(next)) => {
                     let axis = if d[0] != 0 { 0 } else { 2 };
-                    let before = (o.pos[axis] - l.pos[axis]) * d[axis];
-                    let after = (o.pos[axis] - next[axis]) * d[axis];
-                    if before > 0 && after <= 0 {
-                        l.pos[axis] = o.pos[axis];
+                    let centre = o.pos[axis].div_euclid(SUB) * SUB + SUB / 2;
+                    let crosses = |at: i32| (at - l.pos[axis]) * d[axis] > 0 && (at - next[axis]) * d[axis] <= 0;
+                    let at = if Self::cell_of(o.pos) == here && crosses(centre) {
+                        Some(centre)
+                    } else if near(next) && crosses(o.pos[axis]) {
+                        Some(o.pos[axis])
+                    } else {
+                        None
+                    };
+                    if let Some(at) = at {
+                        l.pos[axis] = at;
                         l.dir = to;
                         return;
                     }

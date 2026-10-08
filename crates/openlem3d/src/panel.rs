@@ -56,6 +56,10 @@ const SKILL_FPS: f32 = 50.0;
 /// Pause paws: one cell per 70 Hz frame.
 const PAWS_FPS: f32 = 70.0;
 const ARROW_FPS: f32 = 20.0;
+/// The bomb's mushroom cloud, played once on a nuke (rate ours).
+const EXPLOSION_FPS: f32 = 14.0;
+/// The longest gap between the two clicks of a double click (ours).
+const DOUBLE_CLICK_SECONDS: f32 = 0.5;
 
 /// Panel graphics, uploaded once.
 #[derive(Resource)]
@@ -194,6 +198,7 @@ enum Animated {
     Faster,
     Arrow,
     Face,
+    Nuke,
 }
 
 fn spawn_panel(mut commands: Commands, art: Option<Res<Art>>, mut images: ResMut<Assets<Image>>) {
@@ -234,7 +239,7 @@ fn spawn_panel(mut commands: Commands, art: Option<Res<Art>>, mut images: ResMut
     item(&mut commands, Vec2::new(260.0, 0.0), Vec2::new(32.0, 16.0), art.labels[0].clone(), None, None);
     item(&mut commands, Vec2::new(260.0, 16.0), Vec2::new(32.0, 16.0), art.labels[1].clone(), None, None);
     item(&mut commands, Vec2::new(260.0, 32.0), Vec2::new(32.0, 16.0), art.labels[2].clone(), None, None);
-    item(&mut commands, Vec2::new(260.0, 48.0), icon24, p(icon::BOMB), Some(Action::Nuke), None);
+    item(&mut commands, Vec2::new(260.0, 48.0), icon24, p(icon::BOMB), Some(Action::Nuke), Some(Animated::Nuke));
     item(&mut commands, Vec2::new(284.0, 48.0), icon24, p(icon::PLAY), Some(Action::FastForward), Some(Animated::FastForward));
     item(&mut commands, Vec2::new(260.0, 72.0), icon24, p(icon::CAMERA), Some(Action::Camera), None);
     item(&mut commands, Vec2::new(284.0, 72.0), icon24, p(icon::PAUSE.start), Some(Action::Pause), Some(Animated::Paws));
@@ -308,6 +313,7 @@ fn buttons(
     mut pending_turner: ResMut<crate::hud::PendingTurner>,
     scene_camera: Res<crate::scene_render::SceneCamera>,
     windows: Query<&Window>,
+    (time, mut last_bomb_click): (Res<Time<Real>>, Local<Option<f32>>),
 ) {
     for (interaction, action) in &pressed {
         if *interaction != Interaction::Pressed {
@@ -336,31 +342,48 @@ fn buttons(
                     }
                 }
             }
+            // Only a double click on the bomb nukes (owner's recollection);
+            // Alt+Q works at once.
             Action::Nuke => {
-                if !sim.nuked {
-                    sfx.write(crate::sfx::Sfx("VOXFX/GEDDON1"));
+                let now = time.elapsed_secs();
+                if last_bomb_click.is_some_and(|t| now - t <= DOUBLE_CLICK_SECONDS) {
+                    *last_bomb_click = None;
+                    if !sim.nuked {
+                        sfx.write(crate::sfx::Sfx("VOXFX/GEDDON1"));
+                    }
+                    sim.nuke();
+                } else {
+                    *last_bomb_click = Some(now);
                 }
-                sim.nuke();
             }
             Action::FastForward => game.fast_forward = !game.fast_forward,
             Action::Pause => game.paused = !game.paused,
             Action::Camera => {
                 if let (Some(cams), Ok(mut view)) = (&cameras, views.single_mut()) {
                     preset.0 = (preset.0 + 1) % 4;
-                    view.set_preset(&cams.cameras[preset.0]);
+                    view.glide_to_preset(&cams.cameras[preset.0]);
                     *lemming_cam = LemmingCam::Off;
                 }
             }
             // The arrow arms highlighting (the next click on a lemming picks
-            // it); clicked again, it disarms and drops the highlight. In the
-            // lemming view it can't be dropped: the lemming ridden with stays
-            // the current one (owner's observation).
+            // it) and deselects the skill, as a skill button then gives its
+            // skill to the highlighted lemming; clicked again, it disarms and
+            // drops the highlight. In the lemming view it moves on to the
+            // next lemming in play and rides along with it (owner's
+            // observation).
             Action::Arrow => {
                 if let Some(i) = lemming_cam.following() {
-                    *highlight = crate::hud::Highlight { on: true, lemming: Some(i) };
+                    let n = sim.lemmings.len();
+                    let next = (1..=n).map(|k| (i + k) % n).find(|&j| !sim.lemmings[j].gone).unwrap_or(i);
+                    *highlight = crate::hud::Highlight { on: true, lemming: Some(next) };
+                    selected.0 = None;
+                    if let Ok(view) = views.single() {
+                        lemming_cam.follow(next, view);
+                    }
                 } else if highlight.on {
                     *highlight = crate::hud::Highlight::default();
                 } else {
+                    selected.0 = None;
                     let size = windows.single().map_or(Vec2::ONE, |w| Vec2::new(w.width(), w.height()));
                     *highlight = crate::hud::Highlight { on: true, lemming: crate::hud::nearest_to_centre(sim, &scene_camera, size) };
                 }
@@ -444,9 +467,17 @@ fn animate(
     keys: Res<ButtonInput<KeyCode>>,
     mut items: Query<(&Animated, &mut ImageNode)>,
     highlight: Res<crate::hud::Highlight>,
+    mut nuked_at: Local<Option<f32>>,
 ) {
     let Some(art) = art else { return };
     let t = time.elapsed_secs();
+    let nuked = game.sim.as_ref().is_some_and(|s| s.nuked);
+    match (nuked, *nuked_at) {
+        (true, None) => *nuked_at = Some(t),
+        (false, Some(_)) => *nuked_at = None,
+        _ => {}
+    }
+    let nuked_at = *nuked_at;
     let down = |a: Action| held.iter().any(|(i, b)| *i == Interaction::Pressed && *b == a);
     for (anim, mut node) in &mut items {
         let image = match *anim {
@@ -481,6 +512,11 @@ fn animate(
             },
             // Squinting when idle, eyes open when armed or riding along.
             Animated::Face => art.panel[icon::FACE + (*lemming_cam == LemmingCam::Off) as usize].clone(),
+            // The mushroom cloud once from the nuke, then the bomb again.
+            Animated::Nuke => {
+                let frame = nuked_at.map_or(usize::MAX, |at| ((t - at) * EXPLOSION_FPS) as usize);
+                art.panel[icon::EXPLOSION.clone().nth(frame).unwrap_or(icon::BOMB)].clone()
+            }
         };
         if node.image != image {
             node.image = image;

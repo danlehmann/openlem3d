@@ -209,7 +209,7 @@ fn main() {
         .add_systems(Startup, (spawn_camera, turbo))
         .add_systems(
             Update,
-            (switch_level, load_level, refresh_scenery, camera_controls).chain().run_if(in_state(menu::AppState::Playing)),
+            (pause_keys, load_level, refresh_scenery, camera_controls).chain().run_if(in_state(menu::AppState::Playing)),
         )
         .run();
 }
@@ -244,6 +244,25 @@ struct ViewCamera {
     /// Roll in radians about the view direction, turning the picture
     /// anticlockwise; 0 except in the lemming view.
     roll: f32,
+    /// A glide under way to a preset view.
+    glide: Option<Glide>,
+}
+
+/// A smooth move from one view (position and yaw) to another, `t` seconds
+/// in; it turns the short way round.
+#[derive(Clone, Copy)]
+struct Glide {
+    from: (Vec3, f32),
+    to: (Vec3, f32),
+    t: f32,
+}
+
+/// How long a glide to a preset view takes, in seconds (ours).
+const GLIDE_SECONDS: f32 = 0.8;
+
+/// A preset camera's position and yaw.
+fn preset_view(p: &CameraPreset) -> (Vec3, f32) {
+    (Vec3::new(16.0 + p.x as f32 / 256.0, 8.0 + p.y as f32 / 256.0, 16.0 + p.z as f32 / 256.0), p.rotation as f32 * std::f32::consts::FRAC_PI_2)
 }
 
 impl ViewCamera {
@@ -251,9 +270,36 @@ impl ViewCamera {
         Vec3::new(-self.yaw.cos(), 0.0, -self.yaw.sin())
     }
 
+    /// Jumps to a preset view.
     fn set_preset(&mut self, p: &CameraPreset) {
-        self.pos = Vec3::new(16.0 + p.x as f32 / 256.0, 8.0 + p.y as f32 / 256.0, 16.0 + p.z as f32 / 256.0);
-        self.yaw = p.rotation as f32 * std::f32::consts::FRAC_PI_2;
+        (self.pos, self.yaw) = preset_view(p);
+        self.glide = None;
+    }
+
+    /// Starts gliding to a preset view.
+    fn glide_to_preset(&mut self, p: &CameraPreset) {
+        self.glide = Some(Glide { from: (self.pos, self.yaw), to: preset_view(p), t: 0.0 });
+    }
+
+    /// Moves a glide on by `dt` seconds, ending it on arrival.
+    fn advance_glide(&mut self, dt: f32) {
+        let Some(g) = self.glide.as_mut() else { return };
+        g.t += dt;
+        let s = (g.t / GLIDE_SECONDS).min(1.0);
+        let s = s * s * (3.0 - 2.0 * s);
+        let turn = (g.to.1 - g.from.1 + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU) - std::f32::consts::PI;
+        self.pos = g.from.0.lerp(g.to.0, s);
+        self.yaw = g.from.1 + turn * s;
+        if g.t >= GLIDE_SECONDS {
+            self.glide = None;
+        }
+    }
+
+    /// Ends a glide at once, at its destination.
+    fn finish_glide(&mut self) {
+        if let Some(g) = self.glide.take() {
+            (self.pos, self.yaw) = g.to;
+        }
     }
 }
 
@@ -337,22 +383,13 @@ fn sky_left_column(yaw: f32) -> f32 {
 fn spawn_camera(mut commands: Commands) {
     // A 2D camera drives the frame; the scene renderer draws the 3D level
     // into its target before sprites and UI.
-    commands.spawn((Camera2d, Tonemapping::None, Msaa::Off, ViewCamera { pos: Vec3::new(16.0, 8.0, 16.0), yaw: 0.0, roll: 0.0 }));
+    commands.spawn((Camera2d, Tonemapping::None, Msaa::Off, ViewCamera { pos: Vec3::new(16.0, 8.0, 16.0), yaw: 0.0, roll: 0.0, glide: None }));
 }
 
 /// Whether the level about to be played is starting afresh, rather than
 /// resuming after the options screen.
 pub fn fresh_level(current: Res<CurrentLevel>) -> bool {
     current.loaded.is_none()
-}
-
-fn switch_level(keys: Res<ButtonInput<KeyCode>>, mut current: ResMut<CurrentLevel>) {
-    if keys.just_pressed(KeyCode::BracketRight) {
-        current.number = (current.number + 1) % 100;
-    }
-    if keys.just_pressed(KeyCode::BracketLeft) {
-        current.number = (current.number + 99) % 100;
-    }
 }
 
 /// The level being played.
@@ -414,9 +451,19 @@ impl Replay {
 /// is unmeasured).
 const FAST_FORWARD_TICKS: u32 = 3;
 
-fn step_simulation(keys: Res<ButtonInput<KeyCode>>, options: Res<Options>, mut game: ResMut<Game>, mut scene: ResMut<SceneContent>) {
-    if keys.just_pressed(KeyCode::KeyP) {
+/// P or Space pauses and resumes the level (not during the preview, which
+/// keeps it waiting itself).
+fn pause_keys(keys: Res<ButtonInput<KeyCode>>, preview: Res<briefing::Preview>, mut game: ResMut<Game>) {
+    if !preview.active && keys.any_just_pressed([KeyCode::KeyP, KeyCode::Space]) {
         game.paused = !game.paused;
+    }
+}
+
+fn step_simulation(options: Res<Options>, mut game: ResMut<Game>, mut scene: ResMut<SceneContent>, views: Query<&ViewCamera>) {
+    // The level waits while the camera glides to a preset view, so the
+    // glide costs the player no time.
+    if views.iter().any(|v| v.glide.is_some()) {
+        return;
     }
     let Game { sim: Some(sim), paused: false, terrain, fast_forward, replay, doors, .. } = &mut *game else { return };
     for _ in 0..if *fast_forward { FAST_FORWARD_TICKS } else { 1 } {
@@ -534,7 +581,7 @@ pub(crate) fn camera_controls(
     info: Option<Res<LevelInfo>>,
     windows: Query<&Window>,
     mut scene_cam: ResMut<SceneCamera>,
-    lemming_cam: Res<lemming_cam::LemmingCam>,
+    (lemming_cam, preview): (Res<lemming_cam::LemmingCam>, Res<briefing::Preview>),
     mut preset: ResMut<PresetIndex>,
     settings: Res<settings::Settings>,
     game: Res<Game>,
@@ -566,11 +613,12 @@ pub(crate) fn camera_controls(
         if let Some(info) = &info {
             for (i, k) in presets.iter().enumerate() {
                 if keys.just_pressed(*k) {
-                    cam.set_preset(&info.cameras[i]);
+                    cam.glide_to_preset(&info.cameras[i]);
                     preset.0 = i;
                 }
             }
         }
+        let gliding = cam.glide.is_some();
         let held = |a: KeyCode, b: KeyCode| (keys.pressed(a) || keys.pressed(b)) as i32 as f32;
         let turn = held(KeyCode::KeyE, KeyCode::ArrowRight) - held(KeyCode::KeyQ, KeyCode::ArrowLeft);
         cam.yaw += turn * 1.8 * dt;
@@ -600,20 +648,31 @@ pub(crate) fn camera_controls(
             + right * side;
         cam.pos += mv * speed * dt;
         // The wheel raises and lowers the camera.
+        let notches = match scroll.unit {
+            MouseScrollUnit::Line => scroll.delta.y,
+            MouseScrollUnit::Pixel => scroll.delta.y / 50.0,
+        };
         if dt > 0.0 {
-            let notches = match scroll.unit {
-                MouseScrollUnit::Line => scroll.delta.y,
-                MouseScrollUnit::Pixel => scroll.delta.y / 50.0,
-            };
             cam.pos.y += notches * WHEEL_STEP;
+        }
+        // Moving the camera by hand stops a glide where it is.
+        let manual = dt > 0.0 && (turn != 0.0 || spin != 0.0 || dragging || mv != Vec3::ZERO || notches != 0.0);
+        if manual {
+            cam.glide = None;
+        } else {
+            cam.advance_glide(time.delta_secs());
         }
         // Never below the ground plane (the sea and land).
         cam.pos.y = cam.pos.y.max(scene_build::GROUND_Y + CAMERA_RADIUS);
         // The camera can't enter blocks (unless they are marked passable for
-        // it); it slides along them. Preset jumps and the lemming view are
-        // exempt.
+        // it); it slides along them. Preset jumps and glides, the lemming
+        // view and the preview are exempt; after a glide the camera moves
+        // freely until it is clear of blocks.
+        if gliding {
+            *last_free = None;
+        }
         if let Some((level, blocks, _)) = &game.terrain {
-            let jumped = keys.any_just_pressed(presets) || lemming_cam.following().is_some();
+            let jumped = keys.any_just_pressed(presets) || lemming_cam.following().is_some() || preview.active || gliding;
             if let Some(free) = *last_free
                 && !jumped
                 && camera_blocked(level, blocks, cam.pos)

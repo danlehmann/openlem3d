@@ -518,7 +518,9 @@ animated; from the navigation document, not re-measured here).
 
 **Nuke.** Single and double clicks on the bomb had no effect in these runs
 (the navigation document also found clicks unreliable; Alt+Q works). Its
-animation (explosion cells 27–37) was not observed.
+animation (explosion cells 27–37) was not observed. The owner recalls that a
+single click does nothing and a double click nukes, with the explosion
+playing on the icon; ours plays it once at 14 frames/s, then shows the bomb.
 
 **Turner arrows.** After the first click with the turner, two white arrows with a thin black outline, about 12 game pixels tall, appear over the lemming, one per direction it could be turned (seen walking across the screen: an up arrow at the head, a down arrow over the feet). They take turns, never shown together, swapping 7–10 times a second, until the second click (observed: Practice "Turner" demo, 50 ms bursts). Ours draws `MOUSE` cells 11–42 picked by each side's screen direction, swapping every 0.12 s; once the pointer is clearly on one side, only that arrow shows, previewing the direction the next click gives (ours; the demo shows no pointer, so the original's behaviour there is unknown).
 
@@ -632,12 +634,13 @@ skill gives it straight to the highlighted lemming without selecting it (the
 icon plays its animation once); the highlight stays. The face then rides
 along with the highlighted lemming at once; the face again leaves, the
 highlight staying. Entering the lemming view with the face and a click also
-highlights that lemming. The arrow again switches highlighting off, except
-in the lemming view, where it does nothing: the lemming ridden with stays
-highlighted (owner's observation). Highlighting also
+highlights that lemming. Switching highlighting on deselects the skill, since
+a skill button would then give it to the highlighted lemming (owner's
+observation). The arrow again switches highlighting off, except in the
+lemming view, where it moves on to the next lemming and rides along with it
+(owner's observation; ours takes the next in release order). Highlighting also
 ends when the lemming ridden with dies or leaves (about 2.7 s after). No arrow
-shows over the lemming ridden with. Whether the arrow switches the lemming
-view to another lemming is unconfirmed (ours does).
+shows over the lemming ridden with.
 
 **Practice grid order.** The face (Virtual Lemming, level 90
 "Claustrophobic") stands before the arrow (Hi-Light Lemming, level 89) in the

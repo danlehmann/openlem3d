@@ -205,6 +205,9 @@ pub struct Preview {
     practice: bool,
     started: bool,
     angle: f32,
+    /// The camera is gliding from where the flyover left it to camera 1;
+    /// the level starts when it arrives.
+    gliding: bool,
 }
 
 /// Preview orbit, measured in the original (`docs/spec/camera.md`): radius in
@@ -284,17 +287,29 @@ fn preview(
     }
     let on_prompt = choices.iter().any(|(i, _)| *i != Interaction::None);
     let any = keys.get_just_pressed().next().is_some() || (mouse.get_just_pressed().next().is_some() && !on_prompt) || (touches.any_just_released() && !on_prompt);
-    if state.started && any {
-        state.active = false;
-        game.paused = false;
-        // The level starts from camera 1, not where the flyover was.
-        if let (Ok(mut view), Some((level, ..))) = (views.single_mut(), game.terrain.as_ref()) {
-            view.set_preset(&level.cameras[0]);
-            preset.0 = 0;
+    let Ok(mut view) = views.single_mut() else { return };
+    // The level starts from camera 1: the camera glides there from where
+    // the flyover left it, the level still waiting; input meanwhile skips
+    // the rest.
+    // (`camera_controls` moves the glide on.)
+    if state.gliding {
+        if any {
+            view.finish_glide();
+        }
+        if view.glide.is_none() {
+            *state = Preview::default();
+            game.paused = false;
         }
         return;
     }
-    let Ok(mut view) = views.single_mut() else { return };
+    if state.started && any {
+        if let Some((level, ..)) = game.terrain.as_ref() {
+            view.glide_to_preset(&level.cameras[0]);
+            preset.0 = 0;
+        }
+        state.gliding = true;
+        return;
+    }
     game.paused = true;
     let first = !state.started;
     // Input that started the preview doesn't end it.
@@ -375,7 +390,7 @@ fn preview_overlay(
     mut cache: Local<HashMap<u8, Option<ScenePics>>>,
     roots: Query<Entity, With<PreviewRoot>>,
 ) {
-    if !state.active {
+    if !state.active || state.gliding {
         for e in &roots {
             commands.entity(e).despawn();
         }

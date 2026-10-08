@@ -611,8 +611,14 @@ pub fn rebuild_blocks(scene: &SceneData, layer: usize, level: &Level, blocks: &B
     out
 }
 
-/// Builders' bricks as brown boxes. The original's bricks are thin and brown
-/// (`docs/spec/behaviour.md`); the texture is our own.
+/// How far a brick's underside lies below its top, in units: the original
+/// draws bricks as thin horizontal planes with nothing vertical (owner's
+/// observation); ours gets an underside a hair below so it shows from below.
+const BRICK_DRAWN_THICKNESS: f32 = 0.02;
+
+/// Builders' bricks as thin brown planks at the top of each simulated brick.
+/// The original's bricks are thin and brown (`docs/spec/behaviour.md`); the
+/// texture is our own.
 fn brick_layer(bricks: &[l3d_sim::Brick]) -> SceneLayer {
     const W: u32 = 16;
     const H: u32 = 4;
@@ -627,17 +633,12 @@ fn brick_layer(bricks: &[l3d_sim::Brick]) -> SceneLayer {
     let mut b = LayerBuilder::default();
     let sub = l3d_sim::SUB as f32;
     for brick in bricks {
-        let (lo, hi) = (brick.min.map(|v| v as f32 / sub), brick.max.map(|v| v as f32 / sub));
+        let (mut lo, hi) = (brick.min.map(|v| v as f32 / sub), brick.max.map(|v| v as f32 / sub));
+        lo[1] = hi[1] - BRICK_DRAWN_THICKNESS;
         let p = |x: usize, y: usize, z: usize| [[lo[0], hi[0]][x], [lo[1], hi[1]][y], [lo[2], hi[2]][z]];
-        // Each face counter-clockwise from outside, with its brightness.
-        let faces = [
-            ([p(0, 1, 0), p(0, 1, 1), p(1, 1, 1), p(1, 1, 0)], 1.0),
-            ([p(0, 0, 0), p(1, 0, 0), p(1, 0, 1), p(0, 0, 1)], 0.5),
-            ([p(0, 0, 1), p(1, 0, 1), p(1, 1, 1), p(0, 1, 1)], 0.8),
-            ([p(1, 0, 0), p(0, 0, 0), p(0, 1, 0), p(1, 1, 0)], 0.8),
-            ([p(1, 0, 1), p(1, 0, 0), p(1, 1, 0), p(1, 1, 1)], 0.7),
-            ([p(0, 0, 0), p(0, 0, 1), p(0, 1, 1), p(0, 1, 0)], 0.7),
-        ];
+        // The top and the underside, each counter-clockwise from outside,
+        // with its brightness.
+        let faces = [([p(0, 1, 0), p(0, 1, 1), p(1, 1, 1), p(1, 1, 0)], 1.0), ([p(0, 0, 0), p(1, 0, 0), p(1, 0, 1), p(0, 0, 1)], 0.5)];
         for (corners, brightness) in faces {
             let base = b.base();
             for (c, uv) in corners.iter().zip([[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]]) {

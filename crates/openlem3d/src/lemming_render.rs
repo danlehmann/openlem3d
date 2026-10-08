@@ -109,8 +109,14 @@ enum Angles {
     /// view faces screen-left (verified by eye on the walker, cells 12–17,
     /// and the ¾ views 6–11 and 18–23); the right-hand angles mirror them.
     Five,
-    /// Eight blocks going round the lemming from the front (asymmetric poses).
+    /// Eight blocks going round the lemming from the front by its right
+    /// (asymmetric poses; the floater's order is unverified).
     Eight,
+    /// Eight blocks going round the lemming from the front by its left, as
+    /// the turner's: its block 2 (cells 44–50) faces screen-left and block 6
+    /// (72–78) screen-right, the pointing arm towards the camera (verified
+    /// by eye).
+    EightByLeft,
     /// One block, the same from every side (smoke, sparks).
     One,
 }
@@ -155,7 +161,7 @@ fn anim_for(state: State) -> Anim {
         State::Walking => anim(0, 6, Five),
         // Not found yet: lemmings walk into the exit.
         State::Exiting => anim(0, 6, Five),
-        State::Turning { .. } => anim(30, 7, Eight),
+        State::Turning { .. } => anim(30, 7, EightByLeft),
         State::Blocking => anim(86, 7, Five),
         State::Falling { .. } => Anim { first: 399, frames: 5, angles: Five, playback: Playback::MirroredCycle(FALL_CYCLE) },
         State::Digging => anim(161, 8, Five),
@@ -193,6 +199,7 @@ fn cell_for(a: Anim, view: ViewAngle, ticks: u32) -> (u32, bool) {
     };
     let (block, mirror) = match a.angles {
         Angles::Eight => (view.round_index(), false),
+        Angles::EightByLeft => ((8 - view.round_index()) % 8, false),
         Angles::One => (0, false),
         Angles::Five => {
             let r = view.round_index();
@@ -402,8 +409,16 @@ pub fn build(sim: &Simulation, atlas_rows: u32, camera_yaw: f32, doors: &[Door],
             // A bomber swells over the last ticks of its fuse (observed:
             // about 10 ticks after the last countdown digit).
             _ if l.fuse.is_some_and(|f| f <= SWELL_TICKS) && !l.state.is_terminal() => {
-                let swelled = SWELL_TICKS - l.fuse.unwrap_or(0);
-                cell_for(once(271, 5, Angles::Five), view, swelled * 5 / SWELL_TICKS)
+                // Hand to the nose, holding it shut for most of the time
+                // (frames 1–2), then swelling (3–4); the split is ours.
+                let frame = match SWELL_TICKS - l.fuse.unwrap_or(0) {
+                    0 => 0,
+                    1..=2 => 1,
+                    3..=6 => 2,
+                    7..=8 => 3,
+                    _ => 4,
+                };
+                cell_for(once(271, 5, Angles::Five), view, frame * TICKS_PER_FRAME)
             }
             _ => cell_for(anim_for(l.state), view, l.state_ticks),
         };
