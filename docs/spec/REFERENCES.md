@@ -12,3 +12,6 @@ these sources by their tag, for example **[L3DEdit]**.
 | **[RNC]** | Public descriptions of Rob Northen Computing's *ProPack* method 1 compression (for example, Simon Tatham's public-domain `dernc`) | Rob Northen (format), Simon Tatham (decoder description) | RNC decompression |
 | **[GameFAQs-L3D]** | GameFAQs 3D Lemmings board, *"All the Passwords..."* thread (2010) — <https://gamefaqs.gamespot.com/boards/572479-3d-lemmings/55586396> | Mezmorize99 | List of 80 level codes plus five extra codes |
 | **[LU3DWalk]** | Lemmings Universe, *3D Lemmings Walkthrough* — <https://lemmingsuniverse.net/3dwalk.html> | Lemmings Universe | One-line solutions per level (for example Fun 1: "Drop off the 3rd level and divert accordingly.") |
+| **[LemWiki]** | Lemmings Wiki (Fandom), level pages of *3D Lemmings* — <https://lemmings.fandom.com/> | wiki contributors | Step-by-step solutions per level |
+| **[XeyeWalk]** | *A Walkthrough for 3d Lemmings* — <http://www.xeye.org/1995-2000/Other/3D-Lemmings_Walkthrough.html> (read through search-engine excerpts; the host's certificate fails) | unknown author | Step-by-step solutions, including Mayhem levels |
+| **[CoreGamers]** | CoreGamers, *Lemmings 3D walkthrough* (formerly The Spoiler Centre) — <https://coregamers.com/walkthrough/lemmings-3d> | unknown author | Solutions to the Fun and Tricky levels |

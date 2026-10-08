@@ -352,11 +352,37 @@ fn face_tiles(texture: u8, mods: u8) -> (u32, u32) {
 /// Block ids with hard-coded invisible behaviour (see `docs/spec/blk.md`).
 const INVISIBLE_IDS: [u8; 2] = [3, 4];
 
-/// Vertical extent `(bottom, top)` within the cell, from the segment mask.
-fn segment_span(segments: u8) -> (f32, f32) {
-    let lo = segments.trailing_zeros() as f32;
-    let hi = 8.0 - segments.leading_zeros() as f32; // index of highest set bit + 1
-    (lo / 4.0, hi / 4.0)
+/// Vertical extents `(bottom, top)` within the cell of the runs of
+/// consecutive segments in the mask, bottom first: one for a whole block, two
+/// once a basher has cut out the middle.
+fn segment_runs(segments: u8) -> Vec<(f32, f32)> {
+    let mut runs = Vec::new();
+    let mut start = None;
+    for i in 0..=4 {
+        match (start, i < 4 && segments & (1 << i) != 0) {
+            (None, true) => start = Some(i),
+            (Some(s), false) => {
+                runs.push((s as f32 / 4.0, i as f32 / 4.0));
+                start = None;
+            }
+            _ => {}
+        }
+    }
+    runs
+}
+
+/// The height within the cell of a shape's unit-cell point at height `v`
+/// (0–1), for the segment run `y0..y1`. Shapes are stretched to the run,
+/// except that 22.5° ramps keep their slope: a ramp's top falls ½ unit
+/// across the cell (or the run's height, if less) from the run's top (8),
+/// or rises as far from the run's bottom (9), so a half-height ramp cell
+/// and a full one beside it make one even slope.
+fn shape_y(shape: u8, v: f32, y0: f32, y1: f32) -> f32 {
+    match shape {
+        8 => y0.max(y1 - (1.0 - v)),
+        9 => y1.min(y0 + v),
+        _ => y0 + v * (y1 - y0),
+    }
 }
 
 struct Grid<'a> {
@@ -463,139 +489,141 @@ pub fn build(
             *unsupported.entry(cell.shape).or_default() += 1;
             continue;
         };
-        let (y0, y1) = segment_span(cell.segments);
-        let origin = [x as f32, y as f32, z as f32];
-        let mut solid_verts: Vec<[f32; 3]> = Vec::new();
-        let mut placed: Vec<PlacedPoly> = Vec::new();
-        // A hatch keeps all its walls; each flap is a second copy of a side
-        // wall, swung open below it.
-        let flaps = polys
-            .iter()
-            .filter(|p| is_flap(cell, p.src))
-            .map(|p| (p, true));
-        for (p, flap) in polys.iter().map(|p| (p, false)).chain(flaps) {
-            let uvs: Vec<[f32; 2]> = p
-                .verts
+        for (y0, y1) in segment_runs(cell.segments) {
+            let origin = [x as f32, y as f32, z as f32];
+            let mut solid_verts: Vec<[f32; 3]> = Vec::new();
+            let mut placed: Vec<PlacedPoly> = Vec::new();
+            // A hatch keeps all its walls; each flap is a second copy of a side
+            // wall, swung open below it.
+            let flaps = polys
                 .iter()
-                .map(|v| {
-                    // Faces show the part of their tile matching their height;
-                    // flaps show its bottom part, or the top (below) when the
-                    // art is there.
-                    // A flap is upside down once open (its top edge swings out and
-                    // down), so its picture is flipped to keep the hinges at the
-                    // hinge.
-                    let ly = if flap {
-                        (1.0 - v[1]) * (y1 - y0)
-                    } else {
-                        y0 + v[1] * (y1 - y0)
+                .filter(|p| is_flap(cell, p.src))
+                .map(|p| (p, true));
+            for (p, flap) in polys.iter().map(|p| (p, false)).chain(flaps) {
+                let uvs: Vec<[f32; 2]> = p
+                    .verts
+                    .iter()
+                    .map(|v| {
+                        // Faces show the part of their tile matching their height;
+                        // flaps show its bottom part, or the top (below) when the
+                        // art is there.
+                        // A flap is upside down once open (its top edge swings out and
+                        // down), so its picture is flipped to keep the hinges at the
+                        // hinge.
+                        let ly = if flap {
+                            (1.0 - v[1]) * (y1 - y0)
+                        } else {
+                            shape_y(cell.shape, v[1], y0, y1)
+                        };
+                        tile_uv(p.src, [v[0], ly, v[2]])
+                    })
+                    .collect();
+                let verts: Vec<[f32; 3]> = p
+                    .verts
+                    .iter()
+                    .map(|v| {
+                        let mut lp = [v[0], shape_y(cell.shape, v[1], y0, y1), v[2]];
+                        if flap {
+                            lp = open_flap(lp, p.src, y0, hatch_open);
+                        }
+                        let r = rotate_point(lp, effective_rotation(cell.shape, cell.rotation));
+                        [r[0] + origin[0], r[1] + origin[1], r[2] + origin[2]]
+                    })
+                    .collect();
+                solid_verts.extend(&verts);
+                placed.push((verts, uvs, p, flap));
+            }
+            let centre = {
+                let n = solid_verts.len() as f32;
+                let s = solid_verts
+                    .iter()
+                    .fold([0.0; 3], |a, v| [a[0] + v[0], a[1] + v[1], a[2] + v[2]]);
+                s.map(|c| c / n)
+            };
+            for (mut verts, mut uvs, p, flap) in placed {
+                // Faces on the cell boundary are hidden by an opaque neighbour.
+                if let Some(local) = p.on_face.filter(|_| !flap) {
+                    let world = rotate_dir(local, effective_rotation(cell.shape, cell.rotation));
+                    let on_boundary = match world {
+                        FaceDir::PosY => y1 >= 1.0,
+                        FaceDir::NegY => y0 <= 0.0,
+                        _ => true,
                     };
-                    tile_uv(p.src, [v[0], ly, v[2]])
-                })
-                .collect();
-            let verts: Vec<[f32; 3]> = p
-                .verts
-                .iter()
-                .map(|v| {
-                    let mut lp = [v[0], y0 + v[1] * (y1 - y0), v[2]];
-                    if flap {
-                        lp = open_flap(lp, p.src, y0, hatch_open);
+                    let o = dir_offset(world);
+                    let n = [x as i32 + o[0], y as i32 + o[1], z as i32 + o[2]];
+                    if on_boundary && grid.hides_neighbour_faces(n) {
+                        continue;
                     }
-                    let r = rotate_point(lp, effective_rotation(cell.shape, cell.rotation));
-                    [r[0] + origin[0], r[1] + origin[1], r[2] + origin[2]]
-                })
-                .collect();
-            solid_verts.extend(&verts);
-            placed.push((verts, uvs, p, flap));
-        }
-        let centre = {
-            let n = solid_verts.len() as f32;
-            let s = solid_verts
-                .iter()
-                .fold([0.0; 3], |a, v| [a[0] + v[0], a[1] + v[1], a[2] + v[2]]);
-            s.map(|c| c / n)
-        };
-        for (mut verts, mut uvs, p, flap) in placed {
-            // Faces on the cell boundary are hidden by an opaque neighbour.
-            if let Some(local) = p.on_face.filter(|_| !flap) {
-                let world = rotate_dir(local, effective_rotation(cell.shape, cell.rotation));
-                let on_boundary = match world {
-                    FaceDir::PosY => y1 >= 1.0,
-                    FaceDir::NegY => y0 <= 0.0,
-                    _ => true,
-                };
-                let o = dir_offset(world);
-                let n = [x as i32 + o[0], y as i32 + o[1], z as i32 + o[2]];
-                if on_boundary && grid.hides_neighbour_faces(n) {
+                }
+                let face = def.face(p.src);
+                if face.texture == 0xFF || face.texture as u32 >= TILES {
                     continue;
                 }
-            }
-            let face = def.face(p.src);
-            if face.texture == 0xFF || face.texture as u32 >= TILES {
-                continue;
-            }
-            // Wind the polygon counter-clockwise as seen from outside.
-            let (a, b, c) = (verts[0], verts[1], verts[2]);
-            let u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
-            let v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
-            let n = [
-                u[1] * v[2] - u[2] * v[1],
-                u[2] * v[0] - u[0] * v[2],
-                u[0] * v[1] - u[1] * v[0],
-            ];
-            let pc = {
-                let k = verts.len() as f32;
-                let s = verts.iter().fold([0.0; 3], |acc, q| {
-                    [acc[0] + q[0], acc[1] + q[1], acc[2] + q[2]]
-                });
-                s.map(|c| c / k)
-            };
-            let out_dir = [pc[0] - centre[0], pc[1] - centre[1], pc[2] - centre[2]];
-            if n[0] * out_dir[0] + n[1] * out_dir[1] + n[2] * out_dir[2] < 0.0 {
-                verts.reverse();
-                uvs.reverse();
-            }
-            let (mut front, mut back) = face_tiles(face.texture, face.modifiers);
-            let anim = match face_animation(face.texture, face.modifiers) {
-                Some((first, frames)) => {
-                    (front, back) = (first, first);
-                    [frames as f32, 1.0 / TILES as f32]
-                }
-                None => [1.0, 0.0],
-            };
-            let strip = |tile: u32| -> Vec<[f32; 2]> {
-                let shift = if flap && art_on_top(tile) {
-                    y1 - y0 - 1.0
-                } else {
-                    0.0
+                // Wind the polygon counter-clockwise as seen from outside.
+                let (a, b, c) = (verts[0], verts[1], verts[2]);
+                let u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
+                let v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+                let n = [
+                    u[1] * v[2] - u[2] * v[1],
+                    u[2] * v[0] - u[0] * v[2],
+                    u[0] * v[1] - u[1] * v[0],
+                ];
+                let pc = {
+                    let k = verts.len() as f32;
+                    let s = verts.iter().fold([0.0; 3], |acc, q| {
+                        [acc[0] + q[0], acc[1] + q[1], acc[2] + q[2]]
+                    });
+                    s.map(|c| c / k)
                 };
-                uvs.iter()
-                    .map(|[u, v]| {
-                        [
-                            *u,
-                            (tile as f32 + (v + shift).clamp(0.0, 1.0)) / TILES as f32,
-                        ]
-                    })
-                    .collect()
-            };
-            let brightness = 1.0 - (face.shading.min(8) as f32) * 0.07;
-            let transparent =
-                face.modifiers & (modifiers::COLOR0_TRANSPARENT | modifiers::REVERSE_SIDE) != 0;
-            // An open hatch shows the inside of its walls too.
-            let double =
-                def.flags & flags::DOUBLE_SIDED != 0 || flap || (cell.id == 0 && cell.shape == 0);
-            let target = if transparent {
-                &mut out.cutout
-            } else {
-                &mut out.opaque
-            };
-            target.push_poly(&verts, &strip(front), brightness, false, anim);
-            if double {
-                // The inside of a double-sided face: same polygon, opposite
-                // winding, possibly another tile.
-                let (mut rv, mut ru) = (verts.clone(), strip(back));
-                rv.reverse();
-                ru.reverse();
-                target.push_poly(&rv, &ru, brightness, false, anim);
+                let out_dir = [pc[0] - centre[0], pc[1] - centre[1], pc[2] - centre[2]];
+                if n[0] * out_dir[0] + n[1] * out_dir[1] + n[2] * out_dir[2] < 0.0 {
+                    verts.reverse();
+                    uvs.reverse();
+                }
+                let (mut front, mut back) = face_tiles(face.texture, face.modifiers);
+                let anim = match face_animation(face.texture, face.modifiers) {
+                    Some((first, frames)) => {
+                        (front, back) = (first, first);
+                        [frames as f32, 1.0 / TILES as f32]
+                    }
+                    None => [1.0, 0.0],
+                };
+                let strip = |tile: u32| -> Vec<[f32; 2]> {
+                    let shift = if flap && art_on_top(tile) {
+                        y1 - y0 - 1.0
+                    } else {
+                        0.0
+                    };
+                    uvs.iter()
+                        .map(|[u, v]| {
+                            [
+                                *u,
+                                (tile as f32 + (v + shift).clamp(0.0, 1.0)) / TILES as f32,
+                            ]
+                        })
+                        .collect()
+                };
+                let brightness = 1.0 - (face.shading.min(8) as f32) * 0.07;
+                let transparent =
+                    face.modifiers & (modifiers::COLOR0_TRANSPARENT | modifiers::REVERSE_SIDE) != 0;
+                // An open hatch shows the inside of its walls too.
+                let double = def.flags & flags::DOUBLE_SIDED != 0
+                    || flap
+                    || (cell.id == 0 && cell.shape == 0);
+                let target = if transparent {
+                    &mut out.cutout
+                } else {
+                    &mut out.opaque
+                };
+                target.push_poly(&verts, &strip(front), brightness, false, anim);
+                if double {
+                    // The inside of a double-sided face: same polygon, opposite
+                    // winding, possibly another tile.
+                    let (mut rv, mut ru) = (verts.clone(), strip(back));
+                    rv.reverse();
+                    ru.reverse();
+                    target.push_poly(&rv, &ru, brightness, false, anim);
+                }
             }
         }
     }
@@ -626,8 +654,9 @@ mod tests {
 
     #[test]
     fn segments() {
-        assert_eq!(segment_span(0b1111), (0.0, 1.0));
-        assert_eq!(segment_span(0b1100), (0.5, 1.0));
-        assert_eq!(segment_span(0b0010), (0.25, 0.5));
+        assert_eq!(segment_runs(0b1111), [(0.0, 1.0)]);
+        assert_eq!(segment_runs(0b1100), [(0.5, 1.0)]);
+        assert_eq!(segment_runs(0b0010), [(0.25, 0.5)]);
+        assert_eq!(segment_runs(0b1001), [(0.0, 0.25), (0.75, 1.0)]);
     }
 }

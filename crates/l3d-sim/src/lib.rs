@@ -136,15 +136,24 @@ fn hop_height(n: u32, k: i32) -> i32 {
 }
 
 /// The hop a lemming bounces into after dropping `fallen` sub-units onto a
-/// pad: the shortest one that rises higher. Inferred: it reproduces the
-/// measured chain (each hop the next one up), hop 1 from the small drop
-/// onto the first pad, and the published solution of Fun 1 "Take a Dive"
-/// (a 10-unit drop must carry lemmings about 11–12 units on).
+/// pad: the shortest one that rises more than [`HOP_MARGIN`] higher.
+/// Inferred: it reproduces the measured chain (each hop the next one up),
+/// hop 1 from the ½-unit drop onto the first pad of Practice "Trampoline",
+/// the published solution of Fun 1 "Take a Dive" (a 10-unit drop must carry
+/// lemmings about 11–12 units on: hop 11), and that of Tricky 2 "Which
+/// Exit?" (a 1¼-unit drop onto a row of pads must reach the exit door,
+/// which takes hop 2 off the first pad). Those fit any margin from about
+/// 0.28 to 0.9 unit; our own solution of Fun 5 "Bounce Bounce" (a 2-unit
+/// drop taking hop 2) needs less than 0.46.
 fn hop_after_drop(fallen: i32) -> u32 {
     (1..MAX_HOP)
-        .find(|&n| hop_height(n, hop_ticks(n) as i32 / 2) > fallen)
+        .find(|&n| hop_height(n, hop_ticks(n) as i32 / 2) > fallen + HOP_MARGIN)
         .unwrap_or(MAX_HOP)
 }
+
+/// How much higher than the drop the hop after it rises, at least
+/// (inferred, see [`hop_after_drop`]).
+const HOP_MARGIN: i32 = 3 * SUB / 8;
 /// Speed on slippery blocks, sub-units per tick.
 const ICE_SPEED: i32 = WALK_SPEED * 3;
 
@@ -152,6 +161,16 @@ const ICE_SPEED: i32 = WALK_SPEED * 3;
 const ENTRANCE_ID: u8 = 0;
 const EXIT_ID: u8 = 1;
 const SPLITTER_ID: u8 = 2;
+
+/// The side an exit block's doorway faces: its +Z face, turned with the
+/// block's rotation (verified for all four rotations).
+fn door_of(b: l3d_formats::level::BlockCell) -> Dir {
+    let mut door = Dir::PosZ;
+    for _ in 0..b.rotation {
+        door = door.anticlockwise();
+    }
+    door
+}
 
 /// One of the four horizontal headings lemmings walk in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -547,19 +566,27 @@ impl Simulation {
         if l.gone || l.state.is_terminal() || self.skills_left[skill as usize] == 0 {
             return false;
         }
-        let busy = matches!(l.state, State::Blocking | State::Turning { .. });
+        // A lemming at one of the terrain skills takes another in its place
+        // (inferred, as in the 2D games: Mayhem 1 "The Five Arches" needs a
+        // digger to be switched to building [XeyeWalk]); not the one it has.
+        let working = match l.state {
+            State::Digging => Some(Skill::Digger),
+            State::Building { .. } => Some(Skill::Builder),
+            State::Bashing => Some(Skill::Basher),
+            State::Mining => Some(Skill::Miner),
+            _ => None,
+        };
         match skill {
             Skill::Climber => !l.climber,
             Skill::Floater => !l.floater,
             Skill::Bomber => l.fuse.is_none(),
             // Not to a climber on its wall: there a digger is refused and
             // not paid for (verified by the owner on "Candyland Climber").
-            Skill::Blocker
-            | Skill::Turner
-            | Skill::Digger
-            | Skill::Builder
-            | Skill::Basher
-            | Skill::Miner => l.state == State::Walking && !busy && l.pending.is_none(),
+            Skill::Blocker | Skill::Turner => l.state == State::Walking && l.pending.is_none(),
+            Skill::Digger | Skill::Builder | Skill::Basher | Skill::Miner => {
+                l.pending.is_none()
+                    && (l.state == State::Walking || working.is_some_and(|w| w != skill))
+            }
         }
     }
 
@@ -579,6 +606,18 @@ impl Simulation {
         }
         self.skills_left[skill as usize] -= 1;
         let l = &mut self.lemmings[i];
+        // Switched from another terrain skill, a basher or miner starts where
+        // it stands (provisional).
+        if l.state != State::Walking
+            && let Some(s) = match skill {
+                Skill::Basher => Some(State::Bashing),
+                Skill::Miner => Some(State::Mining),
+                _ => None,
+            }
+        {
+            l.set_state(s);
+            return true;
+        }
         match skill {
             Skill::Climber => l.climber = true,
             Skill::Floater => l.floater = true,
@@ -847,19 +886,19 @@ impl Simulation {
                 let (x, z) = (l.pos[0] + d[0] * WALK_SPEED, l.pos[2] + d[2] * WALK_SPEED);
                 let crossing = x.div_euclid(SUB) != l.pos[0].div_euclid(SUB)
                     || z.div_euclid(SUB) != l.pos[2].div_euclid(SUB);
+                let edge = |v: i32, step: i32| {
+                    if step > 0 {
+                        (v.div_euclid(SUB) + 1) * SUB - 1
+                    } else if step < 0 {
+                        v.div_euclid(SUB) * SUB
+                    } else {
+                        v
+                    }
+                };
                 if l.state == State::Walking
                     && crossing
                     && let Some(s) = l.pending.take()
                 {
-                    let edge = |v: i32, step: i32| {
-                        if step > 0 {
-                            (v.div_euclid(SUB) + 1) * SUB - 1
-                        } else if step < 0 {
-                            v.div_euclid(SUB) * SUB
-                        } else {
-                            v
-                        }
-                    };
                     l.pos[0] = edge(l.pos[0], d[0]);
                     l.pos[2] = edge(l.pos[2], d[2]);
                     l.set_state(s);
@@ -868,12 +907,26 @@ impl Simulation {
                     self.walk(l, obstacles);
                     // Or at a wall that would turn the walker round, facing
                     // the wall (the original's basher demo bashes the crate it
-                    // walked up to).
+                    // walked up to). A miner steps up to the cell's edge when
+                    // the wall starts there, so that it mines the wall and not
+                    // the cell it stands in (measured: the skills start at the
+                    // edge of the cell; inferred: in Tricky 3 "This Is the
+                    // Army" a miner on a thin plank mines through the wall
+                    // ahead; bashers stay put, their stroke reaching the wall
+                    // either way).
                     if l.state == State::Walking
                         && l.dir == dir.reverse()
                         && let Some(s) = l.pending.take()
                     {
                         l.dir = dir;
+                        let at = [edge(l.pos[0], d[0]), l.pos[1], edge(l.pos[2], d[2])];
+                        if s == State::Mining
+                            && [SUB / 8, HEAD_HEIGHT - 1]
+                                .iter()
+                                .all(|&h| !self.world.solid([at[0], at[1] + h, at[2]]))
+                        {
+                            l.pos = at;
+                        }
                         l.set_state(s);
                     }
                 }
@@ -948,13 +1001,21 @@ impl Simulation {
         self.spring(l);
     }
 
-    /// Killing traps take a lemming that steps on them, then are busy for a
-    /// while, letting others pass (provisional, as in the 2D games).
+    /// Killing traps take a lemming that reaches the middle of their cell,
+    /// then are busy for a while, letting others pass (provisional, as in
+    /// the 2D games). Taking it anywhere in the cell would let none pass on
+    /// foot, a cell taking longer to cross than a trap is busy, while Taxing
+    /// 5 "3D - A Lemming Odyssey" lines its exit with traps.
     fn spring_traps(&mut self, l: &mut Lemming) {
         if !self.object_kind.is_some_and(|k| k.kills())
             || l.state.is_terminal()
             || matches!(l.state, State::Falling { .. } | State::Floating)
         {
+            return;
+        }
+        let d = l.dir.delta();
+        let off = |v: i32| (v.rem_euclid(SUB) - SUB / 2).abs();
+        if off(l.pos[0]) * d[0].abs() + off(l.pos[2]) * d[2].abs() > SUB / 8 {
             return;
         }
         if let Some(o) = self
@@ -1107,12 +1168,27 @@ impl Simulation {
     /// Trampolines: a lemming arriving on a pad bounces into the hop
     /// [`hop_after_drop`] picks for the height it dropped, after one more
     /// tick on the pad (measured: a walker stepping down onto the first pad
-    /// stands there two ticks). Returns whether it bounced.
+    /// stands there two ticks). A lemming walking onto a pad level with the
+    /// path bounces from its middle (provisional, unmeasured: on Fun 5
+    /// "Bounce Bounce" every pad is a water cell short of the path, which a
+    /// first hop reaches only from about the middle of the pad). Returns
+    /// whether it bounced.
     fn bounce(&mut self, l: &mut Lemming, height: i32) -> bool {
         if self.object_kind != Some(objects::ObjectKind::Trampoline)
             || !self.objects.iter().any(|o| o.touches(l.pos))
         {
             return false;
+        }
+        if matches!(l.state, State::Walking | State::Sliding) {
+            let d = l.dir.delta();
+            let into = |v: i32, step: i32| match step {
+                1 => v.rem_euclid(SUB),
+                -1 => SUB - 1 - v.rem_euclid(SUB),
+                _ => SUB,
+            };
+            if into(l.pos[0], d[0]).min(into(l.pos[2], d[2])) < SUB / 2 {
+                return false;
+            }
         }
         self.press_pad(l.pos);
         l.set_state(State::Bouncing {
@@ -1171,6 +1247,19 @@ impl Simulation {
             advance(l);
             return;
         }
+        // A hop that carries the lemming into an exit through its doorway
+        // saves it (inferred: Tricky 2 "Which Exit?" is solved by bouncing
+        // into a door raised above the pads).
+        if let Some(b) = self
+            .world
+            .block_at([next[0], next[1] + SUB / 8, next[2]])
+            .filter(|b| b.id == EXIT_ID)
+            && l.dir == door_of(b).reverse()
+        {
+            l.pos = next;
+            l.set_state(State::Exiting);
+            return;
+        }
         let wall =
             |w: &World, y: i32| w.solid([next[0], y, next[2]]) && !w.solid([l.pos[0], y, l.pos[2]]);
         if rising && (wall(&self.world, body) || wall(&self.world, next[1] + HEAD_HEIGHT - 1)) {
@@ -1192,8 +1281,21 @@ impl Simulation {
                 advance(l);
                 return;
             }
+            // The touching tick, where the hop comes down to the surface
+            // under it or just ahead: down onto it without moving on, so the
+            // surface it stays over counts (measured: no forward move on the
+            // touching tick; inferred: in Tricky 2 "Which Exit?" a hop that
+            // comes down at the far edge of a pad must bounce off it to reach
+            // the exit door).
+            let (here, here_on_block) =
+                self.world
+                    .surface_below(l.pos[0], l.pos[1] + STEP_UP, l.pos[2]);
+            let (ground, on_block) = if here >= next[1] {
+                (here, here_on_block)
+            } else {
+                (ground, on_block)
+            };
             if ground >= next[1] {
-                // The touching tick: down onto the surface without moving on.
                 let apex = y0 + hop_height(hop, hop_ticks(hop) as i32 / 2);
                 l.pos[1] = ground;
                 let pad = (self.object_kind == Some(objects::ObjectKind::Trampoline))
@@ -1479,12 +1581,14 @@ impl Simulation {
 
     /// The cell a basher works on and the segments it removes there.
     fn bash_cell(l: &Lemming) -> ([i32; 3], u8) {
+        Self::bash_cell_at(l, SUB / 2)
+    }
+
+    /// The cell `along` sub-units ahead of a basher and the segments it
+    /// would remove there.
+    fn bash_cell_at(l: &Lemming, along: i32) -> ([i32; 3], u8) {
         let d = l.dir.delta();
-        let ahead = [
-            l.pos[0] + d[0] * (SUB / 2),
-            l.pos[1],
-            l.pos[2] + d[2] * (SUB / 2),
-        ];
+        let ahead = [l.pos[0] + d[0] * along, l.pos[1], l.pos[2] + d[2] * along];
         let cell = Self::cell_of(ahead);
         // Segments from the feet up to about head height.
         let first = ((l.pos[1] - cell[1] * SUB) / (SUB / 4)).clamp(0, 3);
@@ -1506,15 +1610,38 @@ impl Simulation {
             && (ticks - BASH_CRACK_START).is_multiple_of(BASH_TICKS)
     }
 
+    /// Whether there is wall a basher can break in the cell after the one it
+    /// works on.
+    fn bash_more_ahead(&self, l: &Lemming) -> bool {
+        let (next, mask) = Self::bash_cell_at(l, SUB / 2 + SUB);
+        self.world
+            .block(next)
+            .is_some_and(|(b, _)| b.segments & mask != 0)
+            && self.world.breakable_towards(next, Some(l.dir.delta()))
+    }
+
     /// Removes body-height terrain in the cell ahead and moves into the gap;
-    /// walks on as soon as nothing is left to bash (provisional).
+    /// with more wall in the next cell it walks on through the gap to it and
+    /// bashes on, so walls thicker than a cell can be bashed through (Tricky
+    /// 3 "This Is the Army"); otherwise it walks on as soon as nothing is
+    /// left to bash (provisional).
     fn bash(&mut self, l: &mut Lemming) {
         let d = l.dir.delta();
         let (cell, mask) = Self::bash_cell(l);
-        if self.bash_cell_full(l) && !self.world.breakable_towards(cell, Some(d)) {
+        let full = self.bash_cell_full(l);
+        if full && !self.world.breakable_towards(cell, Some(d)) {
             // Steel or a one-way block facing elsewhere: no cracks, it walks
             // on (owner's observation).
             l.set_state(State::Walking);
+            return;
+        }
+        if !full && self.bash_more_ahead(l) {
+            // On through the gap; the next stroke starts at the wall.
+            l.pos[0] += d[0] * WALK_SPEED;
+            l.pos[2] += d[2] * WALK_SPEED;
+            if self.settle(l) {
+                l.state_ticks = 0;
+            }
             return;
         }
         if !Self::bash_stroke_ends(l.state_ticks) {
@@ -1528,8 +1655,7 @@ impl Simulation {
                 }
                 l.pos[0] += d[0] * (SUB / 4);
                 l.pos[2] += d[2] * (SUB / 4);
-                self.settle(l);
-                if !self.bash_cell_full(l) {
+                if self.settle(l) && !self.bash_cell_full(l) && !self.bash_more_ahead(l) {
                     l.set_state(State::Walking);
                 }
             }
@@ -1546,7 +1672,10 @@ impl Simulation {
         let d = l.dir.delta();
         // One swing moves the miner a quarter unit forward and down (45°),
         // clearing the space its body needs there: from the new feet up to
-        // above head height, from the feet to past the walker's reach.
+        // above head height, from just ahead of the feet to past the
+        // walker's reach. A miner standing at a cell's edge works on the
+        // cell ahead and leaves the one it stands in (inferred: in Tricky 3
+        // "This Is the Army" a miner on a thin plank mines the wall ahead).
         let feet = l.pos[1] - SUB / 4;
         if feet < GROUND {
             // The level bottom can't be mined.
@@ -1554,7 +1683,7 @@ impl Simulation {
             return;
         }
         let (y0, y1) = (feet, feet + HEAD_HEIGHT + STEP_UP);
-        let (h0, h1) = (0, SUB / 4 + REACH + WALK_SPEED);
+        let (h0, h1) = (1, SUB / 4 + REACH + WALK_SPEED);
         let mut removed = false;
         for along in (h0..=h1).step_by((SUB / 8) as usize) {
             let p = [l.pos[0] + d[0] * along, l.pos[2] + d[2] * along];
@@ -1640,22 +1769,22 @@ impl Simulation {
             WALK_SPEED
         };
         let reach = REACH + speed;
-        let probe = [
-            l.pos[0] + d[0] * reach,
-            l.pos[1] + SUB / 8,
-            l.pos[2] + d[2] * reach,
-        ];
-        if let Some(b) = self.world.block_at(probe)
-            && b.id == EXIT_ID
+        // At the feet, or a step up (Taxing 4 "Poles Apart" has an exit
+        // floor ¼ above the path leading to it).
+        let exit = [SUB / 8, STEP_UP + SUB / 8].into_iter().find_map(|h| {
+            self.world
+                .block_at([
+                    l.pos[0] + d[0] * reach,
+                    l.pos[1] + h,
+                    l.pos[2] + d[2] * reach,
+                ])
+                .filter(|b| b.id == EXIT_ID)
+        });
+        if let Some(b) = exit
+            && l.dir == door_of(b).reverse()
         {
-            let mut door = Dir::PosZ;
-            for _ in 0..b.rotation {
-                door = door.anticlockwise();
-            }
-            if l.dir == door.reverse() {
-                l.set_state(State::Exiting);
-                return;
-            }
+            l.set_state(State::Exiting);
+            return;
         }
         let next = [l.pos[0] + d[0] * speed, l.pos[1], l.pos[2] + d[2] * speed];
         // Blockers and turners: walking into one redirects the walker.
@@ -1768,8 +1897,14 @@ impl Simulation {
         if blocked {
             // Climbers climb walls that reach down to their feet; at an
             // overhang they turn like walkers (provisional: lets the
-            // climbers of "Candyland Climber" reach its exit).
-            if l.climber && self.world.solid([ahead[0], l.pos[1] + SUB / 8, ahead[1]]) {
+            // climbers of "Candyland Climber" reach its exit). A climber with
+            // a skill pending takes the skill up at the wall instead
+            // (inferred: Tricky 3 "This Is the Army" has a climber mine
+            // through a wall it walks up to).
+            if l.climber
+                && l.pending.is_none()
+                && self.world.solid([ahead[0], l.pos[1] + SUB / 8, ahead[1]])
+            {
                 l.set_state(State::Climbing);
             } else {
                 l.dir = l.dir.reverse();

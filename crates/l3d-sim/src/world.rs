@@ -343,6 +343,15 @@ impl World {
                 return (top, true);
             }
         }
+        // The steps can pass over terrain within a step of the ground, such
+        // as the foot of a ramp (Mayhem 2 "Brechin's Staircase").
+        if self.terrain_solid([x, GROUND, z]) {
+            let mut top = GROUND;
+            while self.terrain_solid([x, top, z]) {
+                top += 1;
+            }
+            return (top, true);
+        }
         (GROUND, false)
     }
 }
@@ -399,12 +408,28 @@ fn to_shape_space(l: [f32; 3], rotation: u8) -> [f32; 3] {
     [x + 0.5, l[1], z + 0.5]
 }
 
+/// The thickness of a ramp at its thin edge (22.5° ramps, and the flat top
+/// of an upside-down 45° ramp), in units.
+const RAMP_EDGE: f32 = 1.0 / 32.0;
+
 /// Whether the cell-local point `l` (each in `[0, 1)`) lies inside the block.
 /// Shapes mirror the renderer's (`docs/spec/level.md`); the vertical extent is
-/// the span of the segment mask.
+/// the run of consecutive segments at the point's height (a cell a basher has
+/// cut through the middle has two).
 pub fn inside_shape(block: BlockCell, l: [f32; 3]) -> bool {
-    let lo = block.segments.trailing_zeros() as f32 / 4.0;
-    let hi = (8 - block.segments.leading_zeros()) as f32 / 4.0;
+    let s = block.segments;
+    let at = ((l[1] * 4.0).floor() as i32).clamp(0, 3);
+    if s & (1 << at) == 0 {
+        return false;
+    }
+    let (mut lo, mut hi) = (at, at + 1);
+    while lo > 0 && s & (1 << (lo - 1)) != 0 {
+        lo -= 1;
+    }
+    while hi < 4 && s & (1 << hi) != 0 {
+        hi += 1;
+    }
+    let (lo, hi) = (lo as f32 / 4.0, hi as f32 / 4.0);
     if l[1] < lo || l[1] >= hi {
         return false;
     }
@@ -422,10 +447,19 @@ pub fn inside_shape(block: BlockCell, l: [f32; 3]) -> bool {
         3 => t < cone,
         4 => 1.0 - t < cone,
         5 => t < 1.0 - z,
-        6 => t > z,
+        // A turner standing on the thin edge of the flat top (Taxing 5) must
+        // not fall through it.
+        6 => y > (lo + (hi - lo) * z).min(hi - RAMP_EDGE),
         7 => x + z < 1.0,
-        8 => t < 1.0 - 0.5 * z,
-        9 => 1.0 - t < 1.0 - 0.5 * z,
+        // 22.5° ramps keep their slope whatever the run's height: the top
+        // falls ½ unit across the cell (or the run's height, if less) from
+        // the run's top, or for 9 the underside rises as far from its bottom,
+        // so a half-height ramp cell and a full one make one even slope (the
+        // ramp tubes of Taxing 1 "Spaghetti Junction"). Matches the renderer,
+        // but for a sliver at the thin edge so that a ramp meeting another at
+        // the cell boundary leaves no gap there.
+        8 => y < (hi - (hi - lo).min(0.5) * z).max(lo + RAMP_EDGE),
+        9 => y > (lo + (hi - lo).min(0.5) * z).min(hi - RAMP_EDGE),
         10 => t < x.min(z),
         11 => 1.0 - t < x.min(z),
         12 => x + z <= 1.0 && t <= 1.0 - x - z,

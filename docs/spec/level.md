@@ -177,7 +177,7 @@ assuming rotation 0.
 | 3 / 4 | Full-height square pyramid, apex up / down |
 | 5 / 6 | 45° ramp facing +Z/+Y, or +Z/−Y (uses the +Z face texture) |
 | 7 | Vertical 45° deflector wall facing +Z/+X (uses the +Z face texture) |
-| 8 / 9 | 22.5° ramp on the upper / lower two slices |
+| 8 / 9 | 22.5° ramp on the upper / lower two slices. With fewer segments the slope stays ½ unit per cell, falling from the top of the segments (8) or rising from their bottom (9), rather than being squeezed into them (**inferred** from the levels: half-height ramp cells, segments `0011`, sit beside full ones in 26 levels, and only this reading makes each pair one even slope, as in the ramp tubes of Taxing 1 "Spaghetti Junction" and the bridge of Fun 12 "Alpine Assault Course", where a 45° ramp up to height 3 continues into a half-height 22.5° ramp up to 3.5) |
 | 10 / 11 | Outer corner where two 45° ramps meet (top / bottom) |
 | 12 / 13 | Corner piece (top / bottom): a tetrahedron peaking above the −X/−Z corner with its sloped face towards +X/+Z, the outer corner of two 45° ramps (**verified**: the owner saw ours turned wrong on `LEVEL.006`, whose four platform corners, rotations 0–3, join the ramps only this way; [L3DEdit] has the slope towards −X/−Z) |
 | 14 / 15 | Crash the original game |
