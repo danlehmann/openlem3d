@@ -572,7 +572,7 @@ pub(crate) fn camera_controls(
             }
         }
         let held = |a: KeyCode, b: KeyCode| (keys.pressed(a) || keys.pressed(b)) as i32 as f32;
-        let turn = held(KeyCode::KeyE, KeyCode::KeyE) - held(KeyCode::KeyQ, KeyCode::KeyQ);
+        let turn = held(KeyCode::KeyE, KeyCode::ArrowRight) - held(KeyCode::KeyQ, KeyCode::ArrowLeft);
         cam.yaw += turn * 1.8 * dt;
         if dragging && dt > 0.0 {
             cam.yaw += motion.delta.x * 0.005;
@@ -594,7 +594,7 @@ pub(crate) fn camera_controls(
         let right = Vec3::new(-fwd.z, 0.0, fwd.x);
         let speed = if keys.pressed(KeyCode::ShiftLeft) { 16.0 } else { 6.0 } * settings.camera_factor();
         let mv = fwd * (held(KeyCode::KeyW, KeyCode::ArrowUp) - held(KeyCode::KeyS, KeyCode::ArrowDown))
-            + right * (held(KeyCode::KeyD, KeyCode::ArrowRight) - held(KeyCode::KeyA, KeyCode::ArrowLeft))
+            + right * (held(KeyCode::KeyD, KeyCode::KeyD) - held(KeyCode::KeyA, KeyCode::KeyA))
             + Vec3::Y * (held(KeyCode::KeyR, KeyCode::PageUp) - held(KeyCode::KeyF, KeyCode::PageDown))
             + fwd * ahead
             + right * side;

@@ -71,8 +71,8 @@ extracting.
 
 | Action | Keyboard / mouse | Touch |
 |---|---|---|
-| Move | W A S D or the arrow keys; or hold the right button still over the view: the pointer's arrow shows the way (top: forward, bottom: back, bottom corners: sideways, top corners: forward while turning); click the minimap | one-finger drag (up/down) |
-| Turn | Q / E, right-drag, hold the right button at the left or right edge, or hold the turn arrows | one-finger drag (left/right), or hold the turn arrows |
+| Move | W A S D, or ↑ ↓; or hold the right button still over the view: the pointer's arrow shows the way (top: forward, bottom: back, bottom corners: sideways, top corners: forward while turning); click the minimap | one-finger drag (up/down) |
+| Turn | Q / E or ← →, right-drag, hold the right button at the left or right edge, or hold the turn arrows | one-finger drag (left/right), or hold the turn arrows |
 | Up / down | R / F, or the mouse wheel | two-finger drag |
 | Preset cameras | 1–4, or click the camera to cycle | tap the camera to cycle |
 | Pause | P, or click the paws | tap the paws |
@@ -87,7 +87,7 @@ extracting.
 | Nuke | Alt+Q, or click the bomb | tap the bomb |
 | Mute music and sounds | M | — |
 | Options | F12 (also during a level, which waits) or the Options button on the title | tap Options |
-| Briefing | click or Space: play; Enter or click Preview: preview (on Practice levels: Demo, a solution played for you; any key or click returns); right click, Esc or click Menu: back | tap to play, or tap Preview/Demo or Menu |
+| Briefing | click or Space: play; Enter or click Preview: preview (Practice briefings are the level circling behind the details, and Enter or Demo plays a solution for you; any key or click returns); right click, Esc or click Menu: back | tap to play, or tap Preview/Demo or Menu |
 | Results | click, Space or Enter: next level (or retry); right click or Esc: level list | tap; or tap Menu |
 | Level list | click a level; wheel, ↑/↓ or Page Up/Down to scroll; ←/→ change rating; Esc: title | tap a level; drag to scroll |
 | Replay your attempt | Esc restarts the level and replays what you did ("Replaying"); click to take over ("Click to Play") | tap to take over |

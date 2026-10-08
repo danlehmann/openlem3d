@@ -6,7 +6,8 @@
 //! the original's briefings.
 //!
 //! Preview starts the level paused with the camera circling the level's
-//! preview pivot; any key or click ends it and the level runs.
+//! preview pivot; any key or click ends it and the level runs. A Practice
+//! level's briefing is that preview, with Demo (Enter) among its prompts.
 
 use std::collections::HashMap;
 
@@ -94,8 +95,17 @@ fn spawn_briefing(
     mut images: ResMut<Assets<Image>>,
     mut cache: Local<HashMap<u8, Option<ScenePics>>>,
     roots: Query<(), With<BriefingRoot>>,
+    mut preview: ResMut<Preview>,
+    mut next: ResMut<NextState<AppState>>,
 ) {
     if !roots.is_empty() {
+        return;
+    }
+    // A Practice briefing is the flyover itself, with the details and the
+    // Demo prompt over it, not the theme picture (`docs/spec/camera.md`).
+    if has_demo(current.number) {
+        *preview = Preview { active: true, practice: true, ..default() };
+        next.set(AppState::Playing);
         return;
     }
     let Ok(level) = data.0.level(current.number) else { return };
@@ -166,8 +176,6 @@ fn briefing_input(
     touches: Res<Touches>,
     mut preview: ResMut<Preview>,
     current: Res<CurrentLevel>,
-    mut data: ResMut<Data>,
-    mut game: ResMut<Game>,
     mut next: ResMut<NextState<AppState>>,
 ) {
     let on = |c: Choice| choices.iter().any(|(i, k)| *i == Interaction::Pressed && *k == c);
@@ -180,14 +188,8 @@ fn briefing_input(
         || keys.get_just_pressed().any(|k| !matches!(k, KeyCode::Escape | KeyCode::Enter | KeyCode::NumpadEnter));
     if back {
         next.set(crate::menu::level_menu(current.number));
-    } else if show && has_demo(current.number) {
-        let n = current.number;
-        let log = data.0.level(n).ok().zip(data.0.blocks(n).ok()).and_then(|(level, blocks)| l3d_sim::demos::demo(n, &level, &blocks));
-        game.replay = log.map(|log| crate::Replay::demo(log, AppState::Briefing));
-        next.set(AppState::Playing);
     } else if show {
-        preview.active = true;
-        preview.started = false;
+        *preview = Preview { active: true, ..default() };
         next.set(AppState::Playing);
     } else if go {
         next.set(AppState::Playing);
@@ -198,6 +200,9 @@ fn briefing_input(
 #[derive(Resource, Default)]
 pub struct Preview {
     pub active: bool,
+    /// A Practice level's briefing: Enter plays the demo, and the way back
+    /// leads to the Practice screen.
+    practice: bool,
     started: bool,
     angle: f32,
 }
@@ -236,12 +241,14 @@ fn preview_centre(level: &l3d_formats::level::Level, blocks: &l3d_formats::blk::
 #[allow(clippy::too_many_arguments)]
 fn preview(
     time: Res<Time>,
-    keys: Res<ButtonInput<KeyCode>>,
-    mouse: Res<ButtonInput<MouseButton>>,
+    mut keys: ResMut<ButtonInput<KeyCode>>,
+    mut mouse: ResMut<ButtonInput<MouseButton>>,
     touches: Res<Touches>,
+    choices: Query<(&Interaction, &Choice)>,
     mut current: ResMut<CurrentLevel>,
     mut state: ResMut<Preview>,
     mut game: ResMut<Game>,
+    mut data: ResMut<Data>,
     mut views: Query<&mut ViewCamera>,
     mut next: ResMut<NextState<AppState>>,
     mut centre: Local<Option<(u32, Vec3, bool)>>,
@@ -249,16 +256,33 @@ fn preview(
     if !state.active {
         return;
     }
+    let on = |c: Choice| choices.iter().any(|(i, k)| *i == Interaction::Pressed && *k == c);
     // Right click (or Esc) goes back to the level list, as in the original;
     // any other key, click or tap starts the level.
-    if state.started && (mouse.just_pressed(MouseButton::Right) || keys.just_pressed(KeyCode::Escape)) {
+    if state.started && (mouse.just_pressed(MouseButton::Right) || keys.just_pressed(KeyCode::Escape) || on(Choice::Menu)) {
         state.active = false;
         game.paused = false;
         current.loaded = None;
-        next.set(AppState::Menu);
+        next.set(crate::menu::level_menu(current.number));
         return;
     }
-    let any = keys.get_just_pressed().next().is_some() || mouse.get_just_pressed().next().is_some() || touches.any_just_released();
+    // On a Practice level Enter plays the demo from the start; it returns
+    // here.
+    let enter = [KeyCode::Enter, KeyCode::NumpadEnter];
+    if state.started && state.practice && (keys.any_just_pressed(enter) || on(Choice::Preview)) {
+        // The key or click that starts the demo doesn't end it.
+        keys.reset_all();
+        mouse.reset_all();
+        let n = current.number;
+        let log = data.0.level(n).ok().zip(data.0.blocks(n).ok()).and_then(|(level, blocks)| l3d_sim::demos::demo(n, &level, &blocks));
+        state.active = false;
+        game.paused = false;
+        game.replay = log.map(|log| crate::Replay::demo(log, AppState::Briefing));
+        current.loaded = None;
+        return;
+    }
+    let on_prompt = choices.iter().any(|(i, _)| *i != Interaction::None);
+    let any = keys.get_just_pressed().next().is_some() || (mouse.get_just_pressed().next().is_some() && !on_prompt) || (touches.any_just_released() && !on_prompt);
     if state.started && any {
         state.active = false;
         game.paused = false;
@@ -382,7 +406,10 @@ fn preview_overlay(
     }
     let pics = cache.entry(level.theme).or_insert_with(|| load_scene(&mut data, level.theme, &mut images)).clone();
     if let Some(p) = &pics {
-        for (i, x) in [(0, 25.0), (1, 522.0)] {
+        // Left button, right button and, on a Practice level, the two halves
+        // of the ENTER key.
+        let enter: &[(usize, f32)] = if state.practice { &[(2, 268.0), (3, 300.0)] } else { &[] };
+        for &(i, x) in [(0, 25.0), (1, 522.0)].iter().chain(enter) {
             if let Some(h) = p.prompts.get(i).cloned() {
                 add(&mut commands, image_at(h, at(x, PROMPT_Y, 32.0, 32.0)), None);
             }
@@ -390,4 +417,13 @@ fn preview_overlay(
     }
     text(&mut commands, "Continue", 61.0, LABEL_Y);
     text(&mut commands, "Menu", 561.0, LABEL_Y);
+    if state.practice {
+        text(&mut commands, "Demo", 342.0, LABEL_Y);
+    }
+    // Clicking or tapping a prompt picks it; anywhere else continues.
+    let buttons: &[(Choice, f32, f32)] = if state.practice { &[(Choice::Preview, 268.0, 150.0), (Choice::Menu, 522.0, 110.0)] } else { &[(Choice::Menu, 522.0, 110.0)] };
+    for &(choice, x, w) in buttons {
+        let e = commands.spawn((choice, Button, at(x, PROMPT_Y, w, 32.0), Node { position_type: PositionType::Absolute, ..default() })).id();
+        commands.entity(canvas).add_child(e);
+    }
 }

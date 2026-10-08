@@ -190,4 +190,4 @@ position, the camera path fitted to block silhouettes):
   the menu; Enter and Esc do nothing. Ours: right click and Esc return,
   any other key, click or tap starts.
 - Practice briefings offer "Demo" instead of a preview, with the same
-  flyover running behind the briefing.
+  flyover running behind the briefing (ours too: no theme picture).
