@@ -474,7 +474,7 @@ fn pause_keys(keys: Res<ButtonInput<KeyCode>>, preview: Res<briefing::Preview>, 
     }
 }
 
-fn step_simulation(options: Res<Options>, settings: Res<settings::Settings>, mut game: ResMut<Game>, mut scene: ResMut<SceneContent>, views: Query<&ViewCamera>) {
+fn step_simulation(options: Res<Options>, mut game: ResMut<Game>, mut scene: ResMut<SceneContent>, views: Query<&ViewCamera>) {
     // The level waits while the camera glides to a preset view, so the
     // glide costs the player no time.
     if views.iter().any(|v| v.glide.is_some()) {
@@ -511,7 +511,7 @@ fn step_simulation(options: Res<Options>, settings: Res<settings::Settings>, mut
     for ([x, y, z], cell) in changes {
         level.set_block(x, y, z, cell);
     }
-    let rebuilt = scene_build::rebuild_blocks(current, *layer, level, blocks, sim, settings.enhanced);
+    let rebuilt = scene_build::rebuild_blocks(current, *layer, level, blocks, sim);
     scene.version += 1;
     scene.data = Some(Arc::new(rebuilt));
 }
@@ -798,7 +798,7 @@ fn refresh_scenery(
     let content = match (terrain.as_mut(), sim) {
         (Some((level, blocks, layer)), Some(sim)) => {
             *layer = built.block_layer;
-            scene_build::rebuild_blocks(&built.scene, built.block_layer, level, blocks, sim, show.solid_bricks)
+            scene_build::rebuild_blocks(&built.scene, built.block_layer, level, blocks, sim)
         }
         _ => built.scene,
     };

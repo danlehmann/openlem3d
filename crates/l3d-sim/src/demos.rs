@@ -43,7 +43,7 @@ pub const SOLUTIONS: &[Solution] = &[
     at(89, &[(41, 1, 4, None)]),
     at(90, &[(406, 0, 1, Some(true))]),
     at(91, &[(538, 0, 4, None)]),
-    at(92, &[(100, 0, 3, None), (283, 0, 3, None)]),
+    at(92, &[(100, 0, 3, None), (265, 0, 3, None)]),
     at(93, &[(122, 0, 4, None)]),
     at(94, &[(182, 0, 1, Some(false))]),
     at(95, &[(239, 0, 1, Some(true))]),

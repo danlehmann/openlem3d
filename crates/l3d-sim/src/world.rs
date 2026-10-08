@@ -208,11 +208,14 @@ impl World {
         }
     }
 
-    /// Whether the point (in sub-units) is inside solid block geometry.
+    /// Whether the point (in sub-units) is inside solid block geometry or a
+    /// brick.
     pub fn solid(&self, p: [i32; 3]) -> bool {
-        if self.bricks.iter().any(|b| b.contains(p)) {
-            return true;
-        }
+        self.bricks.iter().any(|b| b.contains(p)) || self.terrain_solid(p)
+    }
+
+    /// Whether the point is inside solid block geometry, bricks aside.
+    pub fn terrain_solid(&self, p: [i32; 3]) -> bool {
         let c = p.map(|v| v.div_euclid(SUB));
         let Some(cell) = self.cell(c[0], c[1], c[2]) else { return false };
         let l = [0, 1, 2].map(|i| (p[i] - c[i] * SUB) as f32 / SUB as f32);
@@ -261,20 +264,35 @@ impl World {
     /// The height of the highest walkable surface at column `(x, z)` whose top
     /// is at or below `from_y`, searching down to the ground plane. Returns the
     /// surface height in sub-units and whether it is a block (as opposed to the
-    /// ground plane).
+    /// ground plane). Bricks are floors only: one counts by its top, when
+    /// that is at or below `from_y`; a brick higher up is passed under.
     pub fn surface_below(&self, x: i32, from_y: i32, z: i32) -> (i32, bool) {
+        let terrain = self.terrain_surface_below(x, from_y, z);
+        let brick = self
+            .bricks
+            .iter()
+            .filter(|b| (b.min[0]..b.max[0]).contains(&x) && (b.min[2]..b.max[2]).contains(&z) && b.max[1] <= from_y)
+            .map(|b| b.max[1])
+            .max();
+        match brick {
+            Some(top) if top > terrain.0 => (top, true),
+            _ => terrain,
+        }
+    }
+
+    fn terrain_surface_below(&self, x: i32, from_y: i32, z: i32) -> (i32, bool) {
         let mut y = from_y;
         // Step down in fine increments until the point below is solid.
         const STEP: i32 = SUB / 64;
         while y > GROUND {
-            if self.solid([x, y - 1, z]) {
+            if self.terrain_solid([x, y - 1, z]) {
                 return (y, true);
             }
             y -= STEP;
             // Snap to the precise surface when we enter solid geometry.
-            if self.solid([x, y - 1, z]) {
+            if self.terrain_solid([x, y - 1, z]) {
                 let mut top = y;
-                while self.solid([x, top, z]) {
+                while self.terrain_solid([x, top, z]) {
                     top += 1;
                 }
                 return (top, true);

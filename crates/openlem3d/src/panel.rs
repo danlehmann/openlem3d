@@ -319,12 +319,14 @@ fn buttons(
         if *interaction != Interaction::Pressed {
             continue;
         }
+        let paused = game.paused;
         let Some(sim) = &mut game.sim else { return };
         match *action {
             Action::Skill(s) => {
-                // A skill with none left can't be selected (verified).
+                // A skill with none left can't be selected (verified). Paused,
+                // it is only selected, not given to the highlighted lemming.
                 if sim.skills_left[s as usize] > 0 {
-                    match highlight.lemming {
+                    match highlight.lemming.filter(|_| !paused) {
                         // Given straight to the highlighted lemming, without
                         // selecting the skill (seen in the original); a turner
                         // then waits for the click on the side it points to.

@@ -161,6 +161,9 @@ pub(crate) fn assign_on_pointer(
     if game.replay.is_some() {
         return;
     }
+    // Paused, skills can't be given (owner's observation); selecting,
+    // highlighting and riding along still work.
+    let paused = game.paused;
     let Some(sim) = &mut game.sim else { return };
     let picking = lemming_cam.picking();
     if selected.0 != Some(Skill::Turner) || mouse.just_pressed(settings.turn_button()) {
@@ -188,7 +191,7 @@ pub(crate) fn assign_on_pointer(
     // Riding along, a click acts on the lemming ridden with; a turner points
     // to the side of the screen clicked (left half: its left).
     if let Some(f) = lemming_cam.following() {
-        let Some(skill) = selected.0 else { return };
+        let Some(skill) = selected.0.filter(|_| !paused) else { return };
         let ok = if skill == Skill::Turner {
             let sides = view_sides(&camera, &sim.lemmings[f]);
             sim.assign_turner(f, sides[(point.x >= size.x / 2.0) as usize])
@@ -196,6 +199,9 @@ pub(crate) fn assign_on_pointer(
             sim.assign(f, skill)
         };
         sfx.write(crate::sfx::Sfx(if ok { "VOXFX/OK2" } else { "VOXFX/UH_UH1" }));
+        return;
+    }
+    if paused && pending.0.is_some() {
         return;
     }
     if let Some(i) = pending.0.take().filter(|_| !picking) {
@@ -227,7 +233,7 @@ pub(crate) fn assign_on_pointer(
         }
         return;
     }
-    let Some(skill) = selected.0 else { return };
+    let Some(skill) = selected.0.filter(|_| !paused) else { return };
     if let Some(i) = best {
         if skill == Skill::Turner {
             if sim.can_assign(i, skill) {

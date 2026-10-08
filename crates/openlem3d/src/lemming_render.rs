@@ -396,7 +396,9 @@ pub fn build(sim: &Simulation, atlas_rows: u32, camera_yaw: f32, doors: &[Door],
             // laying motion spread over the rest of the 25-tick cycle
             // (provisional split).
             State::Building { .. } => {
-                let c = l.state_ticks % l3d_sim::BUILD_TICKS;
+                // In step with the bricks, the first of which comes
+                // FIRST_BRICK_TICKS in, after a laying motion.
+                let c = (l.state_ticks + l3d_sim::BUILD_TICKS - l3d_sim::FIRST_BRICK_TICKS) % l3d_sim::BUILD_TICKS;
                 if c < BUILDER_STEP_TICKS {
                     cell_for(anim(444, 6, Angles::Five), view, c)
                 } else {

@@ -512,6 +512,8 @@ not change any icon (verified for clockwise turn).
 in a loop, about 14 cells per 200 ms (one per 70 Hz frame); everything
 else is unchanged. When running, the paws show cell 0. Verified (burst
 around an AUTOTYPE P). Clicking the paws icon did not pause (two tries).
+While paused, skills can be selected but not given to lemmings (owner's
+observation); highlighting and the lemming view still work in ours.
 
 **Lemming cam.** Clicking the face changes it from the squinting cell 23
 to the open-eyed cell 22 (verified); the next click on a lemming then

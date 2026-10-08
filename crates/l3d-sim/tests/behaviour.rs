@@ -149,6 +149,22 @@ fn builder_lays_six_bricks() {
 }
 
 #[test]
+fn walkers_cross_a_staircase_from_the_side() {
+    // Walkers head +X on the floor (surface y = 2) and meet, side-on, a low
+    // step (top ¼ up) and then the next one (from ¼ to ½ up): they step over
+    // the first and pass under the second, never turning round.
+    let mut sim = open_level(1).sim();
+    let floor = 2 * SUB;
+    let brick = |x: i32, bottom: i32| l3d_sim::Brick { min: [x * SUB, floor + bottom, 14 * SUB], max: [x * SUB + SUB / 2, floor + bottom + SUB / 4, 19 * SUB], id: 9 };
+    assert!(sim.world.add_brick(brick(20, 0)));
+    assert!(sim.world.add_brick(brick(22, SUB / 4)));
+    run(&mut sim, 300);
+    let l = &sim.lemmings[0];
+    assert_eq!(l.dir, Dir::PosX);
+    assert!(l.pos[0] > 23 * SUB, "x = {}", l.pos[0] as f32 / SUB as f32);
+}
+
+#[test]
 fn bashing_removes_bricks() {
     let mut sim = open_level(1).sim();
     let c = [20, 2, 20];

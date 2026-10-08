@@ -18,7 +18,7 @@ pub struct Settings {
     /// turns the camera.
     pub left_handed: bool,
     pub fullscreen: bool,
-    /// Enhanced presentation (smooth camera moves, solid bricks); off, the
+    /// Enhanced presentation (smooth camera moves); off, the
     /// game looks and moves as the original.
     pub enhanced: bool,
     /// Volumes and camera speed, 0–10 lights as on the original's sliders.
@@ -55,7 +55,7 @@ impl Settings {
 
     /// The scene parts and style to draw.
     pub fn show(&self) -> crate::scene_build::Show {
-        crate::scene_build::Show { land: self.land, sea: self.sea, sky: self.sky, solid_bricks: self.enhanced }
+        crate::scene_build::Show { land: self.land, sea: self.sea, sky: self.sky }
     }
 
     /// Music volume as a linear factor.

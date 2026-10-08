@@ -607,15 +607,14 @@ pub fn hatch_open(tick: u64) -> f32 {
 }
 
 /// Replaces the block geometry of `scene` with a mesh of the current grid,
-/// the hatches as far open as `sim` has got and its bricks drawn;
-/// `solid_bricks` draws bricks as full slabs rather than the original's
-/// planks.
-pub fn rebuild_blocks(scene: &SceneData, layer: usize, level: &Level, blocks: &BlockSet, sim: &l3d_sim::Simulation, solid_bricks: bool) -> SceneData {
+/// the hatches as far open as `sim` has got and its bricks drawn.
+pub fn rebuild_blocks(scene: &SceneData, layer: usize, level: &Level, blocks: &BlockSet, sim: &l3d_sim::Simulation) -> SceneData {
     let mut out = scene.clone();
     let texture = out.layers[layer].texture.clone();
     let on_top = |tile: u32| art_on_top(|i| texture.texels.get(i * 4 + 3).is_some_and(|&a| a > 0), tile);
     out.layers[layer] = block_layer(&level_mesh::build(level, blocks, &on_top, hatch_open(sim.tick)), texture);
-    out.layers[layer + 1] = brick_layer(&sim.world.bricks, solid_bricks);
+    let brick_texture = out.layers[layer + 1].texture.clone();
+    out.layers[layer + 1] = brick_layer(&sim.world.bricks, brick_texture);
     out
 }
 
@@ -624,59 +623,48 @@ pub fn rebuild_blocks(scene: &SceneData, layer: usize, level: &Level, blocks: &B
 /// observation); ours gets an underside a hair below so it shows from below.
 const BRICK_DRAWN_THICKNESS: f32 = 0.02;
 
-/// Builders' bricks: thin brown planks at the top of each simulated brick,
-/// as the original's, or (`solid`) the whole slab, which makes a staircase.
-/// The original's bricks are thin and brown (`docs/spec/behaviour.md`); the
-/// texture is our own.
-fn brick_layer(bricks: &[l3d_sim::Brick], solid: bool) -> SceneLayer {
-    const W: u32 = 16;
-    const H: u32 = 4;
-    let texels = (0..W * H)
-        .flat_map(|i| {
-            let (x, y) = (i % W, i / W);
-            // Mortar lines between two courses of staggered bricks.
-            let mortar = y % 2 == 1 || (x + if y < 2 { 0 } else { 4 }) % 8 == 7;
-            if mortar { [92, 52, 24, 255] } else { [156, 92, 44, 255] }
-        })
-        .collect();
+/// The texture-set tile bricks show: wooden planks in a light frame, the
+/// planks lying across the way the builder went (the owner's comparison
+/// with the original; seen best from the lemming view).
+const BRICK_TILE: usize = 40;
+
+/// Builders' bricks as thin planks at the top of each simulated brick, each
+/// face showing `texture` (the level's [`BRICK_TILE`]) once.
+fn brick_layer(bricks: &[l3d_sim::Brick], texture: RgbaImage) -> SceneLayer {
     let mut b = LayerBuilder::default();
     let sub = l3d_sim::SUB as f32;
     for brick in bricks {
         let (mut lo, hi) = (brick.min.map(|v| v as f32 / sub), brick.max.map(|v| v as f32 / sub));
-        if !solid {
-            lo[1] = hi[1] - BRICK_DRAWN_THICKNESS;
-        }
+        lo[1] = hi[1] - BRICK_DRAWN_THICKNESS;
         let p = |x: usize, y: usize, z: usize| [[lo[0], hi[0]][x], [lo[1], hi[1]][y], [lo[2], hi[2]][z]];
-        // Each face counter-clockwise from outside, with its brightness: the
-        // top and the underside, then (solid) the four sides.
-        let faces = [
-            ([p(0, 1, 0), p(0, 1, 1), p(1, 1, 1), p(1, 1, 0)], 1.0),
-            ([p(0, 0, 0), p(1, 0, 0), p(1, 0, 1), p(0, 0, 1)], 0.5),
-            ([p(0, 0, 1), p(1, 0, 1), p(1, 1, 1), p(0, 1, 1)], 0.8),
-            ([p(1, 0, 0), p(0, 0, 0), p(0, 1, 0), p(1, 1, 0)], 0.8),
-            ([p(1, 0, 1), p(1, 0, 0), p(1, 1, 0), p(1, 1, 1)], 0.7),
-            ([p(0, 0, 0), p(0, 0, 1), p(0, 1, 1), p(0, 1, 0)], 0.7),
-        ];
-        for (corners, brightness) in faces.into_iter().take(if solid { 6 } else { 2 }) {
+        // A brick is shorter along the way it was laid than across it; the
+        // tile's rows (its planks) run across.
+        let along_x = hi[0] - lo[0] < hi[2] - lo[2];
+        let uv = |c: [f32; 3]| {
+            let (fx, fz) = ((c[0] - lo[0]) / (hi[0] - lo[0]), (c[2] - lo[2]) / (hi[2] - lo[2]));
+            if along_x { [fz, 1.0 - fx] } else { [fx, 1.0 - fz] }
+        };
+        // The top and the underside, each counter-clockwise from outside,
+        // with its brightness.
+        let faces = [([p(0, 1, 0), p(0, 1, 1), p(1, 1, 1), p(1, 1, 0)], 1.0), ([p(0, 0, 0), p(1, 0, 0), p(1, 0, 1), p(0, 0, 1)], 0.5)];
+        for (corners, brightness) in faces {
             let base = b.base();
-            for (c, uv) in corners.iter().zip([[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]]) {
-                Vertex::fixed(*c, uv, brightness, false).push(&mut b.vertices);
+            for c in corners {
+                Vertex::fixed(c, uv(c), brightness, false).push(&mut b.vertices);
             }
             b.indices.extend([base, base + 1, base + 2, base, base + 2, base + 3]);
         }
     }
-    b.finish(RgbaImage { width: W, height: H, texels })
+    b.finish(texture)
 }
 
 /// Which optional parts of the scene to draw (the options screen's Land,
-/// Sea and Sky) and how (enhanced or as the original).
+/// Sea and Sky).
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Show {
     pub land: bool,
     pub sea: bool,
     pub sky: bool,
-    /// Bricks as full slabs (enhanced) rather than planks.
-    pub solid_bricks: bool,
 }
 
 /// Builds everything drawn for level `n`.
@@ -739,7 +727,8 @@ pub fn build(data: &mut GameData, n: u32, show: Show) -> Result<BuiltLevel, l3d_
     let block_layer_index = scene.layers.len();
     scene.layers.push(block_layer(&mesh, indexed_to_rgba(&tex, 64, &pal)));
     // Builders' bricks, right after the blocks (see ebuild_blocks).
-    scene.layers.push(brick_layer(&[], false));
+    let brick_tile = tex.get(BRICK_TILE * 64 * 64..(BRICK_TILE + 1) * 64 * 64).unwrap_or_default();
+    scene.layers.push(brick_layer(&[], indexed_to_rgba(brick_tile, 64, &pal)));
     scene.layers.extend(object_layers(data, &level, &pal));
     scene.layers.extend(decal_layers(data, &level, &pal));
     scene.layers.extend(trap_layer(data, &level, &pal));

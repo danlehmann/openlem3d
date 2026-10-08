@@ -75,7 +75,7 @@ extracting.
 | Turn | Q / E or ← →, right-drag, hold the right button at the left or right edge, or hold the turn arrows | one-finger drag (left/right), or hold the turn arrows |
 | Up / down | R / F, or the mouse wheel | two-finger drag |
 | Preset cameras | 1–4, or click the camera to cycle (the camera glides there while the level waits; moving it yourself stops the glide) | tap the camera to cycle |
-| Pause | P or Space, or click the paws | tap the paws |
+| Pause (skills can be selected but not given while paused) | P or Space, or click the paws | tap the paws |
 | Fast-forward | click the ▶ icon | tap the ▶ icon |
 | Select skill | F1–F9, or click a skill at the bottom | tap a skill |
 | Give skill to a lemming | click the lemming | tap the lemming |
@@ -86,7 +86,7 @@ extracting.
 | Release rate | − / + (hold to repeat) | − / + buttons (hold to repeat) |
 | Nuke | Alt+Q, or double-click the bomb | double-tap the bomb |
 | Mute music and sounds | M | — |
-| Original or Enhanced mode (Enhanced: smooth camera moves, solid brick stairs) | Tab, also on the title, where the top right shows the mode; click it to switch | tap the mode on the title |
+| Original or Enhanced mode (Enhanced: smooth camera moves) | Tab, also on the title, where the top right shows the mode; click it to switch | tap the mode on the title |
 | Options | F12 (also during a level, which waits) or the Options button on the title | tap Options |
 | Briefing | click or Space: play; Enter or click Preview: preview (Practice briefings are the level circling behind the details, and Enter or Demo plays a solution for you; any key or click returns); right click, Esc or click Menu: back | tap to play, or tap Preview/Demo or Menu |
 | Results | click, Space or Enter: next level (or retry); right click or Esc: level list | tap; or tap Menu |

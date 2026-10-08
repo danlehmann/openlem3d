@@ -68,6 +68,9 @@ const BLAST_ABOVE: i32 = SUB;
 const DIG_TICKS: u32 = 40;
 /// Ticks per brick laid by a builder (verified: 25 ± 1).
 pub const BUILD_TICKS: u32 = 25;
+/// Ticks from the assignment to the first brick: the builder stands still
+/// with its sack until then (measured: 8 in the Practice "Builder" demo).
+pub const FIRST_BRICK_TICKS: u32 = 8;
 /// Bricks per builder (verified: 6).
 const BRICKS: u8 = 6;
 /// How long a builder out of bricks shrugs (cells 474–488, three frames;
@@ -1173,7 +1176,7 @@ impl Simulation {
     /// onto it (provisional: one segment per cell, inheriting the block id
     /// of the cell stood on).
     fn build(&mut self, l: &mut Lemming, bricks_left: u8) {
-        if !l.state_ticks.is_multiple_of(BUILD_TICKS) {
+        if l.state_ticks < FIRST_BRICK_TICKS || !(l.state_ticks - FIRST_BRICK_TICKS).is_multiple_of(BUILD_TICKS) {
             return;
         }
         if bricks_left == 0 {
@@ -1433,10 +1436,17 @@ impl Simulation {
         // Body clearance ahead: solid at step height above that surface is a
         // wall (a ramp rises at most REACH over the probe distance, which stays
         // below this), and a ceiling lower than the walker's head blocks too.
-        let wall = |w: &World, y: i32| w.solid([ahead[0], y, ahead[1]]);
+        // Bricks are floors only, never walls (owner's recollection: walkers
+        // meeting a staircase from the side step onto a low step or pass
+        // under).
+        let wall = |w: &World, y: i32| w.terrain_solid([ahead[0], y, ahead[1]]);
+        // Stepping off an edge, the walker is still at its own height when
+        // it moves on (then falls), so that is where it needs room: walls
+        // down by a lower surface don't turn it round.
+        let body = if surface < l.pos[1] - STEP_DOWN { l.pos[1] } else { surface };
         let blocked = surface > l.pos[1] + STEP_UP
-            || wall(&self.world, surface + STEP_UP + 2)
-            || wall(&self.world, surface + HEAD_HEIGHT - 1);
+            || wall(&self.world, body + STEP_UP + 2)
+            || wall(&self.world, body + HEAD_HEIGHT - 1);
         if blocked {
             if l.climber && self.world.solid([ahead[0], l.pos[1] + STEP_UP + 1, ahead[1]]) {
                 l.set_state(State::Climbing);
