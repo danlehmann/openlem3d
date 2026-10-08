@@ -82,6 +82,9 @@ fn open_level(rotation: u16) -> Synth {
 #[test]
 fn release_interval_is_101_minus_rate() {
     let mut sim = open_level(1).rate(80).sim();
+    // Nothing drops while the hatch opens; the first on the tick after.
+    run(&mut sim, l3d_sim::HATCH_OPEN_TICKS);
+    assert_eq!(sim.counts.released, 0);
     sim.step();
     assert_eq!(sim.counts.released, 1);
     // The next release comes 101 − 80 = 21 ticks later.

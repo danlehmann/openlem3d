@@ -54,6 +54,10 @@ pub const FUSE_TICKS: u32 = 50;
 /// The last ticks of a fuse, after the countdown: the bomber holds its nose
 /// and swells (observed: about 10 ticks after the last countdown digit).
 pub const SWELL_TICKS: u32 = 10;
+/// Ticks the entrance hatches take to open at the start of a level; the
+/// first lemming drops on the tick after (the owner saw the hatch start
+/// closed, open, and only then release; the duration is ours).
+pub const HATCH_OPEN_TICKS: u32 = 10;
 /// Explosion radius across the ground in sub-units (rough: the hole is
 /// about one cell long).
 const BLAST_RADIUS: i32 = SUB;
@@ -467,7 +471,7 @@ impl Simulation {
             nuked: false,
             tick: 0,
             log: Vec::new(),
-            release_timer: 0,
+            release_timer: HATCH_OPEN_TICKS,
             next_entrance: 0,
             events: Vec::new(),
             object_kind: objects::level_objects(level).map(|(k, _)| k),

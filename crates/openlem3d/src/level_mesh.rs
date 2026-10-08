@@ -168,16 +168,16 @@ fn is_flap(cell: BlockCell, src: FaceDir) -> bool {
     cell.id == 0 && cell.shape == 0 && matches!(src, FaceDir::PosX | FaceDir::NegX)
 }
 
-/// Where a point of a hatch side face lies on the open door hinged at that
-/// wall's bottom edge: the face swung 135° outward about that edge (the
-/// same place as the half of the bottom swung down), so the door hangs down
-/// and out at 45° (matches the original's
-/// open hatches; angle estimated from captures).
-fn open_flap(p: [f32; 3], src: FaceDir, y0: f32) -> [f32; 3] {
-    const S: f32 = std::f32::consts::FRAC_1_SQRT_2;
+/// Where a point of a hatch side face lies on the door hinged at that
+/// wall's bottom edge, `open` (0–1) of the way open. Closed, the door lies
+/// flat across its half of the hatch's bottom; it swings down through 135°
+/// until it hangs down and out at 45° (matches the original's open hatches;
+/// angle estimated from captures).
+fn open_flap(p: [f32; 3], src: FaceDir, y0: f32, open: f32) -> [f32; 3] {
+    let a = open.clamp(0.0, 1.0) * 0.75 * std::f32::consts::PI;
     let h = p[1] - y0;
-    let x = if src == FaceDir::PosX { 1.0 + S * h } else { -S * h };
-    [x, y0 - S * h, p[2]]
+    let x = if src == FaceDir::PosX { 1.0 - a.cos() * h } else { a.cos() * h };
+    [x, y0 - a.sin() * h, p[2]]
 }
 
 /// The quarter turns actually applied to a cell: the stored rotation plus a
@@ -351,8 +351,8 @@ impl MeshData {
 /// `art_on_top(tile)` says whether a tile's picture is in its top half; a
 /// half-height hatch's flaps show the half that has it (texture sets differ:
 /// `TEXTURE.004` and `.006` draw the crate side in the top half of tiles 59
-/// and 60).
-pub fn build(level: &Level, blocks: &BlockSet, art_on_top: &dyn Fn(u32) -> bool) -> LevelMesh {
+/// and 60). `hatch_open` (0–1) is how far the hatches' doors are open.
+pub fn build(level: &Level, blocks: &BlockSet, art_on_top: &dyn Fn(u32) -> bool, hatch_open: f32) -> LevelMesh {
     let grid = Grid { level, blocks };
     let mut out = LevelMesh::default();
     let mut unsupported = std::collections::BTreeMap::<u8, usize>::new();
@@ -396,7 +396,7 @@ pub fn build(level: &Level, blocks: &BlockSet, art_on_top: &dyn Fn(u32) -> bool)
                 .map(|v| {
                     let mut lp = [v[0], y0 + v[1] * (y1 - y0), v[2]];
                     if flap {
-                        lp = open_flap(lp, p.src, y0);
+                        lp = open_flap(lp, p.src, y0, hatch_open);
                     }
                     let r = rotate_point(lp, effective_rotation(cell.shape, cell.rotation));
                     [r[0] + origin[0], r[1] + origin[1], r[2] + origin[2]]

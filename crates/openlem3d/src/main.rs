@@ -502,14 +502,16 @@ fn step_simulation(options: Res<Options>, settings: Res<settings::Settings>, mut
     }
     let changes = sim.world.take_changes();
     let bricks_changed = sim.world.take_bricks_changed();
-    if changes.is_empty() && !bricks_changed {
+    // The hatches swing open over the first ticks.
+    let opening = sim.tick <= l3d_sim::HATCH_OPEN_TICKS as u64;
+    if changes.is_empty() && !bricks_changed && !opening {
         return;
     }
     let (Some((level, blocks, layer)), Some(current)) = (terrain, &scene.data) else { return };
     for ([x, y, z], cell) in changes {
         level.set_block(x, y, z, cell);
     }
-    let rebuilt = scene_build::rebuild_blocks(current, *layer, level, blocks, &sim.world.bricks, settings.enhanced);
+    let rebuilt = scene_build::rebuild_blocks(current, *layer, level, blocks, sim, settings.enhanced);
     scene.version += 1;
     scene.data = Some(Arc::new(rebuilt));
 }
@@ -796,7 +798,7 @@ fn refresh_scenery(
     let content = match (terrain.as_mut(), sim) {
         (Some((level, blocks, layer)), Some(sim)) => {
             *layer = built.block_layer;
-            scene_build::rebuild_blocks(&built.scene, built.block_layer, level, blocks, &sim.world.bricks, show.solid_bricks)
+            scene_build::rebuild_blocks(&built.scene, built.block_layer, level, blocks, sim, show.solid_bricks)
         }
         _ => built.scene,
     };

@@ -72,6 +72,12 @@ at each death.
 
 ## Release
 
+**The hatch opens first (observed by the owner).** A level starts with its
+hatches closed; they swing open, and only then does the first lemming drop.
+The opening time is unmeasured: ours opens the doors over the first 10
+ticks and drops the first lemming on the 11th (stored solutions count their
+ticks from then).
+
 **Interval: `101 − rate` ticks (verified).** Releases were timed from the
 OUT counter:
 

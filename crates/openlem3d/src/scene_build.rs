@@ -601,15 +601,21 @@ fn art_on_top(opaque: impl Fn(usize) -> bool, tile: u32) -> bool {
     count(0..32) > count(32..64)
 }
 
-/// Replaces the block geometry of `scene` with a mesh of the current grid;
+/// How far the hatches' doors are open `tick` ticks into a level (0–1).
+pub fn hatch_open(tick: u64) -> f32 {
+    (tick as f32 / l3d_sim::HATCH_OPEN_TICKS as f32).min(1.0)
+}
+
+/// Replaces the block geometry of `scene` with a mesh of the current grid,
+/// the hatches as far open as `sim` has got and its bricks drawn;
 /// `solid_bricks` draws bricks as full slabs rather than the original's
 /// planks.
-pub fn rebuild_blocks(scene: &SceneData, layer: usize, level: &Level, blocks: &BlockSet, bricks: &[l3d_sim::Brick], solid_bricks: bool) -> SceneData {
+pub fn rebuild_blocks(scene: &SceneData, layer: usize, level: &Level, blocks: &BlockSet, sim: &l3d_sim::Simulation, solid_bricks: bool) -> SceneData {
     let mut out = scene.clone();
     let texture = out.layers[layer].texture.clone();
     let on_top = |tile: u32| art_on_top(|i| texture.texels.get(i * 4 + 3).is_some_and(|&a| a > 0), tile);
-    out.layers[layer] = block_layer(&level_mesh::build(level, blocks, &on_top), texture);
-    out.layers[layer + 1] = brick_layer(bricks, solid_bricks);
+    out.layers[layer] = block_layer(&level_mesh::build(level, blocks, &on_top, hatch_open(sim.tick)), texture);
+    out.layers[layer + 1] = brick_layer(&sim.world.bricks, solid_bricks);
     out
 }
 
@@ -679,7 +685,7 @@ pub fn build(data: &mut GameData, n: u32, show: Show) -> Result<BuiltLevel, l3d_
     let blocks = data.blocks(n)?;
     let pal = data.palette("GFX/LM3D.PAL")?;
     let tex = data.gfx("TEXTURE", level.texture_set)?;
-    let mesh = level_mesh::build(&level, &blocks, &|tile| art_on_top(|i| tex.get(i).is_some_and(|&p| p != 0), tile));
+    let mesh = level_mesh::build(&level, &blocks, &|tile| art_on_top(|i| tex.get(i).is_some_and(|&p| p != 0), tile), 0.0);
     let mut scene = SceneData::default();
 
     let flags = level.flags;

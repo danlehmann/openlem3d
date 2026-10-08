@@ -11,8 +11,8 @@ use crate::{Command, Simulation, Skill};
 /// How a solution gives out skills.
 #[derive(Debug, Clone, Copy)]
 pub enum Plan {
-    /// `(tick, lemming, skill id, turner side)` assignments, after that many
-    /// ticks; the side is `Some(true)` for clockwise.
+    /// `(tick, lemming, skill id, turner side)` assignments, that many ticks
+    /// after the hatches have opened; the side is `Some(true)` for clockwise.
     At(&'static [(u64, usize, u8, Option<bool>)]),
     /// The skill to every lemming as soon as it appears.
     Each(u8),
@@ -67,7 +67,7 @@ pub fn play(s: &Solution, level: &Level, blocks: &BlockSet) -> Simulation {
         match s.plan {
             Plan::At(steps) => {
                 let now = sim.tick;
-                for &(t, i, id, side) in steps.iter().filter(|(t, ..)| *t == now) {
+                for &(t, i, id, side) in steps.iter().filter(|(t, ..)| *t + crate::HATCH_OPEN_TICKS as u64 == now) {
                     let ok = match (side, sim.lemmings.get(i).map(|l| l.dir)) {
                         (Some(cw), Some(d)) => sim.assign_turner(i, if cw { d.clockwise() } else { d.anticlockwise() }),
                         _ => Skill::from_id(id).is_some_and(|skill| sim.assign(i, skill)),
