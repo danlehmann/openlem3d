@@ -250,6 +250,7 @@ fn preview(
     mut game: ResMut<Game>,
     mut data: ResMut<Data>,
     mut views: Query<&mut ViewCamera>,
+    mut preset: ResMut<crate::PresetIndex>,
     mut next: ResMut<NextState<AppState>>,
     mut centre: Local<Option<(u32, Vec3, bool)>>,
 ) {
@@ -286,6 +287,11 @@ fn preview(
     if state.started && any {
         state.active = false;
         game.paused = false;
+        // The level starts from camera 1, not where the flyover was.
+        if let (Ok(mut view), Some((level, ..))) = (views.single_mut(), game.terrain.as_ref()) {
+            view.set_preset(&level.cameras[0]);
+            preset.0 = 0;
+        }
         return;
     }
     let Ok(mut view) = views.single_mut() else { return };
