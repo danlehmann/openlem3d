@@ -82,9 +82,16 @@ const SHRUG_TICKS: u32 = 6;
 const BRICK_RUN: i32 = SUB / 2;
 const BRICK_START: i32 = SUB / 8;
 const BRICK_END: i32 = SUB / 2 + SUB / 8 + SUB / 16;
-/// Ticks per stroke of a basher (verified, rough: 30–34) and of a miner
-/// (rough: about 3.5 s).
-const BASH_TICKS: u32 = 32;
+/// Ticks per stroke of a basher (verified: the segments go 32 ticks after the
+/// first crack) and of a miner (rough: about 3.5 s).
+pub const BASH_TICKS: u32 = 32;
+/// Ticks from a basher reaching its block to the first crack (measured: about
+/// 7 in the Practice "Basher" demo); its strokes then end every
+/// [`BASH_TICKS`].
+pub const BASH_CRACK_START: u32 = 7;
+/// Ticks per swing of a basher's mallets: one cycle of its 8-frame
+/// animation (provisional).
+const BASH_SWING_TICKS: u32 = 8;
 const MINE_TICKS: u32 = 49;
 /// Duration of terminal animations, in ticks (provisional).
 const EXIT_TICKS: u32 = 11;
@@ -506,6 +513,8 @@ impl Simulation {
             Skill::Climber => !l.climber,
             Skill::Floater => !l.floater,
             Skill::Bomber => l.fuse.is_none(),
+            // Not to a climber on its wall: there a digger is refused and
+            // not paid for (verified by the owner on "Candyland Climber").
             Skill::Blocker
             | Skill::Turner
             | Skill::Digger
@@ -661,7 +670,7 @@ impl Simulation {
         match a {
             State::Building { bricks_left } if matches!(b, State::Building { bricks_left: was } if was > bricks_left) => Some(Event::Brick),
             State::Digging if on(DIG_TICKS) => Some(Event::Dug),
-            State::Bashing if on(BASH_TICKS) => Some(Event::Bashed),
+            State::Bashing if on(BASH_SWING_TICKS) && self.bash_cell_full(after) => Some(Event::Bashed),
             State::Mining if on(MINE_TICKS) => Some(Event::Mined),
             _ => None,
         }
@@ -1144,8 +1153,8 @@ impl Simulation {
             return;
         }
         l.pos[1] += CLIMB_SPEED;
-        if !self.world.solid([ahead[0], l.pos[1], ahead[1]]) {
-            // Reached the top edge: step onto it.
+        if !self.world.solid([ahead[0], l.pos[1], ahead[1]]) && !self.world.solid([ahead[0], l.pos[1] + HEAD_HEIGHT - 1, ahead[1]]) {
+            // Reached the top edge, with room for the body: step onto it.
             l.pos[0] = ahead[0];
             l.pos[2] = ahead[1];
             let (ground, _) = self.world.surface_below(l.pos[0], l.pos[1] + STEP_UP, l.pos[2]);
@@ -1218,33 +1227,67 @@ impl Simulation {
         l.pos = next;
         l.state = State::Building { bricks_left: bricks_left - 1 };
     }
-    /// Removes body-height terrain in the cell ahead and moves into the gap;
-    /// stops when nothing is left to bash (provisional).
-    fn bash(&mut self, l: &mut Lemming) {
-        if !l.state_ticks.is_multiple_of(BASH_TICKS) {
-            return;
+    /// For a basher at work: the cell it is bashing, the segments it will
+    /// remove there (the lower half-unit from its feet up), and the ticks
+    /// since that stroke's cracks began (0 to [`BASH_TICKS`] − 1), once they
+    /// have. `None` before the first crack or when nothing is there to bash.
+    pub fn bash_target(&self, l: &Lemming) -> Option<([i32; 3], u8, u32)> {
+        if l.state != State::Bashing || l.state_ticks < BASH_CRACK_START {
+            return None;
         }
+        let (cell, mask) = Self::bash_cell(l);
+        let present = self.world.block(cell).map_or(0, |(b, _)| b.segments) & mask;
+        (present != 0).then(|| (cell, present, (l.state_ticks - BASH_CRACK_START) % BASH_TICKS))
+    }
+
+    /// The cell a basher works on and the segments it removes there.
+    fn bash_cell(l: &Lemming) -> ([i32; 3], u8) {
         let d = l.dir.delta();
         let ahead = [l.pos[0] + d[0] * (SUB / 2), l.pos[1], l.pos[2] + d[2] * (SUB / 2)];
         let cell = Self::cell_of(ahead);
         // Segments from the feet up to about head height.
         let first = ((l.pos[1] - cell[1] * SUB) / (SUB / 4)).clamp(0, 3);
         // The lower half-unit (two segments) from the feet up (verified, rough).
-        let mask = (0b11u8 << first) & 0xF;
+        (cell, (0b11u8 << first) & 0xF)
+    }
+
+    /// Whether anything is left in the segments a basher works on.
+    fn bash_cell_full(&self, l: &Lemming) -> bool {
+        let (cell, mask) = Self::bash_cell(l);
+        self.world.block(cell).is_some_and(|(b, _)| b.segments & mask != 0)
+    }
+
+    /// Whether a basher `ticks` into bashing ends a stroke now.
+    fn bash_stroke_ends(ticks: u32) -> bool {
+        ticks >= BASH_CRACK_START + BASH_TICKS && (ticks - BASH_CRACK_START).is_multiple_of(BASH_TICKS)
+    }
+
+    /// Removes body-height terrain in the cell ahead and moves into the gap;
+    /// walks on as soon as nothing is left to bash (provisional).
+    fn bash(&mut self, l: &mut Lemming) {
+        let d = l.dir.delta();
+        let (cell, mask) = Self::bash_cell(l);
+        if self.bash_cell_full(l) && !self.world.breakable_towards(cell, Some(d)) {
+            // Steel or a one-way block facing elsewhere: no cracks, it walks
+            // on (owner's observation).
+            l.set_state(State::Walking);
+            return;
+        }
+        if !Self::bash_stroke_ends(l.state_ticks) {
+            return;
+        }
         match self.world.block(cell) {
-            Some((b, f)) if b.segments & mask != 0 => {
-                if f & flags::STEEL != 0 {
-                    l.set_state(State::Walking);
-                    return;
-                }
-                if !self.world.remove_segments_towards(cell, mask, Some(l.dir.delta())) {
-                    // A one-way block facing the other way.
+            Some((b, _)) if b.segments & mask != 0 => {
+                if !self.world.remove_segments_towards(cell, mask, Some(d)) {
                     l.set_state(State::Walking);
                     return;
                 }
                 l.pos[0] += d[0] * (SUB / 4);
                 l.pos[2] += d[2] * (SUB / 4);
                 self.settle(l);
+                if !self.bash_cell_full(l) {
+                    l.set_state(State::Walking);
+                }
             }
             _ => l.set_state(State::Walking),
         }
@@ -1448,7 +1491,10 @@ impl Simulation {
             || wall(&self.world, body + STEP_UP + 2)
             || wall(&self.world, body + HEAD_HEIGHT - 1);
         if blocked {
-            if l.climber && self.world.solid([ahead[0], l.pos[1] + STEP_UP + 1, ahead[1]]) {
+            // Climbers climb walls that reach down to their feet; at an
+            // overhang they turn like walkers (provisional: lets the
+            // climbers of "Candyland Climber" reach its exit).
+            if l.climber && self.world.solid([ahead[0], l.pos[1] + SUB / 8, ahead[1]]) {
                 l.set_state(State::Climbing);
             } else {
                 l.dir = l.dir.reverse();

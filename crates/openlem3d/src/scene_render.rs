@@ -114,6 +114,10 @@ impl Plugin for SceneRenderPlugin {
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 const UNIFORM_SIZE: u64 = 112;
+/// Sky texels panned per full turn for the 320-wide all-round skies: three
+/// repeats of the panorama, close to the 1024 of the other skies and a
+/// whole number of repeats, so no turn shows a seam (provisional).
+const SURROUND_SKY_TURN: f32 = 960.0;
 
 /// GPU resources of the scene renderer.
 #[derive(Resource)]
@@ -353,8 +357,9 @@ fn prepare_scene(
     // The sky's left-edge column is given for a 640-wide screen; wider
     // screens show more sky around the same centre.
     let extra = (w as f32 / scale - 640.0) / 2.0;
-    uniforms.extend([camera.sky_column - extra / 2.0, camera.horizon * h as f32, scale, camera.time]);
     let surround = content.data.as_ref().is_some_and(|d| d.sky_surround);
+    let column = if surround { camera.sky_column * SURROUND_SKY_TURN / 1024.0 } else { camera.sky_column };
+    uniforms.extend([column - extra / 2.0, camera.horizon * h as f32, scale, camera.time]);
     uniforms.extend([camera.right.x, camera.right.y, camera.right.z, if surround { 1.0 } else { 0.0 }]);
     uniforms.extend([camera.roll, w as f32 / 2.0, 0.0, 0.0]);
     queue.write_buffer(&gpu.uniforms, 0, &f32_bytes(&uniforms));

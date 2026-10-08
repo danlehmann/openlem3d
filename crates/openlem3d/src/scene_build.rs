@@ -521,8 +521,18 @@ pub const EXIT_ID: usize = 1;
 /// open.
 pub const DOOR_ATLAS_FIRST: u32 = BOMBNUMB_ATLAS_FIRST + 8;
 pub const DOOR_FRAMES: u32 = 4;
+/// The first atlas cell holding the crack frames of `GFX/OVERLAY.000`
+/// (64×64 each, black where set, clear elsewhere): a crack network growing
+/// over [`CRACK_FRAMES`] frames, drawn over blocks being bashed.
+pub const CRACK_ATLAS_FIRST: u32 = DOOR_ATLAS_FIRST + DOOR_FRAMES;
+pub const CRACK_FRAMES: u32 = 16;
+/// The first atlas cell holding the level's texture set, four 64×64 tiles
+/// per cell (tile `t` in cell `TILE_ATLAS_FIRST + t / 4`, at x `(t % 2) · 64`,
+/// y `(t / 2 % 2) · 64`): the pieces flying off a bashed block.
+pub const TILE_ATLAS_FIRST: u32 = CRACK_ATLAS_FIRST + CRACK_FRAMES;
+pub const TILE_ATLAS_CELLS: u32 = 25;
 /// Rows in the sprite atlas.
-pub const ATLAS_ROWS: u32 = (DOOR_ATLAS_FIRST + DOOR_FRAMES).div_ceil(ATLAS_COLUMNS);
+pub const ATLAS_ROWS: u32 = (TILE_ATLAS_FIRST + TILE_ATLAS_CELLS).div_ceil(ATLAS_COLUMNS);
 
 /// Cells per row in the lemming atlas.
 pub const ATLAS_COLUMNS: u32 = 32;
@@ -533,8 +543,9 @@ pub const TRAP_FRAME: u32 = 64;
 
 /// All `LEMM.MHC` cells packed into one texture, [`ATLAS_COLUMNS`] per row
 /// (cell `i` at column `i % ATLAS_COLUMNS`, row `i / ATLAS_COLUMNS`), then
-/// the level's `TRAPS` frames from [`TRAP_ATLAS_FIRST`].
-fn lemming_atlas(data: &mut GameData, pal: &Palette, traps: Option<&[u8]>, door: &[u8]) -> Result<RgbaImage, l3d_formats::Error> {
+/// the level's `TRAPS` frames from [`TRAP_ATLAS_FIRST`] and the further
+/// pictures listed with the other `*_ATLAS_FIRST` constants.
+fn lemming_atlas(data: &mut GameData, pal: &Palette, traps: Option<&[u8]>, door: &[u8], tiles: &[u8]) -> Result<RgbaImage, l3d_formats::Error> {
     // The 128-pixel sprites; the 64-pixel set (same cells) doubled if missing.
     let (raw, scale) = match data.read("LEMM/LEMM128.MHC") {
         Ok(raw) => (raw, 1),
@@ -577,7 +588,35 @@ fn lemming_atlas(data: &mut GameData, pal: &Palette, traps: Option<&[u8]>, door:
     for (k, f) in door.as_chunks::<{ 64 * 64 }>().0.iter().take(DOOR_FRAMES as usize).enumerate() {
         put_sized(DOOR_ATLAS_FIRST + k as u32, f, 64);
     }
-    Ok(indexed_to_rgba(&pixels, w, pal))
+    for (t, f) in tiles.as_chunks::<{ 64 * 64 }>().0.iter().take(4 * TILE_ATLAS_CELLS as usize).enumerate() {
+        let (ox, oy) = ((t as u32 % 2) * 64, (t as u32 / 2 % 2) * 64);
+        let cell = TILE_ATLAS_FIRST + t as u32 / 4;
+        let (cx, cy) = ((cell % ATLAS_COLUMNS) * LEMMING_CELL + ox, (cell / ATLAS_COLUMNS) * LEMMING_CELL + oy);
+        for y in 0..64 {
+            let dst = ((cy + y) * w + cx) as usize;
+            pixels[dst..dst + 64].copy_from_slice(&f[(y * 64) as usize..(y * 64 + 64) as usize]);
+        }
+    }
+    let mut image = indexed_to_rgba(&pixels, w, pal);
+    // The crack frames: `OVERLAY.000` holds 1-bit 64×64 frames, 8 bytes per
+    // row, the most significant bit leftmost (`docs/spec/graphics.md`).
+    if let Ok(overlay) = data.read("GFX/OVERLAY.000") {
+        let mut texels = image.texels.to_vec();
+        for (k, frame) in overlay.as_chunks::<{ 64 * 8 }>().0.iter().take(CRACK_FRAMES as usize).enumerate() {
+            let cell = CRACK_ATLAS_FIRST + k as u32;
+            let (cx, cy) = ((cell % ATLAS_COLUMNS) * LEMMING_CELL, (cell / ATLAS_COLUMNS) * LEMMING_CELL);
+            for (y, row) in frame.as_chunks::<8>().0.iter().enumerate() {
+                for x in 0..64 {
+                    if row[x / 8] & (0x80 >> (x % 8)) != 0 {
+                        let i = (((cy + y as u32) * w + cx + x as u32) * 4) as usize;
+                        texels[i..i + 4].copy_from_slice(&[0, 0, 0, 255]);
+                    }
+                }
+            }
+        }
+        image.texels = texels.into();
+    }
+    Ok(image)
 }
 
 /// A loaded level with its renderable content.
@@ -738,7 +777,7 @@ pub fn build(data: &mut GameData, n: u32, show: Show) -> Result<BuiltLevel, l3d_
     // (verified for `TEXTURE.095`, tiles 8–11; [L3DEdit]).
     let door = blocks.defs.get(EXIT_ID).map_or(0, |d| d.face(FaceDir::PosZ).texture as usize) * 64 * 64;
     let door = tex.get(door..(door + 4 * 64 * 64).min(tex.len())).unwrap_or_default();
-    scene.sprite_atlas = lemming_atlas(data, &pal, traps.as_deref(), door).ok();
+    scene.sprite_atlas = lemming_atlas(data, &pal, traps.as_deref(), door, &tex).ok();
 
     if show.sky
         && level.sky_gfx != 0xFF

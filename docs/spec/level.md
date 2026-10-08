@@ -179,7 +179,7 @@ assuming rotation 0.
 | 7 | Vertical 45° deflector wall facing +Z/+X (uses the +Z face texture) |
 | 8 / 9 | 22.5° ramp on the upper / lower two slices |
 | 10 / 11 | Outer corner where two 45° ramps meet (top / bottom) |
-| 12 / 13 | Triangular-prism corner piece (top / bottom) |
+| 12 / 13 | Corner piece (top / bottom): a tetrahedron peaking above the −X/−Z corner with its sloped face towards +X/+Z, the outer corner of two 45° ramps (**verified**: the owner saw ours turned wrong on `LEVEL.006`, whose four platform corners, rotations 0–3, join the ramps only this way; [L3DEdit] has the slope towards −X/−Z) |
 | 14 / 15 | Crash the original game |
 
 ## Object grid (structure verified, semantics unverified)
@@ -244,13 +244,17 @@ tested on a save where only level 1 of each rating was unlocked.
 |---|---|---|
 | `BLIMBING` | 2 (Fun 2, "That's Right", `LEVEL.001`) | Shown after completing Fun 1; entered on the code screen, it opened the briefing "Level 2 That's Right". |
 | `FANAGALO` | 3 (Fun 3, "The Bean Machine", `LEVEL.002`) | Shown after completing Fun 2; entered, it opened the briefing "Level 3 The Bean Machine". |
+| `WALLAROO` | 7 (Fun 7, "Candyland Climber", `LEVEL.006`) | From a public list (classicreload.com, "Lemmings 3D", which also has `BLIMBING` and `FANAGALO`); entered, it opened the briefing "Level 7 Candyland Climber". |
+| `AVENTAIL` | 8 (Fun 8, "Lemmings Inside", `LEVEL.007`) | From the same list; entered, it opened the briefing "Level 8 Lemmings Inside". |
 
 **Two other third-party lists don't match this edition.** A list published on
 megagames.com ("Lemmings 3D – Level Passwords") gives `STARTING` for
 level 2, and cheatbook.de gives `NASTALK`. The game itself gives `BLIMBING`
 for level 2, and both third-party codes had no effect (no briefing opened;
 the game returned to the main menu). These lists probably belong to another edition, so none of
-their codes are recorded here.
+their codes are recorded here. Likewise `WALLARDO`, which the owner had for
+"Candyland Climber" in an online "Lemmings 3D" version, was typed in full on
+the code screen and returned to the main menu (verified).
 
 **Pattern:** none visible from two codes. Both are real words (a fruit and a
 pidgin language), not encodings of the level number.

@@ -132,12 +132,15 @@ fn shape_polys(shape: u8) -> Option<Vec<Poly>> {
             poly(&[[0., 0., 1.], [1., 0., 1.], [1., 1., 1.]], PosZ, Some(PosZ)),
         ],
         11 => shape_polys(10)?.into_iter().map(mirror_y).collect(),
-        // Corner piece with one sloped face towards −X/−Z/+Y.
+        // Corner piece: a tetrahedron with its peak above the −X/−Z corner
+        // and one sloped face towards +X/+Z/+Y, the outer corner of two 45°
+        // ramps falling towards +X and +Z (verified on the platform corners
+        // of `LEVEL.006`).
         12 => vec![
-            poly(&[[1., 0., 0.], [1., 0., 1.], [0., 0., 1.]], NegY, Some(NegY)),
-            poly(&[[1., 0., 0.], [0., 0., 1.], [1., 1., 1.]], PosZ, None),
-            poly(&[[1., 0., 0.], [1., 0., 1.], [1., 1., 1.]], PosX, Some(PosX)),
-            poly(&[[0., 0., 1.], [1., 0., 1.], [1., 1., 1.]], PosZ, Some(PosZ)),
+            poly(&[[0., 0., 0.], [1., 0., 0.], [0., 0., 1.]], NegY, Some(NegY)),
+            poly(&[[1., 0., 0.], [0., 0., 1.], [0., 1., 0.]], PosZ, None),
+            poly(&[[0., 0., 0.], [0., 0., 1.], [0., 1., 0.]], NegX, Some(NegX)),
+            poly(&[[0., 0., 0.], [1., 0., 0.], [0., 1., 0.]], NegZ, Some(NegZ)),
         ],
         13 => shape_polys(12)?.into_iter().map(mirror_y).collect(),
         _ => return None,

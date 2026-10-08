@@ -88,7 +88,7 @@ else is **guessed** from the contact sheet's appearance.
 | 0–29 | Walker | 5 × 6 (A0 0–5, A1 6–11, A2 12–17, A3 18–23, A4 24–29) | **Verified.** A4: lemming-cam burst (camera behind a walker) ranked 24, 25, 26, 27, 28, 29 in that cyclic order (mean diff 18–20). A2: a side-on walker ranked cell 12 best (diff 14.8, next other range 20.4). A0: walkers coming towards the camera ranked cells 2–5 best (weaker, 34–35, because lemmings overlapped). A1/A3: matched 13–23 (plain and mirrored) on lemmings walking at an angle. |
 | 30–85 | Turner (pointing with one arm; head turns) | 8 × 7 (30–36, 37–43, 44–50, 51–57, 58–64, 65–71, 72–78, 79–85) | **Partly verified.** A turner seen side-on in Fun 1 ranked only cells from 72–78 (diff ≈ 31) over a 3 s burst, cycling through them. The blocks go round the lemming from the front by its left (front, front-left, left, back-left, back, back-right, right, front-right; verified by eye: block 2, cells 44–50, faces screen-left, and block 6, 72–78, faces screen-right with the pointing arm towards the camera; the reverse order made the arm swap sides as the camera circled, owner's observation). Seen from the front, cells 30–36 hold out the lemming's right arm (screen left) and 79–85 its left arm; drawn that way round (stored cells for a turner pointing to its right), our turners point where they send walkers. Pairs 30–57 and 58–85 are near-mirrors (diff 30–45), not exact copies, because the pointing arm changes sides. |
 | 86–120 | Blocker (arms out, head turns left and right) | 5 × 7 | Guessed. The pose matches the blocker skill icon. Drawn side-on to its heading, so the arms point back the way it came and on the way it was going (as in the original, by the owner's observation). |
-| 121–160 | Tumbling head over heels, arms up | 5 × 8 | Guessed. **Not** the fall from a hatch (see 399–423): those falls ranked these cells clearly worse (mean diff 34–37 against 25–29 with a uniform-scale search). Might be a long fall (not yet observed) or something else. |
+| 121–160 | Climber: reaching up with both arms, then pulling the knees up, as if hauling itself up a wall | 5 × 8 | Matched by eye to the owner's description of the original's climber pulling itself up (ours showed 538–562, which looked like a lemming rising while standing). The side block (137–144) reaches forward and up. **Not** the fall from a hatch (see 399–423): those falls ranked these cells clearly worse (mean diff 34–37 against 25–29 with a uniform-scale search). |
 | 161–200 | Digger (crouched, scooping with one arm) | 5 × 8 | **Verified by eye**: a digger in Mayhem 1 showed this crouched scooping pose (side view, 177–192), then fell through the hole. Too small for a reliable `mhc-match` ranking. |
 | 201–240 | Basher (a mallet in each hand) | 5 × 8 | Guessed. |
 | 241–270 | Miner (pickaxe, swinging down and forward) | 5 × 6 | Guessed. |
@@ -99,14 +99,14 @@ else is **guessed** from the contact sheet's appearance.
 | 369–398 | Drowning (sinking, arms up) | 5 × 6 | **Verified by eye**: a lemming that fell through a dug hole into water in Mayhem 1 showed only the head and raised arms above the water, as in these cells. |
 | 399–423 | **Falling** (arms out, legs dangling) | 5 × 5 (A0 399–403, A1 404–408, A2 409–413, A3 414–418, A4 419–423) | **Verified** for A0 and A4, see "Falling" below. A1–A3 follow the block layout but were not seen in game. |
 | 424–428 | Feet up, seen from above or below | 5 × 1, or 1 × 5 | Guessed. |
-| 429–443 | Lying on the back, feet up: probably splat | 5 × 3 | Guessed. |
+| 429–443 | Lying on the back, feet up | 5 × 3 | Guessed. Not the splat, which leaves no body: the lemming bursts into fragments (owner). |
 | 444–473 | Builder walking between bricks (sack on the back) | 5 × 6 | **Verified by eye**: the Mayhem 1 builder walked between bricks with this sack (side view, as in 450–461). |
 | 474–488 | Builder out of bricks (shrug) | 5 × 3 | Owner recalls the builder shrugging when out of bricks; drawn for 6 ticks (unmeasured) before it walks on. |
 | 489–513 | Standing, arms out, falling over onto the back | 5 × 5 | Guessed: splat, stunned or "oh no". |
 | 514–523 | Electrocution: normal and X-ray skeleton frames alternating | 5 × 2 | Guessed (pairs 514/515 front … 522/523 back). |
 | 524–533 | Electrocution cloud (gathers, lightning, shrinks) | 1 × 10 | Guessed. View-independent. Drawn over a zapped lemming, spread over its death (unmeasured). |
 | 534–537 | Smoke puff, shrinking (bomber explosion) | 1 × 4 | Guessed. View-independent. |
-| 538–562 | Climber (arms raised against a wall, legs alternating) | 5 × 5 | Guessed. The back block (558–562) matches the climber skill icon's pose. |
+| 538–562 | Arms spread sideways, one leg kicking up | 5 × 5 | Unknown. Earlier taken for the climber (the back block resembles the climber skill icon), but it shows a lemming standing, not hauling itself up (owner). Perhaps sliding or balancing. |
 | 563–567 | Film camera (the level's camera marker, not a lemming) | 5 × 1 | Guessed. |
 
 Not found: an exit animation (lemmings were not seen exiting), the bomber

@@ -42,7 +42,7 @@ the source for these (unverified in play):
 | `SPOTFX/FANFARE` | Enough lemmings have exited |
 | `VOXFX/CHEERS1`, `BOOS` | End of level, passed or failed |
 | `VOXFX/SHRUG1` | A builder has finished |
-| `SPOTFX/BRICKS1`, `GRAVEL3`, `PICKAXE4`, `HAMMER1` | Building (no comment), digging, mining, bashing |
+| `SPOTFX/BRICKS1`, `GRAVEL3`, `PICKAXE4`, `HAMMER1` | Building (no comment), digging, mining, bashing (ours: each brick, dig and mine stroke, and each 8-tick basher swing while something is in front of it; provisional) |
 | `SPOTFX/ANVIL1` | A digger, miner or basher hits metal |
 | `SPOTFX/SUCKER2` | Climbing |
 | `SPOTFX/BROLLY1` | An umbrella opens |

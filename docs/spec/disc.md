@@ -55,6 +55,14 @@ the same track; index 1 plays a different one. No level played track 2, 3 or
 | 9 | 6 | 17 |
 | 10 | 11 | 12 |
 
+**Editions differ.** Our CD is the "3D Lemmings" edition (the title on its
+main menu); its Fun list starts "Take A Dive", "That's Right", "The Bean
+Machine" (verified), so file `LEVEL.nnn` is level n + 1. An online
+"Lemmings 3D" version the owner played starts Fun with "Candyland Climber"
+(`LEVEL.006` here) and shows that level with other textures (multicoloured
+blocks, a chocolate floor), so its level data differ (owner's observation).
+Everything in these specs is for the "3D Lemmings" CD.
+
 Observations (one log line per level start):
 
 | Level | File | Theme | Music | Track |
@@ -126,7 +134,8 @@ decompresses with valid CRCs (`l3d-tool rnc-check`: 150/150).
 | `GFX/WALLS.nnn` | 8 | 65,536 bytes. |
 | `GFX/ANIMOBJ.nnn` | 24 | 16,384 bytes. |
 | `GFX/TRAPS.nnn` | 9 | 32,768 bytes, except `TRAPS.008` (20,480 bytes). |
-| `GFX/BGRD.000`, `GFX/OVERLAY.000` | 1 each | 15,360 and 12,288 bytes. |
+| `GFX/BGRD.000` | 1 | 15,360 bytes. |
+| `GFX/OVERLAY.000` | 1 | 12,288 bytes: 24 one-bit 64×64 frames, 8 bytes per row, the most significant bit leftmost. Frames 0–15 are a crack network growing frame by frame (each a superset of the last), painted black over the faces of a block being bashed or dug; frames 16–23 are irregular blobs, not seen in use (verified against the Practice "Basher" demo: stage 15 matched frame 15 row for row). |
 | `GFX/LM3D.PAL` | 1 | Main palette. See [graphics.md](graphics.md). |
 | `GFX/SCENE000`–`010.{RNC,SVG,PAL,SVP}` | 11 sets | Theme preview screens. |
 | `GFX/INTRO1`–`7.{RNC,SVG}` | 7 sets | Intro screens. |

@@ -15,20 +15,18 @@ fn main() {
     let blocks = data.blocks(n).expect("blocks");
     let mut sim = Simulation::new(&level, &blocks);
     let mut last = String::new();
-    // Optional assignment from the environment: ASSIGN=tick:lemming:skill[:cw|acw].
-    let assign: Option<(u64, usize, u8)> = std::env::var("ASSIGN").ok().and_then(|s| {
-        let mut p = s.split(':').map(|v| v.parse::<u64>().ok());
-        Some((p.next()??, p.next()?? as usize, p.next()?? as u8))
-    });
+    // Optional assignments from the environment, comma-separated:
+    // ASSIGN=tick:lemming:skill[:cw|acw],...
+    let spec = std::env::var("ASSIGN").unwrap_or_default();
+    let assigns: Vec<Vec<&str>> = spec.split(',').filter(|a| !a.is_empty()).map(|a| a.split(':').collect()).collect();
     for t in 1..=ticks {
         sim.step();
-        if let Some((at, i, s)) = assign
-            && at == sim.tick
-            && let Some(skill) = l3d_sim::Skill::from_id(s)
-        {
-            let side = std::env::var("ASSIGN").unwrap_or_default().split(':').nth(3).map(str::to_owned);
+        let now = sim.tick;
+        for a in assigns.iter().filter(|a| a[0].parse() == Ok(now)) {
+            let (i, s): (usize, u8) = (a[1].parse().expect("lemming"), a[2].parse().expect("skill"));
+            let Some(skill) = l3d_sim::Skill::from_id(s) else { continue };
             let dir = sim.lemmings[i].dir;
-            let ok = match side.as_deref() {
+            let ok = match a.get(3).copied() {
                 Some("cw") => sim.assign_turner(i, dir.clockwise()),
                 Some("acw") => sim.assign_turner(i, dir.anticlockwise()),
                 _ => sim.assign(i, skill),

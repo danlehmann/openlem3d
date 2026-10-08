@@ -52,6 +52,10 @@ pub const SOLUTIONS: &[Solution] = &[
     Solution { level: 98, plan: Plan::At(&[(253, 0, 1, Some(false))]), saves: 18 },
     at(99, &[(1124, 0, 4, None)]),
     at(0, &[(1409, 0, 1, Some(false))]),
+    // Climbers; the first, blown up on the candy cane, opens a way through
+    // for the next, which bashes the cane's one-way foot from the far side
+    // (the owner's route).
+    at(6, &[(2, 0, 7, None), (53, 1, 7, None), (104, 2, 7, None), (155, 3, 7, None), (240, 0, 2, None), (436, 1, 4, None)]),
 ];
 
 pub fn solution(level: u32) -> Option<&'static Solution> {

@@ -80,6 +80,9 @@ pub struct Options {
     /// Scripted presses `(seconds since start, key, seconds held)`, from
     /// `--press SECONDS:KEY[:HOLD]`.
     press: Vec<(f32, String, f32)>,
+    /// With `--screenshot`, also save a frame each simulation tick into a
+    /// directory from some seconds in (`--record DIR:FROM`), as `TICK.png`.
+    record: Option<(PathBuf, f32)>,
 }
 
 fn parse_args() -> Options {
@@ -100,6 +103,7 @@ fn parse_args() -> Options {
         screen: menu::AppState::Title,
         briefing: false,
         press: Vec::new(),
+        record: None,
     };
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -112,6 +116,11 @@ fn parse_args() -> Options {
             "--fov" => o.fov_y = val().parse().expect("--fov takes degrees"),
             "--horizon" => o.horizon = val().parse().expect("--horizon takes a fraction"),
             "--wait" => o.wait = val().parse().expect("--wait takes seconds"),
+            "--record" => {
+                let v = val();
+                let (dir, from) = v.rsplit_once(':').expect("--record takes DIR:FROM");
+                o.record = Some((dir.into(), from.parse().expect("--record FROM takes seconds")));
+            }
             "--no-hud" => o.no_hud = true,
             "--screen" => {
                 o.screen = match val().as_str() {
@@ -528,7 +537,8 @@ fn update_lemming_sprites(
     // The lemming ridden with is the view's eyes, drawn until the camera
     // has glided into them.
     let eyes = lemming_cam.following().filter(|_| cams.iter().all(|c| c.glide.is_none()));
-    *sprites = lemming_render::build(sim, scene_build::ATLAS_ROWS, yaw, &game.doors, eyes, highlight.lemming);
+    let blocks = game.terrain.as_ref().map(|(_, blocks, _)| blocks);
+    *sprites = lemming_render::build(sim, blocks, scene_build::ATLAS_ROWS, yaw, &game.doors, eyes, highlight.lemming);
 }
 
 #[allow(clippy::too_many_arguments)] // Bevy system parameters
@@ -738,6 +748,7 @@ fn screenshot_when_ready(
     mut elapsed: Local<Option<f32>>,
     mut frames_since_shot: Local<Option<u32>>,
     mut exit: MessageWriter<AppExit>,
+    (game, mut last_recorded): (Res<Game>, Local<Option<u64>>),
 ) {
     let Some(path) = &opts.screenshot else { return };
     if current.loaded.is_none() && !matches!(state.get(), menu::AppState::Menu | menu::AppState::Title | menu::AppState::Code | menu::AppState::Briefing | menu::AppState::Options | menu::AppState::Practice) {
@@ -747,6 +758,15 @@ fn screenshot_when_ready(
     let now = before + time.delta_secs();
     *elapsed = Some(now);
     let shot_at = opts.wait.max(0.5);
+    if let (Some((dir, from)), Some(sim)) = (&opts.record, &game.sim)
+        && now >= *from
+        && now < shot_at
+        && *last_recorded != Some(sim.tick)
+    {
+        *last_recorded = Some(sim.tick);
+        let _ = std::fs::create_dir_all(dir);
+        commands.spawn(Screenshot::primary_window()).observe(save_to_disk(dir.join(format!("{:05}.png", sim.tick))));
+    }
     if before < shot_at && now >= shot_at {
         commands.spawn(Screenshot::primary_window()).observe(save_to_disk(path.clone()));
         *frames_since_shot = Some(0);

@@ -11,8 +11,12 @@ use std::f32::consts::{FRAC_PI_4, TAU};
 use l3d_sim::objects::ObjectKind;
 use l3d_sim::{SUB, Simulation, State};
 
-use crate::scene_build::{ATLAS_COLUMNS, BOMBNUMB_ATLAS_FIRST, DOOR_ATLAS_FIRST, DOOR_FRAMES, EXIT_ID, LEMMING_CELL, LayerBuilder, TRAP_ATLAS_CELLS, TRAP_ATLAS_FIRST, TRAP_FRAME};
+use crate::scene_build::{
+    ATLAS_COLUMNS, BOMBNUMB_ATLAS_FIRST, CRACK_ATLAS_FIRST, CRACK_FRAMES, DOOR_ATLAS_FIRST, DOOR_FRAMES, EXIT_ID, LEMMING_CELL, LayerBuilder, TILE_ATLAS_FIRST, TRAP_ATLAS_CELLS, TRAP_ATLAS_FIRST,
+    TRAP_FRAME,
+};
 use crate::scene_render::SceneSprites;
+use l3d_formats::blk::{BlockSet, FaceDir};
 
 /// Texels per world unit for lemming cells: a cell spans half a grid unit
 /// (estimated from relative sizes in the original's camera 1 view of Fun 1;
@@ -181,7 +185,8 @@ fn anim_for(state: State) -> Anim {
         State::Drowning => once(369, 6, Five),
         State::Splatting => once(429, 3, Five),
         State::Zapped | State::Trapped => anim(514, 2, Five),
-        State::Climbing => anim(538, 5, Five),
+        // Reaching up the wall and pulling the knees up (cells 121–160).
+        State::Climbing => anim(121, 8, Five),
         // Standing on the pad facing the camera (observed); see `build`.
         State::Teleporting { .. } => once(0, 1, One),
     }
@@ -355,14 +360,123 @@ const EXIT_SHRINK_DEPTH: f32 = 0.2;
 const ZAP_CLOUD_FIRST: u32 = 524;
 const ZAP_CLOUD_FRAMES: u32 = 10;
 
+/// How far crack quads stand off the block's faces, in units.
+const CRACK_OFFSET: f32 = 0.004;
+/// Pieces flying off a bashed block: bursts starting this many ticks into a
+/// stroke, pieces per burst, and ticks each flies (measured in the Practice
+/// "Basher" demo: bursts at about 1, 9, 18 and 25 ticks, 25–30 pieces,
+/// gone after 6–7 ticks).
+const CHUNK_BURSTS: [u32; 4] = [1, 9, 17, 25];
+const CHUNKS_PER_BURST: u32 = 25;
+const CHUNK_TICKS: u32 = 7;
+/// A piece's flight per tick, in units (rough, from the same demo: out of
+/// the hole away from the block, a kick upwards, then falling faster).
+const CHUNK_OUT: (f32, f32) = (0.08, 0.2);
+const CHUNK_UP: (f32, f32) = (0.06, 0.18);
+const CHUNK_GRAVITY: f32 = 0.03;
+
+/// A pseudo-random fraction in [0, 1) from integers (the effects are drawn
+/// from the simulation's state alone, so they replay identically).
+fn noise(keys: [u32; 5]) -> f32 {
+    let mut h = 0x9E37_79B9u32;
+    for k in keys {
+        h = (h ^ k).wrapping_mul(0x85EB_CA6B).rotate_left(13).wrapping_mul(0xC2B2_AE35);
+    }
+    (h >> 8) as f32 / (1u32 << 24) as f32
+}
+
+/// The bash effects (`docs/spec/behaviour.md`, Basher): the black cracks of
+/// `OVERLAY.000` spreading over the sides of the segments being bashed, one
+/// frame every 2 ticks, and bursts of pieces cut from the block's texture
+/// flying out of the hole.
+fn bash_effects(b: &mut LayerBuilder, sim: &Simulation, blocks: Option<&BlockSet>, tex: [f32; 2]) {
+    for (i, l) in sim.lemmings.iter().enumerate().filter(|(_, l)| !l.gone) {
+        let Some((cell, mask, t)) = sim.bash_target(l) else { continue };
+        let c = cell.map(|v| v as f32);
+        let crack = CRACK_ATLAS_FIRST + (t / 2).min(CRACK_FRAMES - 1);
+        let (cx, cy) = ((crack % ATLAS_COLUMNS) * LEMMING_CELL, (crack / ATLAS_COLUMNS) * LEMMING_CELL);
+        // Each segment's slice of the overlay: segment s (0 at the bottom) is
+        // the face's texel rows (3 − s)·16 to (4 − s)·16.
+        for n in [[1.0, 0.0], [-1.0, 0.0], [0.0, 1.0], [0.0, -1.0]] {
+            for s in (0..4).filter(|s| mask & (1 << s) != 0) {
+                let centre = [c[0] + 0.5 + n[0] * (0.5 + CRACK_OFFSET), c[1] + s as f32 * 0.25, c[2] + 0.5 + n[1] * (0.5 + CRACK_OFFSET)];
+                b.vertical_quad(centre, n, 1.0, 0.25, [cx as f32, cy as f32 + (3 - s) as f32 * 16.0, 64.0, 16.0], tex, 1.0);
+            }
+        }
+        // The pieces: bits of the block's side texture.
+        let id = sim.world.block(cell).map_or(0, |(b, _)| b.id as usize);
+        let tile = blocks.and_then(|bs| bs.defs.get(id)).map_or(0xFF, |d| d.face(FaceDir::PosX).texture);
+        if tile == 0xFF {
+            continue;
+        }
+        let tile = tile as u32;
+        let tile_cell = TILE_ATLAS_FIRST + tile / 4;
+        let (tx, ty) = ((tile_cell % ATLAS_COLUMNS) * LEMMING_CELL + (tile % 2) * 64, (tile_cell / ATLAS_COLUMNS) * LEMMING_CELL + (tile / 2 % 2) * 64);
+        let d = l.dir.delta().map(|v| v as f32);
+        let (out, side) = ([-d[0], -d[2]], [d[2], -d[0]]);
+        let face = [c[0] + 0.5 - d[0] * 0.5, c[2] + 0.5 - d[2] * 0.5];
+        let bottom = c[1] + mask.trailing_zeros() as f32 * 0.25;
+        let stroke = (l.state_ticks - l3d_sim::BASH_CRACK_START) / l3d_sim::BASH_TICKS;
+        for (burst, &start) in CHUNK_BURSTS.iter().enumerate() {
+            if !(start..start + CHUNK_TICKS).contains(&t) {
+                continue;
+            }
+            let age = (t - start) as f32;
+            for k in 0..CHUNKS_PER_BURST {
+                let r = |salt: u32| noise([i as u32, stroke, burst as u32, k, salt]);
+                let v_out = CHUNK_OUT.0 + r(0) * (CHUNK_OUT.1 - CHUNK_OUT.0);
+                let v_up = CHUNK_UP.0 + r(1) * (CHUNK_UP.1 - CHUNK_UP.0);
+                let v_side = (r(2) - 0.5) * 0.16;
+                let lateral = (r(3) - 0.5) * 0.8;
+                let y0 = bottom + r(4) * 0.5;
+                let along = |a: usize| face[a] + out[a] * v_out * age + side[a] * (lateral + v_side * age);
+                let y = y0 + v_up * age - CHUNK_GRAVITY * age * age / 2.0;
+                let size = 6.0 + (r(5) * 5.0).floor();
+                let (sx, sy) = ((r(6) * (64.0 - size)).floor(), (r(7) * (64.0 - size)).floor());
+                b.sprite_scaled([along(0), y, along(1)], [tx as f32 + sx, ty as f32 + sy, size, size], tex, 1, 0.0, 96.0);
+            }
+        }
+    }
+}
+
+/// A splatted lemming's fragments: texels of the blue smock (walker cell 0,
+/// texels 22–40 across and 28–48 down) flying out on all sides and falling
+/// back, over the death (`docs/spec/behaviour.md`, Splat: "a burst of blue
+/// fragments", verified; count, speeds and spread are ours).
+const SPLAT_PIECES: u32 = 40;
+const SPLAT_SMOCK: [f32; 4] = [22.0, 28.0, 18.0, 20.0];
+const SPLAT_OUT: (f32, f32) = (0.03, 0.09);
+const SPLAT_UP: (f32, f32) = (0.04, 0.16);
+const SPLAT_GRAVITY: f32 = 0.025;
+/// Drawn larger than the lemming, so a piece is a few screen pixels.
+const SPLAT_TEXELS_PER_UNIT: f32 = 64.0;
+
+fn splat(b: &mut LayerBuilder, i: usize, t: u32, at: [f32; 3], tex: [f32; 2]) {
+    let age = t as f32;
+    for k in 0..SPLAT_PIECES {
+        let r = |salt: u32| noise([i as u32, 0x5A1A7, k, salt, 0]);
+        let angle = r(0) * std::f32::consts::TAU;
+        let v_out = SPLAT_OUT.0 + r(1) * (SPLAT_OUT.1 - SPLAT_OUT.0);
+        let v_up = SPLAT_UP.0 + r(2) * (SPLAT_UP.1 - SPLAT_UP.0);
+        // Pieces stop at the ground they burst from.
+        let y = (at[1] + 0.05 + v_up * age - SPLAT_GRAVITY * age * age / 2.0).max(at[1]);
+        let p = [at[0] + angle.cos() * v_out * age, y, at[2] + angle.sin() * v_out * age];
+        let size = 2.0 + (r(3) * 3.0).floor();
+        let (sx, sy) = ((r(4) * (SPLAT_SMOCK[2] - size)).floor(), (r(5) * (SPLAT_SMOCK[3] - size)).floor());
+        b.sprite_scaled(p, [SPLAT_SMOCK[0] + sx, SPLAT_SMOCK[1] + sy, size, size], tex, 1, 0.0, SPLAT_TEXELS_PER_UNIT);
+    }
+}
+
 /// Builds this frame's lemming sprites for a camera facing `camera_yaw`,
 /// leaving out lemming `eyes`, the one the view looks out of, and marking
 /// lemming `highlight` with an arrow.
-pub fn build(sim: &Simulation, atlas_rows: u32, camera_yaw: f32, doors: &[Door], eyes: Option<usize>, highlight: Option<usize>) -> SceneSprites {
+#[allow(clippy::too_many_arguments)]
+pub fn build(sim: &Simulation, blocks: Option<&BlockSet>, atlas_rows: u32, camera_yaw: f32, doors: &[Door], eyes: Option<usize>, highlight: Option<usize>) -> SceneSprites {
     let lemmings = &sim.lemmings;
     let mut b = LayerBuilder::default();
     let tex = [(ATLAS_COLUMNS * LEMMING_CELL) as f32, (atlas_rows * LEMMING_CELL) as f32];
     objects(&mut b, sim, tex);
+    bash_effects(&mut b, sim, blocks, tex);
     for d in doors.iter().filter(|d| d.frame > 0) {
         let cell = DOOR_ATLAS_FIRST + d.frame;
         let (cx, cy) = ((cell % ATLAS_COLUMNS) * LEMMING_CELL, (cell / ATLAS_COLUMNS) * LEMMING_CELL);
@@ -426,6 +540,10 @@ pub fn build(sim: &Simulation, atlas_rows: u32, camera_yaw: f32, doors: &[Door],
         let size = LEMMING_CELL as f32;
         let rect = if mirror { [cx as f32 + size, cy as f32, -size, size] } else { [cx as f32, cy as f32, size, size] };
         let anchor = l.pos.map(|v| v as f32 / SUB as f32);
+        if l.state == State::Splatting {
+            splat(&mut b, i, l.state_ticks, anchor, tex);
+            continue;
+        }
         // Teleporting: squeezed to a sliver, away, then stretched out again
         // (observed).
         let width = match l.state {

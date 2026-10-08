@@ -104,8 +104,9 @@ How we verified it:
     rows) while its left and right edges don't (89). Transposed, it is a
     320×200 panorama that wraps horizontally.
   - **Display (provisional):** we stretch it over the full screen height and
-    pan it like the 1024×64 skies. Its scale and pan rate in the original are
-    unchecked. Tiling the untransposed image showed visible seams (Fun 3).
+    pan it like the 1024×64 skies, but at 960 texels per turn (exactly
+    three repeats) so a full turn shows no seam. Its scale and pan rate in
+    the original are unchecked. Tiling the untransposed image showed visible seams (Fun 3).
 
 ## Ground (partly verified)
 

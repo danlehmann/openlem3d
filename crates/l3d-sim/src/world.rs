@@ -110,18 +110,15 @@ impl World {
 
     /// Like [`World::remove_segments`], for a lemming digging horizontally in
     /// direction `toward` (a unit step), or not horizontally (`None`). One-way
-    /// blocks (ids 5–8) give way only in their direction: +Z, +X, −Z, −X
-    /// for ids 5–8 before rotation ([L3DEdit], unverified), turned with the
-    /// block's rotation like its faces. Non-horizontal digging never breaks
-    /// them (provisional).
+    /// blocks (ids 5–8) give way only in their direction: +Z, −X, −Z, +X
+    /// for ids 5–8 before rotation (the way their arrows point), turned with
+    /// the block's rotation like its faces. Non-horizontal digging never
+    /// breaks them (provisional).
     /// Bricks overlapping the removed segments go too.
     pub fn remove_segments_towards(&mut self, c: [i32; 3], mask: u8, toward: Option<[i32; 3]>) -> bool {
         let bricks_removed = self.remove_bricks(c, mask);
         let Some(mut cell) = self.cell(c[0], c[1], c[2]) else { return bricks_removed };
-        if cell.flags & flags::STEEL != 0 || cell.block.segments & mask == 0 {
-            return bricks_removed;
-        }
-        if (5..=8).contains(&cell.block.id) && toward != Some(one_way_direction(cell.block)) {
+        if cell.block.segments & mask == 0 || !self.breakable_towards(c, toward) {
             return bricks_removed;
         }
         cell.block.segments &= !mask;
@@ -129,6 +126,13 @@ impl World {
         self.cells[i] = (cell.block.segments != 0).then_some(cell);
         self.changes.push((c.map(|v| v as usize), cell.block));
         true
+    }
+
+    /// Whether the terrain block in cell `c` gives way to digging in
+    /// direction `toward` (as for [`World::remove_segments_towards`]): not
+    /// steel, and not a one-way block facing elsewhere. Empty cells do.
+    pub fn breakable_towards(&self, c: [i32; 3], toward: Option<[i32; 3]>) -> bool {
+        self.cell(c[0], c[1], c[2]).is_none_or(|cell| cell.flags & flags::STEEL == 0 && (!(5..=8).contains(&cell.block.id) || toward == Some(one_way_direction(cell.block))))
     }
 
     /// Adds the segments in `mask` to cell `c`. An empty cell becomes a cube
@@ -302,15 +306,15 @@ impl World {
     }
 }
 
-/// The direction a one-way block (ids 5–8) can be dug through: +Z, +X, −Z,
-/// −X before rotation, each rotation step turning +X → −Z → −X → +Z (the
-/// renderer's block-rotation sense).
+/// The direction a one-way block (ids 5–8) can be dug through: +Z, −X, −Z,
+/// +X before rotation (the way its arrows point), each rotation step turning
+/// +X → −Z → −X → +Z (the renderer's block-rotation sense).
 fn one_way_direction(block: BlockCell) -> [i32; 3] {
     let mut d = match block.id {
         5 => [0, 0, 1],
-        6 => [1, 0, 0],
+        6 => [-1, 0, 0],
         7 => [0, 0, -1],
-        _ => [-1, 0, 0],
+        _ => [1, 0, 0],
     };
     for _ in 0..block.rotation % 4 {
         // (x, z) → (z, −x): +X → −Z.
@@ -380,8 +384,8 @@ pub fn inside_shape(block: BlockCell, l: [f32; 3]) -> bool {
         9 => 1.0 - t < 1.0 - 0.5 * z,
         10 => t < x.min(z),
         11 => 1.0 - t < x.min(z),
-        12 => x + z >= 1.0 && t <= x + z - 1.0,
-        13 => x + z >= 1.0 && 1.0 - t <= x + z - 1.0,
+        12 => x + z <= 1.0 && t <= 1.0 - x - z,
+        13 => x + z <= 1.0 && 1.0 - t <= 1.0 - x - z,
         _ => true,
     }
 }
