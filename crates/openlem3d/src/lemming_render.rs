@@ -25,9 +25,6 @@ const DIGIT_TEXELS_PER_UNIT: f32 = 128.0;
 /// original's sprites change once per tick; `docs/spec/behaviour.md`).
 const TICKS_PER_FRAME: u32 = 1;
 
-/// Ticks a bomber spends swelling before the blast.
-const SWELL_TICKS: u32 = 10;
-
 /// Ticks of each builder cycle spent stepping up onto the new brick.
 const BUILDER_STEP_TICKS: u32 = 6;
 
@@ -128,8 +125,9 @@ enum Playback {
     Loop,
     /// Frames 0, 1, …, then the last frame held.
     Once,
-    /// The listed frame indices in a loop, every cell drawn mirrored relative
-    /// to its angle block's usual orientation.
+    /// The listed frame indices in a loop, the front and back views drawn
+    /// mirrored (verified for falls); the side views as stored, which face
+    /// the way the lemming goes (mirrored, it fell looking backwards).
     MirroredCycle(&'static [u32]),
 }
 
@@ -212,7 +210,7 @@ fn cell_for(a: Anim, view: ViewAngle, ticks: u32) -> (u32, bool) {
             }
         }
     };
-    (a.first + block * a.frames + frame, mirror != flip)
+    (a.first + block * a.frames + frame, mirror != (flip && matches!(view, ViewAngle::Front | ViewAngle::Back)))
 }
 
 /// Interactive objects other than trampolines (`TRAPS` frames, one unit
@@ -408,10 +406,10 @@ pub fn build(sim: &Simulation, atlas_rows: u32, camera_yaw: f32, doors: &[Door],
             }
             // A bomber swells over the last ticks of its fuse (observed:
             // about 10 ticks after the last countdown digit).
-            _ if l.fuse.is_some_and(|f| f <= SWELL_TICKS) && !l.state.is_terminal() => {
+            _ if l.fuse.is_some_and(|f| f <= l3d_sim::SWELL_TICKS) && !l.state.is_terminal() => {
                 // Hand to the nose, holding it shut for most of the time
                 // (frames 1–2), then swelling (3–4); the split is ours.
-                let frame = match SWELL_TICKS - l.fuse.unwrap_or(0) {
+                let frame = match l3d_sim::SWELL_TICKS - l.fuse.unwrap_or(0) {
                     0 => 0,
                     1..=2 => 1,
                     3..=6 => 2,
@@ -528,7 +526,8 @@ mod tests {
         assert_eq!(back, want.map(|c| (c, true)));
         assert_eq!(cell_for(fall, ViewAngle::Front, 0), (401, true));
         assert_eq!(cell_for(fall, ViewAngle::Front, 8 * TICKS_PER_FRAME), (401, true));
-        // Left-hand angles: mirrored block, mirrored again.
-        assert_eq!(cell_for(fall, ViewAngle::Left, 0), (411, true));
+        // Side views as stored, facing the way the lemming goes.
+        assert_eq!(cell_for(fall, ViewAngle::Left, 0), (411, false));
+        assert_eq!(cell_for(fall, ViewAngle::Right, 0), (411, true));
     }
 }

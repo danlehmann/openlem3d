@@ -28,6 +28,7 @@ mod options;
 mod scene_render;
 mod settings;
 mod sfx;
+mod style;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -188,7 +189,7 @@ fn main() {
                 }),
         )
         .add_plugins((SceneRenderPlugin, hud::HudPlugin, menu::MenuPlugin, music::MusicPlugin, touch::TouchPlugin, title::TitlePlugin, lemming_cam::LemmingCamPlugin, panel::PanelPlugin, briefing::BriefingPlugin, minimap::MinimapPlugin, results::ResultsPlugin, pointer::PointerPlugin, sfx::SfxPlugin, options::OptionsPlugin, practice::PracticePlugin))
-        .add_plugins(fade::FadePlugin)
+        .add_plugins((fade::FadePlugin, style::StylePlugin))
         .insert_resource(ClearColor(Color::srgb(0.35, 0.55, 0.85)))
         .insert_resource(opts.clone())
         .insert_resource(Data(data))
@@ -244,8 +245,11 @@ struct ViewCamera {
     /// Roll in radians about the view direction, turning the picture
     /// anticlockwise; 0 except in the lemming view.
     roll: f32,
-    /// A glide under way to a preset view.
+    /// A glide under way to another view.
     glide: Option<Glide>,
+    /// Whether moves to another view glide (enhanced) or cut at once, as
+    /// in the original.
+    smooth: bool,
 }
 
 /// A smooth move from one view (position and yaw) to another, `t` seconds
@@ -278,7 +282,18 @@ impl ViewCamera {
 
     /// Starts gliding to a preset view.
     fn glide_to_preset(&mut self, p: &CameraPreset) {
-        self.glide = Some(Glide { from: (self.pos, self.yaw), to: preset_view(p), t: 0.0 });
+        let (pos, yaw) = preset_view(p);
+        self.glide_to(pos, yaw);
+    }
+
+    /// Starts gliding to a position and yaw, or jumps there when not smooth.
+    fn glide_to(&mut self, pos: Vec3, yaw: f32) {
+        if !self.smooth {
+            (self.pos, self.yaw) = (pos, yaw);
+            self.glide = None;
+            return;
+        }
+        self.glide = Some(Glide { from: (self.pos, self.yaw), to: (pos, yaw), t: 0.0 });
     }
 
     /// Moves a glide on by `dt` seconds, ending it on arrival.
@@ -383,7 +398,7 @@ fn sky_left_column(yaw: f32) -> f32 {
 fn spawn_camera(mut commands: Commands) {
     // A 2D camera drives the frame; the scene renderer draws the 3D level
     // into its target before sprites and UI.
-    commands.spawn((Camera2d, Tonemapping::None, Msaa::Off, ViewCamera { pos: Vec3::new(16.0, 8.0, 16.0), yaw: 0.0, roll: 0.0, glide: None }));
+    commands.spawn((Camera2d, Tonemapping::None, Msaa::Off, ViewCamera { pos: Vec3::new(16.0, 8.0, 16.0), yaw: 0.0, roll: 0.0, glide: None, smooth: true }));
 }
 
 /// Whether the level about to be played is starting afresh, rather than
@@ -459,7 +474,7 @@ fn pause_keys(keys: Res<ButtonInput<KeyCode>>, preview: Res<briefing::Preview>, 
     }
 }
 
-fn step_simulation(options: Res<Options>, mut game: ResMut<Game>, mut scene: ResMut<SceneContent>, views: Query<&ViewCamera>) {
+fn step_simulation(options: Res<Options>, settings: Res<settings::Settings>, mut game: ResMut<Game>, mut scene: ResMut<SceneContent>, views: Query<&ViewCamera>) {
     // The level waits while the camera glides to a preset view, so the
     // glide costs the player no time.
     if views.iter().any(|v| v.glide.is_some()) {
@@ -494,7 +509,7 @@ fn step_simulation(options: Res<Options>, mut game: ResMut<Game>, mut scene: Res
     for ([x, y, z], cell) in changes {
         level.set_block(x, y, z, cell);
     }
-    let rebuilt = scene_build::rebuild_blocks(current, *layer, level, blocks, &sim.world.bricks);
+    let rebuilt = scene_build::rebuild_blocks(current, *layer, level, blocks, &sim.world.bricks, settings.enhanced);
     scene.version += 1;
     scene.data = Some(Arc::new(rebuilt));
 }
@@ -508,11 +523,14 @@ fn update_lemming_sprites(
 ) {
     let Some(sim) = &game.sim else { return };
     let yaw = cams.iter().next().map_or(0.0, |c| c.yaw);
-    *sprites = lemming_render::build(sim, scene_build::ATLAS_ROWS, yaw, &game.doors, lemming_cam.following(), highlight.lemming);
+    // The lemming ridden with is the view's eyes, drawn until the camera
+    // has glided into them.
+    let eyes = lemming_cam.following().filter(|_| cams.iter().all(|c| c.glide.is_none()));
+    *sprites = lemming_render::build(sim, scene_build::ATLAS_ROWS, yaw, &game.doors, eyes, highlight.lemming);
 }
 
 #[allow(clippy::too_many_arguments)] // Bevy system parameters
-fn load_level(
+pub(crate) fn load_level(
     mut commands: Commands,
     mut current: ResMut<CurrentLevel>,
     mut data: ResMut<Data>,
@@ -528,7 +546,7 @@ fn load_level(
     }
     let n = current.number;
     current.loaded = Some(n);
-    let scene_build::BuiltLevel { level, blocks, scene: content, mesh, block_layer } = match scene_build::build(&mut data.0, n, scene_build::Show { land: settings.land, sea: settings.sea, sky: settings.sky }) {
+    let scene_build::BuiltLevel { level, blocks, scene: content, mesh, block_layer } = match scene_build::build(&mut data.0, n, settings.show()) {
         Ok(v) => v,
         Err(e) => {
             error!("level {n}: {e}");
@@ -609,6 +627,10 @@ pub(crate) fn camera_controls(
     // Riding along with a lemming: no manual movement.
     let dt = if lemming_cam.following().is_some() { 0.0 } else { time.delta_secs() };
     for mut cam in &mut q {
+        cam.smooth = settings.enhanced;
+        if !cam.smooth {
+            cam.finish_glide();
+        }
         let presets = [KeyCode::Digit1, KeyCode::Digit2, KeyCode::Digit3, KeyCode::Digit4];
         if let Some(info) = &info {
             for (i, k) in presets.iter().enumerate() {
@@ -758,7 +780,7 @@ fn refresh_scenery(
     mut shown: Local<Option<(u32, scene_build::Show)>>,
 ) {
     let Some(n) = current.loaded else { return };
-    let show = scene_build::Show { land: settings.land, sea: settings.sea, sky: settings.sky };
+    let show = settings.show();
     let was = shown.replace((n, show));
     if was.is_none_or(|(m, s)| m != n || s == show) {
         return;
@@ -774,7 +796,7 @@ fn refresh_scenery(
     let content = match (terrain.as_mut(), sim) {
         (Some((level, blocks, layer)), Some(sim)) => {
             *layer = built.block_layer;
-            scene_build::rebuild_blocks(&built.scene, built.block_layer, level, blocks, &sim.world.bricks)
+            scene_build::rebuild_blocks(&built.scene, built.block_layer, level, blocks, &sim.world.bricks, show.solid_bricks)
         }
         _ => built.scene,
     };
@@ -821,6 +843,7 @@ fn key_code(name: &str) -> Option<KeyCode> {
         "Escape" => KeyCode::Escape,
         "Enter" => KeyCode::Enter,
         "Space" => KeyCode::Space,
+        "Tab" => KeyCode::Tab,
         "ArrowUp" => KeyCode::ArrowUp,
         "ArrowDown" => KeyCode::ArrowDown,
         "F1" => KeyCode::F1,

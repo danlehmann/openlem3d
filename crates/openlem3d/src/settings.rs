@@ -18,6 +18,9 @@ pub struct Settings {
     /// turns the camera.
     pub left_handed: bool,
     pub fullscreen: bool,
+    /// Enhanced presentation (smooth camera moves, solid bricks); off, the
+    /// game looks and moves as the original.
+    pub enhanced: bool,
     /// Volumes and camera speed, 0–10 lights as on the original's sliders.
     pub music: u8,
     pub effects: u8,
@@ -34,7 +37,7 @@ pub const SLIDER_STEPS: u8 = 10;
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { land: true, sea: true, sky: true, left_handed: false, fullscreen: false, music: 8, effects: 8, camera: 5, completed: Default::default(), best: Default::default() }
+        Settings { land: true, sea: true, sky: true, left_handed: false, fullscreen: false, enhanced: true, music: 8, effects: 8, camera: 5, completed: Default::default(), best: Default::default() }
     }
 }
 
@@ -48,6 +51,11 @@ impl Settings {
             self.best.insert(level, new);
         }
         completed || new != old
+    }
+
+    /// The scene parts and style to draw.
+    pub fn show(&self) -> crate::scene_build::Show {
+        crate::scene_build::Show { land: self.land, sea: self.sea, sky: self.sky, solid_bricks: self.enhanced }
     }
 
     /// Music volume as a linear factor.
@@ -96,6 +104,7 @@ impl Settings {
                 "sky" => s.sky = flag,
                 "left_handed" => s.left_handed = flag,
                 "fullscreen" => s.fullscreen = flag,
+                "enhanced" => s.enhanced = flag,
                 "music" => s.music = level.unwrap_or(s.music),
                 "effects" => s.effects = level.unwrap_or(s.effects),
                 "camera" => s.camera = level.unwrap_or(s.camera),
@@ -120,12 +129,13 @@ impl Settings {
         let Some(path) = Self::path() else { return };
         let on = |b: bool| if b { "on" } else { "off" };
         let text = format!(
-            "land = {}\nsea = {}\nsky = {}\nleft_handed = {}\nfullscreen = {}\nmusic = {}\neffects = {}\ncamera = {}\ncompleted = {}\nbest = {}\n",
+            "land = {}\nsea = {}\nsky = {}\nleft_handed = {}\nfullscreen = {}\nenhanced = {}\nmusic = {}\neffects = {}\ncamera = {}\ncompleted = {}\nbest = {}\n",
             on(self.land),
             on(self.sea),
             on(self.sky),
             on(self.left_handed),
             on(self.fullscreen),
+            on(self.enhanced),
             self.music,
             self.effects,
             self.camera,

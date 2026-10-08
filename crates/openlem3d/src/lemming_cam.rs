@@ -52,13 +52,15 @@ impl LemmingCam {
         }
     }
 
-    /// Turns the camera off and puts the view back where it was.
+    /// Turns the camera off, gliding the view back to where it was.
     fn turn_off(&mut self, view: &mut ViewCamera) {
-        if let Some((pos, yaw)) = self.saved() {
+        if let (Some((pos, yaw)), Some(_)) = (self.saved(), self.following()) {
+            view.glide_to(pos, yaw);
+        } else if let Some((pos, yaw)) = self.saved() {
             view.pos = pos;
             view.yaw = yaw;
-            view.roll = 0.0;
         }
+        view.roll = 0.0;
         *self = LemmingCam::Off;
     }
 
@@ -122,12 +124,14 @@ pub(crate) fn toggle_keys(mut keys: ResMut<ButtonInput<KeyCode>>, mut cam: ResMu
     }
 }
 
+#[allow(clippy::too_many_arguments)] // Bevy system parameters
 fn follow(
     time: Res<Time>,
     game: Res<Game>,
     opts: Res<crate::Options>,
     mut started: Local<bool>,
     mut sway: Local<f32>,
+    mut entered: Local<Option<usize>>,
     mut cam: ResMut<LemmingCam>,
     mut views: Query<&mut ViewCamera>,
 ) {
@@ -142,16 +146,28 @@ fn follow(
     }
     let Some(i) = cam.following() else {
         view.roll = 0.0;
+        *entered = None;
         return;
     };
     let lemming = game.sim.as_ref().and_then(|s| s.lemmings.get(i)).filter(|l| !l.gone);
     let Some(l) = lemming else {
         cam.turn_off(&mut view);
+        *entered = None;
         return;
     };
     let feet = Vec3::from_array(l.pos.map(|v| v as f32 / SUB as f32));
     let yaw = l.dir.yaw();
     let target = feet + Vec3::Y * EYE_HEIGHT;
+    // Riding along with a new lemming: the camera first glides into its
+    // eyes, the level waiting meanwhile.
+    if *entered != Some(i) {
+        *entered = Some(i);
+        view.roll = 0.0;
+        view.glide_to(target, yaw);
+    }
+    if view.glide.is_some() {
+        return;
+    }
     let k = 1.0 - (-FOLLOW_RATE * time.delta_secs()).exp();
     // A slight roll from side to side with the lemming's steps while it
     // walks, levelling out otherwise.

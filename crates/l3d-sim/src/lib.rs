@@ -51,8 +51,15 @@ pub const FUSE_DIGIT_TICKS: u32 = 8;
 /// Bomber fuse length from assignment to explosion (verified: about 3.6 s,
 /// a 5…1 countdown of 8-tick digits followed by the swelling animation).
 pub const FUSE_TICKS: u32 = 50;
-/// Explosion radius in sub-units (rough: the hole is about one cell long).
+/// The last ticks of a fuse, after the countdown: the bomber holds its nose
+/// and swells (observed: about 10 ticks after the last countdown digit).
+pub const SWELL_TICKS: u32 = 10;
+/// Explosion radius across the ground in sub-units (rough: the hole is
+/// about one cell long).
 const BLAST_RADIUS: i32 = SUB;
+/// How far below and above the bomber's feet the blast reaches.
+const BLAST_BELOW: i32 = SUB / 2;
+const BLAST_ABOVE: i32 = SUB;
 /// Ticks per segment dug (verified, rough: about 40 ±20%).
 const DIG_TICKS: u32 = 40;
 /// Ticks per brick laid by a builder (verified: 25 ± 1).
@@ -713,6 +720,15 @@ impl Simulation {
                 self.explode(l);
                 return;
             }
+            // Holding its nose and swelling, a bomber on its feet stands
+            // still (owner's observation); one in the air keeps moving.
+            let on_feet = matches!(
+                l.state,
+                State::Walking | State::Sliding | State::Building { .. } | State::Shrugging | State::Bashing | State::Mining | State::Digging | State::Climbing
+            );
+            if *f <= SWELL_TICKS && on_feet {
+                return;
+            }
         }
         match l.state {
             State::Exiting => {
@@ -1031,22 +1047,26 @@ impl Simulation {
         advance(l);
     }
     /// Ends a bomber: removes non-steel terrain around it.
+    /// Blows a hole: every column whose centre lies within the blast radius
+    /// of the bomber (across the ground) loses the same band, from half a
+    /// unit below its feet to a unit above them, so a wall it stands at goes
+    /// whole and the crater floor is level (ours; a sphere left floating
+    /// halves of walls and uneven floors that trapped walkers).
     fn explode(&mut self, l: &mut Lemming) {
-        let centre = [l.pos[0], l.pos[1] + SUB / 4, l.pos[2]];
         let r = BLAST_RADIUS;
+        let (lo, hi) = (l.pos[1] - BLAST_BELOW, l.pos[1] + BLAST_ABOVE);
         let cell = |v: i32| v.div_euclid(SUB);
-        for cx in cell(centre[0] - r)..=cell(centre[0] + r) {
-            for cy in cell(centre[1] - r)..=cell(centre[1] + r) {
-                for cz in cell(centre[2] - r)..=cell(centre[2] + r) {
-                    let mut mask = 0u8;
-                    for seg in 0..4 {
-                        // Centre of this segment slice.
-                        let p = [cx * SUB + SUB / 2, cy * SUB + seg * SUB / 4 + SUB / 8, cz * SUB + SUB / 2];
-                        let d = [0, 1, 2].map(|i| (p[i] - centre[i]) as i64);
-                        if d.iter().map(|v| v * v).sum::<i64>() <= (r as i64) * (r as i64) {
-                            mask |= 1 << seg;
-                        }
-                    }
+        for cx in cell(l.pos[0] - r)..=cell(l.pos[0] + r) {
+            for cz in cell(l.pos[2] - r)..=cell(l.pos[2] + r) {
+                let d = [cx * SUB + SUB / 2 - l.pos[0], cz * SUB + SUB / 2 - l.pos[2]].map(|v| v as i64);
+                if d[0] * d[0] + d[1] * d[1] > (r as i64) * (r as i64) {
+                    continue;
+                }
+                for cy in cell(lo)..=cell(hi - 1) {
+                    // Segments whose centres lie in the band.
+                    let mask = (0..4)
+                        .filter(|seg| (lo..hi).contains(&(cy * SUB + seg * SUB / 4 + SUB / 8)))
+                        .fold(0u8, |m, seg| m | 1 << seg);
                     self.world.remove_segments([cx, cy, cz], mask);
                 }
             }

@@ -601,13 +601,15 @@ fn art_on_top(opaque: impl Fn(usize) -> bool, tile: u32) -> bool {
     count(0..32) > count(32..64)
 }
 
-/// Replaces the block geometry of `scene` with a mesh of the current grid.
-pub fn rebuild_blocks(scene: &SceneData, layer: usize, level: &Level, blocks: &BlockSet, bricks: &[l3d_sim::Brick]) -> SceneData {
+/// Replaces the block geometry of `scene` with a mesh of the current grid;
+/// `solid_bricks` draws bricks as full slabs rather than the original's
+/// planks.
+pub fn rebuild_blocks(scene: &SceneData, layer: usize, level: &Level, blocks: &BlockSet, bricks: &[l3d_sim::Brick], solid_bricks: bool) -> SceneData {
     let mut out = scene.clone();
     let texture = out.layers[layer].texture.clone();
     let on_top = |tile: u32| art_on_top(|i| texture.texels.get(i * 4 + 3).is_some_and(|&a| a > 0), tile);
     out.layers[layer] = block_layer(&level_mesh::build(level, blocks, &on_top), texture);
-    out.layers[layer + 1] = brick_layer(bricks);
+    out.layers[layer + 1] = brick_layer(bricks, solid_bricks);
     out
 }
 
@@ -616,10 +618,11 @@ pub fn rebuild_blocks(scene: &SceneData, layer: usize, level: &Level, blocks: &B
 /// observation); ours gets an underside a hair below so it shows from below.
 const BRICK_DRAWN_THICKNESS: f32 = 0.02;
 
-/// Builders' bricks as thin brown planks at the top of each simulated brick.
+/// Builders' bricks: thin brown planks at the top of each simulated brick,
+/// as the original's, or (`solid`) the whole slab, which makes a staircase.
 /// The original's bricks are thin and brown (`docs/spec/behaviour.md`); the
 /// texture is our own.
-fn brick_layer(bricks: &[l3d_sim::Brick]) -> SceneLayer {
+fn brick_layer(bricks: &[l3d_sim::Brick], solid: bool) -> SceneLayer {
     const W: u32 = 16;
     const H: u32 = 4;
     let texels = (0..W * H)
@@ -634,12 +637,21 @@ fn brick_layer(bricks: &[l3d_sim::Brick]) -> SceneLayer {
     let sub = l3d_sim::SUB as f32;
     for brick in bricks {
         let (mut lo, hi) = (brick.min.map(|v| v as f32 / sub), brick.max.map(|v| v as f32 / sub));
-        lo[1] = hi[1] - BRICK_DRAWN_THICKNESS;
+        if !solid {
+            lo[1] = hi[1] - BRICK_DRAWN_THICKNESS;
+        }
         let p = |x: usize, y: usize, z: usize| [[lo[0], hi[0]][x], [lo[1], hi[1]][y], [lo[2], hi[2]][z]];
-        // The top and the underside, each counter-clockwise from outside,
-        // with its brightness.
-        let faces = [([p(0, 1, 0), p(0, 1, 1), p(1, 1, 1), p(1, 1, 0)], 1.0), ([p(0, 0, 0), p(1, 0, 0), p(1, 0, 1), p(0, 0, 1)], 0.5)];
-        for (corners, brightness) in faces {
+        // Each face counter-clockwise from outside, with its brightness: the
+        // top and the underside, then (solid) the four sides.
+        let faces = [
+            ([p(0, 1, 0), p(0, 1, 1), p(1, 1, 1), p(1, 1, 0)], 1.0),
+            ([p(0, 0, 0), p(1, 0, 0), p(1, 0, 1), p(0, 0, 1)], 0.5),
+            ([p(0, 0, 1), p(1, 0, 1), p(1, 1, 1), p(0, 1, 1)], 0.8),
+            ([p(1, 0, 0), p(0, 0, 0), p(0, 1, 0), p(1, 1, 0)], 0.8),
+            ([p(1, 0, 1), p(1, 0, 0), p(1, 1, 0), p(1, 1, 1)], 0.7),
+            ([p(0, 0, 0), p(0, 0, 1), p(0, 1, 1), p(0, 1, 0)], 0.7),
+        ];
+        for (corners, brightness) in faces.into_iter().take(if solid { 6 } else { 2 }) {
             let base = b.base();
             for (c, uv) in corners.iter().zip([[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]]) {
                 Vertex::fixed(*c, uv, brightness, false).push(&mut b.vertices);
@@ -651,12 +663,14 @@ fn brick_layer(bricks: &[l3d_sim::Brick]) -> SceneLayer {
 }
 
 /// Which optional parts of the scene to draw (the options screen's Land,
-/// Sea and Sky).
+/// Sea and Sky) and how (enhanced or as the original).
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Show {
     pub land: bool,
     pub sea: bool,
     pub sky: bool,
+    /// Bricks as full slabs (enhanced) rather than planks.
+    pub solid_bricks: bool,
 }
 
 /// Builds everything drawn for level `n`.
@@ -719,7 +733,7 @@ pub fn build(data: &mut GameData, n: u32, show: Show) -> Result<BuiltLevel, l3d_
     let block_layer_index = scene.layers.len();
     scene.layers.push(block_layer(&mesh, indexed_to_rgba(&tex, 64, &pal)));
     // Builders' bricks, right after the blocks (see ebuild_blocks).
-    scene.layers.push(brick_layer(&[]));
+    scene.layers.push(brick_layer(&[], false));
     scene.layers.extend(object_layers(data, &level, &pal));
     scene.layers.extend(decal_layers(data, &level, &pal));
     scene.layers.extend(trap_layer(data, &level, &pal));

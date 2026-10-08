@@ -491,8 +491,10 @@ constant through each animation (verified, bursts). Only the selected skill
 animates; there is no other selection mark (no frame or highlight;
 verified, zoomed shots). A ping-pong cycle took about 200 ms and the
 digger loop about 165 ms (≈30–70 cells/s; estimated). At the start of
-level 2 the blocker (the first skill with a non-zero count) was already
-selected. Clicking a skill whose count is 0 does not select it (verified:
+level 2 the blocker (the first slot, with a non-zero count) was already
+selected; the Practice "Bomber", with only bombers, started with nothing
+selected (owner's observation). Ours selects the blocker when it has a
+count and nothing otherwise (inferred from the two). Clicking a skill whose count is 0 does not select it (verified:
 the turner, count 0, left the blocker animating). A count of 0 is shown as
 no digits at all (verified); other counts are small-font digits, 5 px
 apart, right-aligned at button x + 17 (e.g. "10" with digits at 84 and
@@ -520,7 +522,7 @@ animated; from the navigation document, not re-measured here).
 (the navigation document also found clicks unreliable; Alt+Q works). Its
 animation (explosion cells 27–37) was not observed. The owner recalls that a
 single click does nothing and a double click nukes, with the explosion
-playing on the icon; ours plays it once at 14 frames/s, then shows the bomb.
+playing on the icon over and over until the level ends; ours loops it at 14 frames/s.
 
 **Turner arrows.** After the first click with the turner, two white arrows with a thin black outline, about 12 game pixels tall, appear over the lemming, one per direction it could be turned (seen walking across the screen: an up arrow at the head, a down arrow over the feet). They take turns, never shown together, swapping 7–10 times a second, until the second click (observed: Practice "Turner" demo, 50 ms bursts). Ours draws `MOUSE` cells 11–42 picked by each side's screen direction, swapping every 0.12 s; once the pointer is clearly on one side, only that arrow shows, previewing the direction the next click gives (ours; the demo shows no pointer, so the original's behaviour there is unknown).
 

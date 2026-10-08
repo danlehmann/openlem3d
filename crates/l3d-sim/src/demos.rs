@@ -33,7 +33,7 @@ const fn at(level: u32, steps: &'static [(u64, usize, u8, Option<bool>)]) -> Sol
 pub const SOLUTIONS: &[Solution] = &[
     at(80, &[(140, 0, 0, None)]),
     at(81, &[(150, 0, 1, Some(true))]),
-    at(82, &[(125, 0, 2, None)]),
+    at(82, &[(131, 0, 2, None)]),
     at(83, &[(185, 0, 3, None)]),
     at(84, &[(235, 0, 4, None)]),
     at(85, &[(150, 0, 5, None)]),

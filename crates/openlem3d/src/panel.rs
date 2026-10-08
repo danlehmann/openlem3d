@@ -29,7 +29,7 @@ impl Plugin for PanelPlugin {
                     .run_if(in_state(AppState::Playing)),
             )
             .add_systems(Update, (show_in_play, show_minimap))
-            .add_systems(OnEnter(AppState::Playing), select_first_skill.run_if(crate::fresh_level));
+            .add_systems(Update, select_first_skill.after(crate::load_level).run_if(in_state(AppState::Playing).and_then(resource_changed::<crate::CurrentLevel>)));
     }
 }
 
@@ -56,7 +56,7 @@ const SKILL_FPS: f32 = 50.0;
 /// Pause paws: one cell per 70 Hz frame.
 const PAWS_FPS: f32 = 70.0;
 const ARROW_FPS: f32 = 20.0;
-/// The bomb's mushroom cloud, played once on a nuke (rate ours).
+/// The bomb's mushroom cloud, looped after a nuke (rate ours).
 const EXPLOSION_FPS: f32 = 14.0;
 /// The longest gap between the two clicks of a double click (ours).
 const DOUBLE_CLICK_SECONDS: f32 = 0.5;
@@ -450,10 +450,11 @@ fn skill_keys_select(game: Res<Game>, mut selected: ResMut<SelectedSkill>) {
     }
 }
 
-/// At the start of a level the first skill with some left is selected
-/// (verified on level 2).
+/// A level starts with the first slot, the blocker, selected if it has any,
+/// otherwise with nothing selected (level 2 started with the blocker; the
+/// Practice "Bomber", with only bombers, with nothing, owner's observation).
 fn select_first_skill(game: Res<Game>, mut selected: ResMut<SelectedSkill>) {
-    selected.0 = game.sim.as_ref().and_then(|sim| Skill::ALL.into_iter().find(|s| sim.skills_left[*s as usize] > 0));
+    selected.0 = game.sim.as_ref().filter(|sim| sim.skills_left[Skill::Blocker as usize] > 0).map(|_| Skill::Blocker);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -512,11 +513,12 @@ fn animate(
             },
             // Squinting when idle, eyes open when armed or riding along.
             Animated::Face => art.panel[icon::FACE + (*lemming_cam == LemmingCam::Off) as usize].clone(),
-            // The mushroom cloud once from the nuke, then the bomb again.
-            Animated::Nuke => {
-                let frame = nuked_at.map_or(usize::MAX, |at| ((t - at) * EXPLOSION_FPS) as usize);
-                art.panel[icon::EXPLOSION.clone().nth(frame).unwrap_or(icon::BOMB)].clone()
-            }
+            // The mushroom cloud, over and over from the nuke until the level
+            // ends (owner's recollection).
+            Animated::Nuke => match nuked_at {
+                Some(at) => art.panel[icon::EXPLOSION.start + ((t - at) * EXPLOSION_FPS) as usize % icon::EXPLOSION.len()].clone(),
+                None => art.panel[icon::BOMB].clone(),
+            },
         };
         if node.image != image {
             node.image = image;

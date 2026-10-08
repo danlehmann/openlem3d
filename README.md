@@ -81,11 +81,12 @@ extracting.
 | Give skill to a lemming | click the lemming | tap the lemming |
 | Turner | click the lemming, then click beside it on the side it should point to | tap, then tap beside it |
 | Highlight a lemming | click the arrow (bottom left): the lemming nearest the middle of the view gets an arrow over it; click another lemming to move it there. Skills clicked go straight to it, and the face rides along with it. It deselects the skill; the arrow again switches it off, and while riding along it moves on to the next lemming | tap the arrow; tap a lemming to move it |
-| Ride along with a lemming | V, I or the face, then click a lemming (or the face with a lemming highlighted); V, I, Esc or the face again to return | tap the face, then a lemming; tap the face again to return |
+| Ride along with a lemming | V, I or the face, then click a lemming (or the face with a lemming highlighted); V, I, Esc or the face again to return. The camera glides in and out while the level waits | tap the face, then a lemming; tap the face again to return |
 | Skills while riding along | click anywhere in the view: the selected skill goes to the lemming ridden with; a turner points to the half of the screen clicked (the two turn arrows show in the middle) | tap |
 | Release rate | − / + (hold to repeat) | − / + buttons (hold to repeat) |
 | Nuke | Alt+Q, or double-click the bomb | double-tap the bomb |
 | Mute music and sounds | M | — |
+| Original or Enhanced mode (Enhanced: smooth camera moves, solid brick stairs) | Tab, also on the title, where the top right shows the mode; click it to switch | tap the mode on the title |
 | Options | F12 (also during a level, which waits) or the Options button on the title | tap Options |
 | Briefing | click or Space: play; Enter or click Preview: preview (Practice briefings are the level circling behind the details, and Enter or Demo plays a solution for you; any key or click returns); right click, Esc or click Menu: back | tap to play, or tap Preview/Demo or Menu |
 | Results | click, Space or Enter: next level (or retry); right click or Esc: level list | tap; or tap Menu |
