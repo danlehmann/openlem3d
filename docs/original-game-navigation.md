@@ -393,8 +393,31 @@ Findings from the screen-layout runs (`spec/ui-graphics.md`, "Screens")
   into the bracket and the state name shows ("Walker", "Sliding"). But
   clicking never put a turner's first-click arrow over the lemming, and the
   skill count did not drop. Tried: 120 ms and 300 ms holds when the bracket
-  shows, and frame-exact presses using Pause emulation. **[verified failure,
-  cause unknown]**
+  shows, and frame-exact presses using Pause emulation. **[verified failure]**
+  Twenty blind 300 ms clicks with a blocker selected on Practice "Blocker"
+  failed too. Likely cause: a click in the view that misses a lemming moves
+  the camera (away from the middle the pointer is a white arrow pointing
+  outwards; a crosshair in the middle; the bracket over a lemming), so
+  repeated clicks shift the scene and the lemming leaves the pointer.
+- **A single click timed on the bracket assigns** **[verified]** (Practice
+  "Blocker", serial mouse, no focus). With the blocker selected and the
+  pointer parked on the path, poll grabs until the white arrow under the
+  pointer gives way to the bracket, then press once for 100 ms: the caption
+  read "Blocker", the count dropped from 5 to 4 and the lemming stood with
+  its arms out. Note that `shot.ps1` grabs and the raw 720×540 client grabs
+  differ in scale (640 vs 720 wide), which matters when choosing the polled
+  spot.
+- **Skills can be given through Hi-Light** **[verified]** (Practice "Blocker",
+  serial mouse, no focus). Click the panel's red down arrow at about
+  (23,440): it turns green and the lemming nearest the middle of the view is
+  highlighted. Clicking a skill icon (blocker at (122,440)) then gives that
+  skill to the highlighted lemming at once: the count dropped from 5 to 4.
+  The arrow again switches highlighting off. Which lemming gets it depends on
+  the view (`spec/ui-graphics.md`, "Highlight arrow").
+- **Screenshot vs mouse coordinates.** In 640-wide `shot.ps1` grabs of a
+  level, panel items sit about 32 px right of and 15 px above the
+  serial-mouse positions above (the arrow shows at (55,425), the face at
+  (100,425)).
 - **Level demos without focus.** Each Practice briefing offers "Enter =
   Demo", which replays a recorded solution, including its camera moves
   ("Demo" shows at the bottom left of the panel). The demo ends with a nuke
