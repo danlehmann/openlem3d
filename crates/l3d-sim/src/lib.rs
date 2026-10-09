@@ -1829,9 +1829,14 @@ impl Simulation {
                     && (p[2] - o.pos[2]).abs() < BLOCK_RADIUS
                     && (p[1] - o.pos[1]).abs() < SUB / 2
             };
+            let axis = if d[0] != 0 { 0 } else { 2 };
+            let towards = (o.pos[axis] - l.pos[axis]) * d[axis] > 0;
             match o.turn_to {
-                // Blockers turn walkers back at arm's length.
-                None if near(next) && !near(l.pos) => {
+                // Blockers turn walkers back at arm's length, and turn back
+                // those already that close walking towards them (observed:
+                // a blocker set in a tight pack turns the lemmings right
+                // behind it; none walks through).
+                None if near(next) && towards => {
                     l.dir = l.dir.reverse();
                     return;
                 }
