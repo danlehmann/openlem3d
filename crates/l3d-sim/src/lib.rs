@@ -583,6 +583,17 @@ impl Simulation {
             // Not to a climber on its wall: there a digger is refused and
             // not paid for (verified by the owner on "Candyland Climber").
             Skill::Blocker | Skill::Turner => l.state == State::Walking && l.pending.is_none(),
+            // A builder out of bricks, laid or shrugging, takes more
+            // (provisional, as in the 2D games; Fun 10 "Castle Lemmalot"
+            // otherwise leaves a few ticks for it).
+            Skill::Builder
+                if matches!(
+                    l.state,
+                    State::Shrugging | State::Building { bricks_left: 0 }
+                ) =>
+            {
+                l.pending.is_none()
+            }
             Skill::Digger | Skill::Builder | Skill::Basher | Skill::Miner => {
                 l.pending.is_none()
                     && (l.state == State::Walking || working.is_some_and(|w| w != skill))
@@ -1927,8 +1938,10 @@ impl Simulation {
             if liquid || (!on_block && self.world.floor(l.pos[0], l.pos[2]) == Floor::Water) {
                 l.set_state(State::Drowning);
             } else if !self.bounce(l, 0) {
-                // Slippery tops make walkers slide; leaving them, they walk.
-                let slippery = ground_flags.is_some_and(|f| f & flags::SLIPPERY != 0);
+                // Slippery tops and floors make walkers slide; leaving them,
+                // they walk.
+                let slippery = ground_flags.is_some_and(|f| f & flags::SLIPPERY != 0)
+                    || (!on_block && self.world.floor_slippery(l.pos[0], l.pos[2]));
                 l.state = if slippery {
                     State::Sliding
                 } else {

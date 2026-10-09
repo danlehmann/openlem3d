@@ -31,6 +31,9 @@ pub struct World {
     /// Convex land polygons as `(x, z)` corner points, in grid units.
     land: Vec<Vec<(i32, i32)>>,
     bottom_solid: bool,
+    /// Header byte `0x157`: bit 0, the level bottom is slippery; bit 1, the
+    /// land is.
+    slippery_floor: u8,
     /// Cells whose block changed since the last [`World::take_changes`], with
     /// their new contents (segments 0 = removed).
     changes: Vec<([usize; 3], BlockCell)>,
@@ -100,6 +103,7 @@ impl World {
             cells,
             land,
             bottom_solid: level.flags & FLAG_BOTTOM_SOLID != 0,
+            slippery_floor: level.flags2 & 3,
             changes: Vec::new(),
             bricks: Vec::new(),
             bricks_changed: false,
@@ -287,6 +291,17 @@ impl World {
         self.solid(p)
             .then(|| self.cell(c[0], c[1], c[2]).map(|s| s.flags))
             .flatten()
+    }
+
+    /// Whether the ground plane at column `(x, z)` (sub-units) is slippery:
+    /// on land by header bit 1, elsewhere by bit 0 ([L3DEdit]; inferred: only
+    /// the ice levels set them, and Fun 14 "Slippery Maze" needs its
+    /// floor slippery).
+    pub fn floor_slippery(&self, x: i32, z: i32) -> bool {
+        let (px, pz) = (x as f32 / SUB as f32, z as f32 / SUB as f32);
+        let on_land = self.land.iter().any(|poly| point_in_convex(poly, px, pz));
+        let bit = if on_land { 2 } else { 1 };
+        self.slippery_floor & bit != 0
     }
 
     /// What the ground plane is at column `(x, z)` (sub-units).
