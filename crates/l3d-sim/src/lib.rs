@@ -1177,9 +1177,13 @@ impl Simulation {
     }
 
     /// Trampolines: a lemming arriving on a pad bounces into the hop
-    /// [`hop_after_drop`] picks for the height it dropped, after one more
-    /// tick on the pad (measured: a walker stepping down onto the first pad
-    /// stands there two ticks). A lemming walking onto a pad level with the
+    /// [`hop_after_drop`] picks for the height it dropped. Stepping down at
+    /// most half a unit onto it, it stands one more tick on the pad
+    /// (measured: a walker stepping down onto the first pad of Practice
+    /// "Trampoline" stands there two ticks); from a longer drop it bounces
+    /// straight off as from a hop (observed in the lemming view on Tricky 2
+    /// "Which Exit?": after its 1¾-unit drop the view rests on the pad one
+    /// tick). A lemming walking onto a pad level with the
     /// path bounces from its middle (provisional, unmeasured: on Fun 5
     /// "Bounce Bounce" every pad is a water cell short of the path, which a
     /// first hop reaches only from about the middle of the pad). Returns
@@ -1204,7 +1208,7 @@ impl Simulation {
         self.press_pad(l.pos);
         l.set_state(State::Bouncing {
             hop: hop_after_drop(height),
-            k: -1,
+            k: if height > SUB / 2 { 0 } else { -1 },
             y0: l.pos[1],
         });
         true
