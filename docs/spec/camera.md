@@ -34,7 +34,10 @@ slides sideways when the camera turns.
 The virtual-lemming view looks out of the followed lemming's eyes (the
 project owner: it is meant to be its eyes). Ours puts the camera 0.4 units
 above its feet, the top of its half-unit-tall sprite, facing its heading,
-and does not draw that lemming.
+and does not draw that lemming. A turner's view faces where its arm
+points, the way it sends walkers (verified: riding with a "Turn right"
+turner in Practice "Turner", the view faced that side, away from the path it
+had walked along).
 
 The virtual-lemming view does not tilt either, as far as observed: through
 about 3 minutes of lemming view in the Practice "Virtual Lemming" demo and

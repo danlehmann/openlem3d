@@ -186,7 +186,13 @@ fn follow(
         return;
     };
     let feet = Vec3::from_array(l.pos.map(|v| v as f32 / SUB as f32));
-    let yaw = l.dir.yaw();
+    // A turner looks where its arm points, the way it sends walkers
+    // (verified in Practice "Turner": riding with a "Turn right" turner, the
+    // original's view faces that side, not along the path it came on).
+    let yaw = match l.state {
+        l3d_sim::State::Turning { to } => to.yaw(),
+        _ => l.dir.yaw(),
+    };
     let target = feet + Vec3::Y * EYE_HEIGHT;
     // Riding along with a new lemming: the camera first glides into its
     // eyes, the level waiting meanwhile.

@@ -414,6 +414,13 @@ Findings from the screen-layout runs (`spec/ui-graphics.md`, "Screens")
   skill to the highlighted lemming at once: the count dropped from 5 to 4.
   The arrow again switches highlighting off. Which lemming gets it depends on
   the view (`spec/ui-graphics.md`, "Highlight arrow").
+- **A turner by mouse** **[verified]** (Practice "Turner", serial mouse, no
+  focus). Select the turner (174,440), click the lemming once on the bracket
+  (100 ms), then move the pointer about 60 px to one side (`rel:-29,0`) and
+  press 100 ms again: the count dropped and the caption read "Turn right".
+  Presses of 300 ms were ignored. Through Hi-Light, clicking the turner icon
+  alone gave no turner. The lemming view then rides with it after the face
+  (68,440) and a 100 ms press on the standing turner.
 - **Screenshot vs mouse coordinates.** In 640-wide `shot.ps1` grabs of a
   level, panel items sit about 32 px right of and 15 px above the
   serial-mouse positions above (the arrow shows at (55,425), the face at
