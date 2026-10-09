@@ -246,6 +246,11 @@ corner of the named cell. `ui-find --screen 40,30,640,480 --game 320,200`
 resamples the screenshot back to 320×200 (the capture adds a 40/30-pixel
 black border). Verified (match): every sprite listed below matches with 0
 differing pixels at 320×200, and none matched at 640×480.
+Ours draws the level's 3D view at 320×200 in Original mode (200 rows, and
+as many columns as keep the original's pixel shape on a screen that isn't
+4:3), stretched over the screen in blocks, and at the screen's resolution in
+Enhanced mode; switching with Tab during a level sharpens or coarsens the
+blocks in ten steps over 1.2 s while the level waits (ours).
 
 **Palette.** All three screens use `GFX/LM3D.PAL` unchanged. Verified
 (match: colours compared within ±12 summed RGB, i.e. exact after 6→8-bit

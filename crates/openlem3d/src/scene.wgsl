@@ -12,6 +12,9 @@ struct Uniforms {
     right: vec4<f32>,
     // x: camera roll in radians (anticlockwise on screen), y: the
     // framebuffer x of the screen centre; the sky turns about (y, sky.y).
+    // zw: screen pixels per rendered pixel across and down (1 unless the
+    // scene is rendered small and stretched); the sky is laid out in
+    // screen pixels.
     view: vec4<f32>,
 };
 
@@ -111,7 +114,7 @@ fn fs_sky(v: SkyOut) -> @location(0) vec4<f32> {
     // In framebuffer coordinates (y down) the anticlockwise roll's inverse is
     // the standard rotation matrix by the same angle.
     let pivot = vec2(u.view.y, u.sky.y);
-    let d = v.clip.xy - pivot;
+    let d = v.clip.xy * u.view.zw - pivot;
     let c = cos(u.view.x);
     let s = sin(u.view.x);
     let p = pivot + vec2(c * d.x - s * d.y, s * d.x + c * d.y);
@@ -125,4 +128,12 @@ fn fs_sky(v: SkyOut) -> @location(0) vec4<f32> {
     let row = clamp(p.y / u.sky.y, 0.0, 1.0) * dims.y;
     let uv = vec2(col / dims.x, min(row, dims.y - 0.5) / dims.y);
     return vec4(textureSampleLevel(tex, samp, uv, 0.0).rgb, 1.0);
+}
+
+// Stretch: the scene rendered small (bound as `tex`) drawn over the whole
+// screen, each rendered pixel a block of screen pixels (nearest sampling).
+@fragment
+fn fs_stretch(v: SkyOut) -> @location(0) vec4<f32> {
+    let screen = vec2<f32>(textureDimensions(tex)) * u.view.zw;
+    return vec4(textureSampleLevel(tex, samp, v.clip.xy / screen, 0.0).rgb, 1.0);
 }

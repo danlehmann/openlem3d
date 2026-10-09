@@ -86,6 +86,12 @@ pub struct SceneCamera {
     /// Roll in radians (anticlockwise on screen) already in `view_proj`;
     /// the sky is turned by it too.
     pub roll: f32,
+    /// The size in pixels the scene is rendered at and then stretched over
+    /// the screen without smoothing; zero for the screen's own size.
+    pub pixels: UVec2,
+    /// The colour behind the scene, linear RGBA, for the low-resolution
+    /// target (the screen itself is cleared to the camera's colour).
+    pub clear: Vec4,
 }
 
 pub struct SceneRenderPlugin;
@@ -130,11 +136,21 @@ struct SceneGpu {
     shader: wgpu::ShaderModule,
     sampler: wgpu::Sampler,
     uniforms: wgpu::Buffer,
-    /// Geometry and sky pipelines and the colour format they were built for.
+    /// Geometry, sky and stretch pipelines and the colour format they were
+    /// built for.
     pipelines: Option<(
         wgpu::TextureFormat,
         wgpu::RenderPipeline,
         wgpu::RenderPipeline,
+        wgpu::RenderPipeline,
+    )>,
+    /// The low-resolution colour target: its size and format, its view, and
+    /// the bind group that samples it.
+    low: Option<(
+        (u32, u32),
+        wgpu::TextureFormat,
+        wgpu::TextureView,
+        wgpu::BindGroup,
     )>,
     /// Version of the uploaded [`SceneContent`].
     version: Option<u64>,
@@ -217,6 +233,7 @@ impl FromWorld for SceneGpu {
             sampler,
             uniforms,
             pipelines: None,
+            low: None,
             version: None,
             layers: Vec::new(),
             sky: None,
@@ -299,7 +316,82 @@ impl SceneGpu {
             multiview_mask: None,
             cache: None,
         });
-        self.pipelines = Some((format, geometry, sky));
+        let stretch = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("scene stretch"),
+            layout: Some(&pl),
+            vertex: wgpu::VertexState {
+                module: &self.shader,
+                entry_point: Some("vs_sky"),
+                buffers: &[],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &self.shader,
+                entry_point: Some("fs_stretch"),
+                targets: &[Some(format.into())],
+                compilation_options: Default::default(),
+            }),
+            primitive: Default::default(),
+            depth_stencil: None,
+            multisample: Default::default(),
+            multiview_mask: None,
+            cache: None,
+        });
+        self.pipelines = Some((format, geometry, sky, stretch));
+    }
+
+    /// The low-resolution colour target of `size` in `format`, made anew
+    /// when either changes.
+    fn low_target(
+        &mut self,
+        device: &wgpu::Device,
+        size: (u32, u32),
+        format: wgpu::TextureFormat,
+    ) -> (wgpu::TextureView, wgpu::BindGroup) {
+        if self
+            .low
+            .as_ref()
+            .is_none_or(|(s, f, ..)| *s != size || *f != format)
+        {
+            let view = device
+                .create_texture(&wgpu::TextureDescriptor {
+                    label: Some("scene low resolution"),
+                    size: wgpu::Extent3d {
+                        width: size.0,
+                        height: size.1,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                        | wgpu::TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
+                })
+                .create_view(&Default::default());
+            let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("scene low resolution"),
+                layout: &self.layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: self.uniforms.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(&view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::Sampler(&self.sampler),
+                    },
+                ],
+            });
+            self.low = Some((size, format, view, bind));
+        }
+        let (_, _, view, bind) = self.low.as_ref().unwrap();
+        (view.clone(), bind.clone())
     }
 
     fn depth_view(&mut self, device: &wgpu::Device, size: (u32, u32)) -> wgpu::TextureView {
@@ -405,7 +497,17 @@ fn prepare_scene(
         camera.right.z,
         if surround { 1.0 } else { 0.0 },
     ]);
-    uniforms.extend([camera.roll, w as f32 / 2.0, 0.0, 0.0]);
+    // Screen pixels per rendered pixel, across and down: the sky is laid out
+    // in screen pixels whatever the scene is rendered at.
+    let pixel = if camera.pixels.x > 0 && camera.pixels.y > 0 {
+        Vec2::new(
+            w as f32 / camera.pixels.x as f32,
+            h as f32 / camera.pixels.y as f32,
+        )
+    } else {
+        Vec2::ONE
+    };
+    uniforms.extend([camera.roll, w as f32 / 2.0, pixel.x, pixel.y]);
     queue.write_buffer(&gpu.uniforms, 0, &f32_bytes(&uniforms));
     upload_sprites(device, &queue, &mut gpu, &sprites);
     if gpu.version == Some(content.version) {
@@ -503,19 +605,52 @@ fn upload_sprites(
     *n = count;
 }
 
-fn draw_scene(view: ViewQuery<&ViewTarget>, mut gpu: ResMut<SceneGpu>, mut ctx: RenderContext) {
+fn draw_scene(
+    view: ViewQuery<&ViewTarget>,
+    camera: Res<SceneCamera>,
+    mut gpu: ResMut<SceneGpu>,
+    mut ctx: RenderContext,
+) {
     let target = view.into_inner();
     let device = ctx.render_device().wgpu_device().clone();
     let size = target.main_texture().size();
     gpu.target_size = (size.width, size.height);
-    let depth = gpu.depth_view(&device, (size.width, size.height));
-    gpu.ensure_pipelines(&device, target.main_texture_format());
+    let format = target.main_texture_format();
+    gpu.ensure_pipelines(&device, format);
+    // Rendered small and stretched over the screen, or at the screen's size.
+    let low = (camera.pixels.x > 0
+        && camera.pixels.y > 0
+        && (camera.pixels.x < size.width || camera.pixels.y < size.height))
+        .then(|| {
+            let s = (camera.pixels.x, camera.pixels.y);
+            (s, gpu.low_target(&device, s, format))
+        });
+    let depth = gpu.depth_view(
+        &device,
+        low.as_ref().map_or((size.width, size.height), |l| l.0),
+    );
     let gpu = &*gpu;
     if gpu.layers.is_empty() && gpu.sky.is_none() && gpu.sprites.is_none() {
         return;
     }
-    let (_, geometry, sky_pipeline) = gpu.pipelines.as_ref().unwrap();
-    let color = target.get_color_attachment();
+    let (_, geometry, sky_pipeline, stretch) = gpu.pipelines.as_ref().unwrap();
+    let color = match &low {
+        Some((_, (view, _))) => wgpu::RenderPassColorAttachment {
+            view,
+            depth_slice: None,
+            resolve_target: None,
+            ops: wgpu::Operations {
+                load: wgpu::LoadOp::Clear(wgpu::Color {
+                    r: camera.clear.x as f64,
+                    g: camera.clear.y as f64,
+                    b: camera.clear.z as f64,
+                    a: camera.clear.w as f64,
+                }),
+                store: wgpu::StoreOp::Store,
+            },
+        },
+        None => target.get_color_attachment(),
+    };
     let encoder = ctx.command_encoder();
     let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
         label: Some("scene"),
@@ -549,6 +684,18 @@ fn draw_scene(view: ViewQuery<&ViewTarget>, mut gpu: ResMut<SceneGpu>, mut ctx: 
         pass.set_vertex_buffer(0, v.slice(..));
         pass.set_index_buffer(i.slice(..), wgpu::IndexFormat::Uint32);
         pass.draw_indexed(0..*n, 0, 0..1);
+    }
+    drop(pass);
+    if let Some((_, (_, bind))) = &low {
+        let color = target.get_color_attachment();
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("scene stretch"),
+            color_attachments: &[Some(color)],
+            ..Default::default()
+        });
+        pass.set_pipeline(stretch);
+        pass.set_bind_group(0, bind, &[]);
+        pass.draw(0..3, 0..1);
     }
 }
 

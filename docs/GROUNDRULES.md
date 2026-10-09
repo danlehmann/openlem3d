@@ -45,7 +45,9 @@ The directory must contain one `.cue` file. The file names can be anything.
 - **Input:** mouse and keyboard, and touch. Both are first-class; the game must
   be fully playable without a keyboard.
 - **Rendering:** a modern, high-resolution 3D renderer. Stay true to the
-  original's look, but don't limit ourselves to its resolution.
+  original's look, but don't limit ourselves to its resolution: Enhanced mode
+  renders at the screen's resolution, Original mode at the original's
+  320×200.
 - **Camera quirk to preserve:** the original camera can't pitch up or down. The
   sky is essentially a 2D panorama image that pans as the camera turns.
   Reproduce this behaviour (at least as the default mode).

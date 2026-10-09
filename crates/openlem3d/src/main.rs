@@ -20,6 +20,7 @@ mod minimap;
 mod music;
 mod options;
 mod panel;
+mod pixels;
 mod pointer;
 mod practice;
 mod results;
@@ -242,7 +243,12 @@ fn main() {
             options::OptionsPlugin,
             practice::PracticePlugin,
         ))
-        .add_plugins((fade::FadePlugin, style::StylePlugin, confirm::ConfirmPlugin))
+        .add_plugins((
+            fade::FadePlugin,
+            style::StylePlugin,
+            confirm::ConfirmPlugin,
+            pixels::PixelsPlugin,
+        ))
         .insert_resource(ClearColor(Color::srgb(0.35, 0.55, 0.85)))
         .insert_resource(opts.clone())
         .insert_resource(Data(data))
@@ -594,10 +600,11 @@ fn step_simulation(
     mut game: ResMut<Game>,
     mut scene: ResMut<SceneContent>,
     views: Query<&ViewCamera>,
+    pixelation: Res<pixels::Pixelation>,
 ) {
-    // The level waits while the camera glides to a preset view, so the
-    // glide costs the player no time.
-    if views.iter().any(|v| v.glide.is_some()) {
+    // The level waits while the camera glides to a preset view, or the
+    // picture changes resolution, so neither costs the player time.
+    if pixelation.changing() || views.iter().any(|v| v.glide.is_some()) {
         return;
     }
     let Game {
