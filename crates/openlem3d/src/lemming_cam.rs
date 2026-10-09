@@ -118,6 +118,33 @@ const SWAY_ROLL: f32 = 1.5;
 const SWAY_PERIOD: f32 = 6.0 / l3d_sim::TICKS_PER_SECOND as f32;
 /// How quickly the roll follows the sway, per second.
 const ROLL_RATE: f32 = 12.0;
+/// The least distance between the eye and a deflector's diagonal face.
+/// A walker turns there only once its centre reaches the face, so an eye
+/// above its centre would look through the block.
+const DEFLECTOR_CLEARANCE: f32 = 0.2;
+
+/// `eye`, moved straight out from the diagonal face of any deflector it is
+/// closer to than [`DEFLECTOR_CLEARANCE`] (or behind).
+fn off_deflectors(world: &l3d_sim::World, mut eye: Vec3) -> Vec3 {
+    const DIAGONALS: [[i32; 2]; 4] = [[1, 1], [1, -1], [-1, 1], [-1, -1]];
+    for n in DIAGONALS {
+        let normal = Vec3::new(n[0] as f32, 0.0, n[1] as f32).normalize();
+        // A point just behind the face, as seen from the eye: if it lies in
+        // a deflector facing the eye, the face passes through that cell's
+        // centre.
+        let behind = eye - normal * DEFLECTOR_CLEARANCE;
+        let p = behind.to_array().map(|v| (v * SUB as f32).floor() as i32);
+        if world.deflector_normal(p) != Some(n) {
+            continue;
+        }
+        let centre = behind.floor() + Vec3::splat(0.5);
+        let out = (eye - centre).with_y(0.0).dot(normal);
+        if out < DEFLECTOR_CLEARANCE {
+            eye += normal * (DEFLECTOR_CLEARANCE - out);
+        }
+    }
+    eye
+}
 
 pub(crate) fn toggle_keys(
     mut keys: ResMut<ButtonInput<KeyCode>>,
@@ -193,7 +220,10 @@ fn follow(
         l3d_sim::State::Turning { to } => to.yaw(),
         _ => l.dir.yaw(),
     };
-    let target = feet + Vec3::Y * EYE_HEIGHT;
+    let target = off_deflectors(
+        &game.sim.as_ref().expect("lemming implies a level").world,
+        feet + Vec3::Y * EYE_HEIGHT,
+    );
     // Riding along with a new lemming: the camera first glides into its
     // eyes, the level waiting meanwhile.
     if *entered != Some(i) {
