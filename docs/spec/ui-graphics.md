@@ -286,8 +286,9 @@ The tile is the screen's width and does not join to itself across: its logos
 are about 120 pixels apart. But columns 0–57 and 173–199 equal the columns
 120 to their right exactly (verified, every row), so the pattern continues
 seamlessly beyond the screen's sides by repeating columns 200–319 to the right
-and columns 0–119 to the left. That is how we fill windows wider than 320:200;
-the original's screen is never wider.
+and columns 0–119 to the left. That is how we fill windows wider than
+320:200 (the original's screen is never wider), drawing the widened and
+repeated tile as one picture so that no seams show between copies.
 
 **Logo animation.** Frames 0, 1, …, 48 in order (one turn; frame 48
 is face-on again), then frame 0 is held for about 1.4 s, then the next turn.

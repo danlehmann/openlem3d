@@ -23,8 +23,11 @@ use crate::{CurrentLevel, Data};
 const SCREEN: Vec2 = Vec2::new(320.0, 200.0);
 /// The backdrop tile, `BGRD.000`.
 const TILE: Vec2 = Vec2::new(320.0, 48.0);
-/// The backdrop's period across, in the strips beside the tile.
-const SIDE_REPEAT: f32 = 120.0;
+/// The backdrop as drawn: the tile widened by `BACKDROP_SIDE` columns on
+/// each side and repeated down `BACKDROP_ROWS` times, enough to cover windows
+/// from 5:1 to 1:2.4.
+const BACKDROP_SIDE: usize = 360;
+const BACKDROP_ROWS: usize = 17;
 /// Backdrop scroll speeds (pixels per second; estimated).
 const TITLE_SCROLL: f32 = 35.0;
 const CODE_SCROLL: f32 = 23.0;
@@ -201,6 +204,31 @@ pub(crate) fn glyphs(
     }
 }
 
+/// `BGRD.000` (`raw`) as one picture to cover any window, so that no seams
+/// show. The tile does not join to itself across: its logos are 120 pixels
+/// apart. But columns 0–57 and 173–199 equal the columns 120 to their right
+/// (verified), so beside the tile the pattern continues exactly by repeating
+/// columns 200–319 to the right and 0–119 to the left.
+fn widened_backdrop(raw: &[u8]) -> Option<IndexedImage> {
+    const PERIOD: i32 = 120;
+    let (w, h) = (TILE.x as i32, TILE.y as usize);
+    if raw.len() != w as usize * h {
+        return None;
+    }
+    let width = w as usize + 2 * BACKDROP_SIDE;
+    let column = |x: i32| match x {
+        x if x < 0 => x.rem_euclid(PERIOD),
+        x if x >= w => w - PERIOD + (x - w) % PERIOD,
+        x => x,
+    } as usize;
+    let mut pixels = Vec::with_capacity(width * h * BACKDROP_ROWS);
+    for y in 0..h * BACKDROP_ROWS {
+        let row = &raw[(y % h) * w as usize..][..w as usize];
+        pixels.extend((0..width).map(|x| row[column(x as i32 - BACKDROP_SIDE as i32)]));
+    }
+    IndexedImage::new(width, h * BACKDROP_ROWS, pixels).ok()
+}
+
 fn load_art(mut commands: Commands, mut data: ResMut<Data>, mut images: ResMut<Assets<Image>>) {
     let d = &mut data.0;
     let Ok(pal) = d.palette("GFX/LM3D.PAL") else {
@@ -210,7 +238,7 @@ fn load_art(mut commands: Commands, mut data: ResMut<Data>, mut images: ResMut<A
     let backdrop = d
         .gfx("BGRD", 0)
         .ok()
-        .and_then(|raw| IndexedImage::new(320, raw.len() / 320, raw).ok())
+        .and_then(|raw| widened_backdrop(&raw))
         .map(|i| add(&i, false));
     let logo = d
         .read("GFX/TITLE.MHC")
@@ -362,7 +390,7 @@ pub(crate) struct ScreenRoot;
 #[derive(Component)]
 pub(crate) struct Canvas(pub(crate) Vec2);
 
-/// The backdrop's tiles, and the scroll speed of the current screen.
+/// The backdrop picture, and the scroll speed of the current screen.
 #[derive(Component)]
 struct Backdrop(f32);
 
@@ -457,30 +485,18 @@ pub(crate) fn spawn_screen(commands: &mut Commands, art: &Art, scroll: f32, tint
             BackgroundColor(Color::BLACK),
         ))
         .id();
-    let backdrop = commands
-        .spawn((
-            Backdrop(scroll),
-            Node {
-                position_type: PositionType::Absolute,
-                ..default()
-            },
-        ))
-        .id();
-    commands.entity(root).add_child(backdrop);
     if let Some(bg) = &art.backdrop {
-        // Enough tiles to cover any window at the canvas scale.
-        for _ in 0..(7 * 16) {
-            let tile = commands
-                .spawn((
-                    ImageNode::new(bg.clone()).with_color(tint),
-                    Node {
-                        position_type: PositionType::Absolute,
-                        ..default()
-                    },
-                ))
-                .id();
-            commands.entity(backdrop).add_child(tile);
-        }
+        let backdrop = commands
+            .spawn((
+                Backdrop(scroll),
+                ImageNode::new(bg.clone()).with_color(tint),
+                Node {
+                    position_type: PositionType::Absolute,
+                    ..default()
+                },
+            ))
+            .id();
+        commands.entity(root).add_child(backdrop);
     }
     let canvas = commands
         .spawn((
@@ -666,57 +682,23 @@ fn layout(
     }
 }
 
-/// The backdrop scrolls upwards and wraps every 48 rows. The whole tile sits
-/// behind the canvas; beyond its sides the pattern continues in
-/// [`SIDE_REPEAT`]-wide strips: columns 200–319 over and over on the right,
-/// columns 0–119 on the left. Columns 0–57 and 173–199 equal the columns 120
-/// to their right (verified), so every seam joins exactly.
+/// The backdrop scrolls upwards and wraps every 48 rows, its columns lined up
+/// with the canvas.
 fn scroll_backdrop(
     time: Res<Time>,
     windows: Query<&Window>,
-    backdrops: Query<(&Backdrop, &Children)>,
-    mut tiles: Query<(&mut Node, &mut ImageNode), Without<Backdrop>>,
+    mut backdrops: Query<(&Backdrop, &mut Node)>,
 ) {
     let Ok(window) = windows.single() else { return };
     let (w, h) = (window.width(), window.height());
     let s = (w / SCREEN.x).min(h / SCREEN.y);
     let origin = Vec2::new((w - SCREEN.x * s) / 2.0, (h - SCREEN.y * s) / 2.0);
-    // Columns as (left edge in the window, first tile column, width in
-    // canvas pixels).
-    let side = (origin.x / s / SIDE_REPEAT).ceil().max(0.0) as usize;
-    let columns = std::iter::once((0.0, 0.0, TILE.x))
-        .chain((0..side).flat_map(|j| {
-            let j = j as f32;
-            [
-                (TILE.x + j * SIDE_REPEAT, TILE.x - SIDE_REPEAT, SIDE_REPEAT),
-                (-(j + 1.0) * SIDE_REPEAT, 0.0, SIDE_REPEAT),
-            ]
-        }))
-        .map(|(x, src, width)| (origin.x + x * s, src, width));
-    for (b, children) in &backdrops {
+    for (b, mut node) in &mut backdrops {
         let phase = (time.elapsed_secs() * b.0).rem_euclid(TILE.y) * s;
-        let y0 = (origin.y - phase).rem_euclid(TILE.y * s) - TILE.y * s;
-        let rows = ((h - y0) / (TILE.y * s)).ceil().max(1.0) as usize;
-        let places = columns
-            .clone()
-            .flat_map(|c| (0..rows).map(move |r| (c, y0 + r as f32 * TILE.y * s)));
-        let mut children = children.iter();
-        for (((x, src, width), y), child) in places.zip(&mut children) {
-            let Ok((mut node, mut image)) = tiles.get_mut(child) else {
-                continue;
-            };
-            node.display = Display::Flex;
-            node.left = px(x);
-            node.top = px(y);
-            node.width = px(width * s);
-            node.height = px(TILE.y * s);
-            image.rect = Some(Rect::new(src, 0.0, src + width, TILE.y));
-        }
-        for child in children {
-            if let Ok((mut node, _)) = tiles.get_mut(child) {
-                node.display = Display::None;
-            }
-        }
+        node.left = px(origin.x - BACKDROP_SIDE as f32 * s);
+        node.top = px((origin.y - phase).rem_euclid(TILE.y * s) - TILE.y * s);
+        node.width = px((TILE.x + 2.0 * BACKDROP_SIDE as f32) * s);
+        node.height = px(TILE.y * BACKDROP_ROWS as f32 * s);
     }
 }
 
