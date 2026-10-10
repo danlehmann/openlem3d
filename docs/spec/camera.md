@@ -25,6 +25,47 @@ spans [*c*, *c*+1].
 +X and 3 faces +Z. Rotations 0 and 3 are verified in `LEVEL.000` and
 `LEVEL.001`.
 
+**Each camera remembers where it was left** (verified, Practice "Rope Slide"
+and "Hi-Light"). A camera that was moved and one that was turned came back
+unchanged after cycling through all four. A preset is only where its camera
+starts.
+
+## Camera markers (partly verified)
+
+The other three cameras are drawn in the world; the current one is not
+(verified: Practice "Rope Slide" and "Hi-Light", where every marker showed
+where the presets predicted). A marker shows its camera where it is now: one
+moved towards the viewer grew and moved down, and one turned changed its
+picture (verified). Markers stay drawn while paused (verified); in the
+lemming view they were not observed (ours draws them). The minimap shows only
+the current camera.
+
+- **Body:** `LEMM128.MHC` cells 563 (lens towards the viewer), 565 (side; as
+  stored the lens points to the screen's left) and 567 (back), drawn like the
+  lemming sprites (a 128 cell spans half a unit), centred on the camera's
+  position (estimated from screen positions at depths 3 and 6; ours looks
+  about 2 game pixels higher than the original on Hi-Light, within the
+  uncertainty of the original's horizon row). It does not animate (verified).
+  The three-quarter cells 564 and 566 never showed in about 60 views.
+- **Which cell (measured; rule fitted):** with `q(yaw) = floor((yaw +
+  11.25°) / 90°)`, yaw growing with right turns (as ours, 0 at rotation 0),
+  and `d = q(camera) − q(viewer) mod 4`: d = 2 front (563), 3 side as stored
+  (565), 1 side mirrored, 0 back (567). Measured by turning a camera in steps
+  of about 11° in view of another: the front showed from −12° to +68° of turn
+  to its right (0 = facing the viewer), the side from +80° to +159° and from
+  −12° to −98°, the back from −108°. Turning the viewer by up to 25° did not
+  change the cell, and the bearing between them does not count (on Rope Slide
+  it predicts the back, but the side showed). How the viewer's own facing is
+  quantised is unverified.
+- **Number:** `BOMBNUMB` cell *n* − 1 for camera *n* (verified for 2, 3 and
+  4), a world sprite 0.25 units square (it scales with distance; verified),
+  never mirrored, centred about 0.4 units above the camera's position
+  (measured 0.39–0.43).
+- **Occlusion:** nearer blocks hide the markers (one observation: a camera's
+  body hidden behind a block while its number above stayed visible); the
+  panel is drawn over them.
+- Ours leaves out a marker within 0.3 units of the view, which would fill it.
+
 ## The camera never pitches (verified)
 
 No control tilts the view. The horizon stays on the same screen row while the

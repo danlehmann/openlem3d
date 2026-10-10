@@ -299,10 +299,12 @@ pub struct CurrentLevel {
 #[derive(Resource, Default)]
 pub struct PresetIndex(pub usize);
 
-/// The current level's preset cameras.
+/// Where each of the current level's four cameras is now, starting at its
+/// preset: a camera keeps its own position and facing when the player
+/// switches away, and comes back to them (verified).
 #[derive(Resource)]
 struct LevelInfo {
-    cameras: [CameraPreset; 4],
+    slots: [(Vec3, f32); 4],
 }
 
 /// The player camera: free horizontal position and yaw; never pitches.
@@ -330,6 +332,9 @@ struct Glide {
     to: (Vec3, f32),
     t: f32,
 }
+
+/// Another camera nearer the view than this (units) is not drawn.
+const CAMERA_MARKER_CLEARANCE: f32 = 0.3;
 
 /// How long a glide to a preset view takes, in seconds (ours).
 const GLIDE_SECONDS: f32 = 0.8;
@@ -664,10 +669,27 @@ fn update_lemming_sprites(
     cams: Query<&ViewCamera>,
     lemming_cam: Res<lemming_cam::LemmingCam>,
     highlight: Res<hud::Highlight>,
+    (info, preset): (Option<Res<LevelInfo>>, Res<PresetIndex>),
     mut sprites: ResMut<scene_render::SceneSprites>,
 ) {
     let Some(sim) = &game.sim else { return };
     let yaw = cams.iter().next().map_or(0.0, |c| c.yaw);
+    // The other three cameras where they are now (verified); the current
+    // one is the view. One right at the view would fill it, so is left out
+    // (ours).
+    let eye = cams.iter().next().map(|c| c.pos);
+    let cameras: Vec<_> = info
+        .iter()
+        .flat_map(|info| info.slots.iter().enumerate())
+        .filter(|(i, (pos, _))| {
+            *i != preset.0 && eye.is_none_or(|e| e.distance(*pos) > CAMERA_MARKER_CLEARANCE)
+        })
+        .map(|(i, &(pos, yaw))| lemming_render::CameraMarker {
+            number: i as u32 + 1,
+            pos,
+            yaw,
+        })
+        .collect();
     // The lemming ridden with is the view's eyes, drawn until the camera
     // has glided into them.
     let eyes = lemming_cam
@@ -682,6 +704,7 @@ fn update_lemming_sprites(
         &game.doors,
         eyes,
         highlight.lemming,
+        &cameras,
     );
 }
 
@@ -750,7 +773,7 @@ pub(crate) fn load_level(
         cam.set_preset(&level.cameras[preset]);
     }
     commands.insert_resource(LevelInfo {
-        cameras: level.cameras,
+        slots: level.cameras.each_ref().map(preset_view),
     });
     game.sim = Some(l3d_sim::Simulation::new(&level, &blocks));
     if opts.solve
@@ -779,7 +802,7 @@ pub(crate) fn camera_controls(
     mouse: Res<ButtonInput<MouseButton>>,
     motion: Res<AccumulatedMouseMotion>,
     time: Res<Time>,
-    info: Option<Res<LevelInfo>>,
+    mut info: Option<ResMut<LevelInfo>>,
     windows: Query<&Window>,
     mut scene_cam: ResMut<SceneCamera>,
     (lemming_cam, preview): (Res<lemming_cam::LemmingCam>, Res<briefing::Preview>),
@@ -849,7 +872,8 @@ pub(crate) fn camera_controls(
         if let Some(info) = &info {
             for (i, k) in presets.iter().enumerate() {
                 if keys.just_pressed(*k) {
-                    cam.glide_to_preset(&info.cameras[i]);
+                    let (pos, yaw) = info.slots[i];
+                    cam.glide_to(pos, yaw);
                     preset.0 = i;
                 }
             }
@@ -954,6 +978,15 @@ pub(crate) fn camera_controls(
             if !camera_blocked(level, blocks, cam.pos) {
                 *last_free = Some(cam.pos);
             }
+        }
+        // The current camera keeps where the player leaves it (not the
+        // lemming view, a glide or the preview).
+        if let Some(info) = info.as_mut()
+            && lemming_cam.following().is_none()
+            && cam.glide.is_none()
+            && !preview.active
+        {
+            info.slots[preset.0] = (cam.pos, cam.yaw);
         }
         let aspect = windows
             .iter()

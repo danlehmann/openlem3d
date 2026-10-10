@@ -640,7 +640,8 @@ fn buttons(
             Action::Camera => {
                 if let (Some(cams), Ok(mut view)) = (&cameras, views.single_mut()) {
                     preset.0 = (preset.0 + 1) % 4;
-                    view.glide_to_preset(&cams.cameras[preset.0]);
+                    let (pos, yaw) = cams.slots[preset.0];
+                    view.glide_to(pos, yaw);
                     *lemming_cam = LemmingCam::Off;
                 }
             }

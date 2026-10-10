@@ -107,7 +107,7 @@ else is **guessed** from the contact sheet's appearance.
 | 524–533 | Electrocution cloud (gathers, lightning, shrinks) | 1 × 10 | Guessed. View-independent. Drawn over a zapped lemming, spread over its death (unmeasured). |
 | 534–537 | Smoke puff, shrinking (bomber explosion) | 1 × 4 | Guessed. View-independent. |
 | 538–562 | Arms spread sideways, one leg kicking up | 5 × 5 | Unknown. Earlier taken for the climber (the back block resembles the climber skill icon), but it shows a lemming standing, not hauling itself up (owner). Perhaps sliding or balancing. |
-| 563–567 | Film camera (the level's camera marker, not a lemming) | 5 × 1 | Guessed. |
+| 563–567 | Film camera (the other cameras' markers in the world, not a lemming) | 5 × 1 | **Verified** (see [camera.md](camera.md), "Camera markers"): only 563 (front), 565 (side) and 567 (back) were ever seen. |
 
 Not found: an exit animation (lemmings were not seen exiting), the bomber
 countdown digits (they are drawn above the lemming in game, so probably not

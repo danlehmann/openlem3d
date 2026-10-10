@@ -8,6 +8,7 @@
 
 use std::f32::consts::{FRAC_PI_4, TAU};
 
+use bevy::math::Vec3;
 use l3d_sim::objects::ObjectKind;
 use l3d_sim::{SUB, Simulation, State};
 
@@ -592,9 +593,83 @@ fn splat(b: &mut LayerBuilder, i: usize, t: u32, at: [f32; 3], tex: [f32; 2]) {
     }
 }
 
+/// One of the level's other cameras, drawn in the world where it is.
+pub struct CameraMarker {
+    /// The camera's number, 1–4.
+    pub number: u32,
+    pub pos: Vec3,
+    /// Facing, as `ViewCamera::yaw`.
+    pub yaw: f32,
+}
+
+/// The film camera's cells: lens towards the viewer, side (lens to the
+/// screen's left as stored), back. The three-quarter cells between them
+/// (564, 566) never show (verified).
+const CAMERA_FRONT: u32 = 563;
+const CAMERA_SIDE: u32 = 565;
+const CAMERA_BACK: u32 = 567;
+/// How far above a camera its number is centred (measured 0.39–0.43).
+const CAMERA_NUMBER_RISE: f32 = 0.4;
+
+/// A facing's quarter turn, 0–3, the quarters centred 11.25° to the left of
+/// the four rotations (fitted to the original's camera markers).
+fn camera_quarter(yaw: f32) -> i32 {
+    ((yaw + std::f32::consts::PI / 16.0) / std::f32::consts::FRAC_PI_2).floor() as i32 & 3
+}
+
+/// The camera cell, and whether it is mirrored, for a camera facing `yaw`
+/// seen from a view facing `viewer_yaw`. Only the two facings' quarters
+/// count, not the bearing between them (verified).
+fn camera_cell(yaw: f32, viewer_yaw: f32) -> (u32, bool) {
+    match (camera_quarter(yaw) - camera_quarter(viewer_yaw)) & 3 {
+        2 => (CAMERA_FRONT, false),
+        3 => (CAMERA_SIDE, false),
+        1 => (CAMERA_SIDE, true),
+        _ => (CAMERA_BACK, false),
+    }
+}
+
+/// The other cameras: the film camera, centred on the camera's position,
+/// with its number (`BOMBNUMB`) above it. Neither animates.
+fn camera_markers(b: &mut LayerBuilder, markers: &[CameraMarker], viewer_yaw: f32, tex: [f32; 2]) {
+    let rect = |cell: u32, size: f32, mirror: bool| {
+        let (cx, cy) = (
+            ((cell % ATLAS_COLUMNS) * LEMMING_CELL) as f32,
+            ((cell / ATLAS_COLUMNS) * LEMMING_CELL) as f32,
+        );
+        if mirror {
+            [cx + size, cy, -size, size]
+        } else {
+            [cx, cy, size, size]
+        }
+    };
+    for m in markers {
+        let (cell, mirror) = camera_cell(m.yaw, viewer_yaw);
+        let size = LEMMING_CELL as f32;
+        let body = m.pos - Vec3::Y * (size / LEMMING_TEXELS_PER_UNIT / 2.0);
+        b.sprite_scaled(
+            body.to_array(),
+            rect(cell, size, mirror),
+            tex,
+            1,
+            0.0,
+            LEMMING_TEXELS_PER_UNIT,
+        );
+        let number = m.pos + Vec3::Y * (CAMERA_NUMBER_RISE - 32.0 / DIGIT_TEXELS_PER_UNIT / 2.0);
+        b.sprite_scaled(
+            number.to_array(),
+            rect(BOMBNUMB_ATLAS_FIRST + m.number - 1, 32.0, false),
+            tex,
+            1,
+            0.0,
+            DIGIT_TEXELS_PER_UNIT,
+        );
+    }
+}
+
 /// Builds this frame's lemming sprites for a camera facing `camera_yaw`,
 /// leaving out lemming `eyes`, the one the view looks out of, and marking
-/// lemming `highlight` with an arrow.
+/// lemming `highlight` with an arrow; and the other cameras' markers.
 #[allow(clippy::too_many_arguments)]
 pub fn build(
     sim: &Simulation,
@@ -604,6 +679,7 @@ pub fn build(
     doors: &[Door],
     eyes: Option<usize>,
     highlight: Option<usize>,
+    cameras: &[CameraMarker],
 ) -> SceneSprites {
     let lemmings = &sim.lemmings;
     let mut b = LayerBuilder::default();
@@ -612,6 +688,7 @@ pub fn build(
         (atlas_rows * LEMMING_CELL) as f32,
     ];
     objects(&mut b, sim, tex);
+    camera_markers(&mut b, cameras, camera_yaw, tex);
     bash_effects(&mut b, sim, blocks, tex);
     for d in doors.iter().filter(|d| d.frame > 0) {
         let cell = DOOR_ATLAS_FIRST + d.frame;
@@ -877,6 +954,22 @@ mod tests {
         // Facing +Z, screen right is −X (yaw 0).
         assert_eq!(ViewAngle::from_yaws(0.0, cam), ViewAngle::Right);
         assert_eq!(ViewAngle::from_yaws(PI, cam), ViewAngle::Left);
+    }
+
+    #[test]
+    fn camera_cells() {
+        let deg = |d: f32| d.to_radians();
+        // Facing each other: the lens.
+        assert_eq!(camera_cell(PI, 0.0), (CAMERA_FRONT, false));
+        // Facing the same way: the back.
+        assert_eq!(camera_cell(deg(90.0), deg(90.0)), (CAMERA_BACK, false));
+        // Turned from facing the viewer: +68° still the lens, +80.5° the
+        // side as stored, −12.3° the side mirrored, −107.6° the back
+        // (measured).
+        assert_eq!(camera_cell(PI + deg(68.0), 0.0), (CAMERA_FRONT, false));
+        assert_eq!(camera_cell(PI + deg(80.5), 0.0), (CAMERA_SIDE, false));
+        assert_eq!(camera_cell(PI - deg(12.3), 0.0), (CAMERA_SIDE, true));
+        assert_eq!(camera_cell(PI - deg(107.6), 0.0), (CAMERA_BACK, false));
     }
 
     #[test]
