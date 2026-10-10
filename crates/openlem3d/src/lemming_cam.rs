@@ -122,6 +122,31 @@ const ROLL_RATE: f32 = 12.0;
 /// A walker turns there only once its centre reaches the face, so an eye
 /// above its centre would look through the block.
 const DEFLECTOR_CLEARANCE: f32 = 0.2;
+/// Moves between two ticks longer than this (in units) are jumps, which the
+/// eye takes at once rather than sweeping through the level.
+const JUMP: f32 = 1.0;
+
+/// The eye's places at the last two simulation steps. Between steps the view
+/// slides from the earlier to the later, one step behind the lemming, so it
+/// moves smoothly at any frame rate.
+#[derive(Default)]
+struct Trail {
+    from: Vec3,
+    to: Vec3,
+    /// Fixed time at the latest step seen.
+    stepped: std::time::Duration,
+}
+
+impl Trail {
+    /// A trail resting at `eye`.
+    fn at(eye: Vec3, stepped: std::time::Duration) -> Self {
+        Trail {
+            from: eye,
+            to: eye,
+            stepped,
+        }
+    }
+}
 
 /// `eye`, moved straight out from the diagonal face of any deflector it is
 /// closer to than [`DEFLECTOR_CLEARANCE`] (or behind).
@@ -175,11 +200,13 @@ pub(crate) fn toggle_keys(
 #[allow(clippy::too_many_arguments)] // Bevy system parameters
 fn follow(
     time: Res<Time>,
+    fixed: Res<Time<Fixed>>,
     game: Res<Game>,
     opts: Res<crate::Options>,
     mut started: Local<bool>,
     mut sway: Local<f32>,
     mut entered: Local<Option<usize>>,
+    mut trail: Local<Trail>,
     mut cam: ResMut<LemmingCam>,
     mut views: Query<&mut ViewCamera>,
 ) {
@@ -232,7 +259,21 @@ fn follow(
         view.glide_to(target, yaw);
     }
     if view.glide.is_some() {
+        *trail = Trail::at(target, fixed.elapsed());
         return;
+    }
+    // A fixed step has run since the last frame: the simulation's position
+    // (unchanged if it did not step, paused or waiting) becomes the new end.
+    if fixed.elapsed() != trail.stepped {
+        *trail = if target.distance(trail.to) > JUMP {
+            Trail::at(target, fixed.elapsed())
+        } else {
+            Trail {
+                from: trail.to,
+                to: target,
+                stepped: fixed.elapsed(),
+            }
+        };
     }
     let k = 1.0 - (-FOLLOW_RATE * time.delta_secs()).exp();
     // A slight roll from side to side with the lemming's steps while it
@@ -252,5 +293,5 @@ fn follow(
     let turn = (yaw - view.yaw + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU)
         - std::f32::consts::PI;
     view.yaw += turn * k;
-    view.pos = target;
+    view.pos = trail.from.lerp(trail.to, fixed.overstep_fraction());
 }
