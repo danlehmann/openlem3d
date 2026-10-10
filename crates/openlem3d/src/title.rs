@@ -21,6 +21,10 @@ use crate::{CurrentLevel, Data};
 
 /// The original's screen, in which all positions are given.
 const SCREEN: Vec2 = Vec2::new(320.0, 200.0);
+/// The backdrop tile, `BGRD.000`.
+const TILE: Vec2 = Vec2::new(320.0, 48.0);
+/// The backdrop's period across, in the strips beside the tile.
+const SIDE_REPEAT: f32 = 120.0;
 /// Backdrop scroll speeds (pixels per second; estimated).
 const TITLE_SCROLL: f32 = 35.0;
 const CODE_SCROLL: f32 = 23.0;
@@ -465,7 +469,7 @@ pub(crate) fn spawn_screen(commands: &mut Commands, art: &Art, scroll: f32, tint
     commands.entity(root).add_child(backdrop);
     if let Some(bg) = &art.backdrop {
         // Enough tiles to cover any window at the canvas scale.
-        for _ in 0..(3 * 8) {
+        for _ in 0..(7 * 16) {
             let tile = commands
                 .spawn((
                     ImageNode::new(bg.clone()).with_color(tint),
@@ -662,40 +666,56 @@ fn layout(
     }
 }
 
-/// The backdrop scrolls upwards and wraps every 48 rows; columns line up
-/// with the canvas.
+/// The backdrop scrolls upwards and wraps every 48 rows. The whole tile sits
+/// behind the canvas; beyond its sides the pattern continues in
+/// [`SIDE_REPEAT`]-wide strips: columns 200–319 over and over on the right,
+/// columns 0–119 on the left. Columns 0–57 and 173–199 equal the columns 120
+/// to their right (verified), so every seam joins exactly.
 fn scroll_backdrop(
     time: Res<Time>,
     windows: Query<&Window>,
     backdrops: Query<(&Backdrop, &Children)>,
-    mut tiles: Query<&mut Node, Without<Backdrop>>,
+    mut tiles: Query<(&mut Node, &mut ImageNode), Without<Backdrop>>,
 ) {
-    const TILE: Vec2 = Vec2::new(320.0, 48.0);
     let Ok(window) = windows.single() else { return };
     let (w, h) = (window.width(), window.height());
     let s = (w / SCREEN.x).min(h / SCREEN.y);
     let origin = Vec2::new((w - SCREEN.x * s) / 2.0, (h - SCREEN.y * s) / 2.0);
-    let size = TILE * s;
+    // Columns as (left edge in the window, first tile column, width in
+    // canvas pixels).
+    let side = (origin.x / s / SIDE_REPEAT).ceil().max(0.0) as usize;
+    let columns = std::iter::once((0.0, 0.0, TILE.x))
+        .chain((0..side).flat_map(|j| {
+            let j = j as f32;
+            [
+                (TILE.x + j * SIDE_REPEAT, TILE.x - SIDE_REPEAT, SIDE_REPEAT),
+                (-(j + 1.0) * SIDE_REPEAT, 0.0, SIDE_REPEAT),
+            ]
+        }))
+        .map(|(x, src, width)| (origin.x + x * s, src, width));
     for (b, children) in &backdrops {
         let phase = (time.elapsed_secs() * b.0).rem_euclid(TILE.y) * s;
-        let x0 = origin.x.rem_euclid(size.x) - size.x;
-        let y0 = (origin.y - phase).rem_euclid(size.y) - size.y;
-        let cols = ((w - x0) / size.x).ceil().max(1.0) as usize;
-        for (i, child) in children.iter().enumerate() {
-            let Ok(mut node) = tiles.get_mut(child) else {
+        let y0 = (origin.y - phase).rem_euclid(TILE.y * s) - TILE.y * s;
+        let rows = ((h - y0) / (TILE.y * s)).ceil().max(1.0) as usize;
+        let places = columns
+            .clone()
+            .flat_map(|c| (0..rows).map(move |r| (c, y0 + r as f32 * TILE.y * s)));
+        let mut children = children.iter();
+        for (((x, src, width), y), child) in places.zip(&mut children) {
+            let Ok((mut node, mut image)) = tiles.get_mut(child) else {
                 continue;
             };
-            let (cx, cy) = (i % cols, i / cols);
-            let (x, y) = (x0 + cx as f32 * size.x, y0 + cy as f32 * size.y);
+            node.display = Display::Flex;
             node.left = px(x);
             node.top = px(y);
-            node.width = px(size.x);
-            node.height = px(size.y);
-            node.display = if cx < cols && y < h {
-                Display::Flex
-            } else {
-                Display::None
-            };
+            node.width = px(width * s);
+            node.height = px(TILE.y * s);
+            image.rect = Some(Rect::new(src, 0.0, src + width, TILE.y));
+        }
+        for child in children {
+            if let Ok((mut node, _)) = tiles.get_mut(child) {
+                node.display = Display::None;
+            }
         }
     }
 }
