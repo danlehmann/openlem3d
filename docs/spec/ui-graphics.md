@@ -150,15 +150,17 @@ arrow (a slider knob?). The large font matches the counters on the game
 screen (lemmings in and out, time); which counters use which font is
 **unverified**.
 
-**Not decoded: 43,648–48,120.** All pixels are opaque. Parts render
-coherently at 12 pixels wide (vertical wood planks, a yellow-and-red knob,
-a strip of water and of sand, matching the 12-pixel slider at the right
-edge of the game screen), others don't. 4,473 bytes is not a multiple of 12,
-so the part holds more than one piece. The first rows look like a wider
-image of horizontal planks.
+**Wooden pieces: 43,648–48,120, partly decoded.** 4,473 bytes holding
+several pieces. Decoded (offsets into the part): the height bar at 948, a
+12×200 wood column with a dark groove down the middle and the red corner
+mark at its top right; and its knob at 3,345, 9×8, a bevelled yellow square
+in a black frame (both verified against captures; colour 0 is black here and
+the original draws them opaque). Not decoded: the first 948 bytes (they look
+like a wider image of horizontal planks), and after the knob some small red
+squares (the corner marks?) and strips of water and of sand.
 
 API: `icons::Icons::parse(data)` with `small`, `panel` (indices in
-`icons::panel`), `umbrella`, `labels`, `unknown`, `small_font`, `large_font`;
+`icons::panel`), `umbrella`, `labels`, `height_bar`, `knob`, `unknown`, `small_font`, `large_font`;
 byte offsets in `icons::offsets`.
 
 ## Other sprite sheets (verified)
@@ -464,7 +466,20 @@ identical placements in both video modes).
 | Lemming-cam face | panel 23 (idle), 22 (armed) | (24, 172) | verified (match, click) |
 | Skill buttons | `MINILEMM.GFX` 32×32 | y = 168, x below | verified (match) |
 | Skill counts | small font, right-aligned | last digit cell at (button x + 17, 188) | verified (match) |
-| Slider | drawn wood column | x 308–319, full height | verified (pixel rows) |
+| Height bar | wood column 12×200 and a 9×8 knob (`ICONS.RNC`, see below) | x 308–319, full height; knob at x 310 | verified (pixel rows) |
+
+**Height bar.** The knob shows the camera's height: on Practice "Rope Slide"
+its yellow square's top was at y 96.7, 147.9 and 175.0 at the presets of
+heights 7.75, 4.75 and 2.75 (ours: 8 + y/256 from the level file), and it
+reached y 190 at the lowest camera and 10.8 with the pointer near the top of
+the bar (measured). Not a
+straight line; `195.8 − 4.6·h^1.5` fits these within a pixel and gives the
+camera's lowest height (1.2) at the bottom (ours uses it; the original's
+rule is unknown). Holding the right button on the bar moves the camera up
+or down, over a second or two, until the knob's yellow square is centred on
+the pointer, and changes nothing else (verified); the left button does
+nothing there (verified). Its speed is unmeasured; ours uses the camera
+keys' speed. In Enhanced mode ours also takes the left button there.
 
 **Counters.** The large font as on the code screen, digits 7 px apart (8
 wide, overlapping 1), right-aligned so the last digit's cell starts at
@@ -547,13 +562,17 @@ Verified (match at 15 points, plus boundary probes). The boundaries lie at
 about x ≈ 100 and ≈ 200 and y ≈ 55 and ≈ 115 (pointer cell centre),
 consistent with thirds of a 308×168 view (estimated). Over a lemming the
 pointer becomes a bracket (cell 8, from the navigation document; not
-re-measured: no lemming was under the pointer in these runs). What holding a
-button there does in the original is unrecorded. Ours: holding the camera
-button (right, or left when left-handed) still over the view moves the
-camera as the arrow shows (up: forward; down: back; left and right:
+re-measured: no lemming was under the pointer in these runs). Holding the
+right button over the view moves the camera as the arrow under the pointer
+shows (verified on Practice "Rope Slide": forward at the top centre, back at
+the bottom centre, turning right at the middle right; about 45° in 1.5 s,
+estimated from the minimap). Moving the pointer while holding does not turn
+the view; the arrow follows the pointer (verified). Holding the left button
+over the view does nothing (verified). Ours, in Original mode: holding the
+camera button (right, or left when left-handed) moves the camera as the
+arrow under the pointer shows (up: forward; down: back; left and right:
 sideways; the turn arrows turn; the diagonal turns move forward while
-turning); a drag of more than 6 pixels turns the view instead. That is
-Original mode. Enhanced mode (ours) drops the holds and their arrows (the
+turning; our speeds, not measured). Enhanced mode (ours) drops the holds and their arrows (the
 pointer stays the cross-hair over the view) and drives the camera as touch
 does: an action-button drag turns the view and moves it forward and back, a
 camera-button drag moves it sideways and up and down, and the wheel moves

@@ -17,13 +17,22 @@ pub mod offsets {
     pub const PANEL: usize = 14_592;
     /// One 32×32 umbrella, then IN, OUT and clock labels of 32×16.
     pub const LABELS: usize = 41_088;
-    /// Wooden panel pieces whose layout is not worked out yet.
+    /// Wooden panel pieces, only partly worked out: see [`super::HEIGHT_BAR`]
+    /// and [`super::KNOB`].
     pub const UNKNOWN: usize = 43_648;
     /// 7×8 font, codes 33–122.
     pub const SMALL_FONT: usize = 48_121;
     /// 10×12 font, codes 33–122.
     pub const LARGE_FONT: usize = 53_161;
 }
+
+/// The height bar at the right edge of the screen, 12×200: a wooden column
+/// with a groove down the middle and a red corner mark, at this offset into
+/// the wooden pieces.
+pub const HEIGHT_BAR: usize = 948;
+/// The height bar's knob, 9×8: a yellow square in a black frame, at this
+/// offset into the wooden pieces.
+pub const KNOB: usize = 3_345;
 
 /// Indices into [`Icons::panel`]. Where an icon comes in a green and a red
 /// version, the green one is listed; the red one follows it.
@@ -64,6 +73,9 @@ pub struct Icons {
     pub umbrella: IndexedImage,
     /// 32×16 labels: "IN" and "OUT" spelt in lemming lettering, and a clock.
     pub labels: Vec<IndexedImage>,
+    /// The height bar and its knob (see [`HEIGHT_BAR`] and [`KNOB`]).
+    pub height_bar: IndexedImage,
+    pub knob: IndexedImage,
     /// Bytes between the labels and the small font, not decoded yet.
     pub unknown: Vec<u8>,
     /// 7×8 font, codes 33 (`!`) to 122 (`z`). Codes 35–37 hold a slider knob
@@ -93,6 +105,12 @@ impl Icons {
             panel: cells(&data[PANEL..LABELS], 24, 24, 46)?,
             umbrella,
             labels,
+            height_bar: IndexedImage::new(
+                12,
+                200,
+                data[UNKNOWN + HEIGHT_BAR..][..12 * 200].to_vec(),
+            )?,
+            knob: IndexedImage::new(9, 8, data[UNKNOWN + KNOB..][..9 * 8].to_vec())?,
             unknown: data[UNKNOWN..SMALL_FONT].to_vec(),
             small_font: Font::parse(&data[SMALL_FONT..LARGE_FONT], 7, 8, b'!')?,
             large_font: Font::parse(&data[LARGE_FONT..], 10, 12, b'!')?,

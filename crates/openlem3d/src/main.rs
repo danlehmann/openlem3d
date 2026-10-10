@@ -805,17 +805,19 @@ pub(crate) fn camera_controls(
         held.is_some_and(|d| d > DRAG_SLOP)
     };
     let [held_drag, action_drag] = &mut *held;
-    let dragging = track(held_drag, settings.turn_button());
-    let action_dragging = track(action_drag, settings.action_button());
+    let enhanced = settings.enhanced;
+    let dragging = track(held_drag, settings.turn_button()) && enhanced;
+    let action_dragging = track(action_drag, settings.action_button()) && enhanced;
     // Enhanced (ours, as touch): an action-button drag turns the view and
     // moves it forward and back, a camera-button drag moves it sideways and
     // up and down, and the wheel moves it forward and back.
-    // Original: a camera-button drag turns the view; held still over the
-    // view, the camera moves as the pointer's arrow shows (see `pointer`),
-    // and the wheel raises and lowers it.
-    let enhanced = settings.enhanced;
+    // Original: holding the camera button moves the camera as the arrow
+    // under the pointer shows (see `pointer`; verified: a drag does not turn
+    // the view, the arrow just follows the pointer), and the wheel raises and
+    // lowers it.
     let region = held_drag
-        .filter(|_| !dragging && !enhanced)
+        .as_ref()
+        .filter(|_| !enhanced)
         .and(
             windows
                 .iter()
@@ -855,14 +857,11 @@ pub(crate) fn camera_controls(
         cam.yaw += turn * 1.8 * dt;
         // Drags, as for touch (see `touch`): the world follows the pointer.
         let mut drag = Vec3::ZERO;
-        if dt > 0.0 && !enhanced && dragging {
-            cam.yaw += motion.delta.x * 0.005;
-        }
-        if dt > 0.0 && enhanced && action_dragging {
+        if dt > 0.0 && action_dragging {
             cam.yaw += motion.delta.x * touch::TURN_PER_PX;
             drag += cam.forward() * motion.delta.y * touch::MOVE_PER_PX;
         }
-        if dt > 0.0 && enhanced && dragging {
+        if dt > 0.0 && dragging {
             let fwd = cam.forward();
             let right = Vec3::new(-fwd.z, 0.0, fwd.x);
             drag += (-right * motion.delta.x + Vec3::Y * motion.delta.y) * touch::MOVE_PER_PX;
@@ -885,7 +884,7 @@ pub(crate) fn camera_controls(
         let speed = if keys.pressed(KeyCode::ShiftLeft) {
             16.0
         } else {
-            6.0
+            CAMERA_SPEED
         } * settings.camera_factor();
         let mv = fwd
             * (held(KeyCode::KeyW, KeyCode::ArrowUp) - held(KeyCode::KeyS, KeyCode::ArrowDown))
@@ -1140,6 +1139,8 @@ fn key_code(name: &str) -> Option<KeyCode> {
 /// Pointer travel (logical pixels) after which holding a mouse button is a
 /// drag rather than a hold or a click.
 const DRAG_SLOP: f32 = 6.0;
+/// Camera speed with the keys and arrows (grid units per second).
+pub const CAMERA_SPEED: f32 = 6.0;
 /// Camera rise per wheel notch (grid units).
 const WHEEL_STEP: f32 = 0.25;
 /// Camera travel forward per wheel notch in Enhanced mode (grid units).

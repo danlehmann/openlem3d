@@ -36,6 +36,12 @@ impl Plugin for PanelPlugin {
                     .chain()
                     .run_if(in_state(AppState::Playing)),
             )
+            .add_systems(
+                Update,
+                height_bar
+                    .before(crate::camera_controls)
+                    .run_if(in_state(AppState::Playing)),
+            )
             .add_systems(Update, (show_in_play, show_minimap))
             .add_systems(
                 Update,
@@ -80,6 +86,9 @@ struct Art {
     panel: Vec<Handle<Image>>,
     labels: Vec<Handle<Image>>,
     umbrella: Handle<Image>,
+    /// The height bar and its knob, opaque.
+    height_bar: Handle<Image>,
+    knob: Handle<Image>,
     skills: Vec<Handle<Image>>,
     small: Glyphs,
     large: Glyphs,
@@ -110,6 +119,11 @@ impl Glyphs {
 }
 
 fn to_image(img: &IndexedImage, pal: &Palette) -> Image {
+    to_image_with(img, pal, true)
+}
+
+/// `img` as an image; with `transparent`, colour 0 shows through.
+fn to_image_with(img: &IndexedImage, pal: &Palette, transparent: bool) -> Image {
     use bevy::asset::RenderAssetUsages;
     use bevy::image::ImageSampler;
     use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
@@ -120,7 +134,7 @@ fn to_image(img: &IndexedImage, pal: &Palette) -> Image {
             depth_or_array_layers: 1,
         },
         TextureDimension::D2,
-        img.to_rgba(pal, true),
+        img.to_rgba(pal, transparent),
         TextureFormat::Rgba8UnormSrgb,
         RenderAssetUsages::RENDER_WORLD,
     );
@@ -147,6 +161,8 @@ fn load_art(mut commands: Commands, mut data: ResMut<Data>, mut images: ResMut<A
     else {
         return;
     };
+    let height_bar = images.add(to_image_with(&icons.height_bar, &pal, false));
+    let knob = images.add(to_image_with(&icons.knob, &pal, false));
     let mut add = |img: &IndexedImage| images.add(to_image(img, &pal));
     let glyphs = |f: &Font,
                   digit_advance: f32,
@@ -164,6 +180,8 @@ fn load_art(mut commands: Commands, mut data: ResMut<Data>, mut images: ResMut<A
         panel: icons.panel.iter().map(&mut add).collect(),
         labels: icons.labels.iter().map(&mut add).collect(),
         umbrella: add(&icons.umbrella),
+        height_bar,
+        knob,
         skills: skills.iter().map(&mut add).collect(),
         small,
         large,
@@ -223,6 +241,12 @@ struct GlyphSlot(usize);
 
 #[derive(Component)]
 struct PanelRoot;
+
+/// The height bar down the right edge, and its knob.
+#[derive(Component)]
+struct HeightBar;
+#[derive(Component)]
+struct Knob;
 
 /// Elements whose picture changes with the game state.
 #[derive(Component, Clone, Copy, PartialEq, Eq)]
@@ -404,6 +428,26 @@ fn spawn_panel(mut commands: Commands, art: Option<Res<Art>>, mut images: ResMut
         None,
         None,
     );
+    // The height bar down the right edge, a button so that it is not part
+    // of the view.
+    let bar = item(
+        &mut commands,
+        Vec2::new(BAR_X, 0.0),
+        Vec2::new(12.0, SCREEN.y),
+        art.height_bar.clone(),
+        None,
+        None,
+    );
+    commands.entity(bar).insert((Button, HeightBar));
+    let knob = item(
+        &mut commands,
+        Vec2::new(BAR_X + 2.0, 0.0),
+        Vec2::new(9.0, 8.0),
+        art.knob.clone(),
+        None,
+        None,
+    );
+    commands.entity(knob).insert(Knob);
     // Bottom row.
     item(
         &mut commands,
@@ -501,13 +545,14 @@ fn scale(window: &Window) -> f32 {
 }
 
 /// Places every element: the skill row keeps to the bottom left, the
-/// right-hand column (x ≥ 256) to the top right, the rest to the top left.
+/// right-hand column (x ≥ 256) to the top right and the height bar to the
+/// right edge, the rest to the top left.
 fn layout(windows: Query<&Window>, mut items: Query<(&PanelPos, &mut Node)>) {
     let Ok(window) = windows.single() else { return };
     let s = scale(window);
     let (w, h) = (window.width(), window.height());
     for (p, mut node) in &mut items {
-        let x = if p.at.y < 160.0 && p.at.x >= 256.0 {
+        let x = if p.at.x >= BAR_X || (p.at.y < 160.0 && p.at.x >= 256.0) {
             w - (SCREEN.x - p.at.x) * s
         } else {
             p.at.x * s
@@ -693,6 +738,68 @@ fn held_buttons(
         && let Ok(mut view) = views.single_mut()
     {
         view.yaw -= turn * TURN_SPEED * time.delta_secs();
+    }
+}
+
+/// The height bar's column (original pixels).
+const BAR_X: f32 = 308.0;
+/// The knob's yellow top on the bar is `BAR_TOP - BAR_SLOPE · h^1.5` for
+/// camera height `h` (original pixels; fitted to the original's knob at the
+/// presets of Practice "Rope Slide", heights 2.75 to 7.75, within a pixel; it
+/// puts the bar's lowest knob at the camera's lowest height).
+const BAR_TOP: f32 = 195.8;
+const BAR_SLOPE: f32 = 4.6;
+/// The knob's yellow square starts a row below the knob, and is 6 rows tall;
+/// the original centres it on the pointer.
+const KNOB_YELLOW: f32 = 1.0;
+const KNOB_CENTRE: f32 = 3.0;
+/// How far the knob travels: its yellow top's range on the bar (measured).
+const KNOB_RANGE: std::ops::RangeInclusive<f32> = 3.0..=190.0;
+
+/// The knob's yellow top for camera height `h`.
+fn knob_at(h: f32) -> f32 {
+    (BAR_TOP - BAR_SLOPE * h.max(0.0).powf(1.5)).clamp(*KNOB_RANGE.start(), *KNOB_RANGE.end())
+}
+
+/// The camera height whose knob's yellow top is at `y`.
+fn height_at(y: f32) -> f32 {
+    ((BAR_TOP - y.clamp(*KNOB_RANGE.start(), *KNOB_RANGE.end())) / BAR_SLOPE).powf(2.0 / 3.0)
+}
+
+/// The height bar: the knob shows the camera's height. Holding the camera
+/// button on the bar (in Enhanced mode, either button) moves the camera up
+/// or down, at the camera keys' speed, to the height whose knob would sit
+/// under the pointer (verified: the original's camera climbs and sinks
+/// until the knob reaches the pointer; its left button does nothing there).
+#[allow(clippy::too_many_arguments)] // Bevy system parameters
+fn height_bar(
+    windows: Query<&Window>,
+    mouse: Res<ButtonInput<MouseButton>>,
+    settings: Res<crate::settings::Settings>,
+    time: Res<Time>,
+    lemming_cam: Res<LemmingCam>,
+    bars: Query<&Interaction, With<HeightBar>>,
+    mut knobs: Query<&mut PanelPos, With<Knob>>,
+    mut views: Query<&mut ViewCamera>,
+) {
+    let Ok(mut view) = views.single_mut() else {
+        return;
+    };
+    let held = mouse.pressed(settings.turn_button())
+        || (settings.enhanced && mouse.pressed(settings.action_button()));
+    if held
+        && lemming_cam.following().is_none()
+        && bars.iter().any(|i| *i != Interaction::None)
+        && let Ok(window) = windows.single()
+        && let Some(p) = window.cursor_position()
+    {
+        let target = height_at(p.y / scale(window) - KNOB_CENTRE);
+        let step = crate::CAMERA_SPEED * settings.camera_factor() * time.delta_secs();
+        view.pos.y += (target - view.pos.y).clamp(-step, step);
+        view.glide = None;
+    }
+    for mut knob in &mut knobs {
+        knob.at.y = knob_at(view.pos.y) - KNOB_YELLOW;
     }
 }
 
