@@ -11,10 +11,11 @@ use crate::menu::AppState;
 /// Finger travel (logical pixels) below which a touch counts as a tap.
 pub const TAP_SLOP: f32 = 12.0;
 
-/// Camera turn per pixel of one-finger horizontal drag (radians).
-const TURN_PER_PX: f32 = 0.006;
+/// Camera turn per pixel of one-finger (or, in Enhanced mode, action-button)
+/// horizontal drag (radians).
+pub const TURN_PER_PX: f32 = 0.006;
 /// Camera travel per pixel of drag (grid units).
-const MOVE_PER_PX: f32 = 0.02;
+pub const MOVE_PER_PX: f32 = 0.02;
 
 pub struct TouchPlugin;
 

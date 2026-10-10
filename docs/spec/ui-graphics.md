@@ -552,7 +552,12 @@ button there does in the original is unrecorded. Ours: holding the camera
 button (right, or left when left-handed) still over the view moves the
 camera as the arrow shows (up: forward; down: back; left and right:
 sideways; the turn arrows turn; the diagonal turns move forward while
-turning); a drag of more than 6 pixels turns the view instead.
+turning); a drag of more than 6 pixels turns the view instead. That is
+Original mode. Enhanced mode (ours) drops the holds and their arrows (the
+pointer stays the cross-hair over the view) and drives the camera as touch
+does: an action-button drag turns the view and moves it forward and back, a
+camera-button drag moves it sideways and up and down, and the wheel moves
+it forward and back. A press on a lemming still acts on it at once.
 
 **Demos.** Practice briefings offer "Enter = Demo" (verified), which plays a
 recorded solution with "Demo" at the bottom left; it ends with a nuke and

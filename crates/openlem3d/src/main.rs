@@ -768,7 +768,7 @@ pub(crate) fn load_level(
     game.terrain = Some((level, blocks, block_layer));
 }
 
-#[allow(clippy::too_many_arguments)] // Bevy system parameters
+#[allow(clippy::too_many_arguments, clippy::type_complexity)] // Bevy system parameters
 pub(crate) fn camera_controls(
     opts: Res<Options>,
     keys: Res<ButtonInput<KeyCode>>,
@@ -784,27 +784,38 @@ pub(crate) fn camera_controls(
     game: Res<Game>,
     mut last_free: Local<Option<Vec3>>,
     mut q: Query<&mut ViewCamera>,
-    (scroll, ui, mut held_drag): (
+    (scroll, ui, mut held): (
         Res<AccumulatedMouseScroll>,
         Query<&Interaction>,
-        Local<Option<f32>>,
+        Local<[Option<f32>; 2]>,
     ),
 ) {
-    // Holding the camera button: a drag turns the view; held still over the
-    // view, the camera moves as the pointer's arrow shows (see `pointer`).
-    let turn_button = settings.turn_button();
-    if mouse.just_pressed(turn_button) {
-        *held_drag = (!ui.iter().any(|i| *i != Interaction::None)).then_some(0.0);
-    }
-    if !mouse.pressed(turn_button) {
-        *held_drag = None;
-    }
-    if let Some(d) = held_drag.as_mut() {
-        *d += motion.delta.length();
-    }
-    let dragging = held_drag.is_some_and(|d| d > DRAG_SLOP);
+    // Pointer travel since a button went down over the view (not the
+    // panel), while it is held.
+    let track = |held: &mut Option<f32>, button: MouseButton| {
+        if mouse.just_pressed(button) {
+            *held = (!ui.iter().any(|i| *i != Interaction::None)).then_some(0.0);
+        }
+        if !mouse.pressed(button) {
+            *held = None;
+        }
+        if let Some(d) = held.as_mut() {
+            *d += motion.delta.length();
+        }
+        held.is_some_and(|d| d > DRAG_SLOP)
+    };
+    let [held_drag, action_drag] = &mut *held;
+    let dragging = track(held_drag, settings.turn_button());
+    let action_dragging = track(action_drag, settings.action_button());
+    // Enhanced (ours, as touch): an action-button drag turns the view and
+    // moves it forward and back, a camera-button drag moves it sideways and
+    // up and down, and the wheel moves it forward and back.
+    // Original: a camera-button drag turns the view; held still over the
+    // view, the camera moves as the pointer's arrow shows (see `pointer`),
+    // and the wheel raises and lowers it.
+    let enhanced = settings.enhanced;
     let region = held_drag
-        .filter(|_| !dragging)
+        .filter(|_| !dragging && !enhanced)
         .and(
             windows
                 .iter()
@@ -842,8 +853,19 @@ pub(crate) fn camera_controls(
         let turn =
             held(KeyCode::KeyE, KeyCode::ArrowRight) - held(KeyCode::KeyQ, KeyCode::ArrowLeft);
         cam.yaw += turn * 1.8 * dt;
-        if dragging && dt > 0.0 {
+        // Drags, as for touch (see `touch`): the world follows the pointer.
+        let mut drag = Vec3::ZERO;
+        if dt > 0.0 && !enhanced && dragging {
             cam.yaw += motion.delta.x * 0.005;
+        }
+        if dt > 0.0 && enhanced && action_dragging {
+            cam.yaw += motion.delta.x * touch::TURN_PER_PX;
+            drag += cam.forward() * motion.delta.y * touch::MOVE_PER_PX;
+        }
+        if dt > 0.0 && enhanced && dragging {
+            let fwd = cam.forward();
+            let right = Vec3::new(-fwd.z, 0.0, fwd.x);
+            drag += (-right * motion.delta.x + Vec3::Y * motion.delta.y) * touch::MOVE_PER_PX;
         }
         // Region moves: forward, sideways and turning, from the 3×3 grid.
         let (ahead, side, spin) = region.map_or((0.0, 0.0, 0.0), |[c, r]| match (c, r) {
@@ -872,18 +894,27 @@ pub(crate) fn camera_controls(
                 * (held(KeyCode::KeyR, KeyCode::PageUp) - held(KeyCode::KeyF, KeyCode::PageDown))
             + fwd * ahead
             + right * side;
-        cam.pos += mv * speed * dt;
-        // The wheel raises and lowers the camera.
+        cam.pos += mv * speed * dt + drag;
         let notches = match scroll.unit {
             MouseScrollUnit::Line => scroll.delta.y,
             MouseScrollUnit::Pixel => scroll.delta.y / 50.0,
         };
         if dt > 0.0 {
-            cam.pos.y += notches * WHEEL_STEP;
+            cam.pos += notches
+                * if enhanced {
+                    fwd * WHEEL_STEP_AHEAD
+                } else {
+                    Vec3::Y * WHEEL_STEP
+                };
         }
         // Moving the camera by hand stops a glide where it is.
         let manual = dt > 0.0
-            && (turn != 0.0 || spin != 0.0 || dragging || mv != Vec3::ZERO || notches != 0.0);
+            && (turn != 0.0
+                || spin != 0.0
+                || dragging
+                || action_dragging
+                || mv != Vec3::ZERO
+                || notches != 0.0);
         if manual {
             cam.glide = None;
         } else {
@@ -1106,11 +1137,13 @@ fn key_code(name: &str) -> Option<KeyCode> {
     })
 }
 
-/// Pointer travel (logical pixels) after which holding the camera button is
-/// a drag that turns the view rather than a hold that moves it.
+/// Pointer travel (logical pixels) after which holding a mouse button is a
+/// drag rather than a hold or a click.
 const DRAG_SLOP: f32 = 6.0;
 /// Camera rise per wheel notch (grid units).
 const WHEEL_STEP: f32 = 0.25;
+/// Camera travel forward per wheel notch in Enhanced mode (grid units).
+const WHEEL_STEP_AHEAD: f32 = 0.5;
 
 /// The cell `[column, row]` of the 3×3 grid over the view that `p` is in.
 pub fn pointer_region(p: Vec2, size: Vec2) -> [usize; 2] {

@@ -111,6 +111,7 @@ fn update(
     touches: Res<Touches>,
     ui: Query<&Interaction>,
     lemming_cam: Res<crate::lemming_cam::LemmingCam>,
+    settings: Res<crate::settings::Settings>,
     windows: Query<(Entity, &Window, Option<&CursorIcon>)>,
     mut images: ResMut<Assets<Image>>,
 ) {
@@ -135,6 +136,9 @@ fn update(
                 .is_some()
             {
                 BRACKET
+            } else if settings.enhanced {
+                // Enhanced mode has no moves by holding still, so no arrows.
+                CROSS_HAIR
             } else {
                 let [col, row] = crate::pointer_region(p, size);
                 GRID[row][col]
