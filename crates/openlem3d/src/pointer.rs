@@ -124,26 +124,27 @@ fn update(
     let size = Vec2::new(window.width(), window.height());
     let cell = match (state.get(), position) {
         (AppState::Code, _) | (_, None) => None,
-        (AppState::Playing, Some(p)) => Some(
-            if ui.iter().any(|i| *i != Interaction::None) || lemming_cam.following().is_some() {
-                // Riding along a click acts on the lemming ridden with, so the
-                // pointer stays the cross-hair.
-                CROSS_HAIR
-            } else if game
-                .sim
-                .as_ref()
-                .and_then(|sim| crate::hud::lemming_at(sim, &camera, size, p))
-                .is_some()
-            {
-                BRACKET
-            } else if settings.enhanced {
-                // Enhanced mode has no moves by holding still, so no arrows.
-                CROSS_HAIR
-            } else {
-                let [col, row] = crate::pointer_region(p, size);
-                GRID[row][col]
-            },
-        ),
+        (AppState::Playing, Some(p)) => Some(if ui.iter().any(|i| *i != Interaction::None) {
+            CROSS_HAIR
+        } else if game
+            .sim
+            .as_ref()
+            .and_then(|sim| {
+                crate::hud::lemming_near(sim, &camera, size, p, lemming_cam.following())
+            })
+            .is_some()
+        {
+            // Riding along, other lemmings can be picked too (verified).
+            BRACKET
+        } else if lemming_cam.following().is_some() {
+            CROSS_HAIR
+        } else if settings.enhanced {
+            // Enhanced mode has no moves by holding still, so no arrows.
+            CROSS_HAIR
+        } else {
+            let [col, row] = crate::pointer_region(p, size);
+            GRID[row][col]
+        }),
         (_, Some(_)) => Some(CROSS_HAIR),
     };
     // Physical pixels: the cursor image is not scaled by the system.

@@ -7,6 +7,7 @@
 use bevy::prelude::*;
 use l3d_sim::SUB;
 
+use crate::hud::{Highlight, SelectedSkill};
 use crate::menu::AppState;
 use crate::{Game, ViewCamera};
 
@@ -74,23 +75,44 @@ impl LemmingCam {
         *self = LemmingCam::Off;
     }
 
-    /// Starts following lemming i if the camera is armed; returns whether
-    /// it was.
-    pub fn pick(&mut self, i: usize) -> bool {
-        match *self {
-            LemmingCam::Picking(saved) => {
-                *self = LemmingCam::Following { lemming: i, saved };
-                true
-            }
-            _ => false,
-        }
-    }
-
     /// Rides along with lemming `i` (switching from another one if already
     /// riding), keeping the view to return to.
     pub fn follow(&mut self, i: usize, view: &ViewCamera) {
         let saved = self.saved().unwrap_or((view.pos, view.yaw));
         *self = LemmingCam::Following { lemming: i, saved };
+    }
+
+    /// The face button (or V or I): with a lemming highlighted that is not
+    /// the one ridden with, rides along with it at once; otherwise arms the
+    /// camera, or turns it off when it is on.
+    pub fn face(
+        &mut self,
+        highlight: &mut Highlight,
+        selected: &mut SelectedSkill,
+        view: &mut ViewCamera,
+    ) {
+        match highlight.lemming {
+            Some(i) if self.following() != Some(i) => self.ride(i, highlight, selected, view),
+            _ => self.toggle(view),
+        }
+    }
+
+    /// Rides along with lemming `i` (switching from another one if already
+    /// riding). Riding highlights the lemming and deselects the skill
+    /// (verified).
+    pub fn ride(
+        &mut self,
+        i: usize,
+        highlight: &mut Highlight,
+        selected: &mut SelectedSkill,
+        view: &ViewCamera,
+    ) {
+        self.follow(i, view);
+        *highlight = Highlight {
+            on: true,
+            lemming: Some(i),
+        };
+        selected.0 = None;
     }
 
     pub fn picking(&self) -> bool {
@@ -174,6 +196,8 @@ fn off_deflectors(world: &l3d_sim::World, mut eye: Vec3) -> Vec3 {
 pub(crate) fn toggle_keys(
     mut keys: ResMut<ButtonInput<KeyCode>>,
     mut cam: ResMut<LemmingCam>,
+    mut highlight: ResMut<Highlight>,
+    mut selected: ResMut<SelectedSkill>,
     mut views: Query<&mut ViewCamera>,
 ) {
     let Ok(mut view) = views.single_mut() else {
@@ -186,7 +210,7 @@ pub(crate) fn toggle_keys(
         KeyCode::Digit4,
     ];
     if keys.just_pressed(KeyCode::KeyV) || keys.just_pressed(KeyCode::KeyI) {
-        cam.toggle(&mut view);
+        cam.face(&mut highlight, &mut selected, &mut view);
     } else if keys.just_pressed(KeyCode::Escape) && *cam != LemmingCam::Off {
         // Esc leaves the lemming view, not the level.
         keys.clear_just_pressed(KeyCode::Escape);
@@ -208,6 +232,7 @@ fn follow(
     mut entered: Local<Option<usize>>,
     mut trail: Local<Trail>,
     mut cam: ResMut<LemmingCam>,
+    mut highlight: ResMut<Highlight>,
     mut views: Query<&mut ViewCamera>,
 ) {
     let Ok(mut view) = views.single_mut() else {
@@ -224,21 +249,36 @@ fn follow(
             saved: (view.pos, view.yaw),
         };
     }
-    let Some(i) = cam.following() else {
+    let Some(mut i) = cam.following() else {
         view.roll = 0.0;
         *entered = None;
         return;
     };
-    let lemming = game
-        .sim
-        .as_ref()
-        .and_then(|s| s.lemmings.get(i))
-        .filter(|l| !l.gone);
-    let Some(l) = lemming else {
-        cam.turn_off(&mut view);
-        *entered = None;
-        return;
-    };
+    let Some(sim) = game.sim.as_ref() else { return };
+    // The lemming ridden with gone (home, or dead), the view goes on at once
+    // with the next lemming in play; with none, it stays where it is until
+    // another comes out (verified for drowning: the lemming right behind
+    // was taken each time; whether the rule is release order or nearest is
+    // open).
+    let mut switched = false;
+    if sim.lemmings.get(i).is_none_or(|l| l.gone) {
+        let n = sim.lemmings.len();
+        let Some(next) = (1..=n)
+            .map(|k| (i + k) % n)
+            .find(|&j| !sim.lemmings[j].gone)
+        else {
+            view.roll = 0.0;
+            return;
+        };
+        i = next;
+        switched = true;
+        cam.follow(i, &view);
+        *highlight = Highlight {
+            on: true,
+            lemming: Some(i),
+        };
+    }
+    let l = &sim.lemmings[i];
     let feet = Vec3::from_array(l.pos.map(|v| v as f32 / SUB as f32));
     // A turner looks where its arm points, the way it sends walkers
     // (verified in Practice "Turner": riding with a "Turn right" turner, the
@@ -247,10 +287,17 @@ fn follow(
         l3d_sim::State::Turning { to } => to.yaw(),
         _ => l.dir.yaw(),
     };
-    let target = off_deflectors(
-        &game.sim.as_ref().expect("lemming implies a level").world,
-        feet + Vec3::Y * EYE_HEIGHT,
-    );
+    let target = off_deflectors(&sim.world, feet + Vec3::Y * EYE_HEIGHT);
+    // Taken on from a lemming that left: straight into its eyes.
+    if switched {
+        *entered = Some(i);
+        view.glide = None;
+        view.pos = target;
+        view.yaw = yaw;
+        view.roll = 0.0;
+        *trail = Trail::at(target, fixed.elapsed());
+        return;
+    }
     // Riding along with a new lemming: the camera first glides into its
     // eyes, the level waiting meanwhile.
     if *entered != Some(i) {

@@ -742,6 +742,10 @@ pub(crate) fn load_level(
     commands.insert_resource(PresetIndex(preset));
     game.fast_forward = false;
     game.paused = false;
+    // A restart starts afresh: not riding along, nothing highlighted.
+    commands.insert_resource(lemming_cam::LemmingCam::Off);
+    commands.insert_resource(hud::PendingTurner(None));
+    commands.insert_resource(hud::Highlight::default());
     for mut cam in &mut cams {
         cam.set_preset(&level.cameras[preset]);
     }

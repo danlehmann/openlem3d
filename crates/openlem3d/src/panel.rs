@@ -599,9 +599,12 @@ fn buttons(
                     match highlight.lemming.filter(|_| !paused) {
                         // Given straight to the highlighted lemming, without
                         // selecting the skill (seen in the original); a turner
-                        // then waits for the click on the side it points to.
+                        // then waits for the click on the side it points to
+                        // (riding with it, still with nothing selected).
                         Some(i) if s == Skill::Turner => {
-                            selected.0 = Some(s);
+                            if lemming_cam.following() != Some(i) {
+                                selected.0 = Some(s);
+                            }
                             if sim.can_assign(i, s) {
                                 pending_turner.0 = Some(i);
                             }
@@ -654,13 +657,8 @@ fn buttons(
                         .map(|k| (i + k) % n)
                         .find(|&j| !sim.lemmings[j].gone)
                         .unwrap_or(i);
-                    *highlight = crate::hud::Highlight {
-                        on: true,
-                        lemming: Some(next),
-                    };
-                    selected.0 = None;
                     if let Ok(view) = views.single() {
-                        lemming_cam.follow(next, view);
+                        lemming_cam.ride(next, &mut highlight, &mut selected, view);
                     }
                 } else if highlight.on {
                     *highlight = crate::hud::Highlight::default();
@@ -677,14 +675,7 @@ fn buttons(
             }
             Action::LemmingCam => {
                 if let Ok(mut view) = views.single_mut() {
-                    match highlight.lemming {
-                        // Ride along with the highlighted lemming (switching to
-                        // it from another); riding with it already, return.
-                        Some(i) if lemming_cam.following() != Some(i) => {
-                            lemming_cam.follow(i, &view)
-                        }
-                        _ => lemming_cam.toggle(&mut view),
-                    }
+                    lemming_cam.face(&mut highlight, &mut selected, &mut view);
                 }
             }
             Action::TurnClockwise | Action::TurnAnticlockwise | Action::Slower | Action::Faster => {
@@ -1082,6 +1073,7 @@ fn caption(
     camera: Res<crate::scene_render::SceneCamera>,
     windows: Query<&Window>,
     ui: Query<&Interaction>,
+    lemming_cam: Res<LemmingCam>,
     mut captions: Query<(Entity, &mut Caption)>,
 ) {
     let Some(font) = art.as_ref().and_then(|a| a.large.as_ref()) else {
@@ -1106,11 +1098,13 @@ fn caption(
                 return None;
             }
             let sim = game.sim.as_ref()?;
-            let i = crate::hud::lemming_at(
+            // Riding along, not the lemming ridden with.
+            let i = crate::hud::lemming_near(
                 sim,
                 &camera,
                 Vec2::new(window.width(), window.height()),
                 point,
+                lemming_cam.following(),
             )?;
             state_name(&sim.lemmings[i])
         })()

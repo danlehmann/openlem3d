@@ -119,9 +119,21 @@ pub fn lemming_at(
     size: Vec2,
     point: Vec2,
 ) -> Option<usize> {
+    lemming_near(sim, camera, size, point, None)
+}
+
+/// The lemming nearest a screen point (logical pixels), if one is close
+/// enough to click, other than `except`.
+pub fn lemming_near(
+    sim: &l3d_sim::Simulation,
+    camera: &SceneCamera,
+    size: Vec2,
+    point: Vec2,
+    except: Option<usize>,
+) -> Option<usize> {
     let mut best: Option<(usize, f32)> = None;
     for (i, l) in sim.lemmings.iter().enumerate() {
-        if l.gone {
+        if l.gone || except == Some(i) {
             continue;
         }
         let Some((screen, px_per_unit)) = to_screen(camera, size, lemming_centre(l)) else {
@@ -161,7 +173,7 @@ pub(crate) fn assign_on_pointer(
     windows: Query<&Window>,
     ui: Query<&Interaction>,
     camera: Res<SceneCamera>,
-    selected: Res<SelectedSkill>,
+    mut selected: ResMut<SelectedSkill>,
     mut pending: ResMut<PendingTurner>,
     mut lemming_cam: ResMut<LemmingCam>,
     mut game: ResMut<Game>,
@@ -179,7 +191,12 @@ pub(crate) fn assign_on_pointer(
     let paused = game.paused;
     let Some(sim) = &mut game.sim else { return };
     let picking = lemming_cam.picking();
-    if selected.0 != Some(Skill::Turner) || mouse.just_pressed(settings.turn_button()) {
+    let following = lemming_cam.following();
+    // A turner given to the lemming ridden with waits for its side without
+    // being selected.
+    if (selected.0 != Some(Skill::Turner) && (following.is_none() || pending.0 != following))
+        || mouse.just_pressed(settings.turn_button())
+    {
         pending.0 = None;
     }
     if pending.0.is_some_and(|i| !sim.can_assign(i, Skill::Turner)) {
@@ -201,23 +218,31 @@ pub(crate) fn assign_on_pointer(
     };
     let Some(point) = point else { return };
     let size = Vec2::new(window.width(), window.height());
-    // Riding along, a click acts on the lemming ridden with; a turner points
-    // to the side of the screen clicked (left half: its left).
-    if let Some(f) = lemming_cam.following() {
-        let Some(skill) = selected.0.filter(|_| !paused) else {
-            return;
-        };
-        let ok = if skill == Skill::Turner {
+    // Riding along, nothing is selected (verified): a turner given to the
+    // lemming ridden with points to the side of the screen clicked (left
+    // half: its left), and a click on another lemming rides along with it
+    // instead.
+    if let Some(f) = following {
+        if pending.0 == Some(f) {
+            if paused {
+                return;
+            }
+            pending.0 = None;
             let sides = view_sides(&camera, &sim.lemmings[f]);
-            sim.assign_turner(f, sides[(point.x >= size.x / 2.0) as usize])
-        } else {
-            sim.assign(f, skill)
-        };
-        sfx.write(crate::sfx::Sfx(if ok {
-            "VOXFX/OK2"
-        } else {
-            "VOXFX/UH_UH1"
-        }));
+            let ok = sim.assign_turner(f, sides[(point.x >= size.x / 2.0) as usize]);
+            sfx.write(crate::sfx::Sfx(if ok {
+                "VOXFX/OK2"
+            } else {
+                "VOXFX/UH_UH1"
+            }));
+            return;
+        }
+        if let Some(i) = lemming_near(sim, &camera, size, point, Some(f))
+            && let Ok(view) = views.single()
+        {
+            lemming_cam.ride(i, &mut highlight, &mut selected, view);
+            sfx.write(crate::sfx::Sfx("SPOTFX/SCALE"));
+        }
         return;
     }
     if paused && pending.0.is_some() {
@@ -236,28 +261,21 @@ pub(crate) fn assign_on_pointer(
         return;
     }
     let best = lemming_at(sim, &camera, size, point);
-    if highlight.on {
-        // A click on a lemming moves the highlight to it; riding along
-        // with another, the view switches to it.
-        if let Some(i) = best {
-            highlight.lemming = Some(i);
-            if lemming_cam.following().is_some()
-                && let Ok(view) = views.single()
-            {
-                lemming_cam.follow(i, view);
-            }
-            sfx.write(crate::sfx::Sfx("SPOTFX/SCALE"));
+    // Armed, the face rides along with the lemming clicked, even with a
+    // skill selected (verified).
+    if picking {
+        if let Some(i) = best
+            && let Ok(view) = views.single()
+        {
+            lemming_cam.ride(i, &mut highlight, &mut selected, view);
         }
         return;
     }
-    if picking {
+    if highlight.on {
+        // A click on a lemming moves the highlight to it.
         if let Some(i) = best {
-            lemming_cam.pick(i);
-            // Riding along also highlights it (seen in the original).
-            *highlight = Highlight {
-                on: true,
-                lemming: Some(i),
-            };
+            highlight.lemming = Some(i);
+            sfx.write(crate::sfx::Sfx("SPOTFX/SCALE"));
         }
         return;
     }
@@ -339,6 +357,10 @@ const ARROW_DIRECTIONS: usize = 32;
 /// 320×200 pixels.
 const ARROW_SIZE: f32 = 16.0;
 const ARROW_DISTANCE: f32 = 12.0;
+/// Riding along, a turner's arrow is centred this far to the side of the
+/// screen's centre, at this height (320×200 pixels; measured).
+const RIDING_ARROW_OFFSET: f32 = 16.0;
+const RIDING_ARROW_Y: f32 = 85.0;
 /// While the pointer is not clearly on one side, the two arrows take turns,
 /// each shown this long (seconds; observed in the original's Practice
 /// "Turner" demo: never both at once, 7–10 swaps a second).
@@ -412,26 +434,32 @@ fn place_turner_marker(
     windows: Query<&Window>,
     mut arrows: Query<(&TurnerArrow, &mut ImageNode, &mut Node, &mut Visibility)>,
     lemming_cam: Res<LemmingCam>,
-    selected: Res<SelectedSkill>,
 ) {
     let shown = (|| {
         if *state.get() != AppState::Playing {
             return None;
         }
-        // Riding along with the turner selected: both arrows in the middle
-        // of the screen, left and right, for the two halves a click picks.
+        // Riding along with a turner waiting for its side: one arrow near
+        // the middle of the view, pointing to the half of the screen the
+        // pointer is in, the side a click there picks (verified).
         if let Some(f) = lemming_cam.following() {
-            let sim = game.sim.as_ref()?;
-            if selected.0 != Some(Skill::Turner) || !sim.can_assign(f, Skill::Turner) {
+            if pending.0 != Some(f) {
                 return None;
             }
             let window = windows.single().ok()?;
             let size = Vec2::new(window.width(), window.height());
-            let sides = view_sides(&camera, &sim.lemmings[f]);
-            let l = &sim.lemmings[f];
-            let screen = |d: l3d_sim::Dir| if d == sides[0] { Vec2::NEG_X } else { Vec2::X };
-            let dirs = [screen(l.dir.anticlockwise()), screen(l.dir.clockwise())];
-            return Some((size / 2.0, dirs, [true, true], size.y / 200.0 * 2.0));
+            let scale = size.y / 200.0;
+            let left = window.cursor_position().is_none_or(|p| p.x < size.x / 2.0);
+            let at = Vec2::new(
+                size.x / 2.0 - (RIDING_ARROW_OFFSET - ARROW_DISTANCE) * scale,
+                RIDING_ARROW_Y * scale,
+            );
+            let at = if left {
+                at
+            } else {
+                Vec2::new(size.x - at.x, at.y)
+            };
+            return Some((at, [Vec2::NEG_X, Vec2::X], [left, !left], scale));
         }
         let l = game.sim.as_ref()?.lemmings.get(pending.0?)?;
         let window = windows.single().ok()?;
@@ -478,6 +506,7 @@ fn place_turner_marker(
 fn clear_highlight(
     game: Res<Game>,
     current: Res<crate::CurrentLevel>,
+    lemming_cam: Res<LemmingCam>,
     mut highlight: ResMut<Highlight>,
 ) {
     if current.loaded.is_none() {
@@ -490,9 +519,10 @@ fn clear_highlight(
             .and_then(|s| s.lemmings.get(i))
             .is_some_and(|l| !l.gone)
     };
-    // The highlighted lemming gone, highlighting ends (seen when the
-    // lemming ridden with died or left).
-    if highlight.lemming.is_some_and(|i| !alive(i)) {
+    // The highlighted lemming gone, highlighting ends; riding along, the
+    // view (and the highlight) go on to another lemming, and with none left
+    // the arrow stays on (verified).
+    if lemming_cam.following().is_none() && highlight.lemming.is_some_and(|i| !alive(i)) {
         *highlight = Highlight::default();
     }
 }

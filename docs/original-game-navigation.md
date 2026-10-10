@@ -295,6 +295,10 @@ below the horizon changes with height.
     fast-forward to speed it up.
 - **Esc in a level is not "quit".** It restarts the level as a replay. Use
   the nuke route.
+- **"Retry" also replays.** After Retry on the results screen the level runs
+  as a replay ("Replaying"), and the first click only takes over control.
+  Click once in the view before testing anything, or skill selections seem
+  to fail.
 - **The rating card is sticky** while the game runs. It resets to Practice
   only when the game restarts.
 - **Restarting cleanly.** `quit.ps1` then `launch.ps1`. If a script dies

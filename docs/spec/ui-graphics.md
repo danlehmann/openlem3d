@@ -543,10 +543,33 @@ around an AUTOTYPE P). Clicking the paws icon did not pause (two tries).
 While paused, skills can be selected but not given to lemmings (owner's
 observation); highlighting and the lemming view still work in ours.
 
-**Lemming cam.** Clicking the face changes it from the squinting cell 23
-to the open-eyed cell 22 (verified); the next click on a lemming then
-enters its view, where the arrow at (0, 172) turns green (cells 39–44,
-animated; from the navigation document, not re-measured here).
+**Lemming cam (virtual lemming).** Verified in play with the serial mouse
+(Practice "Turner" and "Bomber"):
+
+- Clicking the face changes it from the squinting cell 23 to the open-eyed
+  cell 22 and **arms** it. The view does not change until a click on a
+  lemming; the lemming clicked is ridden. The `I` key does the same (three
+  presses armed, disarmed and armed again; no lemming was picked). With a
+  lemming highlighted, the face rides it at once (see **Highlight arrow**).
+- Arming keeps a selected skill selected, but the click that follows rides
+  the lemming rather than giving it the skill. Starting the ride deselects
+  the skill and highlights the lemming ridden with; the arrow at (0, 172)
+  turns green (cells 39–44, animated).
+- While riding, nothing is selected. Hovering another lemming shows the
+  bracket and its caption; clicking it **switches the ride** to it at once,
+  with no skill given. A skill icon gives its skill straight to the lemming
+  ridden with; a turner then waits for its side (see **Turner arrows**).
+- When the lemming ridden with dies, the view **moves at once to another
+  lemming** and goes on riding, the face open and the arrow green. Verified
+  for walkers drowning at the end of a path, where it took the lemming right
+  behind each time; whether the rule is the next in release order or the
+  nearest is unverified (ours: the next in release order). With no lemming
+  left in play the view stays where it was, still in the lemming view, until
+  the level ends. Entering the exit was not observed; ours treats it the same.
+- In the lemming view the pointer over the bottom centre of the view is an
+  **up** arrow, and over the left and right thirds the turn arrows (observed;
+  what holding the camera button does there is unmeasured, and ours shows the
+  cross-hair).
 
 **Nuke.** Single and double clicks on the bomb had no effect in these runs
 (the navigation document also found clicks unreliable; Alt+Q works). Its
@@ -555,6 +578,8 @@ single click does nothing and a double click nukes, with the explosion
 playing on the icon over and over until the level ends; ours loops it at 14 frames/s.
 
 **Turner arrows.** After the first click with the turner, two white arrows with a thin black outline, about 12 game pixels tall, appear over the lemming, one per direction it could be turned (seen walking across the screen: an up arrow at the head, a down arrow over the feet). They take turns, never shown together, swapping 7–10 times a second, until the second click (observed: Practice "Turner" demo, 50 ms bursts). Ours draws `MOUSE` cells 11–42 picked by each side's screen direction, swapping every 0.12 s; once the pointer is clearly on one side, only that arrow shows, previewing the direction the next click gives (ours; the demo shows no pointer, so the original's behaviour there is unknown).
+
+While riding, a turner given to the lemming ridden with shows **one** white arrow near the middle of the view, at about y 85: centred about 16 pixels left of the screen's centre and pointing left while the pointer is in the left half of the screen, and 16 pixels right of centre pointing right while it is in the right half (also over the panel). Never both, and no alternating. A click then turns the lemming to that side: a click in the left half gave "turn left" and the view swung left. Verified (Practice "Turner", 10-frame bursts on each side); the boundary is assumed to be the screen's centre.
 
 **Mouse pointer.** Ours is the system's hardware cursor showing these cells, so it moves at the system's rate rather than the game's frame rate. Over the panel icons: cross-hair, `MOUSE` cell 9. Over
 the 3D view (and the minimap) the pointer depends on which third of the
@@ -679,9 +704,13 @@ highlights that lemming. Switching highlighting on deselects the skill, since
 a skill button would then give it to the highlighted lemming (owner's
 observation). The arrow again switches highlighting off, except in the
 lemming view, where it moves on to the next lemming and rides along with it
-(owner's observation; ours takes the next in release order). Highlighting also
-ends when the lemming ridden with dies or leaves (about 2.7 s after). No arrow
-shows over the lemming ridden with.
+(owner's observation; ours takes the next in release order). In the Hi-Light
+demo, highlighting ended when the lemming ridden with died or left (about
+2.7 s after); in play the lemming view instead goes on with another lemming
+and the arrow stays green (see **Lemming cam**). In the lemming view a large
+white down-arrow often shows at the top centre of the screen, bobbing with
+the walk: probably the highlight arrow over the lemming ridden with, seen
+from just below (observed; identity estimated). Ours draws none there.
 
 **Practice grid order.** The face (Virtual Lemming, level 90
 "Claustrophobic") stands before the arrow (Hi-Light Lemming, level 89) in the
