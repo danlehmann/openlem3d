@@ -1619,6 +1619,19 @@ impl Simulation {
             .is_some_and(|(b, _)| b.segments & mask != 0)
     }
 
+    /// Whether solid terrain is within a walker's reach ahead of a basher, at
+    /// the height of the segments it bashes. A cube's side is as soon as the
+    /// basher reaches its cell; a deflector's diagonal face lies further in.
+    fn bash_reaches_solid(&self, l: &Lemming) -> bool {
+        let d = l.dir.delta();
+        [SUB / 8, 3 * SUB / 8].into_iter().any(|h| {
+            (1..=REACH).step_by(WALK_SPEED as usize).any(|a| {
+                self.world
+                    .solid([l.pos[0] + d[0] * a, l.pos[1] + h, l.pos[2] + d[2] * a])
+            })
+        })
+    }
+
     /// Whether a basher `ticks` into bashing ends a stroke now.
     fn bash_stroke_ends(ticks: u32) -> bool {
         ticks >= BASH_CRACK_START + BASH_TICKS
@@ -1650,7 +1663,7 @@ impl Simulation {
             l.set_state(State::Walking);
             return;
         }
-        if !full && self.bash_more_ahead(l) {
+        if (!full && self.bash_more_ahead(l)) || (full && !self.bash_reaches_solid(l)) {
             // On through the gap; the next stroke starts at the wall.
             l.pos[0] += d[0] * WALK_SPEED;
             l.pos[2] += d[2] * WALK_SPEED;

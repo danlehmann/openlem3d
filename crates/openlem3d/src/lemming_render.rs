@@ -464,6 +464,22 @@ fn noise(keys: [u32; 5]) -> f32 {
     (h >> 8) as f32 / (1u32 << 24) as f32
 }
 
+/// The unit outward normal of the diagonal face of a deflector in `cell`
+/// at height `y` (units), if the cell holds one there. The face runs through
+/// the cell's centre.
+fn deflector_face(sim: &Simulation, cell: [i32; 3], y: f32) -> Option<[f32; 2]> {
+    let sub = l3d_sim::SUB as f32;
+    // A point in each quarter of the cell; the solid half holds one of them.
+    [[0.25, 0.25], [0.25, 0.75], [0.75, 0.25], [0.75, 0.75]]
+        .into_iter()
+        .find_map(|[x, z]| {
+            let at = |c: i32, v: f32| ((c as f32 + v) * sub) as i32;
+            sim.world
+                .deflector_normal([at(cell[0], x), (y * sub) as i32, at(cell[2], z)])
+        })
+        .map(|n| n.map(|v| v as f32 * std::f32::consts::FRAC_1_SQRT_2))
+}
+
 /// The bash effects (`docs/spec/behaviour.md`, Basher): the black cracks of
 /// `OVERLAY.000` spreading over the sides of the segments being bashed, one
 /// frame every 2 ticks, and bursts of pieces cut from the block's texture
@@ -480,23 +496,34 @@ fn bash_effects(b: &mut LayerBuilder, sim: &Simulation, blocks: Option<&BlockSet
             (crack / ATLAS_COLUMNS) * LEMMING_CELL,
         );
         // Each segment's slice of the overlay: segment s (0 at the bottom) is
-        // the face's texel rows (3 − s)·16 to (4 − s)·16.
-        for n in [[1.0, 0.0], [-1.0, 0.0], [0.0, 1.0], [0.0, -1.0]] {
-            for s in (0..4).filter(|s| mask & (1 << s) != 0) {
+        // the face's texel rows (3 − s)·16 to (4 − s)·16, on each of the
+        // block's sides there: the cube faces it fills, and a deflector's
+        // diagonal face.
+        for s in (0..4).filter(|s| mask & (1 << s) != 0) {
+            let rect = [cx as f32, cy as f32 + (3 - s) as f32 * 16.0, 64.0, 16.0];
+            let y = c[1] + s as f32 * 0.25;
+            let filled = |x: f32, z: f32| {
+                let at = |v: f32| (v * l3d_sim::SUB as f32) as i32;
+                sim.world.block_at([at(x), at(y + 0.125), at(z)]).is_some()
+            };
+            for n in [[1.0, 0.0], [-1.0, 0.0], [0.0, 1.0], [0.0, -1.0]] {
+                if !filled(c[0] + 0.5 + n[0] * 0.45, c[2] + 0.5 + n[1] * 0.45) {
+                    continue;
+                }
                 let centre = [
                     c[0] + 0.5 + n[0] * (0.5 + CRACK_OFFSET),
-                    c[1] + s as f32 * 0.25,
+                    y,
                     c[2] + 0.5 + n[1] * (0.5 + CRACK_OFFSET),
                 ];
-                b.vertical_quad(
-                    centre,
-                    n,
-                    1.0,
-                    0.25,
-                    [cx as f32, cy as f32 + (3 - s) as f32 * 16.0, 64.0, 16.0],
-                    tex,
-                    1.0,
-                );
+                b.vertical_quad(centre, n, 1.0, 0.25, rect, tex, 1.0);
+            }
+            if let Some(n) = deflector_face(sim, cell, y + 0.125) {
+                let centre = [
+                    c[0] + 0.5 + n[0] * CRACK_OFFSET,
+                    y,
+                    c[2] + 0.5 + n[1] * CRACK_OFFSET,
+                ];
+                b.vertical_quad(centre, n, std::f32::consts::SQRT_2, 0.25, rect, tex, 1.0);
             }
         }
         // The pieces: bits of the block's side texture.
@@ -515,8 +542,17 @@ fn bash_effects(b: &mut LayerBuilder, sim: &Simulation, blocks: Option<&BlockSet
         );
         let d = l.dir.delta().map(|v| v as f32);
         let (out, side) = ([-d[0], -d[2]], [d[2], -d[0]]);
-        let face = [c[0] + 0.5 - d[0] * 0.5, c[2] + 0.5 - d[2] * 0.5];
         let bottom = c[1] + mask.trailing_zeros() as f32 * 0.25;
+        // The side facing the basher: the cube face, or a deflector's
+        // diagonal (crossing the cell's centre line).
+        let inset = if deflector_face(sim, cell, bottom + 0.125)
+            .is_some_and(|n| n[0] * d[0] + n[1] * d[2] < 0.0)
+        {
+            0.0
+        } else {
+            0.5
+        };
+        let face = [c[0] + 0.5 - d[0] * inset, c[2] + 0.5 - d[2] * inset];
         let stroke = (l.state_ticks - l3d_sim::BASH_CRACK_START) / l3d_sim::BASH_TICKS;
         for (burst, &start) in CHUNK_BURSTS.iter().enumerate() {
             if !(start..start + CHUNK_TICKS).contains(&t) {
