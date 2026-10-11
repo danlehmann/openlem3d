@@ -229,7 +229,7 @@ pub(crate) fn assign_on_pointer(
             }
             pending.0 = None;
             let sides = view_sides(&camera, &sim.lemmings[f]);
-            let ok = sim.assign_turner(f, sides[(point.x >= size.x / 2.0) as usize]);
+            let ok = sim.assign_turner(f, sides[riding_right_half(&camera, size, point) as usize]);
             sfx.write(crate::sfx::Sfx(if ok {
                 "VOXFX/OK2"
             } else {
@@ -446,20 +446,24 @@ fn place_turner_marker(
             if pending.0 != Some(f) {
                 return None;
             }
+            // With the head tilted, the arrow and the halves turn with the
+            // picture (owner's observation: tilted a quarter turn right,
+            // the arrows point up and down, picked by the top and bottom
+            // halves).
             let window = windows.single().ok()?;
             let size = Vec2::new(window.width(), window.height());
             let scale = size.y / 200.0;
-            let left = window.cursor_position().is_none_or(|p| p.x < size.x / 2.0);
-            let at = Vec2::new(
-                size.x / 2.0 - (RIDING_ARROW_OFFSET - ARROW_DISTANCE) * scale,
-                RIDING_ARROW_Y * scale,
-            );
-            let at = if left {
-                at
-            } else {
-                Vec2::new(size.x - at.x, at.y)
-            };
-            return Some((at, [Vec2::NEG_X, Vec2::X], [left, !left], scale));
+            let left = window
+                .cursor_position()
+                .is_none_or(|p| !riding_right_half(&camera, size, p));
+            let (right, down) = riding_axes(&camera);
+            let side = if left { -1.0 } else { 1.0 };
+            let offset = Vec2::new(
+                side * (RIDING_ARROW_OFFSET - ARROW_DISTANCE),
+                RIDING_ARROW_Y - 100.0,
+            ) * scale;
+            let at = size / 2.0 + right * offset.x + down * offset.y;
+            return Some((at, [-right, right], [left, !left], scale));
         }
         let l = game.sim.as_ref()?.lemmings.get(pending.0?)?;
         let window = windows.single().ok()?;
@@ -547,6 +551,18 @@ pub fn nearest_to_centre(
         })
         .min_by(|a, b| a.1.total_cmp(&b.1))
         .map(|(i, _)| i)
+}
+
+/// The view's right and down on screen (y down), turned with its roll.
+fn riding_axes(camera: &SceneCamera) -> (Vec2, Vec2) {
+    let (s, c) = camera.roll.sin_cos();
+    (Vec2::new(c, -s), Vec2::new(s, c))
+}
+
+/// Whether screen point `p` is in the view's right half, the halves split
+/// through the screen's centre and turned with the view's roll.
+fn riding_right_half(camera: &SceneCamera, size: Vec2, p: Vec2) -> bool {
+    (p - size / 2.0).dot(riding_axes(camera).0) >= 0.0
 }
 
 /// For the lemming ridden with: its turn towards screen-left and towards

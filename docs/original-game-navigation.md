@@ -257,7 +257,9 @@ below the horizon changes with height.
   **Ctrl+F10** (a toggle), when needed. Lock status: while the window has
   focus, the host cursor is clipped to the client area. The title bar also
   shows "[Ctrl+F10 releases mouse]", but it can lag the toggle by seconds, so
-  it is only a fallback signal. **Alt chords (such as Alt+Q) drop the lock.**
+  it is only a fallback signal. Playing by hand, press Ctrl+F10 first to
+  lock the mouse; the game is then fully controllable (owner's experience).
+  **Alt chords (such as Alt+Q) drop the lock.**
   The next mouse action re-locks it. A warning "Could not confirm that DOSBox-X
   locked the mouse" sometimes appears even though the action worked. Check the
   screenshot.

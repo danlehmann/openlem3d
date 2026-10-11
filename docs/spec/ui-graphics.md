@@ -570,6 +570,14 @@ observation); highlighting and the lemming view still work in ours.
   **up** arrow, and over the left and right thirds the turn arrows (observed;
   what holding the camera button does there is unmeasured, and ours shows the
   cross-hair).
+- The head **tilts** left and right, up to a quarter turn either way: the
+  picture rolls about the view direction while the left or right arrow key
+  is held, or the camera button over the right-turn area of the view, slowly
+  (owner's observation; the rate is unmeasured, ours 0.8 rad/s). Ours also
+  tilts with the panel's turn arrows, Q and E, and in enhanced mode with a
+  sideways drag of the action button. Ours keeps the tilt when the ride
+  passes to another lemming and drops it when the lemming view ends
+  (unobserved).
 
 **Nuke.** Single and double clicks on the bomb had no effect in these runs
 (the navigation document also found clicks unreliable; Alt+Q works). Its
@@ -579,7 +587,7 @@ playing on the icon over and over until the level ends; ours loops it at 14 fram
 
 **Turner arrows.** After the first click with the turner, two white arrows with a thin black outline, about 12 game pixels tall, appear over the lemming, one per direction it could be turned (seen walking across the screen: an up arrow at the head, a down arrow over the feet). They take turns, never shown together, swapping 7–10 times a second, until the second click (observed: Practice "Turner" demo, 50 ms bursts). Ours draws `MOUSE` cells 11–42 picked by each side's screen direction, swapping every 0.12 s; once the pointer is clearly on one side, only that arrow shows, previewing the direction the next click gives (ours; the demo shows no pointer, so the original's behaviour there is unknown).
 
-While riding, a turner given to the lemming ridden with shows **one** white arrow near the middle of the view, at about y 85: centred about 16 pixels left of the screen's centre and pointing left while the pointer is in the left half of the screen, and 16 pixels right of centre pointing right while it is in the right half (also over the panel). Never both, and no alternating. A click then turns the lemming to that side: a click in the left half gave "turn left" and the view swung left. Verified (Practice "Turner", 10-frame bursts on each side); the boundary is assumed to be the screen's centre.
+While riding, a turner given to the lemming ridden with shows **one** white arrow near the middle of the view, at about y 85: centred about 16 pixels left of the screen's centre and pointing left while the pointer is in the left half of the screen, and 16 pixels right of centre pointing right while it is in the right half (also over the panel). Never both, and no alternating. A click then turns the lemming to that side: a click in the left half gave "turn left" and the view swung left. Verified (Practice "Turner", 10-frame bursts on each side); the boundary is assumed to be the screen's centre. With the head tilted, the arrow and the halves turn with the picture: tilted a quarter turn right, the arrows point up and down and the top and bottom halves pick the side (owner's observation). Ours turns the arrow's place and direction and the dividing line through the screen's centre by the view's roll.
 
 **Mouse pointer.** Ours is the system's hardware cursor showing these cells, so it moves at the system's rate rather than the game's frame rate. Over the panel icons: cross-hair, `MOUSE` cell 9. Over
 the 3D view (and the minimap) the pointer depends on which third of the

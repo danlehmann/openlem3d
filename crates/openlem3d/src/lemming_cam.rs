@@ -72,6 +72,7 @@ impl LemmingCam {
             view.yaw = yaw;
         }
         view.roll = 0.0;
+        view.tilt = 0.0;
         *self = LemmingCam::Off;
     }
 
@@ -140,6 +141,10 @@ const SWAY_ROLL: f32 = 1.5;
 const SWAY_PERIOD: f32 = 6.0 / l3d_sim::TICKS_PER_SECOND as f32;
 /// How quickly the roll follows the sway, per second.
 const ROLL_RATE: f32 = 12.0;
+/// How fast the head tilts while a turn key, turn arrow or turn region is
+/// held, in radians per second (ours; slow in the original, owner's
+/// observation).
+pub const TILT_SPEED: f32 = 0.8;
 /// The least distance between the eye and a deflector's diagonal face.
 /// A walker turns there only once its centre reaches the face, so an eye
 /// above its centre would look through the block.
@@ -251,6 +256,7 @@ fn follow(
     }
     let Some(mut i) = cam.following() else {
         view.roll = 0.0;
+        view.tilt = 0.0;
         *entered = None;
         return;
     };
@@ -267,7 +273,7 @@ fn follow(
             .map(|k| (i + k) % n)
             .find(|&j| !sim.lemmings[j].gone)
         else {
-            view.roll = 0.0;
+            view.roll = view.tilt;
             return;
         };
         i = next;
@@ -294,7 +300,7 @@ fn follow(
         view.glide = None;
         view.pos = target;
         view.yaw = yaw;
-        view.roll = 0.0;
+        view.roll = view.tilt;
         *trail = Trail::at(target, fixed.elapsed());
         return;
     }
@@ -302,7 +308,7 @@ fn follow(
     // eyes, the level waiting meanwhile.
     if *entered != Some(i) {
         *entered = Some(i);
-        view.roll = 0.0;
+        view.roll = view.tilt;
         view.glide_to(target, yaw);
     }
     if view.glide.is_some() {
@@ -330,11 +336,12 @@ fn follow(
         *sway = (*sway + time.delta_secs() * std::f32::consts::TAU / SWAY_PERIOD)
             .rem_euclid(std::f32::consts::TAU);
     }
-    let roll = if walking {
-        SWAY_ROLL.to_radians() * sway.sin()
-    } else {
-        0.0
-    };
+    let roll = view.tilt
+        + if walking {
+            SWAY_ROLL.to_radians() * sway.sin()
+        } else {
+            0.0
+        };
     view.roll += (roll - view.roll) * (1.0 - (-ROLL_RATE * time.delta_secs()).exp());
     // Turn the short way round.
     let turn = (yaw - view.yaw + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU)

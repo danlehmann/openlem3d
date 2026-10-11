@@ -686,7 +686,8 @@ fn buttons(
 }
 
 /// Holding − or + changes the release rate by one per 70 Hz frame, with no
-/// initial delay (verified); the turn arrows turn the camera while held.
+/// initial delay (verified); the turn arrows turn the camera while held, or
+/// tilt the head riding along with a lemming.
 fn held_buttons(
     held: Query<(&Interaction, &Action)>,
     keys: Res<ButtonInput<KeyCode>>,
@@ -725,11 +726,16 @@ fn held_buttons(
     }
     let turn =
         down(Action::TurnAnticlockwise) as i32 as f32 - down(Action::TurnClockwise) as i32 as f32;
+    // Riding along, they tilt the head instead.
     if turn != 0.0
-        && lemming_cam.following().is_none()
         && let Ok(mut view) = views.single_mut()
     {
-        view.yaw -= turn * TURN_SPEED * time.delta_secs();
+        if lemming_cam.following().is_none() {
+            view.yaw -= turn * TURN_SPEED * time.delta_secs();
+        } else {
+            view.tilt = (view.tilt - turn * crate::lemming_cam::TILT_SPEED * time.delta_secs())
+                .clamp(-std::f32::consts::FRAC_PI_2, std::f32::consts::FRAC_PI_2);
+        }
     }
 }
 
