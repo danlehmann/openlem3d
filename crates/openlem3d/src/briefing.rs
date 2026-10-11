@@ -549,7 +549,8 @@ fn preview_overlay(
         }
         return;
     }
-    if !roots.is_empty() {
+    // Until the level is loaded, the terrain is still the previous level's.
+    if !roots.is_empty() || current.loaded != Some(current.number) {
         return;
     }
     let (Some(font), Some((level, ..))) = (
