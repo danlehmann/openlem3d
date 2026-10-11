@@ -191,8 +191,9 @@ fn anim_for(state: State) -> Anim {
         State::Exploding => once(534, 4, One),
         State::Floating => anim(296, 5, Eight),
         // No rope pose found yet; the falling cycle stands in.
-        // Arms spread on ice (observed); the blocker's pose is the nearest.
-        State::Sliding => anim(86, 7, Five),
+        // Arms spread on ice (observed): the otherwise unused pose with arms
+        // spread and one leg kicking up (guessed).
+        State::Sliding => anim(538, 5, Five),
         // Hanging with arms raised (observed); the floater's pose stands in.
         State::OnRope { .. } => anim(296, 5, Eight),
         State::Flying { .. } | State::Bouncing { .. } => Anim {
