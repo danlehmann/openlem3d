@@ -584,19 +584,23 @@ impl Replay {
 /// is unmeasured).
 const FAST_FORWARD_TICKS: u32 = 3;
 
-/// P or Space pauses and resumes the level (not during the preview, which
-/// keeps it waiting itself, nor while the restart question is open).
+/// P or Space pauses and resumes the level, and Enter turns fast-forward on
+/// and off (not during the preview, which keeps it waiting itself, nor while
+/// the restart question is open).
 fn pause_keys(
     keys: Res<ButtonInput<KeyCode>>,
     preview: Res<briefing::Preview>,
     confirm: Res<confirm::RestartConfirm>,
     mut game: ResMut<Game>,
 ) {
-    if !preview.active
-        && confirm.0.is_none()
-        && keys.any_just_pressed([KeyCode::KeyP, KeyCode::Space])
-    {
+    if preview.active || confirm.0.is_some() {
+        return;
+    }
+    if keys.any_just_pressed([KeyCode::KeyP, KeyCode::Space]) {
         game.paused = !game.paused;
+    }
+    if keys.any_just_pressed([KeyCode::Enter, KeyCode::NumpadEnter]) {
+        game.fast_forward = !game.fast_forward;
     }
 }
 
