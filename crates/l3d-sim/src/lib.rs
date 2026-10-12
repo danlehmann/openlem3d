@@ -1092,8 +1092,11 @@ impl Simulation {
 
     /// Rope slides: a lemming reaching a sender (an even value) rides to its
     /// receiver (the next value up); with several of a value only the last
-    /// works [L3DEdit]. Provisional: a straight line at [`ROPE_SPEED`],
-    /// then it walks on in its old direction.
+    /// works [L3DEdit]. One lemming rides a rope at a time; others reaching
+    /// the sender meanwhile walk on (owner's observation: at release rate
+    /// 11 every other lemming of Practice "Rope Slide" is lost). Provisional:
+    /// a straight line at [`ROPE_SPEED`], then it walks on in its old
+    /// direction.
     fn board_rope_slide(&mut self, l: &mut Lemming) {
         if self.object_kind != Some(objects::ObjectKind::RopeSlide)
             || !matches!(
@@ -1119,13 +1122,19 @@ impl Simulation {
             return;
         };
         let o = self.objects[receiver];
-        l.set_state(State::OnRope {
-            to: [
-                o.cell[0] * SUB + SUB / 2,
-                o.surface,
-                o.cell[2] * SUB + SUB / 2,
-            ],
-        });
+        let to = [
+            o.cell[0] * SUB + SUB / 2,
+            o.surface,
+            o.cell[2] * SUB + SUB / 2,
+        ];
+        if self
+            .lemmings
+            .iter()
+            .any(|r| !r.gone && r.state == State::OnRope { to })
+        {
+            return;
+        }
+        l.set_state(State::OnRope { to });
     }
 
     /// Springs: a walker stepping onto a sender (an even value) is thrown in

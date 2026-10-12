@@ -36,6 +36,26 @@ const BUILDER_STEP_TICKS: u32 = 6;
 
 /// The floater's umbrella cells.
 const UMBRELLA_FIRST: u32 = 336;
+/// How far a rope slide's rope runs above the straight line its rider's
+/// feet follow, from the floor at the sender to the floor at the receiver,
+/// where no rope is found (¾–1 unit in Practice "Rope Slide").
+const ROPE_ABOVE_PATH: f32 = 0.75;
+
+/// The height in units of the rope over a rope-slide rider at `pos`: the top
+/// of the first solid run within two units above its feet (the rope is the
+/// sloping top of a run of 22.5° ramp blocks, Practice "Rope Slide"), or
+/// [`ROPE_ABOVE_PATH`] above them.
+fn rope_above(world: &l3d_sim::world::World, pos: [i32; 3]) -> f32 {
+    let step = SUB / 32;
+    let at = |y: i32| world.solid([pos[0], y, pos[2]]);
+    let top = (pos[1] + step..pos[1] + 2 * SUB)
+        .step_by(step as usize)
+        .skip_while(|&y| !at(y))
+        .find(|&y| !at(y));
+    top.map_or(pos[1] as f32 / SUB as f32 + ROPE_ABOVE_PATH, |y| {
+        y as f32 / SUB as f32
+    })
+}
 const UMBRELLA_FRAMES: u32 = 8;
 
 /// Which way a lemming faces as seen by the camera, in eighths of a turn.
@@ -190,11 +210,11 @@ fn anim_for(state: State) -> Anim {
         // drawn from the fuse (see `build`).
         State::Exploding => once(534, 4, One),
         State::Floating => anim(296, 5, Eight),
-        // No rope pose found yet; the falling cycle stands in.
         // Arms spread on ice (observed): the otherwise unused pose with arms
         // spread and one leg kicking up (guessed).
         State::Sliding => anim(538, 5, Five),
-        // Hanging with arms raised (observed); the floater's pose stands in.
+        // Hanging from the handle by one raised hand: the floater's pose
+        // (owner's picture of the original).
         State::OnRope { .. } => anim(296, 5, Eight),
         State::Flying { .. } | State::Bouncing { .. } => Anim {
             first: 399,
@@ -817,7 +837,12 @@ pub fn build(
         } else {
             [cx as f32, cy as f32, size, size]
         };
-        let anchor = l.pos.map(|v| v as f32 / SUB as f32);
+        let mut anchor = l.pos.map(|v| v as f32 / SUB as f32);
+        // On a rope slide the raised hand, at the top of the cell, holds the
+        // rope (owner's picture).
+        if matches!(l.state, State::OnRope { .. }) {
+            anchor[1] = rope_above(&sim.world, l.pos) - size / LEMMING_TEXELS_PER_UNIT;
+        }
         if l.state == State::Splatting {
             splat(&mut b, i, l.state_ticks, anchor, tex);
             continue;

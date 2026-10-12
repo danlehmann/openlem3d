@@ -286,6 +286,11 @@ fn follow(
     }
     let l = &sim.lemmings[i];
     let feet = Vec3::from_array(l.pos.map(|v| v as f32 / SUB as f32));
+    // Passing to another lemming, the head faces forward again (owner's
+    // observation).
+    if switched || *entered != Some(i) {
+        view.head = 0.0;
+    }
     // A turner looks where its arm points, the way it sends walkers
     // (verified in Practice "Turner": riding with a "Turn right" turner, the
     // original's view faces that side, not along the path it came on), and
