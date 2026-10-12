@@ -317,10 +317,9 @@ struct ViewCamera {
     /// Roll in radians about the view direction, turning the picture
     /// anticlockwise; 0 except in the lemming view.
     roll: f32,
-    /// The lemming view's head tilt in radians, at most a quarter turn
-    /// either way; positive tilts the head right, turning the picture
-    /// anticlockwise. The roll is this plus the walking sway.
-    tilt: f32,
+    /// The lemming view's sideways look in radians from the lemming's
+    /// heading, at most a quarter turn either way; positive looks right.
+    head: f32,
     /// A glide under way to another view.
     glide: Option<Glide>,
     /// Whether moves to another view glide (enhanced) or cut at once, as
@@ -509,7 +508,7 @@ fn spawn_camera(mut commands: Commands) {
             pos: Vec3::new(16.0, 8.0, 16.0),
             yaw: 0.0,
             roll: 0.0,
-            tilt: 0.0,
+            head: 0.0,
             glide: None,
             smooth: true,
         },
@@ -916,17 +915,17 @@ pub(crate) fn camera_controls(
             _ => (0.0, 0.0, 0.0),
         });
         cam.yaw += spin * 1.8 * dt;
-        // Riding along, the same keys and regions tilt the head instead, as
+        // Riding along, the same keys and regions turn the head instead, as
         // does a sideways action-button drag (enhanced).
         if lemming_cam.following().is_some() {
-            let mut tilt = (turn + spin) * lemming_cam::TILT_SPEED * time.delta_secs();
+            let mut look = (turn + spin) * lemming_cam::HEAD_SPEED * time.delta_secs();
             if action_dragging {
-                tilt += motion.delta.x * touch::TURN_PER_PX;
+                look += motion.delta.x * touch::TURN_PER_PX;
             }
-            cam.tilt =
-                (cam.tilt + tilt).clamp(-std::f32::consts::FRAC_PI_2, std::f32::consts::FRAC_PI_2);
+            cam.head =
+                (cam.head + look).clamp(-std::f32::consts::FRAC_PI_2, std::f32::consts::FRAC_PI_2);
         } else {
-            cam.tilt = 0.0;
+            cam.head = 0.0;
         }
         let fwd = cam.forward();
         let right = Vec3::new(-fwd.z, 0.0, fwd.x);

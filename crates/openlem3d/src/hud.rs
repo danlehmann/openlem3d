@@ -228,8 +228,9 @@ pub(crate) fn assign_on_pointer(
                 return;
             }
             pending.0 = None;
-            let sides = view_sides(&camera, &sim.lemmings[f]);
-            let ok = sim.assign_turner(f, sides[riding_right_half(&camera, size, point) as usize]);
+            let head = views.single().map_or(0.0, |v| v.head);
+            let sides = lemming_sides(&sim.lemmings[f]);
+            let ok = sim.assign_turner(f, sides[riding_right_half(head, size, point) as usize]);
             sfx.write(crate::sfx::Sfx(if ok {
                 "VOXFX/OK2"
             } else {
@@ -434,6 +435,7 @@ fn place_turner_marker(
     windows: Query<&Window>,
     mut arrows: Query<(&TurnerArrow, &mut ImageNode, &mut Node, &mut Visibility)>,
     lemming_cam: Res<LemmingCam>,
+    views: Query<&crate::ViewCamera>,
 ) {
     let shown = (|| {
         if *state.get() != AppState::Playing {
@@ -446,17 +448,18 @@ fn place_turner_marker(
             if pending.0 != Some(f) {
                 return None;
             }
-            // With the head tilted, the arrow and the halves turn with the
-            // picture (owner's observation: tilted a quarter turn right,
-            // the arrows point up and down, picked by the top and bottom
-            // halves).
+            // With the head turned to the side, the arrow and the halves
+            // turn with the lemming's sides as seen from its eyes (owner's
+            // observation: looking a quarter turn right, the arrows point up
+            // and down, picked by the top and bottom halves).
+            let head = views.single().map_or(0.0, |v| v.head);
             let window = windows.single().ok()?;
             let size = Vec2::new(window.width(), window.height());
             let scale = size.y / 200.0;
             let left = window
                 .cursor_position()
-                .is_none_or(|p| !riding_right_half(&camera, size, p));
-            let (right, down) = riding_axes(&camera);
+                .is_none_or(|p| !riding_right_half(head, size, p));
+            let (right, down) = riding_axes(head);
             let side = if left { -1.0 } else { 1.0 };
             let offset = Vec2::new(
                 side * (RIDING_ARROW_OFFSET - ARROW_DISTANCE),
@@ -553,26 +556,23 @@ pub fn nearest_to_centre(
         .map(|(i, _)| i)
 }
 
-/// The view's right and down on screen (y down), turned with its roll.
-fn riding_axes(camera: &SceneCamera) -> (Vec2, Vec2) {
-    let (s, c) = camera.roll.sin_cos();
+/// The lemming's right and its back on screen (y down) with its head turned
+/// `head` radians to the right: ahead of the eyes is up the screen, so
+/// looking a quarter turn right its right is up.
+fn riding_axes(head: f32) -> (Vec2, Vec2) {
+    let (s, c) = head.sin_cos();
     (Vec2::new(c, -s), Vec2::new(s, c))
 }
 
-/// Whether screen point `p` is in the view's right half, the halves split
-/// through the screen's centre and turned with the view's roll.
-fn riding_right_half(camera: &SceneCamera, size: Vec2, p: Vec2) -> bool {
-    (p - size / 2.0).dot(riding_axes(camera).0) >= 0.0
+/// Whether screen point `p` is on the lemming's right side, the screen
+/// split through its centre along the lemming's heading as seen with the
+/// head turned `head` radians to the right.
+fn riding_right_half(head: f32, size: Vec2, p: Vec2) -> bool {
+    (p - size / 2.0).dot(riding_axes(head).0) >= 0.0
 }
 
-/// For the lemming ridden with: its turn towards screen-left and towards
-/// screen-right, as seen through its eyes.
-fn view_sides(camera: &SceneCamera, l: &l3d_sim::Lemming) -> [l3d_sim::Dir; 2] {
-    let [x, _, z] = l.dir.clockwise().delta();
-    let cw_right = Vec3::new(x as f32, 0.0, z as f32).dot(camera.right) > 0.0;
-    if cw_right {
-        [l.dir.anticlockwise(), l.dir.clockwise()]
-    } else {
-        [l.dir.clockwise(), l.dir.anticlockwise()]
-    }
+/// A lemming's turn to its left and to its right (facing (x, z) with y up,
+/// the right hand is (−z, x): the clockwise turn).
+fn lemming_sides(l: &l3d_sim::Lemming) -> [l3d_sim::Dir; 2] {
+    [l.dir.anticlockwise(), l.dir.clockwise()]
 }

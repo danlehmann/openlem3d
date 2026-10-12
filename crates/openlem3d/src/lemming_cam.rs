@@ -72,7 +72,7 @@ impl LemmingCam {
             view.yaw = yaw;
         }
         view.roll = 0.0;
-        view.tilt = 0.0;
+        view.head = 0.0;
         *self = LemmingCam::Off;
     }
 
@@ -141,10 +141,10 @@ const SWAY_ROLL: f32 = 1.5;
 const SWAY_PERIOD: f32 = 6.0 / l3d_sim::TICKS_PER_SECOND as f32;
 /// How quickly the roll follows the sway, per second.
 const ROLL_RATE: f32 = 12.0;
-/// How fast the head tilts while a turn key, turn arrow or turn region is
+/// How fast the head turns while a turn key, turn arrow or turn region is
 /// held, in radians per second (ours; slow in the original, owner's
 /// observation).
-pub const TILT_SPEED: f32 = 0.8;
+pub const HEAD_SPEED: f32 = 0.8;
 /// The least distance between the eye and a deflector's diagonal face.
 /// A walker turns there only once its centre reaches the face, so an eye
 /// above its centre would look through the block.
@@ -256,7 +256,7 @@ fn follow(
     }
     let Some(mut i) = cam.following() else {
         view.roll = 0.0;
-        view.tilt = 0.0;
+        view.head = 0.0;
         *entered = None;
         return;
     };
@@ -273,7 +273,7 @@ fn follow(
             .map(|k| (i + k) % n)
             .find(|&j| !sim.lemmings[j].gone)
         else {
-            view.roll = view.tilt;
+            view.roll = 0.0;
             return;
         };
         i = next;
@@ -288,11 +288,13 @@ fn follow(
     let feet = Vec3::from_array(l.pos.map(|v| v as f32 / SUB as f32));
     // A turner looks where its arm points, the way it sends walkers
     // (verified in Practice "Turner": riding with a "Turn right" turner, the
-    // original's view faces that side, not along the path it came on).
-    let yaw = match l.state {
-        l3d_sim::State::Turning { to } => to.yaw(),
-        _ => l.dir.yaw(),
-    };
+    // original's view faces that side, not along the path it came on), and
+    // the head turned to the side looks that much further round.
+    let yaw = view.head
+        + match l.state {
+            l3d_sim::State::Turning { to } => to.yaw(),
+            _ => l.dir.yaw(),
+        };
     let target = off_deflectors(&sim.world, feet + Vec3::Y * EYE_HEIGHT);
     // Taken on from a lemming that left: straight into its eyes.
     if switched {
@@ -300,7 +302,7 @@ fn follow(
         view.glide = None;
         view.pos = target;
         view.yaw = yaw;
-        view.roll = view.tilt;
+        view.roll = 0.0;
         *trail = Trail::at(target, fixed.elapsed());
         return;
     }
@@ -308,7 +310,7 @@ fn follow(
     // eyes, the level waiting meanwhile.
     if *entered != Some(i) {
         *entered = Some(i);
-        view.roll = view.tilt;
+        view.roll = 0.0;
         view.glide_to(target, yaw);
     }
     if view.glide.is_some() {
@@ -336,12 +338,11 @@ fn follow(
         *sway = (*sway + time.delta_secs() * std::f32::consts::TAU / SWAY_PERIOD)
             .rem_euclid(std::f32::consts::TAU);
     }
-    let roll = view.tilt
-        + if walking {
-            SWAY_ROLL.to_radians() * sway.sin()
-        } else {
-            0.0
-        };
+    let roll = if walking {
+        SWAY_ROLL.to_radians() * sway.sin()
+    } else {
+        0.0
+    };
     view.roll += (roll - view.roll) * (1.0 - (-ROLL_RATE * time.delta_secs()).exp());
     // Turn the short way round.
     let turn = (yaw - view.yaw + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU)
