@@ -392,6 +392,11 @@ fn trap_layer(data: &mut GameData, level: &Level, pal: &Palette) -> Option<Scene
         if !(0x60..=0x67).contains(&o.kind) {
             continue;
         }
+        // A spring's sender (even value) is the spring itself, drawn with
+        // the lemmings; only its receiver is the flat target.
+        if level.trap_type == TRAP_SPRING && o.kind % 2 == 0 {
+            continue;
+        }
         // Pads need a block to lie on ([L3DEdit]).
         let Some(top) = block_top(y, block) else {
             continue;

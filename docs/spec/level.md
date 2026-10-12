@@ -272,7 +272,7 @@ five codes that are not tied to a level (`SPACEAAA`, `EGYPTAAA`, `ARMYAAAA`,
 
 The codes below were **verified by entry**: on the code screen of the real,
 unpatched image, each opened the briefing showing the expected level number
-and title, and the level then started. The other 44 codes of the list are
+and title, and the level then started. The other 43 codes of the list are
 **unverified** and are not recorded here. openlem3d does not use this list;
 `crates/openlem3d/src/codes.rs` holds only the codes shown by the game itself.
 
@@ -286,6 +286,7 @@ and title, and the level then started. The other 44 codes of the list are
 | `BUNODONT` | 12 | 12 (Fun 12, "ALPINE ASSAULT COURSE", `LEVEL.011`) |
 | `YAKIMONA` | 14 | 14 (Fun 14, "SLIPPERY MAZE", `LEVEL.013`) |
 | `BESLAVER` | 17 | 17 (Fun 17, "HOLE IN TEN", `LEVEL.016`) |
+| `ANABLEPS` | 18 | 18 (Fun 18, "CORKSCREW DIGGER", `LEVEL.017`) |
 | `TARLATAN` | 20 | 20 (Fun 20, "ALILEMM'S", `LEVEL.019`) |
 | `GUMMOSIS` | 22 | 22 (Tricky 2, "WHICH EXIT ?", `LEVEL.021`) |
 | `NGULTRUM` | 24 | 24 (Tricky 4, "FORE!", `LEVEL.023`) |

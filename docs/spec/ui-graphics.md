@@ -151,11 +151,11 @@ screen (lemmings in and out, time); which counters use which font is
 **unverified**.
 
 **Wooden pieces: 43,648–48,120, partly decoded.** 4,473 bytes holding
-several pieces. Decoded (offsets into the part): the height bar at 948, a
+several pieces. Decoded (offsets into the part): the height bar at 945, a
 12×200 wood column with a dark groove down the middle and the red corner
 mark at its top right; and its knob at 3,345, 9×8, a bevelled yellow square
 in a black frame (both verified against captures; colour 0 is black here and
-the original draws them opaque). Not decoded: the first 948 bytes (they look
+the original draws them opaque; the bar ends where the knob begins. At 948, read earlier, each row was off by three pixels, the red mark three pixels in from the screen edge: owner's comparison). Not decoded: the first 945 bytes (they look
 like a wider image of horizontal planks), and after the knob some small red
 squares (the corner marks?) and strips of water and of sand.
 
@@ -575,9 +575,21 @@ observation); highlighting and the lemming view still work in ours.
   is held, or the camera button over the right-turn area of the view, slowly
   (owner's observation; the rate is unmeasured, ours 0.8 rad/s). Ours also
   turns with the panel's turn arrows, Q and E, and in enhanced mode with a
-  sideways drag of the action button. Ours keeps the head turned when the ride
-  passes to another lemming and drops it when the lemming view ends
-  (unobserved).
+  sideways drag of the action button. Passing to another lemming, the head
+  faces forward again (owner's observation); leaving the lemming view drops
+  the turn too.
+- Riding with a blocker, the view faces the way the blocker stands: side-on
+  to its heading (owner's observation; ours, a quarter turn clockwise, the
+  side its sprite faces).
+- While the game is paused the view holds still: no walking sway (owner).
+- Riding with a miner, the view is right in front of the block being
+  mined, nodding a little with each swing of the pickaxe (owner's
+  observation). Ours keeps the eye 0.15 unit back from terrain straight
+  ahead (closer, the block would be clipped away) and nods by moving the
+  horizon up to 4% of the screen's height, once per 6-tick swing (size and
+  timing ours). A miner stands a quarter unit in front of the block it mines
+  (see behaviour.md), so that it does not vanish into the block when seen
+  from elsewhere.
 
 **Nuke.** Single and double clicks on the bomb had no effect in these runs
 (the navigation document also found clicks unreliable; Alt+Q works). Its
@@ -710,7 +722,12 @@ along with the highlighted lemming at once; the face again leaves, the
 highlight staying. Entering the lemming view with the face and a click also
 highlights that lemming. Switching highlighting on deselects the skill, since
 a skill button would then give it to the highlighted lemming (owner's
-observation). The arrow again switches highlighting off, except in the
+observation). Selection and highlighting exclude each other: the skill
+given to the highlighted lemming plays its animation once and stops, and
+the next click on the view highlights again; switching highlighting off
+selects the last skill given while it was on; and the skill buttons never
+animate alongside the highlight arrow except for that one animation
+(owner's observation). The arrow again switches highlighting off, except in the
 lemming view, where it moves on to the next lemming and rides along with it
 (owner's observation; ours takes the next in release order). In the Hi-Light
 demo, highlighting ended when the lemming ridden with died or left (about

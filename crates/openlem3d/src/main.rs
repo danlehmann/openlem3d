@@ -320,6 +320,9 @@ struct ViewCamera {
     /// The lemming view's sideways look in radians from the lemming's
     /// heading, at most a quarter turn either way; positive looks right.
     head: f32,
+    /// The lemming view's nod: how far the horizon is moved down the
+    /// screen, as a fraction of its height (negative: up); 0 otherwise.
+    nod: f32,
     /// A glide under way to another view.
     glide: Option<Glide>,
     /// Whether moves to another view glide (enhanced) or cut at once, as
@@ -509,6 +512,7 @@ fn spawn_camera(mut commands: Commands) {
             yaw: 0.0,
             roll: 0.0,
             head: 0.0,
+            nod: 0.0,
             glide: None,
             smooth: true,
         },
@@ -1013,11 +1017,12 @@ pub(crate) fn camera_controls(
             .next()
             .map_or(16.0 / 9.0, |w| w.width() / w.height().max(1.0));
         let view = Mat4::look_to_rh(cam.pos, cam.forward(), Vec3::Y);
-        scene_cam.view_proj = roll_about_horizon(cam.roll, aspect, opts.horizon)
-            * projection(opts.fov_y, aspect, opts.horizon)
+        let horizon = opts.horizon + cam.nod;
+        scene_cam.view_proj = roll_about_horizon(cam.roll, aspect, horizon)
+            * projection(opts.fov_y, aspect, horizon)
             * view;
         scene_cam.roll = cam.roll;
-        scene_cam.horizon = opts.horizon;
+        scene_cam.horizon = horizon;
         scene_cam.time = time.elapsed_secs();
         scene_cam.sky_column = sky_left_column(cam.yaw);
         scene_cam.right = right;

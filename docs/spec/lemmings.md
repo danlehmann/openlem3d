@@ -99,7 +99,7 @@ else is **guessed** from the contact sheet's appearance.
 | 369–398 | Drowning (sinking, arms up) | 5 × 6 | **Verified by eye**: a lemming that fell through a dug hole into water in Mayhem 1 showed only the head and raised arms above the water, as in these cells. |
 | 399–423 | **Falling** (arms out, legs dangling) | 5 × 5 (A0 399–403, A1 404–408, A2 409–413, A3 414–418, A4 419–423) | **Verified** for A0 and A4, see "Falling" below. A1–A3 follow the block layout but were not seen in game. |
 | 424–428 | Feet up, seen from above or below | 5 × 1, or 1 × 5 | Guessed. |
-| 429–443 | Lying on the back, feet up | 5 × 3 | Guessed. Not the splat, which leaves no body: the lemming bursts into fragments (owner). |
+| 429–443 | Lying on the back, feet up | 5 × 3 | Guessed. Ours draws its first frame, still, for a stunned lemming lying on its back after a long fall (owner: just on its back, no animation). Not the splat, which leaves no body: the lemming bursts into fragments (owner). |
 | 444–473 | Builder walking between bricks (sack on the back) | 5 × 6 | **Verified by eye**: the Mayhem 1 builder walked between bricks with this sack (side view, as in 450–461). |
 | 474–488 | Builder out of bricks (shrug) | 5 × 3 | Owner recalls the builder shrugging when out of bricks; drawn for 6 ticks (unmeasured) before it walks on. |
 | 489–513 | Standing, arms out, falling over onto the back | 5 × 5 | Guessed: splat, stunned or "oh no". |

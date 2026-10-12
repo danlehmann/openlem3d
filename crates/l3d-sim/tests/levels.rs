@@ -133,3 +133,32 @@ fn replaying_the_log_reproduces_the_game() {
         (played.counts, fingerprint(&played))
     );
 }
+
+/// In Practice "Catapults" (`LEVEL.097`) walkers released at rate 55 walk
+/// over the spring every other time, while at rate 52 all of them are thrown
+/// (owner's observation).
+#[test]
+fn springs_rest_between_throws() {
+    let Some(dir) = data_dir() else {
+        eprintln!("game data not found; skipping");
+        return;
+    };
+    let mut data = GameData::open(&dir).expect("open game data");
+    let level = data.level(97).expect("level");
+    let blocks = data.blocks(97).expect("blocks");
+    let thrown = |rate: i32| {
+        let mut sim = Simulation::new(&level, &blocks);
+        sim.adjust_release_rate(rate - sim.release_rate);
+        assert_eq!(sim.release_rate, rate);
+        let mut seen = [false; 4];
+        for _ in 0..500 {
+            sim.step();
+            for (i, l) in sim.lemmings.iter().take(4).enumerate() {
+                seen[i] |= matches!(l.state, l3d_sim::State::Flying { .. });
+            }
+        }
+        seen
+    };
+    assert_eq!(thrown(52), [true; 4]);
+    assert_eq!(thrown(55), [true, false, true, false]);
+}

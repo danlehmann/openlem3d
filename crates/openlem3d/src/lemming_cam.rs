@@ -73,6 +73,7 @@ impl LemmingCam {
         }
         view.roll = 0.0;
         view.head = 0.0;
+        view.nod = 0.0;
         *self = LemmingCam::Off;
     }
 
@@ -109,10 +110,8 @@ impl LemmingCam {
         view: &ViewCamera,
     ) {
         self.follow(i, view);
-        *highlight = Highlight {
-            on: true,
-            lemming: Some(i),
-        };
+        highlight.on = true;
+        highlight.lemming = Some(i);
         selected.0 = None;
     }
 
@@ -145,6 +144,13 @@ const ROLL_RATE: f32 = 12.0;
 /// held, in radians per second (ours; slow in the original, owner's
 /// observation).
 pub const HEAD_SPEED: f32 = 0.8;
+/// The least distance between the eye and terrain straight ahead.
+const WALL_CLEARANCE: f32 = 0.15;
+/// A mining lemming's nod: how far the horizon moves (a fraction of the
+/// screen's height), and ticks per nod, one swing of its pickaxe (the six
+/// frames of cells 241–270).
+const NOD: f32 = 0.04;
+const NOD_PERIOD: f32 = 6.0;
 /// The least distance between the eye and a deflector's diagonal face.
 /// A walker turns there only once its centre reaches the face, so an eye
 /// above its centre would look through the block.
@@ -177,6 +183,25 @@ impl Trail {
 
 /// `eye`, moved straight out from the diagonal face of any deflector it is
 /// closer to than [`DEFLECTOR_CLEARANCE`] (or behind).
+/// `eye`, moved back from terrain straight ahead along `dir` (at eye level
+/// and a little below) to [`WALL_CLEARANCE`] from it, so that a lemming at
+/// work right against a block, as a miner or basher is, does not see through
+/// it.
+fn off_walls(world: &l3d_sim::World, eye: Vec3, dir: l3d_sim::Dir) -> Vec3 {
+    let [x, _, z] = dir.delta();
+    let ahead = Vec3::new(x as f32, 0.0, z as f32);
+    let solid = |p: Vec3| world.solid(p.to_array().map(|v| (v * SUB as f32).floor() as i32));
+    let steps = 16;
+    (0..=steps)
+        .map(|k| WALL_CLEARANCE * k as f32 / steps as f32)
+        .find(|&s| {
+            [0.0, -0.15]
+                .iter()
+                .any(|&h| solid(eye + ahead * s + Vec3::Y * h))
+        })
+        .map_or(eye, |s| eye - ahead * (WALL_CLEARANCE - s))
+}
+
 fn off_deflectors(world: &l3d_sim::World, mut eye: Vec3) -> Vec3 {
     const DIAGONALS: [[i32; 2]; 4] = [[1, 1], [1, -1], [-1, 1], [-1, -1]];
     for n in DIAGONALS {
@@ -257,6 +282,7 @@ fn follow(
     let Some(mut i) = cam.following() else {
         view.roll = 0.0;
         view.head = 0.0;
+        view.nod = 0.0;
         *entered = None;
         return;
     };
@@ -279,10 +305,8 @@ fn follow(
         i = next;
         switched = true;
         cam.follow(i, &view);
-        *highlight = Highlight {
-            on: true,
-            lemming: Some(i),
-        };
+        highlight.on = true;
+        highlight.lemming = Some(i);
     }
     let l = &sim.lemmings[i];
     let feet = Vec3::from_array(l.pos.map(|v| v as f32 / SUB as f32));
@@ -290,6 +314,7 @@ fn follow(
     // observation).
     if switched || *entered != Some(i) {
         view.head = 0.0;
+        view.nod = 0.0;
     }
     // A turner looks where its arm points, the way it sends walkers
     // (verified in Practice "Turner": riding with a "Turn right" turner, the
@@ -298,9 +323,15 @@ fn follow(
     let yaw = view.head
         + match l.state {
             l3d_sim::State::Turning { to } => to.yaw(),
+            // A blocker stands side-on, as it is drawn (owner's observation).
+            l3d_sim::State::Blocking => l.dir.clockwise().yaw(),
             _ => l.dir.yaw(),
         };
-    let target = off_deflectors(&sim.world, feet + Vec3::Y * EYE_HEIGHT);
+    let target = off_walls(
+        &sim.world,
+        off_deflectors(&sim.world, feet + Vec3::Y * EYE_HEIGHT),
+        l.dir,
+    );
     // Taken on from a lemming that left: straight into its eyes.
     if switched {
         *entered = Some(i);
@@ -337,9 +368,10 @@ fn follow(
     }
     let k = 1.0 - (-FOLLOW_RATE * time.delta_secs()).exp();
     // A slight roll from side to side with the lemming's steps while it
-    // walks, levelling out otherwise.
+    // walks, levelling out otherwise; held still while the game is paused
+    // (owner: the view must not move then).
     let walking = l.state == l3d_sim::State::Walking;
-    if walking {
+    if walking && !game.paused {
         *sway = (*sway + time.delta_secs() * std::f32::consts::TAU / SWAY_PERIOD)
             .rem_euclid(std::f32::consts::TAU);
     }
@@ -349,6 +381,15 @@ fn follow(
         0.0
     };
     view.roll += (roll - view.roll) * (1.0 - (-ROLL_RATE * time.delta_secs()).exp());
+    // Nodding with each swing of a miner's pickaxe while it cracks the
+    // block ahead (owner's observation; the size and timing are ours).
+    view.nod = if l.state == l3d_sim::State::Mining && l.state_ticks < l3d_sim::MINE_CRACK_TICKS {
+        let t = l.state_ticks as f32 + fixed.overstep_fraction();
+        // Looking down onto the block: the horizon moves up.
+        -NOD * (1.0 - (t * std::f32::consts::TAU / NOD_PERIOD).cos()) / 2.0
+    } else {
+        0.0
+    };
     // Turn the short way round.
     let turn = (yaw - view.yaw + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU)
         - std::f32::consts::PI;

@@ -30,21 +30,42 @@ fn main() {
         sim.entrances.len(),
         sim.entrances
     );
+    let skills: Vec<String> = Skill::ALL
+        .iter()
+        .filter(|s| sim.skills_left[**s as usize] > 0)
+        .map(|s| format!("{} {}", s.name(), sim.skills_left[*s as usize]))
+        .collect();
+    println!(
+        "skills: {}; lemmings {}, save {}",
+        skills.join(", "),
+        sim.to_release,
+        level.save_requirement
+    );
     for s in 1..=seconds {
         for _ in 0..TICKS_PER_SECOND {
             sim.step();
             for &(t, i, skill, side) in &assignments {
                 if t == sim.tick {
+                    // Why a refusal happens: none left, or the lemming can't
+                    // take it now (falling, busy, stunned, gone ...).
+                    let why = match sim.lemmings.get(i) {
+                        None => "no such lemming yet".to_string(),
+                        Some(_) if sim.skills_left[skill as usize] == 0 => "none left".to_string(),
+                        Some(l) => format!("lemming is {:?}", l.state),
+                    };
                     let ok = match (side, sim.lemmings.get(i).map(|l| l.dir)) {
                         (Some("cw"), Some(d)) => sim.assign_turner(i, d.clockwise()),
                         (Some("acw"), Some(d)) => sim.assign_turner(i, d.anticlockwise()),
                         _ => sim.assign(i, skill),
                     };
-                    println!(
-                        "tick {t}: assign {} to lemming {i}: {}",
-                        skill.name(),
-                        if ok { "ok" } else { "rejected" }
-                    );
+                    if ok {
+                        println!("tick {t}: assign {} to lemming {i}: ok", skill.name());
+                    } else {
+                        println!(
+                            "tick {t}: assign {} to lemming {i}: rejected ({why})",
+                            skill.name()
+                        );
+                    }
                 }
             }
         }

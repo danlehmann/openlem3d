@@ -35,8 +35,14 @@ const CLIMB_SPEED: i32 = SUB / 25;
 const STEP_UP: i32 = SUB / 4;
 /// Lowest drop a walker steps down without falling (provisional).
 const STEP_DOWN: i32 = SUB / 4;
-/// Falls longer than this splat (bracketed: 2 units survive, 4¼ splat).
+/// Falls longer than this splat (bracketed: 3¾ units survive, about 4 splat;
+/// Fun 2's published route survives a 4-unit drop).
 const SPLAT_HEIGHT: i32 = 4 * SUB;
+/// Shorter falls longer than this leave the lemming on its back for
+/// [`STUN_TICKS`] (owner's observation: falls of 3, 3¼ and 3¾ units from a
+/// miner's tunnel in Practice "Miner" stun, 2¾ does not; the time is ours).
+const STUN_HEIGHT: i32 = 23 * SUB / 8;
+pub const STUN_TICKS: u32 = 28;
 /// Clearance a walker needs above the surface it walks onto: openings exactly
 /// this high (half-height gaps under a lintel) are passable (verified: the
 /// half-unit doorways of Practice "Claustrophobic", `LEVEL.090`).
@@ -65,7 +71,7 @@ const BLAST_RADIUS: i32 = SUB;
 const BLAST_BELOW: i32 = SUB / 2;
 const BLAST_ABOVE: i32 = SUB;
 /// Ticks per segment dug (verified, rough: about 40 ±20%).
-const DIG_TICKS: u32 = 40;
+pub const DIG_TICKS: u32 = 40;
 /// Ticks per brick laid by a builder (verified: 25 ± 1).
 pub const BUILD_TICKS: u32 = 25;
 /// Ticks from the assignment to the first brick: the builder stands still
@@ -76,14 +82,16 @@ const BRICKS: u8 = 6;
 /// How long a builder out of bricks shrugs (cells 474–488, three frames;
 /// two ticks each, unmeasured).
 const SHRUG_TICKS: u32 = 6;
-/// Each brick moves the builder this far forward and ¼ unit up (verified
-/// ±10%); bricks reach from [`BRICK_START`] to [`BRICK_END`] ahead of the
+/// Each brick moves the builder this far forward, 0.55 unit, and ¼ unit up
+/// (measured: 37 px a brick at 67 px a unit in Practice "Builder"; a run of
+/// ½ left the published bridges of Mayhem 1 and Taxing 5 about 0.3 unit
+/// short); bricks reach from [`BRICK_START`] to [`BRICK_END`] ahead of the
 /// feet, about 0.55 unit long (measured), so consecutive bricks overlap.
-const BRICK_RUN: i32 = SUB / 2;
+const BRICK_RUN: i32 = 141;
 const BRICK_START: i32 = SUB / 8;
 const BRICK_END: i32 = SUB / 2 + SUB / 8 + SUB / 16;
 /// Ticks per stroke of a basher (verified: the segments go 32 ticks after the
-/// first crack) and of a miner (rough: about 3.5 s).
+/// first crack).
 pub const BASH_TICKS: u32 = 32;
 /// Ticks from a basher reaching its block to the first crack (measured: about
 /// 7 in the Practice "Basher" demo); its strokes then end every
@@ -92,7 +100,19 @@ pub const BASH_CRACK_START: u32 = 7;
 /// Ticks per swing of a basher's mallets: one cycle of its 8-frame
 /// animation (provisional).
 const BASH_SWING_TICKS: u32 = 8;
-const MINE_TICKS: u32 = 49;
+/// Ticks a miner cracks the block ahead before it breaks; with the walk
+/// across the broken block (a unit at walking speed, 32 ticks) a stroke
+/// takes 49 ticks (rough: one cell about every 3.5 s).
+pub const MINE_CRACK_TICKS: u32 = 17;
+/// How far each block a miner breaks lies below the last (owner's
+/// side-by-side comparison with the original in Practice "Miner": half a
+/// unit cut far too deep a trench; ours, a segment).
+const MINE_DROP: i32 = SUB / 4;
+/// How far before the block ahead a miner stands to mine it: about half
+/// its width, so that it stays in front of the block (owner's observation;
+/// the Practice demo had the miner walk on to the edge of its cell, 14 ticks
+/// from mid-cell, which this supersedes).
+const MINE_STANDOFF: i32 = SUB / 4;
 /// Duration of terminal animations, in ticks (provisional).
 const EXIT_TICKS: u32 = 11;
 pub const DEATH_TICKS: u32 = 14;
@@ -101,6 +121,11 @@ pub const TRAP_BUSY_TICKS: u32 = 28;
 /// How long a spring shows its launch after throwing a lemming (unmeasured:
 /// one tick per frame of its seven-frame animation).
 pub const SPRING_BUSY_TICKS: u32 = 7;
+/// Ticks a spring's sender rests after a throw: a walker reaching it
+/// meanwhile walks over it (owner's observation: in Practice "Catapults"
+/// walkers released 46 ticks apart, rate 55, walk over it every other time;
+/// 49 apart, rate 52, all are thrown).
+const SPRING_REST_TICKS: u32 = 48;
 /// How long a trampoline pad shows its dip after a lemming touches it
 /// (its four frames, one per tick; timing unmeasured).
 pub const PAD_BUSY_TICKS: u32 = 4;
@@ -302,11 +327,13 @@ pub enum State {
     Shrugging,
     /// Removing terrain straight ahead.
     Bashing,
-    /// Removing terrain diagonally ahead and down.
+    /// Removing terrain ahead, a block at a time, each half a unit lower.
     Mining,
     Exiting,
     Exploding,
     Splatting,
+    /// Lying on its back for a moment after a long fall, then walking on.
+    Stunned,
     Drowning,
     /// Killed by the level boundary (the original shows a lightning zap).
     Zapped,
@@ -452,6 +479,8 @@ struct Obstacle {
     pos: [i32; 3],
     /// For turners: the heading walkers are sent off in.
     turn_to: Option<Dir>,
+    /// The heading the blocker or turner had when it stopped.
+    heading: Dir,
 }
 
 /// The state of a level being played.
@@ -617,12 +646,16 @@ impl Simulation {
         }
         self.skills_left[skill as usize] -= 1;
         let l = &mut self.lemmings[i];
-        // Switched from another terrain skill, a basher or miner starts where
-        // it stands (provisional).
+        // Switched from another terrain skill, or given more bricks, a
+        // lemming starts where it stands (provisional).
         if l.state != State::Walking
             && let Some(s) = match skill {
                 Skill::Basher => Some(State::Bashing),
                 Skill::Miner => Some(State::Mining),
+                Skill::Digger => Some(State::Digging),
+                Skill::Builder => Some(State::Building {
+                    bricks_left: BRICKS,
+                }),
                 _ => None,
             }
         {
@@ -633,8 +666,8 @@ impl Simulation {
             Skill::Climber => l.climber = true,
             Skill::Floater => l.floater = true,
             Skill::Bomber => l.fuse = Some(FUSE_TICKS),
-            // Diggers and builders start where they stand; the others walk on
-            // to the next cell first (measured).
+            // Diggers and builders start at the middle of their cell, miners
+            // a little before its edge, the others at the edge (see `update`).
             Skill::Blocker => l.pending = Some(State::Blocking),
             // The turner's own left (the one verified case; see `assign_turner`).
             Skill::Turner => {
@@ -642,10 +675,12 @@ impl Simulation {
                     to: l.dir.anticlockwise(),
                 })
             }
-            Skill::Digger => l.set_state(State::Digging),
-            Skill::Builder => l.set_state(State::Building {
-                bricks_left: BRICKS,
-            }),
+            Skill::Digger => l.pending = Some(State::Digging),
+            Skill::Builder => {
+                l.pending = Some(State::Building {
+                    bricks_left: BRICKS,
+                })
+            }
             Skill::Basher => l.pending = Some(State::Bashing),
             Skill::Miner => l.pending = Some(State::Mining),
         }
@@ -718,6 +753,7 @@ impl Simulation {
         }
         for o in &mut self.objects {
             o.busy = o.busy.saturating_sub(1);
+            o.rest = o.rest.saturating_sub(1);
         }
         let obstacles: Vec<Obstacle> = self
             .lemmings
@@ -727,10 +763,12 @@ impl Simulation {
                 State::Blocking => Some(Obstacle {
                     pos: l.pos,
                     turn_to: None,
+                    heading: l.dir,
                 }),
                 State::Turning { to } => Some(Obstacle {
                     pos: l.pos,
                     turn_to: Some(to),
+                    heading: l.dir,
                 }),
                 _ => None,
             })
@@ -781,7 +819,7 @@ impl Simulation {
             State::Bashing if on(BASH_SWING_TICKS) && self.bash_cell_full(after) => {
                 Some(Event::Bashed)
             }
-            State::Mining if on(MINE_TICKS) => Some(Event::Mined),
+            State::Mining if after.state_ticks == MINE_CRACK_TICKS => Some(Event::Mined),
             _ => None,
         }
     }
@@ -881,6 +919,11 @@ impl Simulation {
                     self.counts.dead += 1;
                 }
             }
+            State::Stunned => {
+                if l.state_ticks >= STUN_TICKS {
+                    l.set_state(State::Walking);
+                }
+            }
             State::Exploding | State::Splatting | State::Drowning | State::Zapped => {
                 if l.state_ticks >= DEATH_TICKS {
                     l.gone = true;
@@ -892,7 +935,11 @@ impl Simulation {
             State::Walking | State::Sliding => {
                 // A pending skill starts at the edge of the cell, where the
                 // next step would cross it, standing on the edge (before any
-                // fall beyond it).
+                // fall beyond it); a digger at the middle of the cell, where the
+                // next step would reach or pass it (owner's observation: it
+                // starts in the middle of a block); a builder at the middle or
+                // the edge, whichever comes first ([LOAP]; the owner saw it walk
+                // on with the sack before building).
                 let d = l.dir.delta();
                 let (x, z) = (l.pos[0] + d[0] * WALK_SPEED, l.pos[2] + d[2] * WALK_SPEED);
                 let crossing = x.div_euclid(SUB) != l.pos[0].div_euclid(SUB)
@@ -906,8 +953,40 @@ impl Simulation {
                         v
                     }
                 };
+                let mid = |v: i32| v.div_euclid(SUB) * SUB + SUB / 2;
+                let at_mid = |v: i32, step: i32| {
+                    step == 0
+                        || ((v - mid(v)) * step <= 0
+                            && (v + step * WALK_SPEED - mid(v)) * step >= 0)
+                };
+                let to_middle = matches!(l.pending, Some(State::Building { .. } | State::Digging));
                 if l.state == State::Walking
+                    && to_middle
+                    && at_mid(l.pos[0], d[0])
+                    && at_mid(l.pos[2], d[2])
+                    && let Some(s) = l.pending.take()
+                {
+                    if d[0] != 0 {
+                        l.pos[0] = mid(l.pos[0]);
+                    }
+                    if d[2] != 0 {
+                        l.pos[2] = mid(l.pos[2]);
+                    }
+                    l.set_state(s);
+                } else if l.state == State::Walking
+                    && l.pending == Some(State::Mining)
+                    && Self::to_edge(l.pos, d) - WALK_SPEED <= MINE_STANDOFF
+                    && let Some(s) = l.pending.take()
+                {
+                    // A miner a little earlier, in front of the block ahead
+                    // (owner's observation).
+                    if Self::to_edge(l.pos, d) > MINE_STANDOFF {
+                        l.pos = Self::mine_stand(l.pos, d);
+                    }
+                    l.set_state(s);
+                } else if l.state == State::Walking
                     && crossing
+                    && (!to_middle || matches!(l.pending, Some(State::Building { .. })))
                     && let Some(s) = l.pending.take()
                 {
                     l.pos[0] = edge(l.pos[0], d[0]);
@@ -918,20 +997,23 @@ impl Simulation {
                     self.walk(l, obstacles);
                     // Or at a wall that would turn the walker round, facing
                     // the wall (the original's basher demo bashes the crate it
-                    // walked up to). A miner steps up to the cell's edge when
+                    // walked up to). A miner steps up to its place before the cell's edge when
                     // the wall starts there, so that it mines the wall and not
                     // the cell it stands in (measured: the skills start at the
                     // edge of the cell; inferred: in Tricky 3 "This Is the
                     // Army" a miner on a thin plank mines through the wall
                     // ahead; bashers stay put, their stroke reaching the wall
-                    // either way).
+                    // either way). A builder turns and walks back to the
+                    // middle (ours).
                     if l.state == State::Walking
                         && l.dir == dir.reverse()
+                        && !to_middle
                         && let Some(s) = l.pending.take()
                     {
                         l.dir = dir;
-                        let at = [edge(l.pos[0], d[0]), l.pos[1], edge(l.pos[2], d[2])];
+                        let at = Self::mine_stand(l.pos, d);
                         if s == State::Mining
+                            && Self::to_edge(l.pos, d) > MINE_STANDOFF
                             && [SUB / 8, HEAD_HEIGHT - 1]
                                 .iter()
                                 .all(|&h| !self.world.solid([at[0], at[1] + h, at[2]]))
@@ -1140,7 +1222,8 @@ impl Simulation {
     /// Springs: a walker stepping onto a sender (an even value) is thrown in
     /// an arc onto its receiver (the next value up; the last of each value
     /// works [L3DEdit]) and lands unhurt, walking on in its old direction.
-    /// Flight time and arc height are unmeasured.
+    /// Flight time and arc height are unmeasured. A sender still resting
+    /// from a throw ([`SPRING_REST_TICKS`]) lets a walker walk over it.
     fn spring(&mut self, l: &mut Lemming) {
         if self.object_kind != Some(objects::ObjectKind::Spring)
             || !matches!(l.state, State::Walking | State::Sliding)
@@ -1159,6 +1242,19 @@ impl Simulation {
         let (Some(receiver), true) = (last(value + 1), last(value) == Some(sender)) else {
             return;
         };
+        if self.objects[sender].rest > 0 {
+            // Resting on until the walker is off the far side.
+            let d = l.dir.delta();
+            let left = |v: i32, step: i32| match step {
+                1 => SUB - v.rem_euclid(SUB),
+                -1 => v.rem_euclid(SUB) + 1,
+                _ => 0,
+            };
+            let ticks = (left(l.pos[0], d[0]).max(left(l.pos[2], d[2])) / WALK_SPEED) as u32;
+            let o = &mut self.objects[sender];
+            o.rest = o.rest.max(ticks + 1);
+            return;
+        }
         let o = self.objects[receiver];
         let to = [
             o.cell[0] * SUB + SUB / 2,
@@ -1169,6 +1265,7 @@ impl Simulation {
         let ticks = ((span * SPRING_TICKS_PER_UNIT) as u32).max(8);
         let peak = (span * SPRING_ARC * SUB as f32) as i32;
         self.objects[sender].busy = SPRING_BUSY_TICKS;
+        self.objects[sender].rest = SPRING_REST_TICKS;
         l.set_state(State::Flying {
             from: l.pos,
             to,
@@ -1414,8 +1511,12 @@ impl Simulation {
         let water = !on_block && self.world.floor(l.pos[0], l.pos[2]) == Floor::Water;
         if liquid || water {
             l.set_state(State::Drowning);
-        } else if fell > SPLAT_HEIGHT && !ground_flags.is_some_and(|f| f & flags::NO_SPLAT != 0) {
+        } else if ground_flags.is_some_and(|f| f & flags::NO_SPLAT != 0) {
+            l.set_state(State::Walking);
+        } else if fell > SPLAT_HEIGHT {
             l.set_state(State::Splatting);
+        } else if fell > STUN_HEIGHT {
+            l.set_state(State::Stunned);
         } else {
             l.set_state(State::Walking);
         }
@@ -1531,6 +1632,14 @@ impl Simulation {
             return;
         }
         let d = l.dir.delta();
+        // A builder standing a hair above a segment line (on the thin edge
+        // of a ramp) builds from the line, so that walkers can step onto its
+        // first brick (Fun 10 "Castle Lemmalot", whose published staircase
+        // starts at the foot of a ramp).
+        let above = l.pos[1].rem_euclid(SUB / 4);
+        if bricks_left == BRICKS && above > 0 && above < SUB / 16 {
+            l.pos[1] -= above;
+        }
         let template = match self
             .world
             .block(Self::cell_of([l.pos[0], l.pos[1] - 1, l.pos[2]]))
@@ -1700,64 +1809,172 @@ impl Simulation {
         }
     }
 
-    /// Removes the terrain ahead at and below the feet, stepping forward and
-    /// down a segment per stroke (provisional).
-    fn mine(&mut self, l: &mut Lemming) {
-        if !l.state_ticks.is_multiple_of(MINE_TICKS) {
-            return;
-        }
-        let d = l.dir.delta();
-        // One swing moves the miner a quarter unit forward and down (45°),
-        // clearing the space its body needs there: from the new feet up to
-        // above head height, from just ahead of the feet to past the
-        // walker's reach. A miner standing at a cell's edge works on the
-        // cell ahead and leaves the one it stands in (inferred: in Tricky 3
-        // "This Is the Army" a miner on a thin plank mines the wall ahead).
-        let feet = l.pos[1] - SUB / 4;
-        if feet < GROUND {
-            // The level bottom can't be mined.
-            l.set_state(State::Walking);
-            return;
-        }
-        let (y0, y1) = (feet, feet + HEAD_HEIGHT + STEP_UP);
-        let (h0, h1) = (1, SUB / 4 + REACH + WALK_SPEED);
-        let mut removed = false;
-        for along in (h0..=h1).step_by((SUB / 8) as usize) {
-            let p = [l.pos[0] + d[0] * along, l.pos[2] + d[2] * along];
-            let mut cells: Vec<([i32; 3], u8)> = Vec::new();
-            for y in (y0..y1).step_by((SUB / 4) as usize) {
-                let c = Self::cell_of([p[0], y, p[1]]);
-                let seg = (y - c[1] * SUB) / (SUB / 4);
-                match cells.iter_mut().find(|(k, _)| *k == c) {
-                    Some((_, m)) => *m |= 1 << seg,
-                    None => cells.push((c, 1 << seg)),
-                }
-            }
-            for (c, mask) in cells {
-                let Some((b, f)) = self.world.block(c) else {
-                    continue;
-                };
-                if b.segments & mask == 0 {
-                    continue;
-                }
-                if f & flags::STEEL != 0 || !self.world.remove_segments_towards(c, mask, Some(d)) {
-                    // Steel, or a one-way block facing the other way.
-                    l.set_state(State::Walking);
-                    return;
-                }
-                removed = true;
-            }
-        }
-        if !removed && self.world.solid([l.pos[0], l.pos[1] - 1, l.pos[2]]) {
-            // Nothing left to mine but ground ahead: walk on.
-            l.set_state(State::Walking);
-            return;
-        }
-        l.pos[0] += d[0] * (SUB / 4);
-        l.pos[2] += d[2] * (SUB / 4);
-        // Stand on whatever is left below; out in the open, fall.
-        self.settle(l);
+    /// The block a miner breaks, for a miner whose feet are at `feet` with
+    /// the block ahead in column `ahead` (x, z): the cells there and the
+    /// segments cleared in each, from [`MINE_DROP`] below the feet to a
+    /// walker's headroom above them; and its feet afterwards.
+    fn mine_plan(feet: i32, ahead: [i32; 2]) -> (Vec<([i32; 3], u8)>, i32) {
+        // Feet are on a quarter-unit step. The cut's top: in Practice "Miner"
+        // a miner starting on the plank (top 5¼) on the tower (top 5) leaves
+        // ground above from its fourth block on (owner's observation).
+        let feet = (feet + SUB / 8).div_euclid(SUB / 4) * (SUB / 4);
+        let (bottom, top) = (feet - MINE_DROP, feet + HEAD_HEIGHT);
+        let cells = (bottom.div_euclid(SUB)..=(top - 1).div_euclid(SUB))
+            .map(|y| {
+                let mask = (0..4)
+                    .filter(|s| {
+                        let lo = y * SUB + s * SUB / 4;
+                        lo + SUB / 4 > bottom && lo < top
+                    })
+                    .fold(0u8, |m, s| m | 1 << s);
+                ([ahead[0], y, ahead[1]], mask)
+            })
+            .collect();
+        (cells, bottom)
     }
+
+    /// The plan for the block ahead of miner `l`: the column after the one
+    /// it stands in.
+    fn mine_plan_for(l: &Lemming) -> (Vec<([i32; 3], u8)>, i32) {
+        let d = l.dir.delta();
+        let c = Self::cell_of(l.pos);
+        Self::mine_plan(l.pos[1], [c[0] + d[0], c[2] + d[2]])
+    }
+
+    /// Of a miner's plan: the cells and segments with terrain in them, and
+    /// whether all of it gives way to mining towards `d` (no steel, no
+    /// one-way block facing elsewhere).
+    fn mine_present(&self, cells: &[([i32; 3], u8)], d: [i32; 3]) -> (Vec<([i32; 3], u8)>, bool) {
+        let present: Vec<_> = cells
+            .iter()
+            .filter_map(|&(c, mask)| {
+                let m = self.world.block(c).map_or(0, |(b, _)| b.segments) & mask;
+                (m != 0).then_some((c, m))
+            })
+            .collect();
+        let ok = present
+            .iter()
+            .all(|&(c, _)| self.world.breakable_towards(c, Some(d)));
+        (present, ok)
+    }
+
+    /// For a miner cracking the block ahead: the cells and segments being
+    /// broken there, and the ticks since the cracks began (0 to
+    /// [`MINE_CRACK_TICKS`] − 2). `None` otherwise.
+    pub fn mine_target(&self, l: &Lemming) -> Option<(Vec<([i32; 3], u8)>, u32)> {
+        if l.state != State::Mining || !(1..MINE_CRACK_TICKS).contains(&l.state_ticks) {
+            return None;
+        }
+        let (cells, _) = Self::mine_plan_for(l);
+        let (present, _) = self.mine_present(&cells, l.dir.delta());
+        Some((present, l.state_ticks - 1))
+    }
+
+    /// Mining (owner's observation): standing at the end of its block, the
+    /// miner cracks the block ahead and breaks it, clearing it from half a
+    /// unit below its feet up to the space its body needs (a blocky
+    /// tunnel, half a unit down per block), then steps down into it, walks
+    /// to its far end and starts again. It stops at steel, at a one-way
+    /// block facing the other way, when nothing is left to remove, and at
+    /// the level bottom; it falls if it breaks out into the open.
+    fn mine(&mut self, l: &mut Lemming) {
+        let d = l.dir.delta();
+        let next = [l.pos[0] + d[0] * WALK_SPEED, l.pos[2] + d[2] * WALK_SPEED];
+        // A stroke starts on tick 1 (the count goes up before each update),
+        // [`MINE_STANDOFF`] before the end of the block stood on: one set to
+        // mine further back walks there first.
+        if l.state_ticks == 1 && Self::to_edge(l.pos, d) > MINE_STANDOFF {
+            l.pos[0] = next[0];
+            l.pos[2] = next[1];
+            if Self::to_edge(l.pos, d) <= MINE_STANDOFF {
+                l.pos = Self::mine_stand(l.pos, d);
+            }
+            if self.settle(l) {
+                l.state_ticks = 0;
+            }
+            return;
+        }
+        if l.state_ticks == 1 {
+            let (cells, bottom) = Self::mine_plan_for(l);
+            let (present, ok) = self.mine_present(&cells, d);
+            if present.is_empty() || !ok || bottom < GROUND {
+                l.set_state(State::Walking);
+                return;
+            }
+        }
+        if l.state_ticks < MINE_CRACK_TICKS {
+            return;
+        }
+        if l.state_ticks == MINE_CRACK_TICKS {
+            let (cells, _) = Self::mine_plan_for(l);
+            let (present, ok) = self.mine_present(&cells, d);
+            if !ok {
+                l.set_state(State::Walking);
+                return;
+            }
+            for (c, mask) in present {
+                self.world.remove_segments_towards(c, mask, Some(d));
+            }
+        }
+        // A unit on, into the broken block, down onto what is left of it (a
+        // segment down; out in the open, it falls), to the same place in it,
+        // where the next stroke starts.
+        l.pos[0] = next[0];
+        l.pos[2] = next[1];
+        let (ground, _) = self
+            .world
+            .surface_below(l.pos[0], l.pos[1] + STEP_UP, l.pos[2]);
+        if ground < l.pos[1] - MINE_DROP {
+            let from = l.pos[1];
+            l.set_state(State::Falling { from_y: from });
+            return;
+        }
+        l.pos[1] = ground;
+        if l.state_ticks + 1 == MINE_CRACK_TICKS + (SUB / WALK_SPEED) as u32 {
+            l.state_ticks = 0;
+        }
+    }
+
+    /// Sub-units from `pos` to the far side of its cell along `d` (1 at the
+    /// last position inside it).
+    fn to_edge(pos: [i32; 3], d: [i32; 3]) -> i32 {
+        let along = |v: i32, s: i32| match s.signum() {
+            1 => (v.div_euclid(SUB) + 1) * SUB - v,
+            -1 => v - v.div_euclid(SUB) * SUB + 1,
+            _ => i32::MAX,
+        };
+        along(pos[0], d[0]).min(along(pos[2], d[2]))
+    }
+
+    /// Where a miner at `pos` facing `d` stands to mine the block ahead:
+    /// [`MINE_STANDOFF`] before the far side of its cell.
+    fn mine_stand(pos: [i32; 3], d: [i32; 3]) -> [i32; 3] {
+        let at = |v: i32, s: i32| match s.signum() {
+            1 => (v.div_euclid(SUB) + 1) * SUB - MINE_STANDOFF,
+            -1 => v.div_euclid(SUB) * SUB + MINE_STANDOFF - 1,
+            _ => v,
+        };
+        [at(pos[0], d[0]), pos[1], at(pos[2], d[2])]
+    }
+
+    /// For a digger: the cell under it, the segment it is digging out there
+    /// (the highest one present), and the ticks since it started on that
+    /// segment (0 to [`DIG_TICKS`] − 1). `None` otherwise or with nothing to
+    /// dig.
+    pub fn dig_target(&self, l: &Lemming) -> Option<([i32; 3], u8, u32)> {
+        if l.state != State::Digging {
+            return None;
+        }
+        let c = [
+            l.pos[0].div_euclid(SUB),
+            (l.pos[1] - 1).div_euclid(SUB),
+            l.pos[2].div_euclid(SUB),
+        ];
+        let (b, _) = self.world.block(c)?;
+        let top = (7 - b.segments.leading_zeros()).min(3);
+        Some((c, 1 << top, l.state_ticks % DIG_TICKS))
+    }
+
     fn dig(&mut self, l: &mut Lemming) {
         if !l.state_ticks.is_multiple_of(DIG_TICKS) {
             return;
@@ -1865,14 +2082,20 @@ impl Simulation {
                 // Turners send walkers off from the centre of the turner's
                 // cell, ahead of the turner standing at its edge (owner's
                 // observation); a walker already past the centre turns once
-                // it is level with the turner.
+                // it is level with the turner. That is for walkers coming up
+                // behind it along the line it came on; others are turned only
+                // where they meet the turner itself, so that one crossing its
+                // cell elsewhere, as when coming back from a wall the turner
+                // points at, walks on (owner's observation: such walkers were
+                // not caught in a loop).
                 Some(to) if to != l.dir && (Self::cell_of(o.pos) == here || near(next)) => {
                     let axis = if d[0] != 0 { 0 } else { 2 };
                     let centre = o.pos[axis].div_euclid(SUB) * SUB + SUB / 2;
                     let crosses = |at: i32| {
                         (at - l.pos[axis]) * d[axis] > 0 && (at - next[axis]) * d[axis] <= 0
                     };
-                    let at = if Self::cell_of(o.pos) == here && crosses(centre) {
+                    let behind = l.dir == o.heading;
+                    let at = if behind && Self::cell_of(o.pos) == here && crosses(centre) {
                         Some(centre)
                     } else if near(next) && crosses(o.pos[axis]) {
                         Some(o.pos[axis])

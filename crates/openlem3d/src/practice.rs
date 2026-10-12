@@ -99,11 +99,13 @@ const ITEMS: [(Source, &str); 21] = [
 const TICK: usize = 39;
 const FPS: f32 = 12.0;
 
-/// Uploaded frames per item, and the tick.
+/// Uploaded frames per item, the tick and the umbrella.
 #[derive(Resource)]
 struct Pics {
     items: Vec<Vec<Handle<Image>>>,
     tick: Handle<Image>,
+    /// The floater's umbrella, drawn over its icon as on the skill panel.
+    umbrella: Option<Handle<Image>>,
 }
 
 fn upload(
@@ -142,12 +144,12 @@ fn load(mut commands: Commands, mut data: ResMut<Data>, mut images: ResMut<Asset
         cut(&sheets::DEFLICON),
         cut(&sheets::PRACICON),
     );
-    let panel = d
+    let icons = d
         .read("GFX/ICONS.RNC")
         .ok()
-        .and_then(|raw| Icons::parse(&raw).ok())
-        .map(|i| i.panel)
-        .unwrap_or_default();
+        .and_then(|raw| Icons::parse(&raw).ok());
+    let umbrella = icons.as_ref().map(|i| i.umbrella.clone());
+    let panel = icons.map(|i| i.panel).unwrap_or_default();
     if mini.is_empty() || prac.len() <= TICK {
         return;
     }
@@ -173,7 +175,12 @@ fn load(mut commands: Commands, mut data: ResMut<Data>, mut images: ResMut<Asset
         })
         .collect();
     let tick = up(&prac[TICK..=TICK]).remove(0);
-    commands.insert_resource(Pics { items, tick });
+    let umbrella = umbrella.map(|u| upload(&u, &pal, &mut images));
+    commands.insert_resource(Pics {
+        items,
+        tick,
+        umbrella,
+    });
 }
 
 /// An icon: its index in [`ITEMS`].
@@ -230,6 +237,22 @@ fn spawn_grid(
             ))
             .id();
         commands.entity(canvas).add_child(e);
+        // The floater holds its umbrella, a tile of its own above the icon,
+        // placed as on the skill panel (owner's observation).
+        if matches!(ITEMS[i].0, Source::Skill(8))
+            && let Some(umbrella) = &pics.umbrella
+        {
+            let u = commands
+                .spawn((
+                    image_at(
+                        umbrella.clone(),
+                        at(cx - size / 2.0 - 2.0, cy - size / 2.0 - 25.0, 32.0, 32.0),
+                    ),
+                    Pickable::IGNORE,
+                ))
+                .id();
+            commands.entity(canvas).add_child(u);
+        }
         if i < 20 && settings.completed.contains(&level_of(i)) {
             let t = commands
                 .spawn((

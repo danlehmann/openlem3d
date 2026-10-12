@@ -28,8 +28,10 @@ pub mod offsets {
 
 /// The height bar at the right edge of the screen, 12×200: a wooden column
 /// with a groove down the middle and a red corner mark, at this offset into
-/// the wooden pieces.
-pub const HEIGHT_BAR: usize = 948;
+/// the wooden pieces. It ends where the knob begins; three bytes later,
+/// each row would wrap round by three pixels, putting the red mark three
+/// pixels in from the screen edge (owner's comparison).
+pub const HEIGHT_BAR: usize = 945;
 /// The height bar's knob, 9×8: a yellow square in a black frame, at this
 /// offset into the wooden pieces.
 pub const KNOB: usize = 3_345;

@@ -57,6 +57,8 @@ pub struct Object {
     pub surface: i32,
     /// Ticks left before a trap can fire again.
     pub busy: u32,
+    /// Ticks left before a spring's sender throws another lemming.
+    pub rest: u32,
 }
 
 impl Object {
@@ -87,6 +89,7 @@ pub fn level_objects(level: &Level) -> Option<(ObjectKind, Vec<Object>)> {
                 value: o.kind,
                 surface,
                 busy: 0,
+                rest: 0,
             })
         })
         .collect();

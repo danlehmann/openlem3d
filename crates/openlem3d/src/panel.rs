@@ -21,7 +21,8 @@ pub struct PanelPlugin;
 
 impl Plugin for PanelPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, (load_art, spawn_panel).chain())
+        app.init_resource::<SkillFlash>()
+            .add_systems(Startup, (load_art, spawn_panel).chain())
             .add_systems(
                 Update,
                 (
@@ -583,7 +584,11 @@ fn buttons(
     mut pending_turner: ResMut<crate::hud::PendingTurner>,
     scene_camera: Res<crate::scene_render::SceneCamera>,
     windows: Query<&Window>,
-    (time, mut last_bomb_click): (Res<Time<Real>>, Local<Option<f32>>),
+    (time, mut last_bomb_click, mut flash): (
+        Res<Time<Real>>,
+        Local<Option<f32>>,
+        ResMut<SkillFlash>,
+    ),
 ) {
     for (interaction, action) in &pressed {
         if *interaction != Interaction::Pressed {
@@ -598,19 +603,24 @@ fn buttons(
                 if sim.skills_left[s as usize] > 0 {
                     match highlight.lemming.filter(|_| !paused) {
                         // Given straight to the highlighted lemming, without
-                        // selecting the skill (seen in the original); a turner
-                        // then waits for the click on the side it points to
-                        // (riding with it, still with nothing selected).
+                        // selecting the skill (seen in the original); its
+                        // button plays its animation once, and the next click
+                        // highlights again (owner's observation). A turner
+                        // then waits for the click on the side it points to,
+                        // still with nothing selected.
                         Some(i) if s == Skill::Turner => {
-                            if lemming_cam.following() != Some(i) {
-                                selected.0 = Some(s);
-                            }
                             if sim.can_assign(i, s) {
                                 pending_turner.0 = Some(i);
+                                highlight.last_skill = Some(s);
+                                flash.0 = Some((s, time.elapsed_secs()));
                             }
                         }
                         Some(i) => {
                             let ok = sim.assign(i, s);
+                            if ok {
+                                highlight.last_skill = Some(s);
+                                flash.0 = Some((s, time.elapsed_secs()));
+                            }
                             sfx.write(crate::sfx::Sfx(if ok {
                                 "VOXFX/OK2"
                             } else {
@@ -662,6 +672,9 @@ fn buttons(
                         lemming_cam.ride(next, &mut highlight, &mut selected, view);
                     }
                 } else if highlight.on {
+                    // The last skill given while highlighting becomes the
+                    // selected one (owner's observation).
+                    selected.0 = highlight.last_skill;
                     *highlight = crate::hud::Highlight::default();
                 } else {
                     selected.0 = None;
@@ -671,6 +684,7 @@ fn buttons(
                     *highlight = crate::hud::Highlight {
                         on: true,
                         lemming: crate::hud::nearest_to_centre(sim, &scene_camera, size),
+                        last_skill: None,
                     };
                 }
             }
@@ -834,6 +848,7 @@ fn animate(
     mut items: Query<(&Animated, &mut ImageNode)>,
     highlight: Res<crate::hud::Highlight>,
     mut nuked_at: Local<Option<f32>>,
+    (flash, real): (Res<SkillFlash>, Res<Time<Real>>),
 ) {
     let Some(art) = art else { return };
     let t = time.elapsed_secs();
@@ -852,12 +867,22 @@ fn animate(
         let image = match *anim {
             Animated::Skill(s) => {
                 let cells = SKILL_BUTTONS[s as usize].1;
-                // The selected skill animates while any are left.
+                // The selected skill animates while any are left, but never
+                // alongside highlighting; a skill just given to the
+                // highlighted lemming plays its animation once (owner's
+                // observation).
                 let left = game
                     .sim
                     .as_ref()
                     .is_some_and(|sim| sim.skills_left[s as usize] > 0);
-                let frame = if selected.0 == Some(s) && left {
+                let once = flash
+                    .0
+                    .filter(|&(f, _)| f == s)
+                    .map(|(_, at)| ((real.elapsed_secs() - at) * SKILL_FPS / 4.0) as usize)
+                    .filter(|&k| k < cells.len());
+                let frame = if let Some(k) = once {
+                    k
+                } else if selected.0 == Some(s) && left && !highlight.on {
                     (t * SKILL_FPS / 4.0) as usize % cells.len()
                 } else {
                     0
@@ -1141,3 +1166,9 @@ fn caption(
         commands.entity(entity).add_child(g);
     }
 }
+
+/// A skill given straight to the highlighted lemming, and when (real
+/// seconds): its button plays its animation once, though nothing is
+/// selected (owner's observation).
+#[derive(Resource, Default)]
+struct SkillFlash(Option<(Skill, f32)>);

@@ -151,11 +151,15 @@ pub fn lemming_near(
 /// the arrow's click, which highlights the lemming nearest the middle of
 /// the view, until the arrow is clicked again; meanwhile a click on a
 /// lemming moves the highlight to it. The highlighted lemming carries an
-/// arrow, a skill clicked is given to it, and the face rides along with it.
+/// arrow, a skill clicked is given to it without being selected, and the
+/// face rides along with it.
 #[derive(Resource, Default)]
 pub struct Highlight {
     pub on: bool,
     pub lemming: Option<usize>,
+    /// The last skill given while highlighting; it becomes the selected
+    /// skill when highlighting is switched off (owner's observation).
+    pub last_skill: Option<Skill>,
 }
 
 /// The lemming a first turner click picked; the next click picks the side it
@@ -192,10 +196,11 @@ pub(crate) fn assign_on_pointer(
     let Some(sim) = &mut game.sim else { return };
     let picking = lemming_cam.picking();
     let following = lemming_cam.following();
-    // A turner given to the lemming ridden with waits for its side without
-    // being selected.
-    if (selected.0 != Some(Skill::Turner) && (following.is_none() || pending.0 != following))
-        || mouse.just_pressed(settings.turn_button())
+    // A turner given to the lemming ridden with, or to the highlighted one,
+    // waits for its side without being selected.
+    let waiting = pending.0.is_some()
+        && (pending.0 == following || (highlight.on && pending.0 == highlight.lemming));
+    if (selected.0 != Some(Skill::Turner) && !waiting) || mouse.just_pressed(settings.turn_button())
     {
         pending.0 = None;
     }

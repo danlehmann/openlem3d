@@ -227,6 +227,9 @@ fn anim_for(state: State) -> Anim {
         State::Shrugging => once(474, 3, Five),
         State::Drowning => once(369, 6, Five),
         State::Splatting => once(429, 3, Five),
+        // Lying still on the back, feet up (cells 429–443, the first frame:
+        // owner's observation, no animation; see `build`).
+        State::Stunned => once(429, 3, Five),
         State::Zapped | State::Trapped => anim(514, 2, Five),
         // Reaching up the wall and pulling the knees up (cells 121–160).
         State::Climbing => anim(121, 8, Five),
@@ -327,6 +330,10 @@ fn objects(b: &mut LayerBuilder, sim: &Simulation, tex: [f32; 2]) {
             // Teleporter and spring pads are in the static scene too; a
             // spring shows its launch (frames 1–7, side on) while busy.
             ObjectKind::Teleporter => continue,
+            // A sender (even value) stands as the spring at rest, frame 1;
+            // the receiver is the flat target in the static scene (owner:
+            // the sender is not drawn as the target).
+            ObjectKind::Spring if o.busy == 0 && o.value % 2 == 0 => 1,
             ObjectKind::Spring if o.busy == 0 => continue,
             ObjectKind::Spring => 1 + (l3d_sim::SPRING_BUSY_TICKS - o.busy).min(6),
         };
@@ -501,6 +508,221 @@ fn deflector_face(sim: &Simulation, cell: [i32; 3], y: f32) -> Option<[f32; 2]> 
         .map(|n| n.map(|v| v as f32 * std::f32::consts::FRAC_1_SQRT_2))
 }
 
+/// The black cracks of `OVERLAY.000` (frame `frame`) over the sides of the
+/// segments in `mask` of `cell`.
+fn draw_cracks(
+    b: &mut LayerBuilder,
+    sim: &Simulation,
+    cell: [i32; 3],
+    mask: u8,
+    frame: u32,
+    tex: [f32; 2],
+) {
+    let crack = CRACK_ATLAS_FIRST + frame.min(CRACK_FRAMES - 1);
+    let c = cell.map(|v| v as f32);
+    let (cx, cy) = (
+        (crack % ATLAS_COLUMNS) * LEMMING_CELL,
+        (crack / ATLAS_COLUMNS) * LEMMING_CELL,
+    );
+    // Each segment's slice of the overlay: segment s (0 at the bottom) is
+    // the face's texel rows (3 − s)·16 to (4 − s)·16, on each of the
+    // block's sides there: the cube faces it fills, and a deflector's
+    // diagonal face.
+    for s in (0..4).filter(|s| mask & (1 << s) != 0) {
+        let rect = [cx as f32, cy as f32 + (3 - s) as f32 * 16.0, 64.0, 16.0];
+        let y = c[1] + s as f32 * 0.25;
+        let filled = |x: f32, z: f32| {
+            let at = |v: f32| (v * l3d_sim::SUB as f32) as i32;
+            sim.world.block_at([at(x), at(y + 0.125), at(z)]).is_some()
+        };
+        for n in [[1.0, 0.0], [-1.0, 0.0], [0.0, 1.0], [0.0, -1.0]] {
+            if !filled(c[0] + 0.5 + n[0] * 0.45, c[2] + 0.5 + n[1] * 0.45) {
+                continue;
+            }
+            let centre = [
+                c[0] + 0.5 + n[0] * (0.5 + CRACK_OFFSET),
+                y,
+                c[2] + 0.5 + n[1] * (0.5 + CRACK_OFFSET),
+            ];
+            b.vertical_quad(centre, n, 1.0, 0.25, rect, tex, 1.0);
+        }
+        if let Some(n) = deflector_face(sim, cell, y + 0.125) {
+            let centre = [
+                c[0] + 0.5 + n[0] * CRACK_OFFSET,
+                y,
+                c[2] + 0.5 + n[1] * CRACK_OFFSET,
+            ];
+            b.vertical_quad(centre, n, std::f32::consts::SQRT_2, 0.25, rect, tex, 1.0);
+        }
+    }
+}
+
+/// The mine effects: the cracks spreading over the block ahead of a miner,
+/// one frame a tick, and pieces of it flying back out of its face (the
+/// original shows both, owner's observation; timing, counts and speeds
+/// ours, after the basher's).
+fn mine_effects(b: &mut LayerBuilder, sim: &Simulation, blocks: Option<&BlockSet>, tex: [f32; 2]) {
+    for (i, l) in sim.lemmings.iter().enumerate().filter(|(_, l)| !l.gone) {
+        let Some((cells, t)) = sim.mine_target(l) else {
+            continue;
+        };
+        for &(cell, mask) in &cells {
+            draw_cracks(b, sim, cell, mask, t, tex);
+        }
+        let Some(&(cell, _)) = cells.first() else {
+            continue;
+        };
+        let id = sim.world.block(cell).map_or(0, |(b, _)| b.id as usize);
+        let tile = blocks
+            .and_then(|bs| bs.defs.get(id))
+            .map_or(0xFF, |d| d.face(FaceDir::PosX).texture);
+        if tile == 0xFF {
+            continue;
+        }
+        let tile = tile as u32;
+        let tile_cell = TILE_ATLAS_FIRST + tile / 4;
+        let (tx, ty) = (
+            (tile_cell % ATLAS_COLUMNS) * LEMMING_CELL + (tile % 2) * 64,
+            (tile_cell / ATLAS_COLUMNS) * LEMMING_CELL + (tile / 2 % 2) * 64,
+        );
+        let d = l.dir.delta().map(|v| v as f32);
+        let (out, side) = ([-d[0], -d[2]], [d[2], -d[0]]);
+        let c = cell.map(|v| v as f32);
+        let face = [c[0] + 0.5 - d[0] * 0.5, c[2] + 0.5 - d[2] * 0.5];
+        let feet = l.pos[1] as f32 / SUB as f32;
+        let stroke = sim.tick as u32 / 49;
+        for (burst, &start) in MINE_BURSTS.iter().enumerate() {
+            if !(start..start + CHUNK_TICKS).contains(&t) {
+                continue;
+            }
+            let age = (t - start) as f32;
+            for k in 0..CHUNKS_PER_BURST / 2 {
+                let r = |salt: u32| noise([i as u32, 0x313E + stroke, burst as u32, k, salt]);
+                let v_out = CHUNK_OUT.0 + r(0) * (CHUNK_OUT.1 - CHUNK_OUT.0);
+                let v_up = CHUNK_UP.0 + r(1) * (CHUNK_UP.1 - CHUNK_UP.0);
+                let v_side = (r(2) - 0.5) * 0.16;
+                let lateral = (r(3) - 0.5) * 0.8;
+                let y0 = feet - 0.25 + r(4) * 0.75;
+                let along =
+                    |a: usize| face[a] + out[a] * v_out * age + side[a] * (lateral + v_side * age);
+                let y = y0 + v_up * age - CHUNK_GRAVITY * age * age / 2.0;
+                let size = 6.0 + (r(5) * 5.0).floor();
+                let (sx, sy) = (
+                    (r(6) * (64.0 - size)).floor(),
+                    (r(7) * (64.0 - size)).floor(),
+                );
+                b.sprite_scaled(
+                    [along(0), y, along(1)],
+                    [tx as f32 + sx, ty as f32 + sy, size, size],
+                    tex,
+                    1,
+                    0.0,
+                    96.0,
+                );
+            }
+        }
+    }
+}
+
+/// Bursts of pieces from a block a miner cracks, ticks into the cracking.
+const MINE_BURSTS: [u32; 2] = [1, 9];
+
+/// The dig effects: the cracks spreading over the segment a digger is
+/// digging out, on its sides and over its top, all of them over the time it
+/// takes (`docs/spec/behaviour.md`, Digger: removed after a crack
+/// animation).
+fn dig_effects(b: &mut LayerBuilder, sim: &Simulation, blocks: Option<&BlockSet>, tex: [f32; 2]) {
+    for (i, l) in sim.lemmings.iter().enumerate().filter(|(_, l)| !l.gone) {
+        let Some((cell, mask, t)) = sim.dig_target(l) else {
+            continue;
+        };
+        dig_debris(b, sim, blocks, i, l, cell, mask, t, tex);
+        let frame = t * CRACK_FRAMES / l3d_sim::DIG_TICKS;
+        draw_cracks(b, sim, cell, mask, frame, tex);
+        let crack = CRACK_ATLAS_FIRST + frame.min(CRACK_FRAMES - 1);
+        let (cx, cy) = (
+            (crack % ATLAS_COLUMNS) * LEMMING_CELL,
+            (crack / ATLAS_COLUMNS) * LEMMING_CELL,
+        );
+        let c = cell.map(|v| v as f32);
+        let y = c[1] + (mask.trailing_zeros() + 1) as f32 * 0.25 + CRACK_OFFSET;
+        let (x0, z0, x1, z1) = (c[0], c[2], c[0] + 1.0, c[2] + 1.0);
+        b.quad(
+            [[x0, y, z1], [x1, y, z1], [x1, y, z0], [x0, y, z0]],
+            [cx as f32, cy as f32, 64.0, 64.0],
+            tex,
+            1.0,
+        );
+    }
+}
+
+/// Bursts of pieces of the block's top texture thrown up and out on all
+/// sides from around a digger's feet, ticks into each segment it digs
+/// (owner: the digger throws debris; the bursts, counts and speeds are ours,
+/// after the basher's).
+const DIG_BURSTS: [u32; 4] = [2, 12, 22, 32];
+const DIG_PIECES_PER_BURST: u32 = 12;
+
+#[allow(clippy::too_many_arguments)]
+fn dig_debris(
+    b: &mut LayerBuilder,
+    sim: &Simulation,
+    blocks: Option<&BlockSet>,
+    i: usize,
+    l: &l3d_sim::Lemming,
+    cell: [i32; 3],
+    mask: u8,
+    t: u32,
+    tex: [f32; 2],
+) {
+    let id = sim.world.block(cell).map_or(0, |(b, _)| b.id as usize);
+    let tile = blocks
+        .and_then(|bs| bs.defs.get(id))
+        .map_or(0xFF, |d| d.face(FaceDir::PosY).texture);
+    if tile == 0xFF {
+        return;
+    }
+    let tile = tile as u32;
+    let tile_cell = TILE_ATLAS_FIRST + tile / 4;
+    let (tx, ty) = (
+        (tile_cell % ATLAS_COLUMNS) * LEMMING_CELL + (tile % 2) * 64,
+        (tile_cell / ATLAS_COLUMNS) * LEMMING_CELL + (tile / 2 % 2) * 64,
+    );
+    let top = cell[1] as f32 + (mask.trailing_zeros() + 1) as f32 * 0.25;
+    let feet = l.pos.map(|v| v as f32 / SUB as f32);
+    let stroke = l.state_ticks / l3d_sim::DIG_TICKS;
+    for (burst, &start) in DIG_BURSTS.iter().enumerate() {
+        if !(start..start + CHUNK_TICKS).contains(&t) {
+            continue;
+        }
+        let age = (t - start) as f32;
+        for k in 0..DIG_PIECES_PER_BURST {
+            let r = |salt: u32| noise([i as u32, 0xD16 + stroke, burst as u32, k, salt]);
+            let angle = r(0) * std::f32::consts::TAU;
+            let v_out = 0.5 * (CHUNK_OUT.0 + r(1) * (CHUNK_OUT.1 - CHUNK_OUT.0));
+            let v_up = CHUNK_UP.0 + r(2) * (CHUNK_UP.1 - CHUNK_UP.0);
+            let from = 0.1 + r(3) * 0.15;
+            let (dx, dz) = (angle.cos(), angle.sin());
+            let x = feet[0] + dx * (from + v_out * age);
+            let z = feet[2] + dz * (from + v_out * age);
+            let y = top + v_up * age - CHUNK_GRAVITY * age * age / 2.0;
+            let size = 6.0 + (r(4) * 5.0).floor();
+            let (sx, sy) = (
+                (r(5) * (64.0 - size)).floor(),
+                (r(6) * (64.0 - size)).floor(),
+            );
+            b.sprite_scaled(
+                [x, y, z],
+                [tx as f32 + sx, ty as f32 + sy, size, size],
+                tex,
+                1,
+                0.0,
+                96.0,
+            );
+        }
+    }
+}
+
 /// The bash effects (`docs/spec/behaviour.md`, Basher): the black cracks of
 /// `OVERLAY.000` spreading over the sides of the segments being bashed, one
 /// frame every 2 ticks, and bursts of pieces cut from the block's texture
@@ -511,42 +733,7 @@ fn bash_effects(b: &mut LayerBuilder, sim: &Simulation, blocks: Option<&BlockSet
             continue;
         };
         let c = cell.map(|v| v as f32);
-        let crack = CRACK_ATLAS_FIRST + (t / 2).min(CRACK_FRAMES - 1);
-        let (cx, cy) = (
-            (crack % ATLAS_COLUMNS) * LEMMING_CELL,
-            (crack / ATLAS_COLUMNS) * LEMMING_CELL,
-        );
-        // Each segment's slice of the overlay: segment s (0 at the bottom) is
-        // the face's texel rows (3 − s)·16 to (4 − s)·16, on each of the
-        // block's sides there: the cube faces it fills, and a deflector's
-        // diagonal face.
-        for s in (0..4).filter(|s| mask & (1 << s) != 0) {
-            let rect = [cx as f32, cy as f32 + (3 - s) as f32 * 16.0, 64.0, 16.0];
-            let y = c[1] + s as f32 * 0.25;
-            let filled = |x: f32, z: f32| {
-                let at = |v: f32| (v * l3d_sim::SUB as f32) as i32;
-                sim.world.block_at([at(x), at(y + 0.125), at(z)]).is_some()
-            };
-            for n in [[1.0, 0.0], [-1.0, 0.0], [0.0, 1.0], [0.0, -1.0]] {
-                if !filled(c[0] + 0.5 + n[0] * 0.45, c[2] + 0.5 + n[1] * 0.45) {
-                    continue;
-                }
-                let centre = [
-                    c[0] + 0.5 + n[0] * (0.5 + CRACK_OFFSET),
-                    y,
-                    c[2] + 0.5 + n[1] * (0.5 + CRACK_OFFSET),
-                ];
-                b.vertical_quad(centre, n, 1.0, 0.25, rect, tex, 1.0);
-            }
-            if let Some(n) = deflector_face(sim, cell, y + 0.125) {
-                let centre = [
-                    c[0] + 0.5 + n[0] * CRACK_OFFSET,
-                    y,
-                    c[2] + 0.5 + n[1] * CRACK_OFFSET,
-                ];
-                b.vertical_quad(centre, n, std::f32::consts::SQRT_2, 0.25, rect, tex, 1.0);
-            }
-        }
+        draw_cracks(b, sim, cell, mask, t / 2, tex);
         // The pieces: bits of the block's side texture.
         let id = sim.world.block(cell).map_or(0, |(b, _)| b.id as usize);
         let tile = blocks
@@ -747,6 +934,8 @@ pub fn build(
     objects(&mut b, sim, tex);
     camera_markers(&mut b, cameras, camera_yaw, tex);
     bash_effects(&mut b, sim, blocks, tex);
+    mine_effects(&mut b, sim, blocks, tex);
+    dig_effects(&mut b, sim, blocks, tex);
     for d in doors.iter().filter(|d| d.frame > 0) {
         let cell = DOOR_ATLAS_FIRST + d.frame;
         let (cx, cy) = (
@@ -794,6 +983,17 @@ pub fn build(
             State::Turning { to } if to == facing.anticlockwise() => {
                 let (cell, mirror) = cell_for(anim_for(l.state), view.mirrored(), l.state_ticks);
                 (cell, !mirror)
+            }
+            State::Stunned => cell_for(anim_for(l.state), view, 0),
+            // A miner walks down the block it has broken (owner's
+            // observation).
+            State::Mining if l.state_ticks >= l3d_sim::MINE_CRACK_TICKS => {
+                cell_for(anim_for(State::Walking), view, l.state_ticks)
+            }
+            // A builder on its way to the middle of its cell carries the
+            // sack already (owner's observation).
+            State::Walking if matches!(l.pending, Some(State::Building { .. })) => {
+                cell_for(anim(444, 6, Angles::Five), view, l.state_ticks)
             }
             // Each brick: a few steps up with the sack (444–473), then the
             // laying motion spread over the rest of the 25-tick cycle

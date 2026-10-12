@@ -166,16 +166,27 @@ fn two_unit_drop_survives_and_five_unit_drop_splats() {
 fn builder_lays_six_bricks() {
     let mut sim = open_level(1).skill(0, Skill::Builder, 1).sim();
     run(&mut sim, 30);
-    let start = sim.lemmings[0].pos;
     assert!(sim.assign(0, Skill::Builder));
+    // It walks on to the middle of its cell or its edge first.
+    let cell = sim.lemmings[0].pos.map(|v| v.div_euclid(SUB));
+    while !matches!(sim.lemmings[0].state, State::Building { .. }) {
+        assert!(sim.tick < 30 + SUB as u64, "never started building");
+        sim.step();
+    }
+    let start = sim.lemmings[0].pos;
+    let at = start.map(|v| v.div_euclid(SUB));
+    assert!(at[0].abs_diff(cell[0]) + at[2].abs_diff(cell[2]) <= 1);
+    // At the middle of its cell or its edge, whichever came first.
+    let on = |v: i32| [0, SUB / 2, SUB - 1].contains(&v.rem_euclid(SUB));
+    assert!(on(start[0]) && on(start[2]), "started at {start:?}");
     run(&mut sim, 6 * 25 + 10);
     assert_eq!(sim.world.bricks.len(), 6);
-    // Each brick: ¼ unit up and ½ unit forward.
+    // Each brick: ¼ unit up and 0.55 unit forward.
     let end = sim.lemmings[0].pos;
     assert_eq!(end[1] - start[1], 6 * SUB / 4);
     let run_len = (end[0] - start[0]).abs() + (end[2] - start[2]).abs();
     assert!(
-        (6 * SUB / 2..6 * SUB / 2 + SUB / 4).contains(&run_len),
+        (6 * 141..6 * 141 + SUB / 4).contains(&run_len),
         "ran {run_len}"
     );
 }
