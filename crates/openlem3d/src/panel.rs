@@ -700,8 +700,9 @@ fn buttons(
 }
 
 /// Holding − or + changes the release rate by one per 70 Hz frame, with no
-/// initial delay (verified); the turn arrows turn the camera while held, or
-/// turn the head riding along with a lemming.
+/// initial delay (verified); the turn arrows turn the world about the
+/// level's centre while held (owner's observation: they turn the whole
+/// level, not the camera), or turn the head riding along with a lemming.
 fn held_buttons(
     held: Query<(&Interaction, &Action)>,
     keys: Res<ButtonInput<KeyCode>>,
@@ -712,7 +713,6 @@ fn held_buttons(
     mut views: Query<&mut ViewCamera>,
 ) {
     const RATE_STEPS_PER_SECOND: f32 = 70.0;
-    const TURN_SPEED: f32 = 1.8;
     let down = |a: Action| {
         held.iter()
             .any(|(i, b)| *i == Interaction::Pressed && *b == a)
@@ -745,7 +745,9 @@ fn held_buttons(
         && let Ok(mut view) = views.single_mut()
     {
         if lemming_cam.following().is_none() {
-            view.yaw -= turn * TURN_SPEED * time.delta_secs();
+            if let Some(sim) = game.sim.as_ref() {
+                view.orbit(sim.centre(), -turn * crate::ORBIT_SPEED * time.delta_secs());
+            }
         } else {
             view.head = (view.head - turn * crate::lemming_cam::HEAD_SPEED * time.delta_secs())
                 .clamp(-std::f32::consts::FRAC_PI_2, std::f32::consts::FRAC_PI_2);

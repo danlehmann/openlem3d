@@ -71,6 +71,14 @@ fn vs(v: VIn) -> VOut {
     }
     let world = v.pos + u.right.xyz * v.offset.x + vec3(0.0, v.offset.y, 0.0);
     o.clip = u.view_proj * vec4(world, 1.0);
+    // A billboard is hidden only by what is in front of its middle (a
+    // quarter unit above its anchor), all of it at that depth: a lemming
+    // turning in a deflector's cell, half inside the block, is drawn whole,
+    // as the original draws it (owner's observation).
+    if (any(v.offset != vec2(0.0))) {
+        let mid = u.view_proj * vec4(v.pos + vec3(0.0, 0.25, 0.0), 1.0);
+        o.clip.z = mid.z / mid.w * o.clip.w;
+    }
     o.uv = v.uv + vec2(0.0, frame * v.anim.y);
     o.tile = vec2(0.0, 0.0);
     return o;

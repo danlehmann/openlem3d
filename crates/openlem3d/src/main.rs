@@ -53,6 +53,8 @@ pub struct Options {
     /// Level to start in directly; the level-select screen otherwise.
     level: Option<u32>,
     camera: Option<usize>,
+    /// A camera placed by hand, `X,Y,Z,YAW` (units and radians), for testing.
+    look: Option<(Vec3, f32)>,
     screenshot: Option<PathBuf>,
     /// Vertical field of view in degrees.
     fov_y: f32,
@@ -92,6 +94,7 @@ fn parse_args() -> Options {
         data: None,
         level: None,
         camera: None,
+        look: None,
         screenshot: None,
         fov_y: DEFAULT_FOV_Y,
         horizon: DEFAULT_HORIZON,
@@ -114,6 +117,13 @@ fn parse_args() -> Options {
             "--data" => o.data = Some(val().into()),
             "--level" => o.level = Some(val().parse().expect("--level takes a number")),
             "--camera" => o.camera = Some(val().parse().expect("--camera takes 1-4")),
+            "--look" => {
+                let v: Vec<f32> = val()
+                    .split(',')
+                    .map(|s| s.parse().expect("--look takes X,Y,Z,YAW"))
+                    .collect();
+                o.look = Some((Vec3::new(v[0], v[1], v[2]), v[3]));
+            }
             "--screenshot" => o.screenshot = Some(val().into()),
             "--fov" => o.fov_y = val().parse().expect("--fov takes degrees"),
             "--horizon" => o.horizon = val().parse().expect("--horizon takes a fraction"),
@@ -344,6 +354,9 @@ const CAMERA_MARKER_CLEARANCE: f32 = 0.3;
 
 /// How long a glide to a preset view takes, in seconds (ours).
 const GLIDE_SECONDS: f32 = 0.8;
+/// How fast Q/E and the panel's turn arrows turn the world about the
+/// level's centre, in radians per second (ours).
+pub(crate) const ORBIT_SPEED: f32 = 1.2;
 
 /// A preset camera's position and yaw.
 fn preset_view(p: &CameraPreset) -> (Vec3, f32) {
@@ -360,6 +373,20 @@ fn preset_view(p: &CameraPreset) -> (Vec3, f32) {
 impl ViewCamera {
     fn forward(&self) -> Vec3 {
         Vec3::new(-self.yaw.cos(), 0.0, -self.yaw.sin())
+    }
+
+    /// Turns the world `angle` radians about the vertical through `pivot`
+    /// (`[x, z]`), clockwise seen from above for positive angles: the
+    /// camera circles the other way, keeping its view of the pivot.
+    fn orbit(&mut self, pivot: [f32; 2], angle: f32) {
+        // Rotating (x, z) by `a` turns x towards z, and a heading by the
+        // same `a` (see `forward`).
+        let a = -angle;
+        let (s, c) = a.sin_cos();
+        let (dx, dz) = (self.pos.x - pivot[0], self.pos.z - pivot[1]);
+        self.pos.x = pivot[0] + dx * c - dz * s;
+        self.pos.z = pivot[1] + dx * s + dz * c;
+        self.yaw += a;
     }
 
     /// Jumps to a preset view.
@@ -783,6 +810,9 @@ pub(crate) fn load_level(
     commands.insert_resource(hud::Highlight::default());
     for mut cam in &mut cams {
         cam.set_preset(&level.cameras[preset]);
+        if let Some((pos, yaw)) = opts.look {
+            (cam.pos, cam.yaw) = (pos, yaw);
+        }
     }
     commands.insert_resource(LevelInfo {
         slots: level.cameras.each_ref().map(preset_view),
@@ -892,9 +922,20 @@ pub(crate) fn camera_controls(
         }
         let gliding = cam.glide.is_some();
         let held = |a: KeyCode, b: KeyCode| (keys.pressed(a) || keys.pressed(b)) as i32 as f32;
-        let turn =
-            held(KeyCode::KeyE, KeyCode::ArrowRight) - held(KeyCode::KeyQ, KeyCode::ArrowLeft);
-        cam.yaw += turn * 1.8 * dt;
+        // ← → turn the camera; Q and E turn the world about the level's
+        // centre, like the panel's turn arrows (owner: the arrows turn the
+        // whole level, not the camera).
+        let arrows = held(KeyCode::ArrowRight, KeyCode::ArrowRight)
+            - held(KeyCode::ArrowLeft, KeyCode::ArrowLeft);
+        let world_turn = held(KeyCode::KeyE, KeyCode::KeyE) - held(KeyCode::KeyQ, KeyCode::KeyQ);
+        let turn = arrows + world_turn;
+        cam.yaw += arrows * 1.8 * dt;
+        if world_turn != 0.0
+            && lemming_cam.following().is_none()
+            && let Some(sim) = game.sim.as_ref()
+        {
+            cam.orbit(sim.centre(), world_turn * ORBIT_SPEED * dt);
+        }
         // Drags, as for touch (see `touch`): the world follows the pointer.
         let mut drag = Vec3::ZERO;
         if dt > 0.0 && action_dragging {

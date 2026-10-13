@@ -278,6 +278,9 @@ fn follow(
             lemming: i,
             saved: (view.pos, view.yaw),
         };
+        // As riding along always does.
+        highlight.on = true;
+        highlight.lemming = Some(i);
     }
     let Some(mut i) = cam.following() else {
         view.roll = 0.0;

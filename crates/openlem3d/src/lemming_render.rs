@@ -31,9 +31,6 @@ const DIGIT_TEXELS_PER_UNIT: f32 = 128.0;
 /// original's sprites change once per tick; `docs/spec/behaviour.md`).
 const TICKS_PER_FRAME: u32 = 1;
 
-/// Ticks of each builder cycle spent stepping up onto the new brick.
-const BUILDER_STEP_TICKS: u32 = 6;
-
 /// The floater's umbrella cells.
 const UMBRELLA_FIRST: u32 = 336;
 /// How far a rope slide's rope runs above the straight line its rider's
@@ -796,19 +793,22 @@ fn bash_effects(b: &mut LayerBuilder, sim: &Simulation, blocks: Option<&BlockSet
 }
 
 /// A splatted lemming's fragments: texels of the blue smock (walker cell 0,
-/// texels 22–40 across and 28–48 down) flying out on all sides and falling
+/// texels 22–40 across and 28–48 down in 64-pixel cells, scaled to the
+/// atlas's cells) flying out on all sides and falling
 /// back, over the death (`docs/spec/behaviour.md`, Splat: "a burst of blue
 /// fragments", verified; count, speeds and spread are ours).
-const SPLAT_PIECES: u32 = 40;
+const SPLAT_PIECES: u32 = 60;
 const SPLAT_SMOCK: [f32; 4] = [22.0, 28.0, 18.0, 20.0];
 const SPLAT_OUT: (f32, f32) = (0.03, 0.09);
 const SPLAT_UP: (f32, f32) = (0.04, 0.16);
 const SPLAT_GRAVITY: f32 = 0.025;
 /// Drawn larger than the lemming, so a piece is a few screen pixels.
-const SPLAT_TEXELS_PER_UNIT: f32 = 64.0;
+const SPLAT_TEXELS_PER_UNIT: f32 = 40.0;
 
 fn splat(b: &mut LayerBuilder, i: usize, t: u32, at: [f32; 3], tex: [f32; 2]) {
     let age = t as f32;
+    // The smock's place is given in 64-pixel cells.
+    let k_cell = LEMMING_CELL as f32 / 64.0;
     for k in 0..SPLAT_PIECES {
         let r = |salt: u32| noise([i as u32, 0x5A1A7, k, salt, 0]);
         let angle = r(0) * std::f32::consts::TAU;
@@ -821,18 +821,23 @@ fn splat(b: &mut LayerBuilder, i: usize, t: u32, at: [f32; 3], tex: [f32; 2]) {
             y,
             at[2] + angle.sin() * v_out * age,
         ];
-        let size = 2.0 + (r(3) * 3.0).floor();
+        let size = 3.0 + (r(3) * 4.0).floor();
         let (sx, sy) = (
             (r(4) * (SPLAT_SMOCK[2] - size)).floor(),
             (r(5) * (SPLAT_SMOCK[3] - size)).floor(),
         );
         b.sprite_scaled(
             p,
-            [SPLAT_SMOCK[0] + sx, SPLAT_SMOCK[1] + sy, size, size],
+            [
+                (SPLAT_SMOCK[0] + sx) * k_cell,
+                (SPLAT_SMOCK[1] + sy) * k_cell,
+                size * k_cell,
+                size * k_cell,
+            ],
             tex,
             1,
             0.0,
-            SPLAT_TEXELS_PER_UNIT,
+            SPLAT_TEXELS_PER_UNIT * k_cell,
         );
     }
 }
@@ -995,20 +1000,21 @@ pub fn build(
             State::Walking if matches!(l.pending, Some(State::Building { .. })) => {
                 cell_for(anim(444, 6, Angles::Five), view, l.state_ticks)
             }
-            // Each brick: a few steps up with the sack (444–473), then the
-            // laying motion spread over the rest of the 25-tick cycle
-            // (provisional split).
+            // Each brick: the walk up onto it and along it with the sack
+            // (444–473), as the simulation moves the builder, then the
+            // laying motion over the rest of the 25-tick cycle.
             State::Building { .. } => {
                 // In step with the bricks, the first of which comes
                 // FIRST_BRICK_TICKS in, after a laying motion.
                 let c = (l.state_ticks + l3d_sim::BUILD_TICKS - l3d_sim::FIRST_BRICK_TICKS)
                     % l3d_sim::BUILD_TICKS;
-                if c < BUILDER_STEP_TICKS {
+                let walk = l3d_sim::BRICK_WALK_TICKS as u32;
+                if l.state_ticks > l3d_sim::FIRST_BRICK_TICKS && (1..=walk).contains(&c) {
                     cell_for(anim(444, 6, Angles::Five), view, c)
                 } else {
-                    let laying =
-                        (c - BUILDER_STEP_TICKS) * 5 / (l3d_sim::BUILD_TICKS - BUILDER_STEP_TICKS);
-                    cell_for(once(344, 5, Angles::Five), view, laying)
+                    let into = (c + l3d_sim::BUILD_TICKS - walk - 1) % l3d_sim::BUILD_TICKS;
+                    let laying = into * 5 / (l3d_sim::BUILD_TICKS - walk);
+                    cell_for(once(344, 5, Angles::Five), view, laying.min(4))
                 }
             }
             // A bomber swells over the last ticks of its fuse (observed:

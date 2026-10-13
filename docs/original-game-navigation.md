@@ -427,6 +427,16 @@ Findings from the screen-layout runs (`spec/ui-graphics.md`, "Screens")
   Presses of 300 ms were ignored. Through Hi-Light, clicking the turner icon
   alone gave no turner. The lemming view then rides with it after the face
   (68,440) and a 100 ms press on the standing turner.
+- **Screenshot vs mouse coordinates, measured in a level (Fun 2, 2026-10).**
+  `shot.ps1 -Width 640` position ≈ (0.864·X + 39, 0.853·Y + 33) for
+  serial-mouse position (X, Y): the pointer parked at (61,418) showed at
+  (92,390) and at (333,180) at (327,187). So the red highlight arrow is at
+  about (18,459) and the digger icon at about (464,441) in mouse units.
+  **Unsolved:** giving a walking lemming a digger by clicking it. A click
+  timed on a change under the parked pointer instead entered the lemming
+  view (the face's effect), and the skill count did not drop; Hi-Light was
+  switched on and off by the arrow, but its white marker could not be found
+  in grabs to time the skill click.
 - **Screenshot vs mouse coordinates.** In 640-wide `shot.ps1` grabs of a
   level, panel items sit about 32 px right of and 15 px above the
   serial-mouse positions above (the arrow shows at (55,425), the face at
@@ -442,6 +452,21 @@ Findings from the screen-layout runs (`spec/ui-graphics.md`, "Screens")
   Practice levels.
 - **Attract mode.** About 125 s after (re)entering the main menu a demo
   level starts, whatever the mouse does; a click returns to the menu.
+
+## Changed levels: experiments in the original
+
+`cargo run --release -p l3d-formats --example cdcopy -- make temp/patched`
+copies the CD's data track to `temp/patched/data.iso` with a CD sheet
+`patched.cue` whose music still comes from the original image (the original
+is never touched; `temp/` is git-ignored, and the copy must never be
+committed). `cdcopy level temp/patched N X,Y,Z=ID:SHAPE:ROT:SEGS ...` then
+writes `LEVEL.nnn` with those block cells changed, **unpacked**, to the end
+of the copy and points its directory record there; each run starts from the
+original level. **Verified:** the game accepts the copy and unpacked level
+files (Practice "Miner" and Fun 2 loaded changed). Point DOSBox-X at it with
+`LEM3D_CUE` (`launch.ps1` reads it). Completing a changed level updates
+`LM3D.SAV`, so back it up first and restore it afterwards. Windows refuses to
+run programs whose name contains "patch" without elevation, hence the name.
 
 ## 7. Save states: skip the boot, intro and navigation
 

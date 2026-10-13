@@ -35,13 +35,14 @@ const CLIMB_SPEED: i32 = SUB / 25;
 const STEP_UP: i32 = SUB / 4;
 /// Lowest drop a walker steps down without falling (provisional).
 const STEP_DOWN: i32 = SUB / 4;
-/// Falls longer than this splat (bracketed: 3¾ units survive, about 4 splat;
-/// Fun 2's published route survives a 4-unit drop).
+/// Falls of this height or more splat (owner's observations: 3¾ units
+/// survived and 4 killed out of a miner's tunnel in Practice "Miner", and
+/// lemmings dropping 4 units into a hole dug on Fun 4's castle die).
 const SPLAT_HEIGHT: i32 = 4 * SUB;
-/// Shorter falls longer than this leave the lemming on its back for
+/// Shorter falls of this height or more leave the lemming on its back for
 /// [`STUN_TICKS`] (owner's observation: falls of 3, 3¼ and 3¾ units from a
 /// miner's tunnel in Practice "Miner" stun, 2¾ does not; the time is ours).
-const STUN_HEIGHT: i32 = 23 * SUB / 8;
+const STUN_HEIGHT: i32 = 3 * SUB;
 pub const STUN_TICKS: u32 = 28;
 /// Clearance a walker needs above the surface it walks onto: openings exactly
 /// this high (half-height gaps under a lintel) are passable (verified: the
@@ -70,8 +71,10 @@ const BLAST_RADIUS: i32 = SUB;
 /// How far below and above the bomber's feet the blast reaches.
 const BLAST_BELOW: i32 = SUB / 2;
 const BLAST_ABOVE: i32 = SUB;
-/// Ticks per segment dug (verified, rough: about 40 ±20%).
-pub const DIG_TICKS: u32 = 40;
+/// Ticks per segment dug (measured: 3.0 ± 0.1 s per quarter unit through
+/// Practice "Digger"'s bridge, seen side-on, with the first quarter gone
+/// one period after the assignment).
+pub const DIG_TICKS: u32 = 42;
 /// Ticks per brick laid by a builder (verified: 25 ± 1).
 pub const BUILD_TICKS: u32 = 25;
 /// Ticks from the assignment to the first brick: the builder stands still
@@ -79,6 +82,9 @@ pub const BUILD_TICKS: u32 = 25;
 pub const FIRST_BRICK_TICKS: u32 = 8;
 /// Bricks per builder (verified: 6).
 const BRICKS: u8 = 6;
+/// Ticks a builder takes to walk the length of a brick after laying it, at
+/// walking speed.
+pub const BRICK_WALK_TICKS: i32 = (BRICK_RUN + WALK_SPEED - 1) / WALK_SPEED;
 /// How long a builder out of bricks shrugs (cells 474–488, three frames;
 /// two ticks each, unmeasured).
 const SHRUG_TICKS: u32 = 6;
@@ -88,7 +94,10 @@ const SHRUG_TICKS: u32 = 6;
 /// short); bricks reach from [`BRICK_START`] to [`BRICK_END`] ahead of the
 /// feet, about 0.55 unit long (measured), so consecutive bricks overlap.
 const BRICK_RUN: i32 = 141;
-const BRICK_START: i32 = SUB / 8;
+/// Bricks start at the builder's feet, so one laid at a block's edge leaves
+/// no gap for walkers to drop through (the published routes of Taxing 19
+/// "Lemmtris" and Tricky 14 "Chocolate Drop" have followers cross that way).
+const BRICK_START: i32 = 0;
 const BRICK_END: i32 = SUB / 2 + SUB / 8 + SUB / 16;
 /// Ticks per stroke of a basher (verified: the segments go 32 ticks after the
 /// first crack).
@@ -186,6 +195,23 @@ const ICE_SPEED: i32 = WALK_SPEED * 3;
 const ENTRANCE_ID: u8 = 0;
 const EXIT_ID: u8 = 1;
 const SPLITTER_ID: u8 = 2;
+
+/// The segments one dig removes from block `b` under a digger whose feet
+/// are `feet` above the cell's bottom: the highest segment of a flat block;
+/// of a sloped block, every segment reaching above the feet, which leaves a
+/// flat floor where the digger stands (a sixteenth of slack keeps a digger
+/// on a ramp's quarter line from cutting below it).
+fn dig_cut(b: l3d_formats::level::BlockCell, feet: i32) -> u8 {
+    let top = 1 << (7 - b.segments.leading_zeros()).min(3);
+    if b.shape == 0 {
+        return top;
+    }
+    let kept = ((feet + SUB / 16) / (SUB / 4)).clamp(0, 4);
+    match b.segments & !((1u8 << kept) - 1) {
+        0 => top,
+        above => above,
+    }
+}
 
 /// The side an exit block's doorway faces: its +Z face, turned with the
 /// block's rotation (verified for all four rotations).
@@ -414,6 +440,9 @@ pub struct Lemming {
     /// Standing on the teleporter it arrived on; it must step off before
     /// another teleport.
     pub teleported: bool,
+    /// The spring sender (index into the objects) it is walking over, which
+    /// was resting when it stepped on; that sender doesn't throw it.
+    pub passing: Option<usize>,
     /// A skill given but not started yet: blockers, turners, bashers and
     /// miners walk on until they cross into the next cell along their
     /// heading, then take it up (measured in the original's Practice demos).
@@ -741,6 +770,7 @@ impl Simulation {
                     fuse: None,
                     gone: false,
                     teleported: false,
+                    passing: None,
                     pending: None,
                 });
                 self.counts.released += 1;
@@ -866,6 +896,16 @@ impl Simulation {
     /// released and has left play.
     pub fn finished(&self) -> bool {
         self.time_left == 0 || (self.counts.released >= self.to_release && self.out() == 0)
+    }
+
+    /// The middle of the level's boundary (the area lemmings are zapped
+    /// outside of), in units, as `[x, z]`.
+    pub fn centre(&self) -> [f32; 2] {
+        let [min_x, min_z, max_x, max_z] = self.border;
+        [
+            (min_x + max_x + 1) as f32 / 2.0,
+            (min_z + max_z + 1) as f32 / 2.0,
+        ]
     }
 
     /// Lemmings still in play.
@@ -1223,7 +1263,9 @@ impl Simulation {
     /// an arc onto its receiver (the next value up; the last of each value
     /// works [L3DEdit]) and lands unhurt, walking on in its old direction.
     /// Flight time and arc height are unmeasured. A sender still resting
-    /// from a throw ([`SPRING_REST_TICKS`]) lets a walker walk over it.
+    /// from a throw ([`SPRING_REST_TICKS`]) lets a walker walk over it; the
+    /// sender's rest then ends as usual, and it throws the next walker to
+    /// step on.
     fn spring(&mut self, l: &mut Lemming) {
         if self.object_kind != Some(objects::ObjectKind::Spring)
             || !matches!(l.state, State::Walking | State::Sliding)
@@ -1231,11 +1273,14 @@ impl Simulation {
             return;
         }
         let last = |v: u8| self.objects.iter().rposition(|o| o.value == v);
-        let Some(sender) = self
+        let sender = self
             .objects
             .iter()
-            .position(|o| o.value % 2 == 0 && o.touches(l.pos))
-        else {
+            .position(|o| o.value % 2 == 0 && o.touches(l.pos));
+        if l.passing != sender {
+            l.passing = None;
+        }
+        let Some(sender) = sender else {
             return;
         };
         let value = self.objects[sender].value;
@@ -1243,16 +1288,9 @@ impl Simulation {
             return;
         };
         if self.objects[sender].rest > 0 {
-            // Resting on until the walker is off the far side.
-            let d = l.dir.delta();
-            let left = |v: i32, step: i32| match step {
-                1 => SUB - v.rem_euclid(SUB),
-                -1 => v.rem_euclid(SUB) + 1,
-                _ => 0,
-            };
-            let ticks = (left(l.pos[0], d[0]).max(left(l.pos[2], d[2])) / WALK_SPEED) as u32;
-            let o = &mut self.objects[sender];
-            o.rest = o.rest.max(ticks + 1);
+            l.passing = Some(sender);
+        }
+        if l.passing.is_some() {
             return;
         }
         let o = self.objects[receiver];
@@ -1513,9 +1551,9 @@ impl Simulation {
             l.set_state(State::Drowning);
         } else if ground_flags.is_some_and(|f| f & flags::NO_SPLAT != 0) {
             l.set_state(State::Walking);
-        } else if fell > SPLAT_HEIGHT {
+        } else if fell >= SPLAT_HEIGHT {
             l.set_state(State::Splatting);
-        } else if fell > STUN_HEIGHT {
+        } else if fell >= STUN_HEIGHT {
             l.set_state(State::Stunned);
         } else {
             l.set_state(State::Walking);
@@ -1622,9 +1660,25 @@ impl Simulation {
     /// onto it (provisional: one segment per cell, inheriting the block id
     /// of the cell stood on).
     fn build(&mut self, l: &mut Lemming, bricks_left: u8) {
-        if l.state_ticks < FIRST_BRICK_TICKS
-            || !(l.state_ticks - FIRST_BRICK_TICKS).is_multiple_of(BUILD_TICKS)
-        {
+        if l.state_ticks < FIRST_BRICK_TICKS {
+            return;
+        }
+        // After laying a brick the builder steps up onto it and walks along
+        // it at walking speed to where the next is laid (owner: it walks
+        // over the brick, it does not jump to its end).
+        let phase = ((l.state_ticks - FIRST_BRICK_TICKS) % BUILD_TICKS) as i32;
+        if (1..=BRICK_WALK_TICKS).contains(&phase) {
+            let d = l.dir.delta();
+            let run = |p: i32| BRICK_RUN * p / BRICK_WALK_TICKS;
+            let step = run(phase) - run(phase - 1);
+            l.pos[0] += d[0] * step;
+            l.pos[2] += d[2] * step;
+            if phase == 1 {
+                l.pos[1] += SUB / 4;
+            }
+            return;
+        }
+        if phase != 0 {
             return;
         }
         if bricks_left == 0 {
@@ -1687,8 +1741,9 @@ impl Simulation {
         if laid != Some(BRICK_END) || head_blocked {
             l.set_state(State::Walking);
             return;
-        } // Climb onto the new brick.
-        l.pos = next;
+        }
+        // It climbs onto the new brick over the next ticks.
+        let _ = next;
         l.state = State::Building {
             bricks_left: bricks_left - 1,
         };
@@ -1965,30 +2020,37 @@ impl Simulation {
         if l.state != State::Digging {
             return None;
         }
+        let (c, b, _) = self.dig_cell(l)?;
+        Some((
+            c,
+            dig_cut(b, l.pos[1] - c[1] * SUB),
+            l.state_ticks % DIG_TICKS,
+        ))
+    }
+
+    /// The cell under a digger's feet and its block.
+    fn dig_cell(&self, l: &Lemming) -> Option<([i32; 3], l3d_formats::level::BlockCell, u8)> {
         let c = [
             l.pos[0].div_euclid(SUB),
             (l.pos[1] - 1).div_euclid(SUB),
             l.pos[2].div_euclid(SUB),
         ];
-        let (b, _) = self.world.block(c)?;
-        let top = (7 - b.segments.leading_zeros()).min(3);
-        Some((c, 1 << top, l.state_ticks % DIG_TICKS))
+        let (b, f) = self.world.block(c)?;
+        Some((c, b, f))
     }
 
     fn dig(&mut self, l: &mut Lemming) {
         if !l.state_ticks.is_multiple_of(DIG_TICKS) {
             return;
         }
-        let c = [
-            l.pos[0].div_euclid(SUB),
-            (l.pos[1] - 1).div_euclid(SUB),
-            l.pos[2].div_euclid(SUB),
-        ];
-        match self.world.block(c) {
-            Some((b, f)) if f & flags::STEEL == 0 => {
-                // Remove the highest present segment under the feet.
-                let top = (7 - b.segments.leading_zeros()).min(3);
-                self.world.remove_segments(c, 1 << top);
+        match self.dig_cell(l) {
+            Some((c, b, f)) if f & flags::STEEL == 0 => {
+                self.world
+                    .remove_segments(c, dig_cut(b, l.pos[1] - c[1] * SUB));
+                // What is left of a sloped block is flat-topped, going down
+                // layer by layer (owner: a dug ramp block must not change its
+                // angle).
+                self.world.flatten(c);
                 let (ground, on_block) = self.world.surface_below(l.pos[0], l.pos[1], l.pos[2]);
                 if !on_block || ground < l.pos[1] - STEP_DOWN {
                     let from = l.pos[1];

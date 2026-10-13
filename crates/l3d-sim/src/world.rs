@@ -155,6 +155,22 @@ impl World {
         })
     }
 
+    /// Makes the block in cell `c` a cube of its remaining segments,
+    /// keeping its id and flags. Returns whether it changed.
+    pub fn flatten(&mut self, c: [i32; 3]) -> bool {
+        let Some(mut cell) = self.cell(c[0], c[1], c[2]) else {
+            return false;
+        };
+        if cell.block.shape == 0 {
+            return false;
+        }
+        cell.block.shape = 0;
+        let i = index(c[0] as usize, c[1] as usize, c[2] as usize);
+        self.cells[i] = Some(cell);
+        self.changes.push((c.map(|v| v as usize), cell.block));
+        true
+    }
+
     /// Adds the segments in `mask` to cell `c`. An empty cell becomes a cube
     /// of `template`'s block id; an occupied cell keeps its block. Returns
     /// whether anything was added.
@@ -366,6 +382,19 @@ impl World {
                 top += 1;
             }
             return (top, true);
+        }
+        // Over water, a point on a cell edge stands on the cells on either
+        // side of it, as the foot of a ramp beside a ground-level stone
+        // (Mayhem 4 "Driving Range").
+        let edge = |v: i32| if v.rem_euclid(SUB) == 0 { -1 } else { 0 };
+        let beside = [(edge(x), 0), (0, edge(z)), (edge(x), edge(z))];
+        if from_y >= GROUND
+            && self.floor(x, z) == Floor::Water
+            && beside
+                .iter()
+                .any(|&(dx, dz)| self.terrain_solid([x + dx, GROUND - 1, z + dz]))
+        {
+            return (GROUND, true);
         }
         (GROUND, false)
     }

@@ -66,6 +66,13 @@ the current camera.
   panel is drawn over them.
 - Ours leaves out a marker within 0.3 units of the view, which would fill it.
 
+**The panel's two red turn arrows turn the level, not the camera**
+(owner's observation): seen from outside the level, the whole world turns
+round. Ours turns it about the middle of the level's boundary, at 1.2 rad/s
+(both ours), the camera circling the other way and keeping its view of that
+point; Q and E do the same. The original's keys A/S "rotate" (see the
+navigation notes); whether they are the same as the arrows is unchecked.
+
 ## The camera never pitches (verified)
 
 No control tilts the view. The horizon stays on the same screen row while the
