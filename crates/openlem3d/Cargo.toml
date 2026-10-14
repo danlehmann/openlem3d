@@ -27,6 +27,18 @@ bevy = { version = "0.19.1", default-features = false, features = [
 wgpu = "29.0.4"
 l3d-sim.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+# Precision touchpad fingers (`src/trackpad.rs`); the version winit uses.
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_Devices_HumanInterfaceDevice",
+    "Win32_Graphics_Gdi",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Threading",
+    "Win32_UI_Input",
+    "Win32_UI_WindowsAndMessaging",
+] }
+
 [target.'cfg(target_os = "android")'.dependencies]
 # For the window insets (`src/platform.rs`); the version Bevy's audio uses.
 jni = "0.21"

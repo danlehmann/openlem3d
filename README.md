@@ -74,7 +74,7 @@ extracting.
 | Move | W A S D, or ↑ ↓; or hold the right button still over the view: the pointer's arrow shows the way (top: forward, bottom: back, bottom corners: sideways, top corners: forward while turning); click the minimap | one-finger drag (up/down) |
 | Turn | ← →, right-drag, or hold the right button at the left or right edge | one-finger drag (left/right) |
 | Turn the level about its centre | Q / E, or hold the turn arrows | hold the turn arrows |
-| Up / down | R / F, or the mouse wheel | two-finger drag (up/down; left/right moves sideways; spread or pinch moves forward or back) |
+| Up / down | R / F, or the mouse wheel | two-finger drag (up/down; left/right moves sideways; spread or pinch moves forward or back); on Windows the same with two fingers on a precision trackpad |
 | Preset cameras | 1–4, or click the camera to cycle (the camera glides there while the level waits; moving it yourself stops the glide) | tap the camera to cycle |
 | Pause (skills can be selected but not given while paused) | P or Space, or click the paws | tap the paws |
 | Fast-forward | Enter, or click the ▶ icon | tap the ▶ icon |

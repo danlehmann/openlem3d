@@ -3768,6 +3768,7 @@ dependencies = [
  "l3d-formats",
  "l3d-sim",
  "wgpu",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

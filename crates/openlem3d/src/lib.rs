@@ -33,6 +33,7 @@ mod sfx;
 mod style;
 mod title;
 mod touch;
+mod trackpad;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -258,6 +259,7 @@ pub fn main() {
         ))
         .add_plugins((
             fade::FadePlugin,
+            trackpad::TrackpadPlugin,
             style::StylePlugin,
             confirm::ConfirmPlugin,
             pixels::PixelsPlugin,
@@ -857,10 +859,11 @@ pub(crate) fn camera_controls(
     game: Res<Game>,
     mut last_free: Local<Option<Vec3>>,
     mut q: Query<&mut ViewCamera>,
-    (scroll, ui, mut held): (
+    (scroll, ui, mut held, trackpad): (
         Res<AccumulatedMouseScroll>,
         Query<&Interaction>,
         Local<[Option<f32>; 2]>,
+        Res<trackpad::Trackpad>,
     ),
 ) {
     // Pointer travel since a button went down over the view (not the
@@ -991,7 +994,10 @@ pub(crate) fn camera_controls(
             + fwd * ahead
             + right * side;
         cam.pos += mv * speed * dt + drag;
+        // Scrolling that a trackpad gesture makes moves the camera through
+        // its fingers instead (`trackpad`).
         let notches = match scroll.unit {
+            _ if trackpad.owns_wheel() => 0.0,
             MouseScrollUnit::Line => scroll.delta.y,
             MouseScrollUnit::Pixel => scroll.delta.y / 50.0,
         };
