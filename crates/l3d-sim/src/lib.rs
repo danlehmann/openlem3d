@@ -522,6 +522,8 @@ pub enum Command {
 
 #[derive(Debug, Clone, Copy)]
 struct Obstacle {
+    /// The index of the lemming standing there.
+    lemming: usize,
     pos: [i32; 3],
     /// For turners: the heading walkers are sent off in.
     turn_to: Option<Dir>,
@@ -802,28 +804,32 @@ impl Simulation {
             o.busy = o.busy.saturating_sub(1);
             o.rest = o.rest.saturating_sub(1);
         }
-        let obstacles: Vec<Obstacle> = self
-            .lemmings
-            .iter()
-            .filter(|l| !l.gone)
-            .filter_map(|l| match l.state {
-                State::Blocking => Some(Obstacle {
-                    pos: l.pos,
-                    turn_to: None,
-                    heading: l.dir,
-                }),
-                State::Turning { to } => Some(Obstacle {
-                    pos: l.pos,
-                    turn_to: Some(to),
-                    heading: l.dir,
-                }),
-                _ => None,
-            })
-            .collect();
+        // A turner turns walkers from the moment it is given, while it still
+        // walks on to the edge of its cell (measured in the original).
+        let obstacles: Vec<Obstacle> =
+            self.lemmings
+                .iter()
+                .enumerate()
+                .filter(|(_, l)| !l.gone)
+                .filter_map(|(i, l)| {
+                    let turn_to = match (l.state, l.pending) {
+                        (State::Blocking, _) => None,
+                        (State::Turning { to }, _)
+                        | (State::Walking, Some(State::Turning { to })) => Some(to),
+                        _ => return None,
+                    };
+                    Some(Obstacle {
+                        lemming: i,
+                        pos: l.pos,
+                        turn_to,
+                        heading: l.dir,
+                    })
+                })
+                .collect();
         for i in 0..self.lemmings.len() {
             if !self.lemmings[i].gone {
                 let mut l = self.lemmings[i].clone();
-                self.update(&mut l, &obstacles);
+                self.update(&mut l, i, &obstacles);
                 let before = &self.lemmings[i];
                 if let Some(e) = self.event_for(before, &l) {
                     self.events.push(e);
@@ -936,7 +942,7 @@ impl Simulation {
         c[0] >= min_x && c[0] <= max_x && c[2] >= min_z && c[2] <= max_z && c[1] <= self.ceiling
     }
 
-    fn update(&mut self, l: &mut Lemming, obstacles: &[Obstacle]) {
+    fn update(&mut self, l: &mut Lemming, me: usize, obstacles: &[Obstacle]) {
         l.state_ticks += 1;
         if let Some(f) = &mut l.fuse
             && !l.state.is_terminal()
@@ -1051,7 +1057,7 @@ impl Simulation {
                     l.set_state(s);
                 } else {
                     let dir = l.dir;
-                    self.walk(l, obstacles);
+                    self.walk(l, me, obstacles);
                     // Or at a wall that would turn the walker round, facing
                     // the wall (the original's basher demo bashes the crate it
                     // walked up to). A miner steps up to its place before the cell's edge when
@@ -2133,7 +2139,7 @@ impl Simulation {
             .find_map(|h| self.world.deflector_normal([x, feet + h, z]))
     }
 
-    fn walk(&mut self, l: &mut Lemming, obstacles: &[Obstacle]) {
+    fn walk(&mut self, l: &mut Lemming, me: usize, obstacles: &[Obstacle]) {
         let d = l.dir.delta();
         // Exits: walking into an exit block through its doorway (the block's
         // +Z face, rotated with the block).
@@ -2185,7 +2191,7 @@ impl Simulation {
                 return;
             }
         }
-        for o in obstacles {
+        for o in obstacles.iter().filter(|o| o.lemming != me) {
             let near = |p: [i32; 3]| {
                 (p[0] - o.pos[0]).abs() < BLOCK_RADIUS
                     && (p[2] - o.pos[2]).abs() < BLOCK_RADIUS
@@ -2203,30 +2209,17 @@ impl Simulation {
                     return;
                 }
                 // Turners turn only walkers going the way the turner was
-                // walking when it stopped; walkers meeting it from any other
-                // side are not affected (owner). They are sent off from the
-                // centre of the turner's cell, ahead of the turner standing
-                // at its edge; a walker already past the centre turns once it
-                // is level with the turner.
-                Some(to)
-                    if to != l.dir
-                        && l.dir == o.heading
-                        && (Self::cell_of(o.pos) == here || near(next)) =>
-                {
-                    let axis = if d[0] != 0 { 0 } else { 2 };
+                // walking when it was given; walkers meeting it from any
+                // other side are not affected (owner). They are sent off as
+                // they cross the centre of the turner's cell, so all leave
+                // along its middle; one already past the centre walks on and
+                // is lost (measured in the original's Practice "Turner" at
+                // release rate 99).
+                Some(to) if to != l.dir && l.dir == o.heading && Self::cell_of(o.pos) == here => {
                     let centre = o.pos[axis].div_euclid(SUB) * SUB + SUB / 2;
-                    let crosses = |at: i32| {
-                        (at - l.pos[axis]) * d[axis] > 0 && (at - next[axis]) * d[axis] <= 0
-                    };
-                    let at = if Self::cell_of(o.pos) == here && crosses(centre) {
-                        Some(centre)
-                    } else if near(next) && crosses(o.pos[axis]) {
-                        Some(o.pos[axis])
-                    } else {
-                        None
-                    };
-                    if let Some(at) = at {
-                        l.pos[axis] = at;
+                    if (centre - l.pos[axis]) * d[axis] > 0 && (centre - next[axis]) * d[axis] <= 0
+                    {
+                        l.pos[axis] = centre;
                         l.dir = to;
                         return;
                     }
