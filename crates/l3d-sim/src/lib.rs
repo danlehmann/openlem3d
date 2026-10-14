@@ -196,21 +196,26 @@ const ENTRANCE_ID: u8 = 0;
 const EXIT_ID: u8 = 1;
 const SPLITTER_ID: u8 = 2;
 
-/// The segments one dig removes from block `b` under a digger whose feet
-/// are `feet` above the cell's bottom: the highest segment of a flat block;
-/// of a sloped block, every segment reaching above the feet, which leaves a
-/// flat floor where the digger stands (a sixteenth of slack keeps a digger
-/// on a ramp's quarter line from cutting below it).
-fn dig_cut(b: l3d_formats::level::BlockCell, feet: i32) -> u8 {
-    let top = 1 << (7 - b.segments.leading_zeros()).min(3);
-    if b.shape == 0 {
-        return top;
+/// The height in quarter units that one dig cuts block `b` (dug down to
+/// `cut` so far) down to, under a digger whose feet are `feet` above the
+/// cell's bottom: a quarter off the top; a shaped block whose top reaches
+/// above the feet is first cut level with them, so the digger stands on the
+/// cut (a sixteenth of slack keeps a digger on a quarter line from cutting
+/// below it).
+fn dig_cut(b: l3d_formats::level::BlockCell, cut: u8, feet: i32) -> u8 {
+    let top = (8 - b.segments.leading_zeros() as u8).min(cut);
+    let level = ((feet + SUB / 16) / (SUB / 4)).clamp(0, 4) as u8;
+    if b.shape != 0 && level < top {
+        level
+    } else {
+        top.saturating_sub(1)
     }
-    let kept = ((feet + SUB / 16) / (SUB / 4)).clamp(0, 4);
-    match b.segments & !((1u8 << kept) - 1) {
-        0 => top,
-        above => above,
-    }
+}
+
+/// The segments of `segments` from height `from` up to `to`, in quarter
+/// units.
+fn segments_between(segments: u8, from: u8, to: u8) -> u8 {
+    segments & !((1u8 << from) - 1) & ((1u8 << to) - 1)
 }
 
 /// The side an exit block's doorway faces: its +Z face, turned with the
@@ -2012,18 +2017,20 @@ impl Simulation {
         [at(pos[0], d[0]), pos[1], at(pos[2], d[2])]
     }
 
-    /// For a digger: the cell under it, the segment it is digging out there
-    /// (the highest one present), and the ticks since it started on that
-    /// segment (0 to [`DIG_TICKS`] − 1). `None` otherwise or with nothing to
-    /// dig.
+    /// For a digger: the cell under it, the segments it is digging out there
+    /// (for a shaped block, the quarters its cut passes through), and the
+    /// ticks since it started on them (0 to [`DIG_TICKS`] − 1). `None`
+    /// otherwise or with nothing to dig.
     pub fn dig_target(&self, l: &Lemming) -> Option<([i32; 3], u8, u32)> {
         if l.state != State::Digging {
             return None;
         }
         let (c, b, _) = self.dig_cell(l)?;
+        let cut = self.world.cut(c);
+        let to = dig_cut(b, cut, l.pos[1] - c[1] * SUB);
         Some((
             c,
-            dig_cut(b, l.pos[1] - c[1] * SUB),
+            segments_between(b.segments, to, cut),
             l.state_ticks % DIG_TICKS,
         ))
     }
@@ -2045,12 +2052,18 @@ impl Simulation {
         }
         match self.dig_cell(l) {
             Some((c, b, f)) if f & flags::STEEL == 0 => {
-                self.world
-                    .remove_segments(c, dig_cut(b, l.pos[1] - c[1] * SUB));
-                // What is left of a sloped block is flat-topped, going down
-                // layer by layer (owner: a dug ramp block must not change its
-                // angle).
-                self.world.flatten(c);
+                let cut = self.world.cut(c);
+                let to = dig_cut(b, cut, l.pos[1] - c[1] * SUB);
+                // A shaped block is shaved flat and keeps its slopes below
+                // the cut: where a sloped underside leaves nothing under the
+                // digger it falls, and the rest stays as a ledge (owner,
+                // comparing Fun 2 with the original).
+                if b.shape == 0 {
+                    self.world
+                        .remove_segments(c, segments_between(b.segments, to, 4));
+                } else {
+                    self.world.shave(c, to);
+                }
                 let (ground, on_block) = self.world.surface_below(l.pos[0], l.pos[1], l.pos[2]);
                 if !on_block || ground < l.pos[1] - STEP_DOWN {
                     let from = l.pos[1];

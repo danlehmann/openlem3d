@@ -305,10 +305,10 @@ pub const SOLUTIONS: &[Solution] = &[
     at(
         27,
         &[
-            (423, 0, 6, None),
-            (434, 1, 2, None),
-            (889, 2, 4, None),
-            (1083, 0, 0, None),
+            (400, 0, 6, None),
+            (411, 1, 2, None),
+            (866, 2, 4, None),
+            (1060, 0, 0, None),
         ],
     ),
     at(
@@ -324,13 +324,13 @@ pub const SOLUTIONS: &[Solution] = &[
     ),
     // Fun levels, play-tested in the simulation; each follows the published
     // route unless noted.
-    // Fun 2 by a route of our own (saves 71 of 70).
+    // Fun 2 by a route of our own (saves 75 of 70).
     Solution {
         level: 1,
         plan: Plan::Rated(
             &[(187, 99)],
             &[
-                (10, 0, 8, None),
+                (12, 0, 8, None),
                 (57, 2, 8, None),
                 (78, 3, 8, None),
                 (120, 5, 8, None),

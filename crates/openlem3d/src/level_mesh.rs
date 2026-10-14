@@ -385,6 +385,59 @@ fn shape_y(shape: u8, v: f32, y0: f32, y1: f32) -> f32 {
     }
 }
 
+/// The part of planar convex polygon `poly` at or below height `h`; the
+/// points where its edges cross that height are added to `crossings`.
+fn clip_below(poly: &[[f32; 3]], h: f32, crossings: &mut Vec<[f32; 3]>) -> Vec<[f32; 3]> {
+    let mut out = Vec::new();
+    for (i, &a) in poly.iter().enumerate() {
+        let b = poly[(i + 1) % poly.len()];
+        if a[1] <= h {
+            out.push(a);
+            if a[1] == h {
+                crossings.push(a);
+            }
+        }
+        if (a[1] <= h) != (b[1] <= h) {
+            let t = (h - a[1]) / (b[1] - a[1]);
+            let p = [a[0] + t * (b[0] - a[0]), h, a[2] + t * (b[2] - a[2])];
+            out.push(p);
+            crossings.push(p);
+        }
+    }
+    out
+}
+
+/// The flat top a cut at height `h` leaves in a shape: the convex hull of the
+/// points where the shape's faces cross it, or `None` if they enclose no
+/// area.
+fn cap_poly(points: &[[f32; 3]], h: f32) -> Option<Poly> {
+    let mut pts: Vec<[f32; 2]> = points.iter().map(|p| [p[0], p[2]]).collect();
+    pts.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    pts.dedup_by(|a, b| (a[0] - b[0]).abs() < 1e-4 && (a[1] - b[1]).abs() < 1e-4);
+    if pts.len() < 3 {
+        return None;
+    }
+    let cross = |o: [f32; 2], a: [f32; 2], b: [f32; 2]| {
+        (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+    };
+    // Andrew's monotone chain: the lower hull, then the upper.
+    let mut hull: Vec<[f32; 2]> = Vec::new();
+    for pass in [pts.clone(), pts.iter().rev().copied().collect()] {
+        let start = hull.len();
+        for p in pass {
+            while hull.len() >= start + 2
+                && cross(hull[hull.len() - 2], hull[hull.len() - 1], p) <= 0.0
+            {
+                hull.pop();
+            }
+            hull.push(p);
+        }
+        hull.pop();
+    }
+    let verts: Vec<[f32; 3]> = hull.iter().map(|q| [q[0], h, q[1]]).collect();
+    (verts.len() >= 3).then(|| poly(&verts, FaceDir::PosY, None))
+}
+
 struct Grid<'a> {
     level: &'a Level,
     blocks: &'a BlockSet,
@@ -468,11 +521,15 @@ impl MeshData {
 /// half-height hatch's flaps show the half that has it (texture sets differ:
 /// `TEXTURE.004` and `.006` draw the crate side in the top half of tiles 59
 /// and 60). `hatch_open` (0–1) is how far the hatches' doors are open.
+/// `cut(x, y, z)` is the height within cell `(x, y, z)` above which its block
+/// has been dug away (1 for a whole block): the shape is sliced off flat
+/// there, unchanged below.
 pub fn build(
     level: &Level,
     blocks: &BlockSet,
     art_on_top: &dyn Fn(u32) -> bool,
     hatch_open: f32,
+    cut: &dyn Fn(usize, usize, usize) -> f32,
 ) -> LevelMesh {
     let grid = Grid { level, blocks };
     let mut out = LevelMesh::default();
@@ -489,9 +546,21 @@ pub fn build(
             *unsupported.entry(cell.shape).or_default() += 1;
             continue;
         };
+        let top = cut(x, y, z);
         for (y0, y1) in segment_runs(cell.segments) {
+            if top <= y0 {
+                continue;
+            }
+            let clip = top < y1;
             let origin = [x as f32, y as f32, z as f32];
+            let rotation = effective_rotation(cell.shape, cell.rotation);
+            let place = |lp: [f32; 3]| {
+                let r = rotate_point(lp, rotation);
+                [r[0] + origin[0], r[1] + origin[1], r[2] + origin[2]]
+            };
             let mut solid_verts: Vec<[f32; 3]> = Vec::new();
+            let mut crossings: Vec<[f32; 3]> = Vec::new();
+            let mut cap: Vec<Poly> = Vec::new();
             let mut placed: Vec<PlacedPoly> = Vec::new();
             // A hatch keeps all its walls; each flap is a second copy of a side
             // wall, swung open below it.
@@ -500,38 +569,47 @@ pub fn build(
                 .filter(|p| is_flap(cell, p.src))
                 .map(|p| (p, true));
             for (p, flap) in polys.iter().map(|p| (p, false)).chain(flaps) {
-                let uvs: Vec<[f32; 2]> = p
-                    .verts
-                    .iter()
-                    .map(|v| {
-                        // Faces show the part of their tile matching their height;
-                        // flaps show its bottom part, or the top (below) when the
-                        // art is there.
-                        // A flap is upside down once open (its top edge swings out and
-                        // down), so its picture is flipped to keep the hinges at the
-                        // hinge.
-                        let ly = if flap {
-                            (1.0 - v[1]) * (y1 - y0)
-                        } else {
-                            shape_y(cell.shape, v[1], y0, y1)
-                        };
-                        tile_uv(p.src, [v[0], ly, v[2]])
-                    })
-                    .collect();
-                let verts: Vec<[f32; 3]> = p
-                    .verts
-                    .iter()
-                    .map(|v| {
-                        let mut lp = [v[0], shape_y(cell.shape, v[1], y0, y1), v[2]];
-                        if flap {
-                            lp = open_flap(lp, p.src, y0, hatch_open);
+                let (verts, uvs): (Vec<[f32; 3]>, Vec<[f32; 2]>) = if flap {
+                    // Flaps show their tile's bottom part, or the top (below)
+                    // when the art is there. A flap is upside down once open
+                    // (its top edge swings out and down), so its picture is
+                    // flipped to keep the hinges at the hinge.
+                    p.verts
+                        .iter()
+                        .map(|v| {
+                            let lp = [v[0], shape_y(cell.shape, v[1], y0, y1), v[2]];
+                            let uv = tile_uv(p.src, [v[0], (1.0 - v[1]) * (y1 - y0), v[2]]);
+                            (place(open_flap(lp, p.src, y0, hatch_open)), uv)
+                        })
+                        .unzip()
+                } else {
+                    // Faces show the part of their tile matching their height.
+                    let mut local: Vec<[f32; 3]> = p
+                        .verts
+                        .iter()
+                        .map(|v| [v[0], shape_y(cell.shape, v[1], y0, y1), v[2]])
+                        .collect();
+                    if clip {
+                        local = clip_below(&local, top, &mut crossings);
+                        if local.len() < 3 {
+                            continue;
                         }
-                        let r = rotate_point(lp, effective_rotation(cell.shape, cell.rotation));
-                        [r[0] + origin[0], r[1] + origin[1], r[2] + origin[2]]
-                    })
-                    .collect();
+                    }
+                    local
+                        .iter()
+                        .map(|&lp| (place(lp), tile_uv(p.src, lp)))
+                        .unzip()
+                };
                 solid_verts.extend(&verts);
                 placed.push((verts, uvs, p, flap));
+            }
+            // A dug block's flat top where the cut went through it.
+            cap.extend(clip.then(|| cap_poly(&crossings, top)).flatten());
+            for c in &cap {
+                let verts: Vec<[f32; 3]> = c.verts.iter().map(|&lp| place(lp)).collect();
+                let uvs = c.verts.iter().map(|&lp| tile_uv(c.src, lp)).collect();
+                solid_verts.extend(&verts);
+                placed.push((verts, uvs, c, false));
             }
             let centre = {
                 let n = solid_verts.len() as f32;

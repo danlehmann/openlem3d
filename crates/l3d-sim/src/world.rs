@@ -68,6 +68,9 @@ struct SolidCell {
     block: BlockCell,
     /// Behaviour flags of the block definition.
     flags: u8,
+    /// Height in quarter units above which the block has been dug away,
+    /// leaving its shape below unchanged: 4 for a whole block.
+    cut: u8,
 }
 
 impl World {
@@ -84,6 +87,7 @@ impl World {
             cells[index(x, y, z)] = Some(SolidCell {
                 block: b,
                 flags: def.flags,
+                cut: 4,
             });
         }
         let land = level
@@ -155,20 +159,31 @@ impl World {
         })
     }
 
-    /// Makes the block in cell `c` a cube of its remaining segments,
-    /// keeping its id and flags. Returns whether it changed.
-    pub fn flatten(&mut self, c: [i32; 3]) -> bool {
+    /// Shaves the block in cell `c` down to `cut` quarter units: what lies
+    /// above goes, the shape below stays as it was. A block with nothing
+    /// left below the cut is removed. Returns whether anything changed.
+    pub fn shave(&mut self, c: [i32; 3], cut: u8) -> bool {
         let Some(mut cell) = self.cell(c[0], c[1], c[2]) else {
             return false;
         };
-        if cell.block.shape == 0 {
+        if cut >= cell.cut {
             return false;
         }
-        cell.block.shape = 0;
+        self.remove_bricks(c, 0xF & !((1 << cut) - 1));
+        cell.cut = cut;
+        if cell.block.segments & ((1 << cut) - 1) == 0 {
+            cell.block.segments = 0;
+        }
         let i = index(c[0] as usize, c[1] as usize, c[2] as usize);
-        self.cells[i] = Some(cell);
+        self.cells[i] = (cell.block.segments != 0).then_some(cell);
         self.changes.push((c.map(|v| v as usize), cell.block));
         true
+    }
+
+    /// The height in quarter units above which the block in cell `c` has
+    /// been dug away ([`World::shave`]): 4 for a whole block or none.
+    pub fn cut(&self, c: [i32; 3]) -> u8 {
+        self.cell(c[0], c[1], c[2]).map_or(4, |s| s.cut)
     }
 
     /// Adds the segments in `mask` to cell `c`. An empty cell becomes a cube
@@ -188,6 +203,7 @@ impl World {
                 segments: 0,
             },
             flags: 0,
+            cut: 4,
         });
         if cell.block.segments & mask == mask {
             return false;
@@ -272,7 +288,7 @@ impl World {
             return false;
         };
         let l = [0, 1, 2].map(|i| (p[i] - c[i] * SUB) as f32 / SUB as f32);
-        inside_shape(cell.block, l)
+        l[1] * 4.0 < cell.cut as f32 && inside_shape(cell.block, l)
     }
 
     /// For a point inside a 45° deflector wall (shape 7): the outward normal
