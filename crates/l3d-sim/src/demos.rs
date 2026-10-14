@@ -816,6 +816,17 @@ pub const SOLUTIONS: &[Solution] = &[
             (3660, 25, 1, Some(true)),
         ],
     ),
+    // Mayhem 9 "Over the Top", by the published walkthrough.
+    at(
+        68,
+        &[
+            (1, 0, 7, None),
+            (67, 1, 7, None),
+            (380, 0, 1, Some(false)),
+            (760, 1, 3, None),
+            (1855, 1, 6, None),
+        ],
+    ),
     Solution {
         level: 76,
         plan: Plan::Rated(
@@ -1126,6 +1137,21 @@ pub const SOLUTIONS: &[Solution] = &[
             (1200, 1, 2, None),
             (1205, 0, 5, None),
             (1231, 0, 5, None),
+        ],
+    ),
+    // Taxing 9 "Which Trampoline ?" by a route of our own, east of the
+    // walkthrough's, into the exit's east door; hatch lemmings land past the
+    // centre of the first turner's cell and are turned where they land.
+    at(
+        48,
+        &[
+            (9, 0, 1, Some(true)),
+            (370, 1, 1, Some(false)),
+            (577, 2, 1, Some(false)),
+            (708, 3, 1, Some(true)),
+            (840, 4, 1, Some(false)),
+            (975, 5, 1, Some(true)),
+            (1113, 6, 1, Some(true)),
         ],
     ),
     // Taxing 10 "It's the Name of the Game" by a route of our own, found once

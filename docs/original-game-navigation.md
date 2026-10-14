@@ -481,6 +481,19 @@ instead, for header fields (`docs/spec/level.md`). **Verified** on Practice
 - **Our sim** plays the same copy with `OPENLEM3D_DATA=temp/patched`.
 - **Replays:** after a failed attempt, the next start replays it; a click
   takes over ("Click to Play").
+- **Starting view:** preset camera 1 (`@15D`) is the view a level opens on,
+  so copying another camera's bytes there saves camera clicks. A level whose
+  lemmings all drown ends within seconds at release rate 99; a lower rate
+  (`@E2=32,...`, 50) keeps them coming for about a minute.
+- **A turner without help** (2026-10-14): select the turner (174,440, 300 ms),
+  park the pointer on the lemmings' path, poll grabs until the caption box
+  at the bottom left (about x 60–140, y 350–376 in a 640-wide grab) shows
+  white text, then press 100 ms twice, 300 ms apart, without moving. The
+  first press shows the direction arrow (here pointing at the camera); the
+  second commits it. Moving the pointer between the presses can point the
+  arrow along the lemming's own heading, and then nothing is given. A
+  `move:` after homing doesn't land at the same place every time, so check
+  the pointer with a grab and correct it with `rel:`.
 
 ## 7. Save states: skip the boot, intro and navigation
 

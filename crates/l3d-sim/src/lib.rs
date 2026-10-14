@@ -462,6 +462,8 @@ pub struct Lemming {
     /// was resting when it stepped on, and the way it is crossing; that
     /// sender doesn't throw it on this crossing.
     pub passing: Option<(usize, Dir)>,
+    /// Has come down from a fall and not yet taken a walking step.
+    pub landed: bool,
     /// A skill given but not started yet: blockers, turners, bashers and
     /// miners walk on until they cross into the next cell along their
     /// heading, then take it up (measured in the original's Practice demos).
@@ -792,6 +794,7 @@ impl Simulation {
                     gone: false,
                     teleported: false,
                     passing: None,
+                    landed: false,
                     pending: None,
                 });
                 self.counts.released += 1;
@@ -1582,6 +1585,7 @@ impl Simulation {
         if self.bounce(l, fell) {
             return;
         }
+        l.landed = true;
         let ground_flags = if on_block {
             self.world.flags_at([l.pos[0], l.pos[1] - 1, l.pos[2]])
         } else {
@@ -2143,6 +2147,7 @@ impl Simulation {
 
     fn walk(&mut self, l: &mut Lemming, me: usize, obstacles: &[Obstacle]) {
         let d = l.dir.delta();
+        let landed = std::mem::take(&mut l.landed);
         // Exits: walking into an exit block through its doorway (the block's
         // +Z face, rotated with the block).
         // Probe as far ahead as the wall check below (one step plus REACH), so a
@@ -2216,9 +2221,15 @@ impl Simulation {
                 // they cross the centre of the turner's cell, so all leave
                 // along its middle; one already past the centre walks on and
                 // is lost (measured in the original's Practice "Turner" at
-                // release rate 99).
+                // release rate 99). One landing past the centre is turned
+                // where it lands (measured on a test level: hatch lemmings
+                // landing about ¼ past the centre of a turner's cell).
                 Some(to) if to != l.dir && l.dir == o.heading && Self::cell_of(o.pos) == here => {
                     let centre = o.pos[axis].div_euclid(SUB) * SUB + SUB / 2;
+                    if landed && (centre - l.pos[axis]) * d[axis] <= 0 {
+                        l.dir = to;
+                        return;
+                    }
                     if (centre - l.pos[axis]) * d[axis] > 0 && (centre - next[axis]) * d[axis] <= 0
                     {
                         l.pos[axis] = centre;

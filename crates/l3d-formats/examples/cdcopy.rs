@@ -7,7 +7,9 @@
 //! - `cdcopy level DIR LEVEL [X,Y,Z=ID:SHAPE:ROT:SEGS ...]`: writes
 //!   `LEVELS/LEVEL.nnn`, unpacked, with the given block-grid cells changed
 //!   (`docs/spec/level.md`), to the end of the copy and points the file's
-//!   directory record at it. Each run starts again from the original level.
+//!   directory record at it. Each run starts again from the original level;
+//!   `LEVEL=OTHER` starts from level OTHER's file instead, so `98=68` puts
+//!   Mayhem 9 in the Practice "Trampoline" slot.
 //!   An edit `@OFFSET=B,B,...` writes raw bytes (hex) at a hex offset of the
 //!   unpacked level, e.g. a preset camera (`docs/spec/level.md`).
 //!
@@ -28,16 +30,18 @@ fn main() {
     match args[0].as_str() {
         "make" => make(dir),
         "level" => {
-            let n: u32 = args[2].parse().expect("level number");
-            level(dir, n, &args[3..]);
+            let (n, from) = args[2].split_once('=').unwrap_or((&args[2], &args[2]));
+            let n: u32 = n.parse().expect("level number");
+            let from: u32 = from.parse().expect("level number");
+            level(dir, n, from, &args[3..]);
         }
         a => panic!("unknown command {a}"),
     }
 }
 
-fn level(dir: &Path, n: u32, edits: &[String]) {
+fn level(dir: &Path, n: u32, from: u32, edits: &[String]) {
     let mut data = GameData::open(&locate_data_dir(None)).expect("game CD");
-    let mut level = data.read(&format!("LEVELS/LEVEL.{n:03}")).unwrap();
+    let mut level = data.read(&format!("LEVELS/LEVEL.{from:03}")).unwrap();
     for e in edits {
         if let Some(raw) = e.strip_prefix('@') {
             // `@OFFSET=B,B,...`: bytes (hex) written at a hex offset.
