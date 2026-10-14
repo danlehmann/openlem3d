@@ -63,6 +63,20 @@ fn practice_solutions_still_work() {
         let level = data.level(s.level).expect("level");
         let blocks = data.blocks(s.level).expect("blocks");
         let played = demos::play(s, &level, &blocks);
+        if let demos::Plan::At(steps) | demos::Plan::Rated(_, steps) = s.plan {
+            let taken = played
+                .log
+                .iter()
+                .filter(|(_, c)| matches!(c, Command::Assign { .. } | Command::Turner { .. }))
+                .count();
+            if taken != steps.len() {
+                failures.push(format!(
+                    "LEVEL.{:03}: {taken} of {} assignments taken",
+                    s.level,
+                    steps.len()
+                ));
+            }
+        }
         let need = if s.saves > 0 {
             s.saves
         } else {

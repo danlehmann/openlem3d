@@ -344,7 +344,6 @@ pub const SOLUTIONS: &[Solution] = &[
                 (600, 0, 6, None),
                 (690, 26, 0, None),
                 (750, 42, 0, None),
-                (880, 44, 0, None),
             ],
         ),
         saves: 0,
@@ -1118,13 +1117,13 @@ pub fn play(s: &Solution, level: &Level, blocks: &BlockSet) -> Simulation {
                     }
                 }
                 for &(t, i, id, side) in steps.iter().filter(|(t, ..)| due(*t)) {
-                    let ok = match (side, sim.lemmings.get(i).map(|l| l.dir)) {
+                    // A rejected assignment leaves no command in the log.
+                    match (side, sim.lemmings.get(i).map(|l| l.dir)) {
                         (Some(cw), Some(d)) => {
                             sim.assign_turner(i, if cw { d.clockwise() } else { d.anticlockwise() })
                         }
                         _ => Skill::from_id(id).is_some_and(|skill| sim.assign(i, skill)),
                     };
-                    debug_assert!(ok, "LEVEL.{:03}: assignment at tick {t} rejected", s.level);
                 }
             }
             Plan::Each(id) => {
