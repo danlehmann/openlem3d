@@ -148,6 +148,7 @@ mod win {
     const DIGITIZER: u16 = 0x0D;
     const TOUCH_PAD: u16 = 0x05;
     const TIP_SWITCH: u16 = 0x42;
+    const CONFIDENCE: u16 = 0x47;
     const CONTACT_ID: u16 = 0x51;
     const CONTACT_COUNT: u16 = 0x54;
     const GENERIC_DESKTOP: u16 = 0x01;
@@ -392,7 +393,7 @@ mod win {
             };
             let mut usages = [0u16; 16];
             let mut n = usages.len() as u32;
-            let tip = unsafe {
+            let read = unsafe {
                 HidP_GetUsages(
                     HidP_Input,
                     DIGITIZER,
@@ -403,9 +404,11 @@ mod win {
                     report.as_ptr() as *mut u8,
                     len,
                 )
-            } == HIDP_STATUS_SUCCESS
-                && usages[..n as usize].contains(&TIP_SWITCH);
-            if !tip {
+            } == HIDP_STATUS_SUCCESS;
+            let on = |usage| read && usages[..n as usize].contains(&usage);
+            // A palm resting on the pad is reported too, without the
+            // confidence that it is a finger.
+            if !(on(TIP_SWITCH) && on(CONFIDENCE)) {
                 if count > 0 {
                     shared.remove(&(device, id));
                 }
