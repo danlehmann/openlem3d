@@ -149,6 +149,9 @@ pub struct EventLoop<T: 'static> {
     // button state bits, and the cursor's last position.
     mouse_buttons: u32,
     mouse_position: Option<PhysicalPosition<f64>>,
+    // openlem3d patch: the fingers of a touchpad gesture under way, by
+    // pointer id.
+    touchpad_gesture: Option<Vec<(i32, PhysicalPosition<f32>)>>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -161,6 +164,33 @@ impl Default for PlatformSpecificEventLoopAttributes {
     fn default() -> Self {
         Self { android_app: Default::default(), ignore_volume_keys: true }
     }
+}
+
+/// openlem3d patch: whether the event is part of a touchpad gesture (two or
+/// more fingers), not the pointer: a finger down on the mouse pointer's source
+/// without a button (a tap or click reports the primary button).
+fn is_touchpad_gesture(motion_event: &MotionEvent<'_>) -> bool {
+    motion_event.pointer_at_index(0).tool_type() == ToolType::Finger
+        && motion_event.button_state().0 == 0
+        && matches!(
+            motion_event.action(),
+            MotionAction::Down
+                | MotionAction::Move
+                | MotionAction::Up
+                | MotionAction::Cancel
+                | MotionAction::PointerDown
+                | MotionAction::PointerUp
+        )
+}
+
+/// openlem3d patch: whether the event comes from a mouse-like pointer: a
+/// mouse, or a touchpad moving the pointer (whose pointer is a finger, but whose
+/// source is the mouse class), rather than a touchscreen or stylus.
+fn is_mouse(motion_event: &MotionEvent<'_>) -> bool {
+    const SOURCE_MOUSE_BIT: u32 = 0x2000; // AINPUT_SOURCE_MOUSE without the class
+    motion_event.pointer_count() > 0
+        && (motion_event.pointer_at_index(0).tool_type() == ToolType::Mouse
+            || u32::from(motion_event.source()) & SOURCE_MOUSE_BIT != 0)
 }
 
 impl<T: 'static> EventLoop<T> {
@@ -200,6 +230,7 @@ impl<T: 'static> EventLoop<T> {
             combining_accent: None,
             mouse_buttons: 0,
             mouse_position: None,
+            touchpad_gesture: None,
         })
     }
 
@@ -376,6 +407,10 @@ impl<T: 'static> EventLoop<T> {
     where
         F: FnMut(event::Event<T>, &RootAEL),
     {
+        if is_touchpad_gesture(motion_event) {
+            self.handle_touchpad_gesture(motion_event, callback);
+            return;
+        }
         let window_id = window::WindowId(WindowId);
         let device_id = event::DeviceId(DeviceId(motion_event.device_id()));
         let pointer = motion_event.pointer_at_index(0);
@@ -401,15 +436,9 @@ impl<T: 'static> EventLoop<T> {
             .replace(position)
             .map(|last| (position.x - last.x, position.y - last.y))
             .filter(|&delta| delta != (0.0, 0.0));
-        // A pointer down without any button reported (e.g. a touchpad tap)
-        // is the primary button; `Move`, unlike `HoverMove`, means down.
-        let primary = u32::from(Button::Primary);
-        let mut held = motion_event.button_state().0;
-        if held == 0 && matches!(action, MotionAction::Down | MotionAction::Move) {
-            held = primary;
-        }
+        let held = motion_event.button_state().0;
         let buttons = [
-            (primary, event::MouseButton::Left),
+            (u32::from(Button::Primary), event::MouseButton::Left),
             (u32::from(Button::Secondary), event::MouseButton::Right),
             (u32::from(Button::Tertiary), event::MouseButton::Middle),
             (u32::from(Button::Back), event::MouseButton::Back),
@@ -441,6 +470,79 @@ impl<T: 'static> EventLoop<T> {
         }
     }
 
+    /// openlem3d patch: a touchpad gesture, which Android reports as fingers
+    /// on the mouse pointer's source (a two-finger swipe as one finger moving
+    /// as the fingers do, a pinch as two), as pan and pinch gestures.
+    fn handle_touchpad_gesture<F>(&mut self, motion_event: &MotionEvent<'_>, callback: &mut F)
+    where
+        F: FnMut(event::Event<T>, &RootAEL),
+    {
+        let window_id = window::WindowId(WindowId);
+        let device_id = event::DeviceId(DeviceId(motion_event.device_id()));
+        let fingers: Vec<(i32, PhysicalPosition<f32>)> = motion_event
+            .pointers()
+            .map(|p| (p.pointer_id(), PhysicalPosition::new(p.x(), p.y())))
+            .collect();
+        let action = motion_event.action();
+        let phase = match action {
+            MotionAction::Down => event::TouchPhase::Started,
+            MotionAction::Up => event::TouchPhase::Ended,
+            MotionAction::Cancel => event::TouchPhase::Cancelled,
+            _ => event::TouchPhase::Moved,
+        };
+        let last = std::mem::replace(
+            &mut self.touchpad_gesture,
+            matches!(phase, event::TouchPhase::Started | event::TouchPhase::Moved)
+                .then(|| fingers.clone()),
+        );
+        let mut send = |this: &mut Self, event| {
+            callback(event::Event::WindowEvent { window_id, event }, this.window_target())
+        };
+        let zero = PhysicalPosition::new(0.0, 0.0);
+        match phase {
+            event::TouchPhase::Started => {
+                send(self, event::WindowEvent::PanGesture { device_id, delta: zero, phase });
+                send(self, event::WindowEvent::PinchGesture { device_id, delta: 0.0, phase });
+            },
+            event::TouchPhase::Ended | event::TouchPhase::Cancelled => {
+                send(self, event::WindowEvent::PanGesture { device_id, delta: zero, phase });
+                send(self, event::WindowEvent::PinchGesture { device_id, delta: 0.0, phase });
+            },
+            event::TouchPhase::Moved if action == MotionAction::Move => {
+                // Fingers seen before too, so one landing or lifting doesn't
+                // jump.
+                let moved: Vec<_> = fingers
+                    .iter()
+                    .filter_map(|(id, now)| {
+                        let (_, before) = last.as_ref()?.iter().find(|(i, _)| i == id)?;
+                        Some((*before, *now))
+                    })
+                    .collect();
+                if moved.is_empty() {
+                    return;
+                }
+                let n = moved.len() as f32;
+                let delta = PhysicalPosition::new(
+                    moved.iter().map(|(b, a)| a.x - b.x).sum::<f32>() / n,
+                    moved.iter().map(|(b, a)| a.y - b.y).sum::<f32>() / n,
+                );
+                send(self, event::WindowEvent::PanGesture { device_id, delta, phase });
+                if let [(b0, a0), (b1, a1), ..] = moved[..] {
+                    let distance = |p: PhysicalPosition<f32>, q: PhysicalPosition<f32>| {
+                        ((p.x - q.x).powi(2) + (p.y - q.y).powi(2)).sqrt()
+                    };
+                    let before = distance(b0, b1);
+                    if before > 0.0 {
+                        let delta = (distance(a0, a1) / before - 1.0) as f64;
+                        send(self, event::WindowEvent::PinchGesture { device_id, delta, phase });
+                    }
+                }
+            },
+            // A finger landing or lifting mid-gesture.
+            event::TouchPhase::Moved => {},
+        }
+    }
+
     fn handle_input_event<F>(
         &mut self,
         android_app: &AndroidApp,
@@ -452,10 +554,7 @@ impl<T: 'static> EventLoop<T> {
     {
         let mut input_status = InputStatus::Handled;
         match event {
-            InputEvent::MotionEvent(motion_event)
-                if motion_event.pointer_count() > 0
-                    && motion_event.pointer_at_index(0).tool_type() == ToolType::Mouse =>
-            {
+            InputEvent::MotionEvent(motion_event) if is_mouse(motion_event) => {
                 self.handle_mouse_event(motion_event, callback);
             },
             InputEvent::MotionEvent(motion_event) => {

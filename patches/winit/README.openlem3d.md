@@ -6,8 +6,9 @@ tests, used through `[patch.crates-io]` in the workspace `Cargo.toml`.
 
 The only change is in `src/platform_impl/android/mod.rs` (marked "openlem3d
 patch"): winit 0.30 reports every Android pointer event as a touch, so a mouse
-loses its buttons, hovering and wheel. The patch reports mouse pointers as
-`CursorMoved`, `MouseInput`, `MouseWheel`, `CursorEntered` and `CursorLeft`
-instead, and their movement as `DeviceEvent::MouseMotion`.
+loses its buttons, hovering and wheel. The patch reports mouse pointers (a
+mouse, or a touchpad moving the pointer) as `CursorMoved`, `MouseInput`,
+`MouseWheel`, `CursorEntered` and `CursorLeft` instead, and their movement as
+`DeviceEvent::MouseMotion`.
 
 Remove this copy once Bevy uses a winit that handles Android mice.

@@ -1,15 +1,18 @@
-//! Precision touchpad fingers (Windows): two or more fingers on the
-//! trackpad move the camera as two fingers on a touchscreen do (see
-//! `touch`). One finger is left to the pointer.
+//! Trackpad gestures: two or more fingers on the trackpad move the camera as
+//! two fingers on a touchscreen do (see `touch`). One finger is left to the
+//! pointer.
 //!
 //! Windows turns trackpad gestures into wheel scrolling, one axis at a time,
-//! for ordinary windows; the fingers themselves come from the touchpad's raw
-//! HID reports, read here on a thread of its own with a hidden window.
+//! for ordinary windows; the fingers themselves come from the precision
+//! touchpad's raw HID reports, read here on a thread of its own with a hidden
+//! window. On Android the (patched) winit reports them as pan and pinch
+//! gestures.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+use bevy::input::gestures::{PanGesture, PinchGesture};
 use bevy::prelude::*;
 
 use crate::ViewCamera;
@@ -24,6 +27,9 @@ const PAD_WIDTH_PX: f32 = 1200.0;
 const WHEEL_QUIET: Duration = Duration::from_millis(600);
 /// A contact not reported for this long has left the trackpad.
 const CONTACT_TIMEOUT: Duration = Duration::from_millis(150);
+/// A pinch gesture's change in scale, as fingers this far apart (pixels)
+/// spreading or pinching.
+const PINCH_SPREAD_PX: f32 = 300.0;
 
 pub struct TrackpadPlugin;
 
@@ -32,7 +38,7 @@ impl Plugin for TrackpadPlugin {
         start();
         app.init_resource::<Trackpad>().add_systems(
             Update,
-            trackpad_camera
+            (trackpad_camera, gesture_camera)
                 .before(crate::camera_controls)
                 .run_if(in_state(AppState::Playing)),
         );
@@ -77,17 +83,42 @@ fn trackpad_camera(mut pad: ResMut<Trackpad>, mut cams: Query<&mut ViewCamera>) 
             let n = both.len() as f32;
             let delta = both.iter().map(|(q, p)| *p - *q).sum::<Vec2>() / n;
             let spread = both[0].1.distance(both[1].1) - both[0].0.distance(both[1].0);
-            for mut cam in &mut cams {
-                let fwd = cam.forward();
-                let right = Vec3::new(-fwd.z, 0.0, fwd.x);
-                cam.pos += -right * delta.x * MOVE_PER_PX
-                    + Vec3::Y * delta.y * MOVE_PER_PX
-                    + fwd * spread * MOVE_PER_PX;
-                cam.glide = None;
-            }
+            move_camera(&mut cams, delta, spread);
         }
     }
     pad.previous = now;
+}
+
+/// Pan and pinch gestures, as two fingers on the trackpad.
+fn gesture_camera(
+    mut pans: MessageReader<PanGesture>,
+    mut pinches: MessageReader<PinchGesture>,
+    windows: Query<&Window>,
+    mut pad: ResMut<Trackpad>,
+    mut cams: Query<&mut ViewCamera>,
+) {
+    // Physical pixels, as winit reports them.
+    let scale = windows.iter().next().map_or(1.0, |w| w.scale_factor());
+    let delta = pans.read().map(|p| p.0).sum::<Vec2>() / scale;
+    let spread = pinches.read().map(|p| p.0).sum::<f32>() * PINCH_SPREAD_PX;
+    if delta == Vec2::ZERO && spread == 0.0 {
+        return;
+    }
+    pad.last_gesture = Some(Instant::now());
+    move_camera(&mut cams, delta, spread);
+}
+
+/// Dragging two fingers by `delta` moves the camera sideways and up and down,
+/// spreading them apart by `spread` moves it forward (pixels).
+fn move_camera(cams: &mut Query<&mut ViewCamera>, delta: Vec2, spread: f32) {
+    for mut cam in cams {
+        let fwd = cam.forward();
+        let right = Vec3::new(-fwd.z, 0.0, fwd.x);
+        cam.pos += -right * delta.x * MOVE_PER_PX
+            + Vec3::Y * delta.y * MOVE_PER_PX
+            + fwd * spread * MOVE_PER_PX;
+        cam.glide = None;
+    }
 }
 
 /// One finger on the trackpad, as the reading thread last saw it.
