@@ -1101,6 +1101,35 @@ pub const SOLUTIONS: &[Solution] = &[
         ),
         saves: 0,
     },
+    // Tricky 6 "Lemmhanger" by the walkthrough; Taxing 19 "Lemmtris" by
+    // xeye's route, the exit tunnel mined in two goes.
+    at(
+        25,
+        &[
+            (10, 0, 3, None),
+            (200, 1, 1, Some(true)),
+            (545, 2, 1, Some(false)),
+            (690, 3, 0, None),
+            (845, 4, 1, Some(true)),
+            (1214, 5, 1, Some(false)),
+            (1342, 6, 3, None),
+            (1475, 6, 1, Some(true)),
+            (1615, 7, 4, None),
+            (1940, 7, 0, None),
+        ],
+    ),
+    at(
+        58,
+        &[
+            (2, 0, 8, None),
+            (68, 1, 3, None),
+            (424, 0, 5, None),
+            (1043, 0, 3, None),
+            (1200, 1, 2, None),
+            (1205, 0, 5, None),
+            (1231, 0, 5, None),
+        ],
+    ),
 ];
 
 pub fn solution(level: u32) -> Option<&'static Solution> {
