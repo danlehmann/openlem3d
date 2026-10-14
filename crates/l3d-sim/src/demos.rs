@@ -856,6 +856,53 @@ pub const SOLUTIONS: &[Solution] = &[
             (4296, 24, 1, Some(false)),
         ],
     ),
+    // By the published walkthroughs; Mayhem 8 "Five Towers" with one more
+    // bridge than the walkthrough's.
+    at(
+        67,
+        &[
+            (345, 1, 1, Some(true)),
+            (482, 3, 1, Some(false)),
+            (686, 5, 1, Some(true)),
+            (780, 7, 3, None),
+            (940, 7, 3, None),
+            (1098, 7, 3, None),
+            (1236, 7, 3, None),
+            (1402, 7, 3, None),
+            (1431, 7, 1, Some(false)),
+            (1965, 13, 5, None),
+            (2156, 17, 1, Some(true)),
+        ],
+    ),
+    Solution {
+        level: 76,
+        plan: Plan::Rated(
+            &[(280, 49)],
+            &[
+                (70, 0, 6, None),
+                (115, 0, 4, None),
+                (274, 1, 2, None),
+                (1230, 2, 4, None),
+            ],
+        ),
+        saves: 0,
+    },
+    Solution {
+        level: 78,
+        plan: Plan::Rated(
+            &[(1130, 49)],
+            &[
+                (5, 0, 7, None),
+                (352, 0, 3, None),
+                (800, 0, 4, None),
+                (1112, 16, 7, None),
+                (1630, 16, 4, None),
+                (1800, 3, 4, None),
+                (1927, 0, 2, None),
+            ],
+        ),
+        saves: 0,
+    },
 ];
 
 pub fn solution(level: u32) -> Option<&'static Solution> {
