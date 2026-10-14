@@ -446,8 +446,9 @@ pub struct Lemming {
     /// another teleport.
     pub teleported: bool,
     /// The spring sender (index into the objects) it is walking over, which
-    /// was resting when it stepped on; that sender doesn't throw it.
-    pub passing: Option<usize>,
+    /// was resting when it stepped on, and the way it is crossing; that
+    /// sender doesn't throw it on this crossing.
+    pub passing: Option<(usize, Dir)>,
     /// A skill given but not started yet: blockers, turners, bashers and
     /// miners walk on until they cross into the next cell along their
     /// heading, then take it up (measured in the original's Practice demos).
@@ -1270,7 +1271,7 @@ impl Simulation {
     /// Flight time and arc height are unmeasured. A sender still resting
     /// from a throw ([`SPRING_REST_TICKS`]) lets a walker walk over it; the
     /// sender's rest then ends as usual, and it throws the next walker to
-    /// step on.
+    /// step on, or one that turned round on it (a crossing ends there).
     fn spring(&mut self, l: &mut Lemming) {
         if self.object_kind != Some(objects::ObjectKind::Spring)
             || !matches!(l.state, State::Walking | State::Sliding)
@@ -1282,7 +1283,7 @@ impl Simulation {
             .objects
             .iter()
             .position(|o| o.value % 2 == 0 && o.touches(l.pos));
-        if l.passing != sender {
+        if l.passing.map(|(s, _)| s) != sender || l.passing.is_some_and(|(_, d)| d != l.dir) {
             l.passing = None;
         }
         let Some(sender) = sender else {
@@ -1293,7 +1294,7 @@ impl Simulation {
             return;
         };
         if self.objects[sender].rest > 0 {
-            l.passing = Some(sender);
+            l.passing = Some((sender, l.dir));
         }
         if l.passing.is_some() {
             return;

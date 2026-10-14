@@ -4,7 +4,7 @@
 
 use l3d_formats::level::{BlockCell, Level};
 
-use crate::SUB;
+use crate::{GROUND, SUB};
 
 /// What a level's interactive objects are, by trap type ([L3DEdit]; the
 /// Practice levels "Rope Slide", "Catapults", "Trampoline" and "Teleporter"
@@ -72,7 +72,7 @@ impl Object {
 
 /// The level's interactive objects. Objects that need a block to stand on
 /// (everything but the killing traps) are skipped where their cell is empty
-/// ([L3DEdit] "Objects vs Blocks").
+/// ([L3DEdit] "Objects vs Blocks"), but for a rope slide's far end.
 pub fn level_objects(level: &Level) -> Option<(ObjectKind, Vec<Object>)> {
     let kind = ObjectKind::from_trap_type(level.trap_type)?;
     let objects = level
@@ -81,7 +81,7 @@ pub fn level_objects(level: &Level) -> Option<(ObjectKind, Vec<Object>)> {
         .filter_map(|(x, y, z, b, o)| {
             let surface = match top(y as i32, b) {
                 Some(t) => t,
-                None if kind.kills() => y as i32 * SUB,
+                None if kind.kills() || anchor(kind, o.kind) => (y as i32 * SUB).max(GROUND),
                 None => return None,
             };
             Some(Object {
@@ -94,6 +94,13 @@ pub fn level_objects(level: &Level) -> Option<(ObjectKind, Vec<Object>)> {
         })
         .collect();
     Some((kind, objects))
+}
+
+/// Whether object-grid value `value` is a rope slide's far end, which only
+/// anchors the rope and so needs no block (Taxing 20 "Death Slide" has its
+/// in an empty cell, and both published routes ride that rope).
+fn anchor(kind: ObjectKind, value: u8) -> bool {
+    kind == ObjectKind::RopeSlide && value % 2 == 1
 }
 
 /// Top of the segments present in a cell, in sub-units.
