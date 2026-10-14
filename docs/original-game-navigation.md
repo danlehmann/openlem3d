@@ -468,6 +468,20 @@ files (Practice "Miner" and Fun 2 loaded changed). Point DOSBox-X at it with
 `LM3D.SAV`, so back it up first and restore it afterwards. Windows refuses to
 run programs whose name contains "patch" without elevation, hence the name.
 
+An edit `@OFFSET=B,B,...` writes raw bytes (hex) into the unpacked level
+instead, for header fields (`docs/spec/level.md`). **Verified** on Practice
+"Trampoline":
+- **Preset cameras** (`@15D`, `@165`, `@16D`, `@175`) give side-on views of
+  test lanes. The camera icon (538,205) cycles through them with the serial
+  mouse.
+- **Release rate and lemming count** (`@E2=63,00,50,00`: 99 and 80) give
+  continuous trails without any input.
+- **Extra hatches:** further block-id-0 cells release lemmings in turn.
+- **Pads:** removing a pad's block removes the pad.
+- **Our sim** plays the same copy with `OPENLEM3D_DATA=temp/patched`.
+- **Replays:** after a failed attempt, the next start replays it; a click
+  takes over ("Click to Play").
+
 ## 7. Save states: skip the boot, intro and navigation
 
 DOSBox-X's own save states make a run start where it is needed (the main

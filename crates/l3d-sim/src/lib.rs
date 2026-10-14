@@ -186,13 +186,15 @@ fn hop_after_drop(fallen: i32) -> u32 {
 }
 
 /// Ticks of the hop off a blue pad after dropping `fallen` sub-units onto it:
-/// 6 per unit dropped, to the nearest tick, less 2 (none below
-/// [`MIN_HOP_TICKS`]: the lemming walks on). Fitted to Fun 5 "Bounce Bounce"
-/// in the original: drops of 3, 2 and 1 unit give hops of about 16 ticks
-/// (1.6–1.75 units, landing before the middle of the cell beyond the water),
-/// about 10 ticks, and no bounce.
+/// 7 per unit dropped, to the nearest tick, less 4 (none below
+/// [`MIN_HOP_TICKS`]: the lemming walks on). Fitted to the original: on
+/// Fun 5 "Bounce Bounce" drops of 3, 2 and 1 unit give hops of about 16
+/// ticks (landing before the middle of the cell beyond the water), about 10
+/// ticks, and no bounce; on a test level (`docs/spec/behaviour.md`), drops
+/// of 3 and 4¼ units splash down about 3 and 3.5 units on (17 and 26–27
+/// ticks).
 fn blue_hop_after_drop(fallen: i32) -> Option<u32> {
-    let ticks = (6 * fallen.max(0) + SUB / 2) / SUB - 2;
+    let ticks = (7 * fallen.max(0) + SUB / 2) / SUB - 4;
     (ticks >= MIN_HOP_TICKS as i32).then(|| (ticks as u32).min(MAX_HOP_TICKS))
 }
 

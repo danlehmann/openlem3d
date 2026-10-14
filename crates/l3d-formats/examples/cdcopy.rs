@@ -8,6 +8,8 @@
 //!   `LEVELS/LEVEL.nnn`, unpacked, with the given block-grid cells changed
 //!   (`docs/spec/level.md`), to the end of the copy and points the file's
 //!   directory record at it. Each run starts again from the original level.
+//!   An edit `@OFFSET=B,B,...` writes raw bytes (hex) at a hex offset of the
+//!   unpacked level, e.g. a preset camera (`docs/spec/level.md`).
 //!
 //! The copy holds game data: keep it under the git-ignored `temp/`.
 
@@ -37,6 +39,16 @@ fn level(dir: &Path, n: u32, edits: &[String]) {
     let mut data = GameData::open(&locate_data_dir(None)).expect("game CD");
     let mut level = data.read(&format!("LEVELS/LEVEL.{n:03}")).unwrap();
     for e in edits {
+        if let Some(raw) = e.strip_prefix('@') {
+            // `@OFFSET=B,B,...`: bytes (hex) written at a hex offset.
+            let (at, bytes) = raw.split_once('=').expect("@OFFSET=B,B,...");
+            let at = usize::from_str_radix(at.trim_start_matches("0x"), 16).unwrap();
+            for (k, b) in bytes.split(',').enumerate() {
+                level[at + k] = u8::from_str_radix(b, 16).unwrap();
+            }
+            println!("bytes at {at:#x}: {bytes}");
+            continue;
+        }
         let (at, cell) = e.split_once('=').expect("X,Y,Z=ID:SHAPE:ROT:SEGS");
         let p: Vec<usize> = at.split(',').map(|v| v.parse().unwrap()).collect();
         let c: Vec<u16> = cell.split(':').map(|v| v.parse().unwrap()).collect();
