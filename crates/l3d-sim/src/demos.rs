@@ -631,6 +631,88 @@ pub const SOLUTIONS: &[Solution] = &[
         ),
         saves: 0,
     },
+    // Taxing levels, by the published walkthroughs (Taxing 13 "Motherboard"
+    // by xeye's route).
+    at(
+        52,
+        &[
+            (590, 0, 0, None),
+            (702, 1, 1, Some(true)),
+            (755, 2, 3, None),
+            (978, 3, 1, Some(true)),
+        ],
+    ),
+    at(
+        53,
+        &[
+            (90, 0, 1, Some(false)),
+            (150, 1, 1, Some(false)),
+            (375, 2, 1, Some(false)),
+            (800, 3, 1, Some(false)),
+            (930, 4, 1, Some(false)),
+        ],
+    ),
+    at(
+        54,
+        &[
+            (110, 1, 7, None),
+            (460, 0, 4, None),
+            (770, 1, 3, None),
+            (947, 0, 5, None),
+            (980, 2, 6, None),
+        ],
+    ),
+    at(
+        55,
+        &[
+            (110, 0, 2, None),
+            (620, 1, 2, None),
+            (1587, 2, 2, None),
+            (1862, 3, 2, None),
+            (2240, 4, 2, None),
+            (2690, 5, 1, Some(true)),
+            (2770, 6, 3, None),
+        ],
+    ),
+    Solution {
+        level: 56,
+        plan: Plan::Rated(&[(0, 16), (20, 99)], &[(382, 0, 4, None)]),
+        saves: 0,
+    },
+    Solution {
+        level: 57,
+        plan: Plan::Rated(
+            &[(963, 29), (1050, -29)],
+            &[
+                (68, 0, 1, Some(true)),
+                (150, 1, 0, None),
+                (375, 2, 1, Some(false)),
+                (595, 4, 1, Some(false)),
+                (890, 6, 1, Some(true)),
+                (1078, 8, 1, Some(true)),
+                (1330, 10, 1, Some(false)),
+                (1520, 12, 1, Some(false)),
+                (1735, 78, 2, None),
+                (1742, 14, 1, Some(true)),
+                (1900, 16, 1, Some(true)),
+                (2089, 76, 2, None),
+                (2090, 18, 1, Some(false)),
+                (2248, 20, 1, Some(false)),
+                (2347, 74, 2, None),
+                (2406, 22, 1, Some(true)),
+                (2532, 24, 1, Some(true)),
+                (2605, 72, 2, None),
+                (2662, 26, 1, Some(false)),
+                (2767, 70, 2, None),
+                (2786, 28, 1, Some(false)),
+                (2880, 30, 1, Some(true)),
+                (2929, 68, 2, None),
+                (2995, 66, 2, None),
+                (3051, 64, 2, None),
+            ],
+        ),
+        saves: 0,
+    },
     // Mayhem levels, play-tested in the simulation; Mayhem 8 "Across the
     // Network" by a route of our own, Mayhem 4 "Driving Range" partly.
     at(
