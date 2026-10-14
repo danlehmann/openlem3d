@@ -153,44 +153,49 @@ const ROPE_GRAB_TICKS: u32 = 8;
 const SPRING_TICKS_PER_UNIT: f32 = 1.4;
 const SPRING_ARC: f32 = 0.3;
 /// Trampoline hops, measured tick by tick in the original's Practice
-/// "Trampoline" (`docs/spec/behaviour.md`): forward speed in the air, sub-units
-/// per tick (none on the tick a pad is touched); hop `n` (from 1) lasts
-/// `8n + 6` ticks from pad to pad and rises `120·k·(N − k)/(N + 1)` sub-units
-/// above its take-off height `k` ticks in; [`MAX_HOP`] bounds the chain.
+/// "Trampoline" and Fun 5 "Bounce Bounce" (`docs/spec/behaviour.md`): forward
+/// speed in the air, sub-units per tick (none on the tick a pad is touched).
+/// A hop of `N` ticks from pad to pad rises `120·k·(N − k)/(N + 1)` sub-units
+/// above its take-off height `k` ticks in; [`MAX_HOP_TICKS`] bounds a chain.
 const BOUNCE_VX: i32 = 32;
-const MAX_HOP: u32 = 60;
+const MAX_HOP_TICKS: u32 = 486;
 
-/// Ticks from pad to pad of trampoline hop `n`.
-const fn hop_ticks(n: u32) -> u32 {
-    8 * n + 6
-}
+/// The hop off a pad reached on foot along a level path, in ticks.
+const MIN_HOP_TICKS: u32 = 10;
 
-/// Height of trampoline hop `n` above its take-off, `k` ticks in (negative
-/// past its end, continuing the same curve down).
-fn hop_height(n: u32, k: i32) -> i32 {
-    let t = hop_ticks(n) as i64;
+/// Ticks a red pad adds to the hop that lands on it, and a blue pad takes off.
+const HOP_STEP_TICKS: u32 = 8;
+
+/// Height of a trampoline hop of `ticks` above its take-off, `k` ticks in
+/// (negative past its end, continuing the same curve down).
+fn hop_height(ticks: u32, k: i32) -> i32 {
+    let t = ticks as i64;
     (120 * k as i64 * (t - k as i64) / (t + 1)) as i32
 }
 
-/// The hop a lemming bounces into after dropping `fallen` sub-units onto a
-/// pad: the shortest one that rises more than [`HOP_MARGIN`] higher.
-/// Inferred: it reproduces the measured chain (each hop the next one up),
-/// hop 1 from the ½-unit drop onto the first pad of Practice "Trampoline",
-/// the published solution of Fun 1 "Take a Dive" (a 10-unit drop must carry
-/// lemmings about 11–12 units on: hop 11), and that of Tricky 2 "Which
-/// Exit?" (a 1¼-unit drop onto a row of pads must reach the exit door,
-/// which takes hop 2 off the first pad). Those fit any margin from about
-/// 0.28 to 0.9 unit; our own solution of Fun 5 "Bounce Bounce" (a 2-unit
-/// drop taking hop 2) needs less than 0.46.
+/// Ticks of the hop off a red pad after dropping `fallen` sub-units onto it:
+/// [`MIN_HOP_TICKS`] and [`HOP_STEP_TICKS`] more per unit dropped, to the
+/// nearest tick. Measured on Fun 5 "Bounce Bounce": about 10, 14 and 18
+/// ticks after drops of 0, ½ and 1 unit; Practice "Trampoline": 14 after its
+/// ½-unit drop. Fits the published solutions of Fun 1 "Take a Dive" (a
+/// 10-unit drop must carry lemmings about 11–12 units on: 90 ticks) and
+/// Tricky 2 "Which Exit?".
 fn hop_after_drop(fallen: i32) -> u32 {
-    (1..MAX_HOP)
-        .find(|&n| hop_height(n, hop_ticks(n) as i32 / 2) > fallen + HOP_MARGIN)
-        .unwrap_or(MAX_HOP)
+    let step = SUB / HOP_STEP_TICKS as i32;
+    (MIN_HOP_TICKS + ((fallen.max(0) + step / 2) / step) as u32).min(MAX_HOP_TICKS)
 }
 
-/// How much higher than the drop the hop after it rises, at least
-/// (inferred, see [`hop_after_drop`]).
-const HOP_MARGIN: i32 = 3 * SUB / 8;
+/// Ticks of the hop off a blue pad after dropping `fallen` sub-units onto it:
+/// 6 per unit dropped, to the nearest tick, less 2 (none below
+/// [`MIN_HOP_TICKS`]: the lemming walks on). Fitted to Fun 5 "Bounce Bounce"
+/// in the original: drops of 3, 2 and 1 unit give hops of about 16 ticks
+/// (1.6–1.75 units, landing before the middle of the cell beyond the water),
+/// about 10 ticks, and no bounce.
+fn blue_hop_after_drop(fallen: i32) -> Option<u32> {
+    let ticks = (6 * fallen.max(0) + SUB / 2) / SUB - 2;
+    (ticks >= MIN_HOP_TICKS as i32).then(|| (ticks as u32).min(MAX_HOP_TICKS))
+}
+
 /// Speed on slippery blocks, sub-units per tick.
 const ICE_SPEED: i32 = WALK_SPEED * 3;
 
@@ -384,11 +389,11 @@ pub enum State {
     /// Walking on a slippery block: faster, and no skill that needs a
     /// standing lemming can be given (the original shows "Sliding").
     Sliding,
-    /// Bouncing on trampolines: `k` ticks into hop `hop` (see
-    /// [`hop_height`]), taken off at height `y0`; before tick 1 it stands on
-    /// the pad (`k` below 0: ticks still to wait there).
+    /// Bouncing on trampolines: `k` ticks into a hop lasting `ticks` from pad
+    /// to pad (see [`hop_height`]), taken off at height `y0`; before tick 1 it
+    /// stands on the pad (`k` below 0: ticks still to wait there).
     Bouncing {
-        hop: u32,
+        ticks: u32,
         k: i32,
         y0: i32,
     },
@@ -1076,7 +1081,7 @@ impl Simulation {
                     }
                 }
             }
-            State::Bouncing { hop, k, y0 } => self.fly(l, hop, k, y0),
+            State::Bouncing { ticks, k, y0 } => self.fly(l, ticks, k, y0),
             State::Climbing => self.climb(l),
             State::Digging => self.dig(l),
             State::Building { bricks_left } => self.build(l, bricks_left),
@@ -1333,24 +1338,32 @@ impl Simulation {
     }
 
     /// Trampolines: a lemming arriving on a pad bounces into the hop
-    /// [`hop_after_drop`] picks for the height it dropped. Stepping down at
-    /// most half a unit onto it, it stands one more tick on the pad
-    /// (measured: a walker stepping down onto the first pad of Practice
-    /// "Trampoline" stands there two ticks); from a longer drop it bounces
-    /// straight off as from a hop (observed in the lemming view on Tricky 2
-    /// "Which Exit?": after its 1¾-unit drop the view rests on the pad one
-    /// tick). A lemming walking onto a pad level with the
-    /// path bounces from its middle (provisional, unmeasured: on Fun 5
-    /// "Bounce Bounce" every pad is a water cell short of the path, which a
-    /// first hop reaches only from about the middle of the pad). Returns
-    /// whether it bounced.
+    /// [`hop_after_drop`] gives for the height it dropped off a red pad, or
+    /// [`blue_hop_after_drop`] off a blue one (which may let it walk on).
+    /// Stepping down at most half a unit onto it, it stands one more tick on
+    /// the pad (measured: a walker
+    /// stepping down onto the first pad of Practice "Trampoline" stands there
+    /// two ticks); from a longer drop it bounces straight off as from a hop
+    /// (observed in the lemming view on Tricky 2 "Which Exit?": after its
+    /// 1¾-unit drop the view rests on the pad one tick). A lemming walking
+    /// onto a pad level with its path walks to the pad's middle first
+    /// (measured on Fun 5 "Bounce Bounce"; lemmings stepping or dropping
+    /// onto a pad bounce where they touch it). Returns whether it bounced.
     fn bounce(&mut self, l: &mut Lemming, height: i32) -> bool {
-        if self.object_kind != Some(objects::ObjectKind::Trampoline)
-            || !self.objects.iter().any(|o| o.touches(l.pos))
-        {
+        if self.object_kind != Some(objects::ObjectKind::Trampoline) {
             return false;
         }
-        if matches!(l.state, State::Walking | State::Sliding) {
+        let Some(pad) = self.objects.iter().find(|o| o.touches(l.pos)) else {
+            return false;
+        };
+        let Some(ticks) = (if pad.value >= 0x64 {
+            blue_hop_after_drop(height)
+        } else {
+            Some(hop_after_drop(height))
+        }) else {
+            return false;
+        };
+        if height == 0 && matches!(l.state, State::Walking | State::Sliding) {
             let d = l.dir.delta();
             let into = |v: i32, step: i32| match step {
                 1 => v.rem_euclid(SUB),
@@ -1363,7 +1376,7 @@ impl Simulation {
         }
         self.press_pad(l.pos);
         l.set_state(State::Bouncing {
-            hop: hop_after_drop(height),
+            ticks,
             k: if height > SUB / 2 { 0 } else { -1 },
             y0: l.pos[1],
         });
@@ -1374,7 +1387,7 @@ impl Simulation {
     /// hop's height curve. Walls turn it back and deflectors turn it aside in
     /// the air; coming down onto a pad it stands there for the tick and
     /// bounces into the next hop up; elsewhere it lands unhurt.
-    fn fly(&mut self, l: &mut Lemming, hop: u32, k: i32, y0: i32) {
+    fn fly(&mut self, l: &mut Lemming, ticks: u32, k: i32, y0: i32) {
         if k < 0 {
             // Still on the pad, stepping on at walking speed (measured: the
             // first pad's take-off is about 8 sub-units past the touch).
@@ -1387,16 +1400,20 @@ impl Simulation {
             if !self.world.solid([ahead[0], ahead[1] + SUB / 8, ahead[2]]) {
                 l.pos = ahead;
             }
-            l.state = State::Bouncing { hop, k: k + 1, y0 };
+            l.state = State::Bouncing {
+                ticks,
+                k: k + 1,
+                y0,
+            };
             return;
         }
         let d = l.dir.delta();
         let k1 = k + 1;
-        let y = y0 + hop_height(hop, k1);
+        let y = y0 + hop_height(ticks, k1);
         let rising = y >= l.pos[1];
         let next = [l.pos[0] + d[0] * BOUNCE_VX, y, l.pos[2] + d[2] * BOUNCE_VX];
         let body = next[1] + SUB / 8;
-        let advance = |l: &mut Lemming| l.state = State::Bouncing { hop, k: k1, y0 };
+        let advance = |l: &mut Lemming| l.state = State::Bouncing { ticks, k: k1, y0 };
         if let Some(n) = self
             .deflector_across(next[0], next[1], next[2])
             .filter(|n| d[0] * n[0] + d[2] * n[1] < 0)
@@ -1467,7 +1484,6 @@ impl Simulation {
                 (ground, on_block)
             };
             if ground >= next[1] {
-                let apex = y0 + hop_height(hop, hop_ticks(hop) as i32 / 2);
                 l.pos[1] = ground;
                 let pad = (self.object_kind == Some(objects::ObjectKind::Trampoline))
                     .then(|| self.objects.iter().find(|o| o.touches(l.pos)))
@@ -1475,23 +1491,29 @@ impl Simulation {
                     .copied();
                 if let Some(pad) = pad {
                     self.press_pad(l.pos);
-                    // Red pads (0x60–0x63) throw the next hop one longer, blue
-                    // ones (0x64–0x67) one shorter, and off a blue pad after
-                    // the shortest hop the lemming walks on (inferred: the
-                    // Practice "Trampoline" demo's lemmings bounce up a red row,
-                    // then come down along blue ones to walk into the exit).
+                    // Red pads (0x60–0x63) throw the next hop
+                    // [`HOP_STEP_TICKS`] longer, blue ones (0x64–0x67) that
+                    // much shorter, and off a blue pad after the shortest hop
+                    // the lemming walks on (measured: hops of 14, 22, 30 ticks
+                    // up the red row of Practice "Trampoline"; inferred: its
+                    // demo's lemmings then come down along blue ones to walk
+                    // into the exit). A pad lower than the take-off adds its
+                    // drop as [`hop_after_drop`] does (inferred).
+                    let step = (SUB / HOP_STEP_TICKS as i32) as i64;
+                    let level = ticks as i64 + (y0 - ground) as i64 / step;
                     let next = if pad.value >= 0x64 {
-                        hop.checked_sub(1).filter(|&n| n > 0)
+                        level - HOP_STEP_TICKS as i64
                     } else {
-                        Some(hop_after_drop(apex - ground))
+                        level + HOP_STEP_TICKS as i64
                     };
-                    match next {
-                        Some(n) => l.set_state(State::Bouncing {
-                            hop: n,
+                    if next >= MIN_HOP_TICKS as i64 {
+                        l.set_state(State::Bouncing {
+                            ticks: (next as u32).min(MAX_HOP_TICKS),
                             k: 0,
                             y0: ground,
-                        }),
-                        None => l.set_state(State::Walking),
+                        });
+                    } else {
+                        l.set_state(State::Walking);
                     }
                 } else {
                     self.land(l, on_block, 0);
@@ -1506,9 +1528,9 @@ impl Simulation {
             }
         } else if self.world.solid([next[0], next[1] + HEAD_HEIGHT, next[2]]) {
             // A ceiling stops the rise: the hop goes on from its way down.
-            let mirrored = hop_ticks(hop) as i32 - k;
+            let mirrored = ticks as i32 - k;
             l.state = State::Bouncing {
-                hop,
+                ticks,
                 k: mirrored.max(k1),
                 y0,
             };
@@ -2283,6 +2305,7 @@ impl Simulation {
             .world
             .surface_below(l.pos[0], l.pos[1] + STEP_UP, l.pos[2]);
         if ground >= l.pos[1] - STEP_DOWN {
+            let stepped = (l.pos[1] - ground).max(0);
             l.pos[1] = ground;
             let ground_flags = if on_block {
                 self.world.flags_at([l.pos[0], ground - 1, l.pos[2]])
@@ -2292,7 +2315,7 @@ impl Simulation {
             let liquid = ground_flags.is_some_and(|f| f & flags::LIQUID != 0);
             if liquid || (!on_block && self.world.floor(l.pos[0], l.pos[2]) == Floor::Water) {
                 l.set_state(State::Drowning);
-            } else if !self.bounce(l, 0) {
+            } else if !self.bounce(l, stepped) {
                 // Slippery tops and floors make walkers slide; leaving them,
                 // they walk.
                 let slippery = ground_flags.is_some_and(|f| f & flags::SLIPPERY != 0)

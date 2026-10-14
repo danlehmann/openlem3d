@@ -589,6 +589,16 @@ pub fn build(
                         .iter()
                         .map(|v| [v[0], shape_y(cell.shape, v[1], y0, y1), v[2]])
                         .collect();
+                    // A 22.5° ramp squeezed into a short run brings corners
+                    // together; a repeated corner would make the winding and
+                    // normal come from a degenerate triangle.
+                    local.dedup();
+                    if local.len() > 1 && local.first() == local.last() {
+                        local.pop();
+                    }
+                    if local.len() < 3 {
+                        continue;
+                    }
                     if clip {
                         local = clip_below(&local, top, &mut crossings);
                         if local.len() < 3 {

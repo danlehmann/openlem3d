@@ -105,9 +105,13 @@ pub const SOLUTIONS: &[Solution] = &[
     at(
         4,
         &[
-            (274, 0, 1, Some(false)),
-            (660, 1, 1, Some(false)),
-            (858, 2, 1, Some(true)),
+            (162, 0, 1, Some(false)),
+            (344, 1, 1, Some(true)),
+            (507, 2, 1, Some(false)),
+            (620, 3, 1, Some(false)),
+            (734, 4, 1, Some(true)),
+            (935, 5, 1, Some(false)),
+            (1094, 6, 1, Some(true)),
         ],
     ),
     at(
