@@ -15,6 +15,7 @@ use l3d_sim::Skill;
 use crate::hud::SelectedSkill;
 use crate::lemming_cam::LemmingCam;
 use crate::menu::AppState;
+use crate::screen::Screen;
 use crate::{Data, Game, LevelInfo, PresetIndex, ViewCamera};
 
 pub struct PanelPlugin;
@@ -540,18 +541,17 @@ fn spawn_panel(mut commands: Commands, art: Option<Res<Art>>, mut images: ResMut
     commands.entity(root).add_child(c);
 }
 
-/// Window pixels per original pixel.
-fn scale(window: &Window) -> f32 {
-    (window.height() / SCREEN.y).max(1.0)
+/// Screen pixels per original pixel.
+fn scale(screen: &Screen) -> f32 {
+    (screen.size.y / SCREEN.y).max(1.0)
 }
 
 /// Places every element: the skill row keeps to the bottom left, the
 /// right-hand column (x ≥ 256) to the top right and the height bar to the
 /// right edge, the rest to the top left.
-fn layout(windows: Query<&Window>, mut items: Query<(&PanelPos, &mut Node)>) {
-    let Ok(window) = windows.single() else { return };
-    let s = scale(window);
-    let (w, h) = (window.width(), window.height());
+fn layout(screen: Res<Screen>, mut items: Query<(&PanelPos, &mut Node)>) {
+    let s = scale(&screen);
+    let (w, h) = (screen.size.x, screen.size.y);
     for (p, mut node) in &mut items {
         let x = if p.at.x >= BAR_X || (p.at.y < 160.0 && p.at.x >= 256.0) {
             w - (SCREEN.x - p.at.x) * s
@@ -583,7 +583,7 @@ fn buttons(
     mut highlight: ResMut<crate::hud::Highlight>,
     mut pending_turner: ResMut<crate::hud::PendingTurner>,
     scene_camera: Res<crate::scene_render::SceneCamera>,
-    windows: Query<&Window>,
+    screen: Res<Screen>,
     (time, mut last_bomb_click, mut flash): (
         Res<Time<Real>>,
         Local<Option<f32>>,
@@ -678,9 +678,7 @@ fn buttons(
                     *highlight = crate::hud::Highlight::default();
                 } else {
                     selected.0 = None;
-                    let size = windows
-                        .single()
-                        .map_or(Vec2::ONE, |w| Vec2::new(w.width(), w.height()));
+                    let size = screen.size;
                     *highlight = crate::hud::Highlight {
                         on: true,
                         lemming: crate::hud::nearest_to_centre(sim, &scene_camera, size),
@@ -788,6 +786,7 @@ fn height_at(y: f32) -> f32 {
 #[allow(clippy::too_many_arguments)] // Bevy system parameters
 fn height_bar(
     windows: Query<&Window>,
+    screen: Res<Screen>,
     mouse: Res<ButtonInput<MouseButton>>,
     settings: Res<crate::settings::Settings>,
     time: Res<Time>,
@@ -805,9 +804,9 @@ fn height_bar(
         && lemming_cam.following().is_none()
         && bars.iter().any(|i| *i != Interaction::None)
         && let Ok(window) = windows.single()
-        && let Some(p) = window.cursor_position()
+        && let Some(p) = screen.cursor(window)
     {
-        let target = height_at(p.y / scale(window) - KNOB_CENTRE);
+        let target = height_at(p.y / scale(&screen) - KNOB_CENTRE);
         let step = crate::CAMERA_SPEED * settings.camera_factor() * time.delta_secs();
         view.pos.y += (target - view.pos.y).clamp(-step, step);
         view.glide = None;
@@ -1106,6 +1105,7 @@ fn caption(
     time: Res<Time>,
     camera: Res<crate::scene_render::SceneCamera>,
     windows: Query<&Window>,
+    screen: Res<Screen>,
     ui: Query<&Interaction>,
     lemming_cam: Res<LemmingCam>,
     mut captions: Query<(Entity, &mut Caption)>,
@@ -1127,7 +1127,7 @@ fn caption(
     } else {
         (|| {
             let window = windows.single().ok()?;
-            let point = window.cursor_position()?;
+            let point = screen.cursor(window)?;
             if ui.iter().any(|i| *i != Interaction::None) {
                 return None;
             }
@@ -1136,7 +1136,7 @@ fn caption(
             let i = crate::hud::lemming_near(
                 sim,
                 &camera,
-                Vec2::new(window.width(), window.height()),
+                screen.size,
                 point,
                 lemming_cam.following(),
             )?;

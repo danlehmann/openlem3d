@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A code-free APK: NativeActivity loads libopenlem3d.so directly. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="org.openlem3d"
+    android:versionCode="1"
+    android:versionName="0.1.0">
+
+    <uses-sdk android:minSdkVersion="26" android:targetSdkVersion="37" />
+    <uses-feature android:name="android.hardware.vulkan.version" android:required="false" />
+    <!-- Mouse and keyboard work: on desktops, Android then passes the mouse
+         through rather than turning its primary button into touches. -->
+    <uses-feature android:name="android.hardware.type.pc" android:required="false" />
+
+    <application
+        android:label="openlem3d"
+        android:hasCode="false"
+        android:appCategory="game"
+        android:isGame="true">
+        <activity
+            android:name="android.app.NativeActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:screenOrientation="sensorLandscape"
+            android:resizeableActivity="true"
+            android:theme="@android:style/Theme.NoTitleBar.Fullscreen"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density">
+            <meta-data android:name="android.app.lib_name" android:value="openlem3d" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>

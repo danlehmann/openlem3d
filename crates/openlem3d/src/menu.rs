@@ -316,7 +316,7 @@ fn menu_input(
     keys: Res<ButtonInput<KeyCode>>,
     mut wheel: MessageReader<bevy::input::mouse::MouseWheel>,
     touches: Res<Touches>,
-    windows: Query<&Window>,
+    screen: Res<crate::screen::Screen>,
     mut drag: Local<f32>,
     mut scroll: ResMut<Scroll>,
     mut rating: ResMut<MenuRating>,
@@ -350,10 +350,7 @@ fn menu_input(
         delta -= ROWS_SHOWN as i32;
     }
     // Dragging a finger up or down scrolls a row per row height moved.
-    let row_px = ROW_STEP
-        * windows
-            .single()
-            .map_or(4.0, |w| (w.width() / 320.0).min(w.height() / 200.0));
+    let row_px = ROW_STEP * (screen.size.x / 320.0).min(screen.size.y / 200.0);
     for t in touches.iter() {
         *drag -= t.delta().y;
     }

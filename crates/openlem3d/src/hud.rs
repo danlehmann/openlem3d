@@ -175,6 +175,7 @@ pub(crate) fn assign_on_pointer(
     mouse: Res<ButtonInput<MouseButton>>,
     touches: Res<Touches>,
     windows: Query<&Window>,
+    screen: Res<crate::screen::Screen>,
     ui: Query<&Interaction>,
     camera: Res<SceneCamera>,
     mut selected: ResMut<SelectedSkill>,
@@ -213,16 +214,16 @@ pub(crate) fn assign_on_pointer(
         return;
     }
     let point = if mouse.just_pressed(settings.action_button()) {
-        window.cursor_position()
+        screen.cursor(window)
     } else {
         // A tap is a touch released without having been dragged.
         touches
             .iter_just_released()
             .find(|t| t.distance().length() < crate::touch::TAP_SLOP)
-            .map(|t| t.position())
+            .map(|t| screen.from_window(t.position()))
     };
     let Some(point) = point else { return };
-    let size = Vec2::new(window.width(), window.height());
+    let size = screen.size;
     // Riding along, nothing is selected (verified): a turner given to the
     // lemming ridden with points to the side of the screen clicked (left
     // half: its left), and a click on another lemming rides along with it
@@ -438,6 +439,7 @@ fn place_turner_marker(
     cells: Option<Res<ArrowCells>>,
     time: Res<Time>,
     windows: Query<&Window>,
+    screen: Res<crate::screen::Screen>,
     mut arrows: Query<(&TurnerArrow, &mut ImageNode, &mut Node, &mut Visibility)>,
     lemming_cam: Res<LemmingCam>,
     views: Query<&crate::ViewCamera>,
@@ -459,10 +461,10 @@ fn place_turner_marker(
             // and down, picked by the top and bottom halves).
             let head = views.single().map_or(0.0, |v| v.head);
             let window = windows.single().ok()?;
-            let size = Vec2::new(window.width(), window.height());
+            let size = screen.size;
             let scale = size.y / 200.0;
-            let left = window
-                .cursor_position()
+            let left = screen
+                .cursor(window)
                 .is_none_or(|p| !riding_right_half(head, size, p));
             let (right, down) = riding_axes(head);
             let side = if left { -1.0 } else { 1.0 };
@@ -475,8 +477,8 @@ fn place_turner_marker(
         }
         let l = game.sim.as_ref()?.lemmings.get(pending.0?)?;
         let window = windows.single().ok()?;
-        let size = Vec2::new(window.width(), window.height());
-        let pointer = window.cursor_position();
+        let size = screen.size;
+        let pointer = screen.cursor(window);
         let (at, dirs, fit) = turner_sides(&camera, size, l, pointer)?;
         let scale = size.y / 200.0;
         let clear = pointer.is_some_and(|p| p.distance(at) > ARROW_CLEAR_DISTANCE * scale)

@@ -281,6 +281,7 @@ fn click(
     mouse: Res<ButtonInput<MouseButton>>,
     touches: Res<Touches>,
     windows: Query<&Window>,
+    screen: Res<crate::screen::Screen>,
     nodes: Query<(&ComputedNode, &UiGlobalTransform), With<MinimapView>>,
     mut views: Query<&mut ViewCamera>,
 ) {
@@ -289,9 +290,12 @@ fn click(
     }
     let Ok(window) = windows.single() else { return };
     let point = if mouse.just_pressed(MouseButton::Left) {
-        window.cursor_position()
+        screen.cursor(window)
     } else {
-        touches.iter_just_released().map(|t| t.position()).next()
+        touches
+            .iter_just_released()
+            .map(|t| screen.from_window(t.position()))
+            .next()
     };
     let (Some(point), Ok((node, transform)), Ok(mut view)) =
         (point, nodes.single(), views.single_mut())

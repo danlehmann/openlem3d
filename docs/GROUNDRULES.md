@@ -36,12 +36,17 @@ Users supply their own *Lemmings 3D* CD image as a `.cue` file plus its
 
 The directory must contain one `.cue` file. The file names can be anything.
 
+On Android, which has no command line, environment or working directory, the
+game instead looks in the app's own external files directory,
+`Android/data/org.openlem3d/files/`, then in its internal storage's
+`files/gamedata/` (see `docs/android.md`).
+
 ## Technical direction
 
 - **Language and engine:** Rust (latest stable) and Bevy.
 - **Portable:** the game must run on Windows, Linux and macOS (x86_64 and
-  arm64). Web/WASM would be nice to have. Platform-specific code is only
-  allowed in small, isolated modules.
+  arm64), and on Android (arm64). Web/WASM would be nice to have.
+  Platform-specific code is only allowed in small, isolated modules.
 - **Input:** mouse and keyboard, and touch. Both are first-class; the game must
   be fully playable without a keyboard.
 - **Rendering:** a modern, high-resolution 3D renderer. Stay true to the

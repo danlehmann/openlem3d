@@ -67,6 +67,7 @@ fn update(
     state: Res<State<crate::menu::AppState>>,
     clear: Res<ClearColor>,
     windows: Query<&Window>,
+    view: Res<crate::screen::Screen>,
     mut pixelation: ResMut<Pixelation>,
     mut camera: ResMut<SceneCamera>,
 ) {
@@ -108,10 +109,7 @@ fn update(
     let Some(window) = windows.iter().next() else {
         return;
     };
-    let screen = Vec2::new(
-        window.physical_width() as f32,
-        window.physical_height() as f32,
-    );
+    let screen = (view.size * window.scale_factor()).round();
     camera.pixels = if p.detail >= 1.0 || screen.min_element() < 1.0 {
         UVec2::ZERO
     } else {

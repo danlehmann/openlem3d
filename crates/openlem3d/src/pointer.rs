@@ -113,15 +113,16 @@ fn update(
     lemming_cam: Res<crate::lemming_cam::LemmingCam>,
     settings: Res<crate::settings::Settings>,
     windows: Query<(Entity, &Window, Option<&CursorIcon>)>,
+    screen: Res<crate::screen::Screen>,
     mut images: ResMut<Assets<Image>>,
 ) {
     let (Some(mut cells), Ok((entity, window, icon))) = (cells, windows.single()) else {
         return;
     };
-    let position = window
-        .cursor_position()
+    let position = screen
+        .cursor(window)
         .filter(|_| touches.iter().next().is_none());
-    let size = Vec2::new(window.width(), window.height());
+    let size = screen.size;
     let cell = match (state.get(), position) {
         (AppState::Code, _) | (_, None) => None,
         (AppState::Playing, Some(p)) => Some(if ui.iter().any(|i| *i != Interaction::None) {

@@ -22,3 +22,8 @@ opt-level = 1
 
 [profile.dev.package."*"]
 opt-level = 3
+
+# winit 0.30 turns Android mouse events into touches, losing the buttons; this
+# copy handles them as mouse events (`patches/winit/README.openlem3d.md`).
+[patch.crates-io]
+winit = { path = "patches/winit" }

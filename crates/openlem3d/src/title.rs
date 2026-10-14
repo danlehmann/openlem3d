@@ -658,15 +658,14 @@ fn spawn_title(mut commands: Commands, art: Option<Res<Art>>, roots: Query<(), W
 /// Fits the canvas into the window and places every element on it; tiles
 /// the backdrop across the whole window.
 fn layout(
-    windows: Query<&Window>,
+    screen: Res<crate::screen::Screen>,
     mut canvases: Query<(&Canvas, &mut Node), Without<At>>,
     mut items: Query<(&At, &mut Node), Without<Canvas>>,
 ) {
-    let Ok(window) = windows.single() else { return };
     let Some((size, _)) = canvases.iter().next().map(|(c, _)| (c.0, ())) else {
         return;
     };
-    let (w, h) = (window.width(), window.height());
+    let (w, h) = (screen.size.x, screen.size.y);
     let s = (w / size.x).min(h / size.y);
     for (_, mut node) in &mut canvases {
         node.left = px((w - size.x * s) / 2.0);
@@ -686,11 +685,10 @@ fn layout(
 /// with the canvas.
 fn scroll_backdrop(
     time: Res<Time>,
-    windows: Query<&Window>,
+    screen: Res<crate::screen::Screen>,
     mut backdrops: Query<(&Backdrop, &mut Node)>,
 ) {
-    let Ok(window) = windows.single() else { return };
-    let (w, h) = (window.width(), window.height());
+    let (w, h) = (screen.size.x, screen.size.y);
     let s = (w / SCREEN.x).min(h / SCREEN.y);
     let origin = Vec2::new((w - SCREEN.x * s) / 2.0, (h - SCREEN.y * s) / 2.0);
     for (b, mut node) in &mut backdrops {

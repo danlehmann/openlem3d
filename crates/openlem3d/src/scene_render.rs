@@ -14,7 +14,7 @@ use bevy::core_pipeline::schedule::Core2d;
 use bevy::prelude::*;
 use bevy::render::extract_resource::{ExtractResource, ExtractResourcePlugin};
 use bevy::render::renderer::{RenderContext, RenderDevice, RenderQueue, ViewQuery};
-use bevy::render::view::ViewTarget;
+use bevy::render::view::{ExtractedView, ViewTarget};
 use bevy::render::{Render, RenderApp, RenderSystems};
 use wgpu::util::DeviceExt;
 
@@ -123,7 +123,7 @@ impl Plugin for SceneRenderPlugin {
 }
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
-const UNIFORM_SIZE: u64 = 112;
+const UNIFORM_SIZE: u64 = 128;
 /// Sky texels panned per full turn for the 320-wide all-round skies: three
 /// repeats of the panorama, close to the 1024 of the other skies and a
 /// whole number of repeats, so no turn shows a seam (provisional).
@@ -161,7 +161,9 @@ struct SceneGpu {
     sprites: Option<(wgpu::Buffer, wgpu::Buffer, u32)>,
     /// Depth buffer and its size.
     depth: Option<((u32, u32), wgpu::TextureView)>,
-    /// Size of the colour target, for the sky parameters.
+    /// The part of the colour target drawn in (the camera's viewport): its
+    /// top-left corner and size, for the sky parameters.
+    target_origin: (u32, u32),
     target_size: (u32, u32),
     /// Uploaded textures by their texel data, kept while the content still
     /// uses that data (a terrain change re-uploads geometry only).
@@ -240,6 +242,7 @@ impl FromWorld for SceneGpu {
             sprite_atlas: None,
             sprites: None,
             depth: None,
+            target_origin: (0, 0),
             target_size: (1, 1),
             textures: Vec::new(),
         }
@@ -508,6 +511,15 @@ fn prepare_scene(
         Vec2::ONE
     };
     uniforms.extend([camera.roll, w as f32 / 2.0, pixel.x, pixel.y]);
+    // The viewport's corner in the target, for shaders working in framebuffer
+    // pixels: the sky's (none when rendered small), then the stretch's.
+    let (x, y) = (gpu.target_origin.0 as f32, gpu.target_origin.1 as f32);
+    let sky = if renders_small(camera.pixels, (w, h)) {
+        [0.0, 0.0]
+    } else {
+        [x, y]
+    };
+    uniforms.extend([sky[0], sky[1], x, y]);
     queue.write_buffer(&gpu.uniforms, 0, &f32_bytes(&uniforms));
     upload_sprites(device, &queue, &mut gpu, &sprites);
     if gpu.version == Some(content.version) {
@@ -606,28 +618,28 @@ fn upload_sprites(
 }
 
 fn draw_scene(
-    view: ViewQuery<&ViewTarget>,
+    view: ViewQuery<(&ViewTarget, &ExtractedView)>,
     camera: Res<SceneCamera>,
     mut gpu: ResMut<SceneGpu>,
     mut ctx: RenderContext,
 ) {
-    let target = view.into_inner();
+    let (target, extracted) = view.into_inner();
     let device = ctx.render_device().wgpu_device().clone();
-    let size = target.main_texture().size();
-    gpu.target_size = (size.width, size.height);
+    let full = target.main_texture().size();
+    let viewport = extracted.viewport;
+    let size = (viewport.z.max(1), viewport.w.max(1));
+    gpu.target_origin = (viewport.x, viewport.y);
+    gpu.target_size = size;
     let format = target.main_texture_format();
     gpu.ensure_pipelines(&device, format);
     // Rendered small and stretched over the screen, or at the screen's size.
-    let low = (camera.pixels.x > 0
-        && camera.pixels.y > 0
-        && (camera.pixels.x < size.width || camera.pixels.y < size.height))
-        .then(|| {
-            let s = (camera.pixels.x, camera.pixels.y);
-            (s, gpu.low_target(&device, s, format))
-        });
+    let low = renders_small(camera.pixels, size).then(|| {
+        let s = (camera.pixels.x, camera.pixels.y);
+        (s, gpu.low_target(&device, s, format))
+    });
     let depth = gpu.depth_view(
         &device,
-        low.as_ref().map_or((size.width, size.height), |l| l.0),
+        low.as_ref().map_or((full.width, full.height), |l| l.0),
     );
     let gpu = &*gpu;
     if gpu.layers.is_empty() && gpu.sky.is_none() && gpu.sprites.is_none() {
@@ -665,6 +677,9 @@ fn draw_scene(
         }),
         ..Default::default()
     });
+    if low.is_none() {
+        set_viewport(&mut pass, viewport);
+    }
     if let Some(sky) = &gpu.sky {
         pass.set_pipeline(sky_pipeline);
         pass.set_bind_group(0, sky, &[]);
@@ -693,10 +708,29 @@ fn draw_scene(
             color_attachments: &[Some(color)],
             ..Default::default()
         });
+        set_viewport(&mut pass, viewport);
         pass.set_pipeline(stretch);
         pass.set_bind_group(0, bind, &[]);
         pass.draw(0..3, 0..1);
     }
+}
+
+/// Whether the scene is rendered at `pixels` and stretched over a view of
+/// `size`, rather than at the view's own size.
+fn renders_small(pixels: UVec2, size: (u32, u32)) -> bool {
+    pixels.x > 0 && pixels.y > 0 && (pixels.x < size.0 || pixels.y < size.1)
+}
+
+/// Draws into the camera's viewport (x, y, width, height) only.
+fn set_viewport(pass: &mut wgpu::RenderPass, viewport: UVec4) {
+    pass.set_viewport(
+        viewport.x as f32,
+        viewport.y as f32,
+        viewport.z.max(1) as f32,
+        viewport.w.max(1) as f32,
+        0.0,
+        1.0,
+    );
 }
 
 fn f32_bytes(v: &[f32]) -> Vec<u8> {

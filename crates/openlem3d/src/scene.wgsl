@@ -16,6 +16,9 @@ struct Uniforms {
     // scene is rendered small and stretched); the sky is laid out in
     // screen pixels.
     view: vec4<f32>,
+    // The view's top-left corner in the framebuffer (the camera's viewport):
+    // xy for the sky, 0 when the scene is rendered small; zw for the stretch.
+    origin: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> u: Uniforms;
@@ -122,7 +125,7 @@ fn fs_sky(v: SkyOut) -> @location(0) vec4<f32> {
     // In framebuffer coordinates (y down) the anticlockwise roll's inverse is
     // the standard rotation matrix by the same angle.
     let pivot = vec2(u.view.y, u.sky.y);
-    let d = v.clip.xy * u.view.zw - pivot;
+    let d = (v.clip.xy - u.origin.xy) * u.view.zw - pivot;
     let c = cos(u.view.x);
     let s = sin(u.view.x);
     let p = pivot + vec2(c * d.x - s * d.y, s * d.x + c * d.y);
@@ -143,5 +146,6 @@ fn fs_sky(v: SkyOut) -> @location(0) vec4<f32> {
 @fragment
 fn fs_stretch(v: SkyOut) -> @location(0) vec4<f32> {
     let screen = vec2<f32>(textureDimensions(tex)) * u.view.zw;
-    return vec4(textureSampleLevel(tex, samp, v.clip.xy / screen, 0.0).rgb, 1.0);
+    let at = (v.clip.xy - u.origin.zw) / screen;
+    return vec4(textureSampleLevel(tex, samp, at, 0.0).rgb, 1.0);
 }
