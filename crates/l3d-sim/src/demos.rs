@@ -1128,6 +1128,26 @@ pub const SOLUTIONS: &[Solution] = &[
             (1231, 0, 5, None),
         ],
     ),
+    // Taxing 10 "It's the Name of the Game" by a route of our own, found once
+    // the trampolines were measured.
+    at(
+        49,
+        &[
+            (20, 0, 7, None),
+            (132, 0, 4, None),
+            (515, 0, 3, None),
+            (846, 0, 6, None),
+            (990, 0, 2, None),
+            (1200, 3, 5, None),
+            (1384, 3, 3, None),
+            (1440, 3, 4, None),
+            (1895, 3, 1, Some(true)),
+            (2068, 10, 1, Some(false)),
+            (2168, 1, 1, Some(true)),
+            (2329, 11, 1, Some(true)),
+            (2419, 45, 1, Some(false)),
+        ],
+    ),
 ];
 
 pub fn solution(level: u32) -> Option<&'static Solution> {
