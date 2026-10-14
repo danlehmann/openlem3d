@@ -183,22 +183,6 @@ pub const SOLUTIONS: &[Solution] = &[
         ],
     ),
     at(
-        62,
-        &[
-            (283, 0, 1, Some(true)),
-            (437, 1, 1, Some(true)),
-            (655, 2, 1, Some(false)),
-            (915, 3, 1, Some(false)),
-            (1020, 4, 7, None),
-            (1090, 5, 7, None),
-            (1160, 4, 0, None),
-            (1283, 5, 4, None),
-            (1473, 5, 1, Some(false)),
-            (1665, 6, 1, Some(false)),
-            (1779, 7, 1, Some(false)),
-        ],
-    ),
-    at(
         40,
         &[
             (10, 0, 1, Some(true)),
@@ -235,15 +219,15 @@ pub const SOLUTIONS: &[Solution] = &[
     at(
         22,
         &[
-            (2, 0, 7, None),
-            (2, 0, 8, None),
-            (83, 1, 7, None),
-            (83, 1, 8, None),
-            (606, 1, 2, None),
-            (700, 0, 5, None),
-            (925, 2, 3, None),
-            (1915, 2, 3, None),
-            (2040, 2, 4, None),
+            (14, 0, 7, None),
+            (14, 0, 8, None),
+            (95, 1, 7, None),
+            (95, 1, 8, None),
+            (618, 1, 2, None),
+            (712, 0, 5, None),
+            (937, 2, 3, None),
+            (1913, 2, 3, None),
+            (2038, 2, 4, None),
         ],
     ),
     at(
@@ -365,9 +349,9 @@ pub const SOLUTIONS: &[Solution] = &[
         9,
         &[
             (50, 0, 3, None),
-            (200, 0, 3, None),
-            (361, 0, 1, Some(true)),
-            (459, 2, 1, Some(false)),
+            (218, 0, 3, None),
+            (379, 0, 1, Some(true)),
+            (477, 2, 1, Some(false)),
         ],
     ),
     at(
@@ -642,16 +626,6 @@ pub const SOLUTIONS: &[Solution] = &[
         ],
     ),
     at(
-        53,
-        &[
-            (90, 0, 1, Some(false)),
-            (150, 1, 1, Some(false)),
-            (375, 2, 1, Some(false)),
-            (800, 3, 1, Some(false)),
-            (930, 4, 1, Some(false)),
-        ],
-    ),
-    at(
         54,
         &[
             (110, 1, 7, None),
@@ -824,37 +798,6 @@ pub const SOLUTIONS: &[Solution] = &[
             (2465, 11, 6, None),
         ],
     ),
-    at(
-        72,
-        &[
-            (96, 0, 1, Some(true)),
-            (211, 1, 1, Some(false)),
-            (326, 2, 1, Some(false)),
-            (441, 3, 1, Some(true)),
-            (716, 4, 1, Some(true)),
-            (831, 5, 1, Some(true)),
-            (1042, 6, 1, Some(false)),
-            (1157, 7, 1, Some(false)),
-            (1432, 8, 1, Some(true)),
-            (1547, 9, 1, Some(true)),
-            (1662, 10, 1, Some(false)),
-            (1937, 11, 1, Some(false)),
-            (2052, 12, 1, Some(true)),
-            (2167, 13, 1, Some(true)),
-            (2666, 14, 1, Some(true)),
-            (2909, 15, 1, Some(true)),
-            (3152, 16, 1, Some(false)),
-            (3235, 17, 3, None),
-            (3322, 17, 1, Some(true)),
-            (3414, 18, 1, Some(true)),
-            (3625, 19, 1, Some(false)),
-            (3740, 20, 1, Some(true)),
-            (3855, 21, 1, Some(true)),
-            (4034, 22, 1, Some(true)),
-            (4149, 23, 1, Some(false)),
-            (4296, 24, 1, Some(false)),
-        ],
-    ),
     // By the published walkthroughs; Mayhem 8 "Five Towers" with one more
     // bridge than the walkthrough's.
     at(
@@ -886,54 +829,7 @@ pub const SOLUTIONS: &[Solution] = &[
         ),
         saves: 0,
     },
-    Solution {
-        level: 78,
-        plan: Plan::Rated(
-            &[(1130, 49)],
-            &[
-                (5, 0, 7, None),
-                (352, 0, 3, None),
-                (800, 0, 4, None),
-                (1112, 16, 7, None),
-                (1630, 16, 4, None),
-                (1800, 3, 4, None),
-                (1927, 0, 2, None),
-            ],
-        ),
-        saves: 0,
-    },
-    // Tricky levels by the published walkthroughs; Tricky 7 "Follow the
-    // Yellow Brick Road" pens the early lemmings first.
-    at(
-        26,
-        &[
-            (56, 0, 3, None),
-            (91, 1, 1, Some(true)),
-            (228, 0, 3, None),
-            (274, 2, 0, None),
-            (386, 0, 3, None),
-            (544, 0, 3, None),
-            (581, 1, 2, None),
-            (603, 0, 6, None),
-            (636, 3, 1, Some(true)),
-            (997, 0, 4, None),
-            (1110, 0, 6, None),
-            (1334, 0, 1, Some(true)),
-            (1357, 4, 4, None),
-            (1469, 4, 1, Some(true)),
-            (1552, 5, 4, None),
-            (1609, 5, 6, None),
-            (1833, 5, 4, None),
-            (1883, 5, 1, Some(false)),
-            (1908, 11, 4, None),
-            (2020, 11, 1, Some(false)),
-            (2087, 17, 4, None),
-            (2262, 17, 1, Some(false)),
-            (2305, 16, 4, None),
-            (2480, 16, 1, Some(true)),
-            (2511, 18, 4, None),
-        ],
-    ),
+    // Tricky levels by the published walkthroughs.
     at(
         28,
         &[
@@ -1004,8 +900,7 @@ pub const SOLUTIONS: &[Solution] = &[
             (2346, 8, 5, None),
         ],
     ),
-    // Taxing levels by the published walkthroughs; Taxing 8 "Rescue Team"
-    // by a route of our own, and Taxing 11 "Chaos Maze" stops its digger
+    // Taxing levels by the published walkthroughs; Taxing 11 "Chaos Maze" stops its digger
     // with a basher where the walkthrough gives a turner.
     at(
         43,
@@ -1037,7 +932,6 @@ pub const SOLUTIONS: &[Solution] = &[
             (2150, 5, 3, None),
             (2380, 3, 2, None),
             (2388, 7, 6, None),
-            (2975, 2, 0, None),
         ],
     ),
     Solution {
@@ -1060,25 +954,6 @@ pub const SOLUTIONS: &[Solution] = &[
         saves: 0,
     },
     at(
-        47,
-        &[
-            (300, 1, 1, Some(false)),
-            (610, 5, 1, Some(true)),
-            (930, 17, 1, Some(true)),
-            (1060, 9, 1, Some(false)),
-            (1335, 21, 4, None),
-            (1375, 13, 4, None),
-            (1470, 25, 1, Some(true)),
-            (1840, 29, 4, None),
-            (2362, 0, 1, Some(false)),
-            (2988, 3, 1, Some(false)),
-            (3100, 41, 4, None),
-            (3305, 2, 1, Some(true)),
-            (3385, 65, 1, Some(false)),
-            (3385, 59, 1, Some(true)),
-        ],
-    ),
-    at(
         50,
         &[
             (5, 0, 7, None),
@@ -1095,6 +970,137 @@ pub const SOLUTIONS: &[Solution] = &[
             (2335, 10, 1, Some(true)),
         ],
     ),
+    // Re-solved after turners were found to turn only walkers going their
+    // way. Tricky 7 "Follow the Yellow Brick Road" pens the early lemmings
+    // first; Taxing 8 "Rescue Team", Mayhem 13 "The Catacombs" (past the
+    // trap while it is busy) and Mayhem 19 "Tuther Circus Level" by routes
+    // of our own.
+    at(
+        26,
+        &[
+            (56, 0, 3, None),
+            (91, 1, 1, Some(true)),
+            (228, 0, 3, None),
+            (274, 2, 0, None),
+            (386, 0, 3, None),
+            (450, 3, 1, Some(true)),
+            (544, 0, 3, None),
+            (581, 1, 2, None),
+            (603, 0, 6, None),
+            (997, 0, 4, None),
+            (1110, 0, 6, None),
+            (1334, 0, 1, Some(true)),
+            (1345, 7, 4, None),
+            (1455, 7, 1, Some(true)),
+            (1548, 4, 4, None),
+            (1600, 4, 6, None),
+            (1822, 4, 4, None),
+            (1872, 4, 1, Some(false)),
+            (1899, 5, 4, None),
+            (2013, 5, 1, Some(false)),
+            (2087, 17, 4, None),
+            (2262, 17, 1, Some(false)),
+            (2322, 12, 4, None),
+            (2497, 12, 1, Some(true)),
+            (2522, 20, 4, None),
+        ],
+    ),
+    at(
+        47,
+        &[
+            (66, 1, 3, None),
+            (325, 5, 1, Some(true)),
+            (380, 1, 1, Some(false)),
+            (735, 9, 4, None),
+            (870, 13, 1, Some(true)),
+            (1203, 0, 1, Some(false)),
+            (1240, 17, 4, None),
+            (1260, 8, 4, None),
+            (1385, 6, 1, Some(true)),
+            (1525, 23, 1, Some(false)),
+            (1530, 24, 1, Some(true)),
+            (1545, 14, 1, Some(false)),
+            (1860, 22, 1, Some(true)),
+            (2135, 18, 1, Some(false)),
+            (2260, 2, 4, None),
+        ],
+    ),
+    at(
+        53,
+        &[
+            (90, 0, 1, Some(false)),
+            (150, 1, 1, Some(false)),
+            (375, 2, 1, Some(false)),
+            (930, 4, 1, Some(false)),
+            (1075, 6, 1, Some(false)),
+        ],
+    ),
+    at(
+        62,
+        &[
+            (283, 0, 1, Some(true)),
+            (437, 1, 1, Some(true)),
+            (655, 2, 1, Some(false)),
+            (915, 3, 1, Some(false)),
+            (1020, 4, 7, None),
+            (1090, 5, 7, None),
+            (1160, 4, 0, None),
+            (1283, 5, 4, None),
+            (1765, 6, 1, Some(false)),
+            (1915, 8, 1, Some(false)),
+            (2040, 9, 1, Some(false)),
+        ],
+    ),
+    Solution {
+        level: 72,
+        plan: Plan::Rated(
+            &[(850, 49)],
+            &[
+                (96, 0, 1, Some(true)),
+                (211, 1, 1, Some(false)),
+                (326, 2, 1, Some(false)),
+                (441, 3, 1, Some(true)),
+                (716, 4, 1, Some(true)),
+                (831, 5, 1, Some(true)),
+                (1042, 6, 1, Some(false)),
+                (1157, 7, 1, Some(false)),
+                (1432, 8, 1, Some(true)),
+                (1547, 9, 1, Some(true)),
+                (1662, 10, 1, Some(false)),
+                (1937, 11, 1, Some(false)),
+                (2052, 12, 1, Some(true)),
+                (2167, 13, 1, Some(true)),
+                (2666, 14, 1, Some(true)),
+                (2909, 15, 1, Some(true)),
+                (3152, 16, 1, Some(false)),
+                (3314, 18, 1, Some(true)),
+                (3397, 19, 1, Some(true)),
+                (3574, 20, 1, Some(false)),
+                (3632, 21, 1, Some(true)),
+                (3698, 22, 1, Some(true)),
+                (3841, 42, 1, Some(true)),
+                (3914, 43, 1, Some(false)),
+                (4015, 44, 1, Some(false)),
+            ],
+        ),
+        saves: 0,
+    },
+    Solution {
+        level: 78,
+        plan: Plan::Rated(
+            &[(1150, 49)],
+            &[
+                (5, 0, 7, None),
+                (60, 1, 7, None),
+                (310, 0, 0, None),
+                (540, 1, 4, None),
+                (1200, 1, 4, None),
+                (1245, 15, 4, None),
+                (1300, 0, 2, None),
+            ],
+        ),
+        saves: 0,
+    },
 ];
 
 pub fn solution(level: u32) -> Option<&'static Solution> {
@@ -1116,7 +1122,7 @@ pub fn play(s: &Solution, level: &Level, blocks: &BlockSet) -> Simulation {
                         sim.adjust_release_rate(change);
                     }
                 }
-                for &(t, i, id, side) in steps.iter().filter(|(t, ..)| due(*t)) {
+                for &(_, i, id, side) in steps.iter().filter(|(t, ..)| due(*t)) {
                     // A rejected assignment leaves no command in the log.
                     match (side, sim.lemmings.get(i).map(|l| l.dir)) {
                         (Some(cw), Some(d)) => {

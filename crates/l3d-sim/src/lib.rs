@@ -130,11 +130,14 @@ pub const TRAP_BUSY_TICKS: u32 = 28;
 /// How long a spring shows its launch after throwing a lemming (unmeasured:
 /// one tick per frame of its seven-frame animation).
 pub const SPRING_BUSY_TICKS: u32 = 7;
-/// Ticks a spring's sender rests after a throw: a walker reaching it
-/// meanwhile walks over it (owner's observation: in Practice "Catapults"
-/// walkers released 46 ticks apart, rate 55, walk over it every other time;
-/// 49 apart, rate 52, all are thrown).
-const SPRING_REST_TICKS: u32 = 48;
+/// Ticks a spring's sender rests after a throw, per unit thrown: a walker
+/// reaching it meanwhile walks over it. Practice "Catapults" (an 18-unit
+/// throw) rests between 46 and 49 ticks (owner: walkers released 46 ticks
+/// apart walk over it every other time, 49 apart are all thrown); Mayhem 15
+/// "Hole in One, Two, Three!" (7 units) between 17 and 25 (observed: walkers
+/// 31 ticks apart all thrown, 17 apart every other one, and one throw 25
+/// ticks after the last). Proportional to the distance is ours.
+const SPRING_REST_PER_UNIT: f32 = 2.65;
 /// How long a trampoline pad shows its dip after a lemming touches it
 /// (its four frames, one per tick; timing unmeasured).
 pub const PAD_BUSY_TICKS: u32 = 4;
@@ -190,6 +193,9 @@ fn hop_after_drop(fallen: i32) -> u32 {
 const HOP_MARGIN: i32 = 3 * SUB / 8;
 /// Speed on slippery blocks, sub-units per tick.
 const ICE_SPEED: i32 = WALK_SPEED * 3;
+
+/// The 22.5° ramp's shape (`docs/spec/level.md`).
+const SHALLOW_RAMP: u8 = 8;
 
 /// Block ids with hard-coded meaning (`docs/spec/blk.md`).
 const ENTRANCE_ID: u8 = 0;
@@ -1269,7 +1275,7 @@ impl Simulation {
     /// an arc onto its receiver (the next value up; the last of each value
     /// works [L3DEdit]) and lands unhurt, walking on in its old direction.
     /// Flight time and arc height are unmeasured. A sender still resting
-    /// from a throw ([`SPRING_REST_TICKS`]) lets a walker walk over it; the
+    /// from a throw ([`SPRING_REST_PER_UNIT`]) lets a walker walk over it; the
     /// sender's rest then ends as usual, and it throws the next walker to
     /// step on, or one that turned round on it (a crossing ends there).
     fn spring(&mut self, l: &mut Lemming) {
@@ -1309,7 +1315,7 @@ impl Simulation {
         let ticks = ((span * SPRING_TICKS_PER_UNIT) as u32).max(8);
         let peak = (span * SPRING_ARC * SUB as f32) as i32;
         self.objects[sender].busy = SPRING_BUSY_TICKS;
-        self.objects[sender].rest = SPRING_REST_TICKS;
+        self.objects[sender].rest = (span * SPRING_REST_PER_UNIT) as u32;
         l.set_state(State::Flying {
             from: l.pos,
             to,
@@ -1726,7 +1732,10 @@ impl Simulation {
             .iter()
             .any(|&y| self.world.solid([next[0], y, next[2]]));
         // A brick that would run into terrain is cut short at it, filling
-        // the gap up to the wall; the builder then stops (provisional).
+        // the gap up to the wall, and is laid even where the builder's head
+        // would not fit on it; the builder then stops (observed in Practice
+        // "Builder" with a wall across the bridge: the brick running into it
+        // is laid, then the builder walks back).
         let mut end = BRICK_END;
         let laid = loop {
             let (x0, x1) = along(BRICK_START, end, 0);
@@ -1736,7 +1745,7 @@ impl Simulation {
                 max: [x1, l.pos[1] + SUB / 4, z1],
                 id: template,
             };
-            if !head_blocked && self.world.add_brick(brick) {
+            if (!head_blocked || end < BRICK_END) && self.world.add_brick(brick) {
                 break Some(end);
             }
             end -= 1;
@@ -1763,7 +1772,7 @@ impl Simulation {
             return None;
         }
         let (cell, mask) = Self::bash_cell(l);
-        let present = self.world.block(cell).map_or(0, |(b, _)| b.segments) & mask;
+        let present = self.world.present(cell) & mask;
         (present != 0).then(|| {
             (
                 cell,
@@ -1793,9 +1802,16 @@ impl Simulation {
     /// Whether anything is left in the segments a basher works on.
     fn bash_cell_full(&self, l: &Lemming) -> bool {
         let (cell, mask) = Self::bash_cell(l);
+        self.world.present(cell) & mask != 0
+    }
+
+    /// Whether the block a basher works on is a 22.5° ramp, which it cuts
+    /// level at its feet instead of walking up it.
+    fn bash_cell_shallow_ramp(&self, l: &Lemming) -> bool {
+        let (cell, _) = Self::bash_cell(l);
         self.world
             .block(cell)
-            .is_some_and(|(b, _)| b.segments & mask != 0)
+            .is_some_and(|(b, _)| b.shape == SHALLOW_RAMP)
     }
 
     /// Whether solid terrain is within a walker's reach ahead of a basher, at
@@ -1821,9 +1837,7 @@ impl Simulation {
     /// works on.
     fn bash_more_ahead(&self, l: &Lemming) -> bool {
         let (next, mask) = Self::bash_cell_at(l, SUB / 2 + SUB);
-        self.world
-            .block(next)
-            .is_some_and(|(b, _)| b.segments & mask != 0)
+        self.world.present(next) & mask != 0
             && self.world.breakable_towards(next, Some(l.dir.delta()))
     }
 
@@ -1842,7 +1856,8 @@ impl Simulation {
             l.set_state(State::Walking);
             return;
         }
-        if (!full && self.bash_more_ahead(l)) || (full && !self.bash_reaches_solid(l)) {
+        let shallow = self.bash_cell_shallow_ramp(l);
+        if (!full && self.bash_more_ahead(l)) || (full && !shallow && !self.bash_reaches_solid(l)) {
             // On through the gap; the next stroke starts at the wall.
             l.pos[0] += d[0] * WALK_SPEED;
             l.pos[2] += d[2] * WALK_SPEED;
@@ -1855,8 +1870,18 @@ impl Simulation {
             return;
         }
         match self.world.block(cell) {
-            Some((b, _)) if b.segments & mask != 0 => {
-                if !self.world.remove_segments_towards(cell, mask, Some(d)) {
+            Some(_) if self.world.present(cell) & mask != 0 => {
+                // A 22.5° ramp is cut level at the feet (observed in a
+                // Practice "Basher" changed to have one before the crate: a
+                // notch with a vertical face, the basher standing in it);
+                // a shaped block keeps its slope below the cut.
+                let cut = if shallow {
+                    self.world.breakable_towards(cell, Some(d))
+                        && self.world.shave(cell, mask.trailing_zeros() as u8)
+                } else {
+                    self.world.remove_segments_towards(cell, mask, Some(d))
+                };
+                if !cut {
                     l.set_state(State::Walking);
                     return;
                 }
@@ -2155,23 +2180,23 @@ impl Simulation {
                     l.dir = l.dir.reverse();
                     return;
                 }
-                // Turners send walkers off from the centre of the turner's
-                // cell, ahead of the turner standing at its edge (owner's
-                // observation); a walker already past the centre turns once
-                // it is level with the turner. That is for walkers coming up
-                // behind it along the line it came on; others are turned only
-                // where they meet the turner itself, so that one crossing its
-                // cell elsewhere, as when coming back from a wall the turner
-                // points at, walks on (owner's observation: such walkers were
-                // not caught in a loop).
-                Some(to) if to != l.dir && (Self::cell_of(o.pos) == here || near(next)) => {
+                // Turners turn only walkers going the way the turner was
+                // walking when it stopped; walkers meeting it from any other
+                // side are not affected (owner). They are sent off from the
+                // centre of the turner's cell, ahead of the turner standing
+                // at its edge; a walker already past the centre turns once it
+                // is level with the turner.
+                Some(to)
+                    if to != l.dir
+                        && l.dir == o.heading
+                        && (Self::cell_of(o.pos) == here || near(next)) =>
+                {
                     let axis = if d[0] != 0 { 0 } else { 2 };
                     let centre = o.pos[axis].div_euclid(SUB) * SUB + SUB / 2;
                     let crosses = |at: i32| {
                         (at - l.pos[axis]) * d[axis] > 0 && (at - next[axis]) * d[axis] <= 0
                     };
-                    let behind = l.dir == o.heading;
-                    let at = if behind && Self::cell_of(o.pos) == here && crosses(centre) {
+                    let at = if Self::cell_of(o.pos) == here && crosses(centre) {
                         Some(centre)
                     } else if near(next) && crosses(o.pos[axis]) {
                         Some(o.pos[axis])

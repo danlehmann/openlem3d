@@ -186,6 +186,13 @@ impl World {
         self.cell(c[0], c[1], c[2]).map_or(4, |s| s.cut)
     }
 
+    /// The segments of the block in cell `c` that hold something: those
+    /// present, below its cut. 0 for an empty cell.
+    pub fn present(&self, c: [i32; 3]) -> u8 {
+        self.cell(c[0], c[1], c[2])
+            .map_or(0, |s| s.block.segments & ((1 << s.cut) - 1))
+    }
+
     /// Adds the segments in `mask` to cell `c`. An empty cell becomes a cube
     /// of `template`'s block id; an occupied cell keeps its block. Returns
     /// whether anything was added.
