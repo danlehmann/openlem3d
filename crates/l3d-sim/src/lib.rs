@@ -1567,7 +1567,26 @@ impl Simulation {
                     let mask = (0..4)
                         .filter(|seg| (lo..hi).contains(&(cy * SUB + seg * SUB / 4 + SUB / 8)))
                         .fold(0u8, |m, seg| m | 1 << seg);
-                    self.world.remove_segments([cx, cy, cz], mask);
+                    let c = [cx, cy, cz];
+                    let low = mask.trailing_zeros();
+                    let above_band = self.world.present(c) & !mask & (0xF << low);
+                    // A shaped block losing its top is shaved flat and keeps
+                    // its slopes below the cut, as for the digger (blasts on
+                    // a hill of 45° ramps in the original left flat steps
+                    // with vertical faces, no shallower slope).
+                    match self.world.block(c) {
+                        Some((b, _))
+                            if b.shape != 0
+                                && mask != 0
+                                && above_band == 0
+                                && self.world.breakable_towards(c, None) =>
+                        {
+                            self.world.shave(c, low as u8);
+                        }
+                        _ => {
+                            self.world.remove_segments(c, mask);
+                        }
+                    }
                 }
             }
         }

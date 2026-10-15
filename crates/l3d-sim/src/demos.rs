@@ -132,10 +132,10 @@ pub const SOLUTIONS: &[Solution] = &[
     at(
         5,
         &[
-            (104, 0, 2, None),
-            (537, 1, 2, None),
-            (798, 2, 2, None),
-            (1258, 3, 2, None),
+            (112, 0, 2, None),
+            (545, 1, 2, None),
+            (806, 2, 2, None),
+            (1266, 3, 2, None),
         ],
     ),
     at(
