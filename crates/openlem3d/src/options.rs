@@ -5,15 +5,13 @@
 //! settings that mean something here are offered. Esc also saves and
 //! leaves.
 
-use bevy::asset::RenderAssetUsages;
-use bevy::image::ImageSampler;
 use bevy::prelude::*;
-use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use l3d_formats::icons::Icons;
 
 use crate::Data;
 use crate::menu::AppState;
 use crate::settings::{SLIDER_STEPS, Settings};
+use crate::texture::indexed_image;
 use crate::title::{Art, ScreenRoot, at, image_at, spawn_screen};
 
 pub struct OptionsPlugin;
@@ -55,19 +53,7 @@ fn load_lights(mut commands: Commands, mut data: ResMut<Data>, mut images: ResMu
     };
     let mut add = |c: u8| {
         let g = icons.small_font.glyph(c)?;
-        let mut image = Image::new(
-            Extent3d {
-                width: g.width as u32,
-                height: g.height as u32,
-                depth_or_array_layers: 1,
-            },
-            TextureDimension::D2,
-            g.to_rgba(&pal, true),
-            TextureFormat::Rgba8UnormSrgb,
-            RenderAssetUsages::RENDER_WORLD,
-        );
-        image.sampler = ImageSampler::nearest();
-        Some(images.add(image))
+        Some(images.add(indexed_image(g, &pal, true)))
     };
     if let (Some(on), Some(off)) = (add(b'#'), add(b'$')) {
         let font = crate::title::glyphs(&icons.small_font, &pal, 4.0, 1.0, &mut images);

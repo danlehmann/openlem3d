@@ -11,14 +11,11 @@
 
 use std::collections::HashMap;
 
-use bevy::asset::RenderAssetUsages;
-use bevy::image::ImageSampler;
 use bevy::prelude::*;
-use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
-use l3d_formats::image::IndexedImage;
 use l3d_formats::screen;
 
 use crate::menu::AppState;
+use crate::texture::indexed_image;
 use crate::title::{Art, At, Canvas, at, image_at};
 use crate::{CurrentLevel, Data, Game, ViewCamera};
 
@@ -33,7 +30,10 @@ impl Plugin for BriefingPlugin {
                     .chain()
                     .run_if(in_state(AppState::Briefing)),
             )
-            .add_systems(OnExit(AppState::Briefing), despawn_briefing)
+            .add_systems(
+                OnExit(AppState::Briefing),
+                crate::title::despawn::<BriefingRoot>,
+            )
             .add_systems(
                 Update,
                 preview
@@ -70,27 +70,6 @@ pub(crate) struct ScenePics {
     pub(crate) prompts: Vec<Handle<Image>>,
 }
 
-fn upload(
-    img: &IndexedImage,
-    pal: &l3d_formats::gamedata::Palette,
-    transparent0: bool,
-    images: &mut Assets<Image>,
-) -> Handle<Image> {
-    let mut image = Image::new(
-        Extent3d {
-            width: img.width as u32,
-            height: img.height as u32,
-            depth_or_array_layers: 1,
-        },
-        TextureDimension::D2,
-        img.to_rgba(pal, transparent0),
-        TextureFormat::Rgba8UnormSrgb,
-        RenderAssetUsages::RENDER_WORLD,
-    );
-    image.sampler = ImageSampler::nearest();
-    images.add(image)
-}
-
 /// Loads `SCENEnnn.SVG` (640×480) with its palette.
 pub(crate) fn load_scene(
     data: &mut Data,
@@ -105,13 +84,13 @@ pub(crate) fn load_scene(
     .ok()?;
     let pal = d.palette(&format!("GFX/SCENE{theme:03}.SVP")).ok()?;
     Some(ScenePics {
-        picture: upload(&scene.image, &pal, false, images),
+        picture: images.add(indexed_image(&scene.image, &pal, false)),
         // The prompts are drawn over the picture, index 0 transparent (as seen
         // in the original: the mice show the picture around them).
         prompts: scene
             .prompts
             .iter()
-            .map(|p| upload(p, &pal, true, images))
+            .map(|p| images.add(indexed_image(p, &pal, true)))
             .collect(),
     })
 }
@@ -256,12 +235,6 @@ fn spawn_briefing(
 enum Choice {
     Preview,
     Menu,
-}
-
-fn despawn_briefing(mut commands: Commands, roots: Query<Entity, With<BriefingRoot>>) {
-    for e in &roots {
-        commands.entity(e).despawn();
-    }
 }
 
 #[allow(clippy::too_many_arguments)]

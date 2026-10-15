@@ -3,7 +3,7 @@
 //! itself is in `panel`. Works with mouse, keyboard and touch.
 
 use bevy::prelude::*;
-use l3d_sim::{SUB, Skill};
+use l3d_sim::Skill;
 
 use crate::Game;
 use crate::lemming_cam::LemmingCam;
@@ -108,7 +108,7 @@ fn to_screen(camera: &SceneCamera, size: Vec2, pos: Vec3) -> Option<(Vec2, f32)>
 
 /// A lemming's centre in world units.
 fn lemming_centre(l: &l3d_sim::Lemming) -> Vec3 {
-    Vec3::from_array(l.pos.map(|v| v as f32 / SUB as f32)) + Vec3::Y * 0.2
+    Vec3::from_array(l.pos.map(crate::units)) + Vec3::Y * 0.2
 }
 
 /// The lemming nearest a screen point (logical pixels), if one is close
@@ -383,9 +383,6 @@ fn spawn_turner_marker(
     mut data: ResMut<crate::Data>,
     mut images: ResMut<Assets<Image>>,
 ) {
-    use bevy::asset::RenderAssetUsages;
-    use bevy::image::ImageSampler;
-    use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
     let d = &mut data.0;
     let sheet = &l3d_formats::sheets::MOUSE;
     let (Ok(pal), Ok(raw)) = (d.palette("GFX/LM3D.PAL"), d.read(sheet.path)) else {
@@ -396,21 +393,7 @@ fn spawn_turner_marker(
         .iter()
         .skip(ARROW_FIRST)
         .take(ARROW_DIRECTIONS)
-        .map(|c| {
-            let mut image = Image::new(
-                Extent3d {
-                    width: c.width as u32,
-                    height: c.height as u32,
-                    depth_or_array_layers: 1,
-                },
-                TextureDimension::D2,
-                c.to_rgba(&pal, true),
-                TextureFormat::Rgba8UnormSrgb,
-                RenderAssetUsages::RENDER_WORLD,
-            );
-            image.sampler = ImageSampler::nearest();
-            images.add(image)
-        })
+        .map(|c| images.add(crate::texture::indexed_image(c, &pal, true)))
         .collect();
     commands.insert_resource(ArrowCells(handles));
     for side in 0..2 {

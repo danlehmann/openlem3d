@@ -1,11 +1,9 @@
-//! openlem3d: level viewer (first milestone of the game).
+//! openlem3d: the game, from the title screen and menus through briefings,
+//! play and results, drawn from the user's original CD data.
 //!
-//! Usage: `openlem3d [--data DIR] [--level N] [--camera 1-4] [--screenshot FILE]`
-//! Without `--level` the game starts at the level-select screen.
-//!
-//! Controls: W/S/A/D or arrows move, Q/E or right-drag turn, R/F rise/fall,
-//! 1–4 preset cameras, P pause, [ / ] previous/next level, Esc level select,
-//! M mute music.
+//! Usage: `openlem3d [--data DIR] [--level N] [OPTIONS]`; the further
+//! options (`--camera`, `--screen`, `--screenshot`, `--press`, …) are those
+//! of `parse_args`. Without `--level` the game starts at the title screen.
 
 mod briefing;
 mod codes;
@@ -31,6 +29,7 @@ mod screen;
 mod settings;
 mod sfx;
 mod style;
+mod texture;
 mod title;
 mod touch;
 mod trackpad;
@@ -48,6 +47,12 @@ use l3d_formats::blk::BlockSet;
 use l3d_formats::gamedata::{GameData, locate_data_dir};
 use l3d_formats::level::{CameraPreset, Level};
 use scene_render::{SceneCamera, SceneContent, SceneRenderPlugin};
+
+/// A simulation length or coordinate in sub-units ([`l3d_sim::SUB`] to the
+/// unit), in units.
+pub(crate) fn units(sub: i32) -> f32 {
+    sub as f32 / l3d_sim::SUB as f32
+}
 
 /// Command-line options.
 #[derive(Resource, Clone)]
@@ -71,7 +76,7 @@ pub struct Options {
     no_hud: bool,
     /// Scripted skill assignments `(tick, lemming, skill id, turner side)`,
     /// from `--assign TICK:LEMMING:SKILL[:cw|acw]`.
-    assign: Vec<(u64, usize, u8, Option<String>)>,
+    assign: Vec<l3d_sim::demos::Step>,
     /// Lemming the virtual-lemming camera follows from the start (`--follow N`).
     follow: Option<usize>,
     /// Play the level's stored solution as a replay of player input, so it
@@ -167,21 +172,10 @@ fn parse_args() -> Options {
             "--solve" => o.solve = true,
             "--turbo" => o.turbo = true,
             "--follow" => o.follow = Some(val().parse().expect("--follow takes a lemming number")),
-            "--assign" => {
-                let v = val();
-                let p: Vec<&str> = v.split(':').collect();
-                let num = |i: usize| {
-                    p.get(i)
-                        .and_then(|s| s.parse().ok())
-                        .expect("--assign takes TICK:LEMMING:SKILL[:cw|acw]")
-                };
-                o.assign.push((
-                    num(0),
-                    num(1) as usize,
-                    num(2) as u8,
-                    p.get(3).map(|s| s.to_string()),
-                ));
-            }
+            "--assign" => o.assign.push(
+                l3d_sim::demos::parse_step(&val())
+                    .expect("--assign takes TICK:LEMMING:SKILL[:cw|acw]"),
+            ),
             "--size" => {
                 let v = val();
                 let (w, h) = v.split_once('x').expect("--size takes WxH");
@@ -675,19 +669,9 @@ fn step_simulation(
         }
         sim.step();
         lemming_render::step_doors(doors, sim);
-        for (tick, i, skill, side) in &options.assign {
-            if *tick == sim.tick
-                && replay.is_none()
-                && let (Some(skill), Some(dir)) = (
-                    l3d_sim::Skill::from_id(*skill),
-                    sim.lemmings.get(*i).map(|l| l.dir),
-                )
-            {
-                match side.as_deref() {
-                    Some("cw") => sim.assign_turner(*i, dir.clockwise()),
-                    Some("acw") => sim.assign_turner(*i, dir.anticlockwise()),
-                    _ => sim.assign(*i, skill),
-                };
+        for &step in &options.assign {
+            if step.0 == sim.tick && replay.is_none() {
+                l3d_sim::demos::apply_step(sim, step);
             }
         }
     }
@@ -928,13 +912,13 @@ pub(crate) fn camera_controls(
             }
         }
         let gliding = cam.glide.is_some();
+        let key = |k: KeyCode| keys.pressed(k) as i32 as f32;
         let held = |a: KeyCode, b: KeyCode| (keys.pressed(a) || keys.pressed(b)) as i32 as f32;
         // ← → turn the camera; Q and E turn the world about the level's
         // centre, like the panel's turn arrows (owner: the arrows turn the
         // whole level, not the camera).
-        let arrows = held(KeyCode::ArrowRight, KeyCode::ArrowRight)
-            - held(KeyCode::ArrowLeft, KeyCode::ArrowLeft);
-        let world_turn = held(KeyCode::KeyE, KeyCode::KeyE) - held(KeyCode::KeyQ, KeyCode::KeyQ);
+        let arrows = key(KeyCode::ArrowRight) - key(KeyCode::ArrowLeft);
+        let world_turn = key(KeyCode::KeyE) - key(KeyCode::KeyQ);
         let turn = arrows + world_turn;
         cam.yaw += arrows * 1.8 * dt;
         if world_turn != 0.0
@@ -988,7 +972,7 @@ pub(crate) fn camera_controls(
         } * settings.camera_factor();
         let mv = fwd
             * (held(KeyCode::KeyW, KeyCode::ArrowUp) - held(KeyCode::KeyS, KeyCode::ArrowDown))
-            + right * (held(KeyCode::KeyD, KeyCode::KeyD) - held(KeyCode::KeyA, KeyCode::KeyA))
+            + right * (key(KeyCode::KeyD) - key(KeyCode::KeyA))
             + Vec3::Y
                 * (held(KeyCode::KeyR, KeyCode::PageUp) - held(KeyCode::KeyF, KeyCode::PageDown))
             + fwd * ahead

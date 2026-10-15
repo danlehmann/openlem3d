@@ -22,7 +22,10 @@ impl Plugin for ResultsPlugin {
                     .chain()
                     .run_if(in_state(AppState::Results)),
             )
-            .add_systems(OnExit(AppState::Results), despawn_results);
+            .add_systems(
+                OnExit(AppState::Results),
+                crate::title::despawn::<ResultsRoot>,
+            );
     }
 }
 
@@ -249,12 +252,6 @@ fn spawn_results(
             ))
             .id();
         commands.entity(canvas).add_child(e);
-    }
-}
-
-fn despawn_results(mut commands: Commands, roots: Query<Entity, With<ResultsRoot>>) {
-    for e in &roots {
-        commands.entity(e).despawn();
     }
 }
 

@@ -6,7 +6,6 @@
 
 use bevy::prelude::*;
 use l3d_formats::font::Font;
-use l3d_formats::gamedata::Palette;
 use l3d_formats::icons::{Icons, panel as icon};
 use l3d_formats::image::IndexedImage;
 use l3d_formats::sheets;
@@ -16,6 +15,7 @@ use crate::hud::SelectedSkill;
 use crate::lemming_cam::LemmingCam;
 use crate::menu::AppState;
 use crate::screen::Screen;
+use crate::texture::indexed_image;
 use crate::{Data, Game, LevelInfo, PresetIndex, ViewCamera};
 
 pub struct PanelPlugin;
@@ -120,30 +120,6 @@ impl Glyphs {
     }
 }
 
-fn to_image(img: &IndexedImage, pal: &Palette) -> Image {
-    to_image_with(img, pal, true)
-}
-
-/// `img` as an image; with `transparent`, colour 0 shows through.
-fn to_image_with(img: &IndexedImage, pal: &Palette, transparent: bool) -> Image {
-    use bevy::asset::RenderAssetUsages;
-    use bevy::image::ImageSampler;
-    use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
-    let mut image = Image::new(
-        Extent3d {
-            width: img.width as u32,
-            height: img.height as u32,
-            depth_or_array_layers: 1,
-        },
-        TextureDimension::D2,
-        img.to_rgba(pal, transparent),
-        TextureFormat::Rgba8UnormSrgb,
-        RenderAssetUsages::RENDER_WORLD,
-    );
-    image.sampler = ImageSampler::nearest();
-    image
-}
-
 fn load_art(mut commands: Commands, mut data: ResMut<Data>, mut images: ResMut<Assets<Image>>) {
     let d = &mut data.0;
     let Ok(pal) = d.palette("GFX/LM3D.PAL") else {
@@ -163,9 +139,9 @@ fn load_art(mut commands: Commands, mut data: ResMut<Data>, mut images: ResMut<A
     else {
         return;
     };
-    let height_bar = images.add(to_image_with(&icons.height_bar, &pal, false));
-    let knob = images.add(to_image_with(&icons.knob, &pal, false));
-    let mut add = |img: &IndexedImage| images.add(to_image(img, &pal));
+    let height_bar = images.add(indexed_image(&icons.height_bar, &pal, false));
+    let knob = images.add(indexed_image(&icons.knob, &pal, false));
+    let mut add = |img: &IndexedImage| images.add(indexed_image(img, &pal, true));
     let glyphs = |f: &Font,
                   digit_advance: f32,
                   colon_advance: f32,

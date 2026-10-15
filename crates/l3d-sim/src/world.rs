@@ -193,34 +193,6 @@ impl World {
             .map_or(0, |s| s.block.segments & ((1 << s.cut) - 1))
     }
 
-    /// Adds the segments in `mask` to cell `c`. An empty cell becomes a cube
-    /// of `template`'s block id; an occupied cell keeps its block. Returns
-    /// whether anything was added.
-    pub fn add_segments(&mut self, c: [i32; 3], mask: u8, template: BlockCell) -> bool {
-        let ok = |v: i32, n: usize| v >= 0 && (v as usize) < n;
-        if !(ok(c[0], SIZE_X) && ok(c[1], SIZE_Y) && ok(c[2], SIZE_Z)) {
-            return false;
-        }
-        let i = index(c[0] as usize, c[1] as usize, c[2] as usize);
-        let mut cell = self.cells[i].unwrap_or(SolidCell {
-            block: BlockCell {
-                id: template.id,
-                shape: 0,
-                rotation: 0,
-                segments: 0,
-            },
-            flags: 0,
-            cut: 4,
-        });
-        if cell.block.segments & mask == mask {
-            return false;
-        }
-        cell.block.segments |= mask;
-        self.cells[i] = Some(cell);
-        self.changes.push((c.map(|v| v as usize), cell.block));
-        true
-    }
-
     /// Removes the bricks overlapping the segments in `mask` of cell `c`;
     /// returns whether there were any.
     fn remove_bricks(&mut self, c: [i32; 3], mask: u8) -> bool {

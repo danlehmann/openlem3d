@@ -49,9 +49,7 @@ fn rope_above(world: &l3d_sim::world::World, pos: [i32; 3]) -> f32 {
         .step_by(step as usize)
         .skip_while(|&y| !at(y))
         .find(|&y| !at(y));
-    top.map_or(pos[1] as f32 / SUB as f32 + ROPE_ABOVE_PATH, |y| {
-        y as f32 / SUB as f32
-    })
+    top.map_or(crate::units(pos[1]) + ROPE_ABOVE_PATH, crate::units)
 }
 const UMBRELLA_FRAMES: u32 = 8;
 
@@ -294,7 +292,7 @@ fn objects(b: &mut LayerBuilder, sim: &Simulation, tex: [f32; 2]) {
                         (cell % ATLAS_COLUMNS) * LEMMING_CELL,
                         (cell / ATLAS_COLUMNS) * LEMMING_CELL,
                     );
-                    let y = o.surface as f32 / SUB as f32 + 0.008;
+                    let y = crate::units(o.surface) + 0.008;
                     let (x0, z0) = (o.cell[0] as f32, o.cell[2] as f32);
                     let (x1, z1) = (x0 + 1.0, z0 + 1.0);
                     let s = TRAP_FRAME as f32;
@@ -341,7 +339,7 @@ fn objects(b: &mut LayerBuilder, sim: &Simulation, tex: [f32; 2]) {
         );
         let anchor = [
             o.cell[0] as f32 + 0.5,
-            o.surface as f32 / SUB as f32,
+            crate::units(o.surface),
             o.cell[2] as f32 + 0.5,
         ];
         let size = TRAP_FRAME as f32;
@@ -402,7 +400,7 @@ pub fn step_doors(doors: &mut [Door], sim: &Simulation) {
             d.cell[2] as f32 + 0.5 + d.normal[1] as f32 * 0.5,
         ];
         let entering = sim.lemmings.iter().any(|l| {
-            let p = l.pos.map(|v| v as f32 / SUB as f32);
+            let p = l.pos.map(crate::units);
             !l.gone
                 && l.state == State::Exiting
                 && (p[0] - face[0]).abs() < 0.8
@@ -586,7 +584,7 @@ fn mine_effects(b: &mut LayerBuilder, sim: &Simulation, blocks: Option<&BlockSet
         let (out, side) = ([-d[0], -d[2]], [d[2], -d[0]]);
         let c = cell.map(|v| v as f32);
         let face = [c[0] + 0.5 - d[0] * 0.5, c[2] + 0.5 - d[2] * 0.5];
-        let feet = l.pos[1] as f32 / SUB as f32;
+        let feet = crate::units(l.pos[1]);
         let stroke = sim.tick as u32 / 49;
         for (burst, &start) in MINE_BURSTS.iter().enumerate() {
             if !(start..start + CHUNK_TICKS).contains(&t) {
@@ -686,7 +684,7 @@ fn dig_debris(
         (tile_cell / ATLAS_COLUMNS) * LEMMING_CELL + (tile / 2 % 2) * 64,
     );
     let top = cell[1] as f32 + (mask.trailing_zeros() + 1) as f32 * 0.25;
-    let feet = l.pos.map(|v| v as f32 / SUB as f32);
+    let feet = l.pos.map(crate::units);
     let stroke = l.state_ticks / l3d_sim::DIG_TICKS;
     for (burst, &start) in DIG_BURSTS.iter().enumerate() {
         if !(start..start + CHUNK_TICKS).contains(&t) {
@@ -1043,7 +1041,7 @@ pub fn build(
         } else {
             [cx as f32, cy as f32, size, size]
         };
-        let mut anchor = l.pos.map(|v| v as f32 / SUB as f32);
+        let mut anchor = l.pos.map(crate::units);
         // On a rope slide the raised hand, at the top of the cell, holds the
         // rope (owner's picture).
         if matches!(l.state, State::OnRope { .. }) {
@@ -1065,7 +1063,7 @@ pub fn build(
                     );
                     let s = TRAP_FRAME as f32;
                     b.sprite_scaled(
-                        at.map(|v| v as f32 / SUB as f32),
+                        at.map(crate::units),
                         [cx as f32, cy as f32, s, s],
                         tex,
                         1,

@@ -8,18 +8,21 @@ use l3d_formats::level::Level;
 
 use crate::{Command, Simulation, Skill};
 
+/// A skill assignment `(tick, lemming, skill id, turner side)`; the side is
+/// `Some(true)` for clockwise.
+pub type Step = (u64, usize, u8, Option<bool>);
+
+/// A release-rate change `(tick, change)`.
+pub type RateStep = (u64, i32);
+
 /// How a solution gives out skills.
 #[derive(Debug, Clone, Copy)]
 pub enum Plan {
-    /// `(tick, lemming, skill id, turner side)` assignments, that many ticks
-    /// after the hatches have opened; the side is `Some(true)` for clockwise.
-    At(&'static [(u64, usize, u8, Option<bool>)]),
-    /// Like [`Plan::At`], with release-rate changes `(tick, change)`, each
-    /// made before that tick's assignments.
-    Rated(
-        &'static [(u64, i32)],
-        &'static [(u64, usize, u8, Option<bool>)],
-    ),
+    /// Assignments, ticks counted from the hatches opening.
+    At(&'static [Step]),
+    /// Like [`Plan::At`], with release-rate changes, each made before that
+    /// tick's assignments.
+    Rated(&'static [RateStep], &'static [Step]),
     /// The skill to every lemming as soon as it appears.
     Each(u8),
 }
@@ -32,7 +35,19 @@ pub struct Solution {
     pub saves: u32,
 }
 
-const fn at(level: u32, steps: &'static [(u64, usize, u8, Option<bool>)]) -> Solution {
+impl Solution {
+    /// How many lemmings this solution must save on `level`, the level it
+    /// solves.
+    pub fn need(&self, level: &Level) -> u32 {
+        if self.saves > 0 {
+            self.saves
+        } else {
+            level.save_requirement as u32
+        }
+    }
+}
+
+const fn at(level: u32, steps: &'static [Step]) -> Solution {
     Solution {
         level,
         plan: Plan::At(steps),
@@ -1183,38 +1198,80 @@ pub fn solution(level: u32) -> Option<&'static Solution> {
 /// Plays a solution through and returns the finished simulation, whose
 /// `log` replays it.
 pub fn play(s: &Solution, level: &Level, blocks: &BlockSet) -> Simulation {
-    let mut sim = Simulation::new(level, blocks);
-    while !sim.finished() {
-        sim.step();
-        let now = sim.tick;
-        let due = |t: u64| t + crate::HATCH_OPEN_TICKS as u64 == now;
-        match s.plan {
-            Plan::At(steps) | Plan::Rated(_, steps) => {
-                if let Plan::Rated(rates, _) = s.plan {
-                    for &(_, change) in rates.iter().filter(|(t, _)| due(*t)) {
-                        sim.adjust_release_rate(change);
-                    }
-                }
-                for &(_, i, id, side) in steps.iter().filter(|(t, ..)| due(*t)) {
-                    // A rejected assignment leaves no command in the log.
-                    match (side, sim.lemmings.get(i).map(|l| l.dir)) {
-                        (Some(cw), Some(d)) => {
-                            sim.assign_turner(i, if cw { d.clockwise() } else { d.anticlockwise() })
-                        }
-                        _ => Skill::from_id(id).is_some_and(|skill| sim.assign(i, skill)),
-                    };
-                }
-            }
-            Plan::Each(id) => {
+    match s.plan {
+        Plan::At(steps) => play_steps(&[], steps, level, blocks),
+        Plan::Rated(rates, steps) => play_steps(rates, steps, level, blocks),
+        Plan::Each(id) => {
+            let mut sim = Simulation::new(level, blocks);
+            while !sim.finished() {
+                sim.step();
                 if let Some(skill) = Skill::from_id(id) {
                     for i in 0..sim.lemmings.len() {
                         sim.assign(i, skill);
                     }
                 }
             }
+            sim
+        }
+    }
+}
+
+/// Plays release-rate changes and assignments through as [`Plan::Rated`]
+/// does and returns the finished simulation, whose `log` replays it.
+pub fn play_steps(
+    rates: &[RateStep],
+    steps: &[Step],
+    level: &Level,
+    blocks: &BlockSet,
+) -> Simulation {
+    let mut sim = Simulation::new(level, blocks);
+    while !sim.finished() {
+        sim.step();
+        let now = sim.tick;
+        let due = |t: u64| t + crate::HATCH_OPEN_TICKS as u64 == now;
+        for &(_, change) in rates.iter().filter(|(t, _)| due(*t)) {
+            sim.adjust_release_rate(change);
+        }
+        for &step in steps.iter().filter(|(t, ..)| due(*t)) {
+            apply_step(&mut sim, step);
         }
     }
     sim
+}
+
+/// Gives out `step`'s skill now, whatever its tick, and returns whether it
+/// was taken (a rejected assignment leaves no command in the log). With a
+/// side, a lemming that is out gets a turner pointing to that side of its
+/// heading; otherwise the skill is assigned as is.
+pub fn apply_step(sim: &mut Simulation, (_, i, id, side): Step) -> bool {
+    match (side, sim.lemmings.get(i).map(|l| l.dir)) {
+        (Some(cw), Some(d)) => {
+            sim.assign_turner(i, if cw { d.clockwise() } else { d.anticlockwise() })
+        }
+        _ => Skill::from_id(id).is_some_and(|skill| sim.assign(i, skill)),
+    }
+}
+
+/// Parses a step written `TICK:LEMMING:SKILL`, with a fourth part `cw` or
+/// `acw` for a turner's side; any other fourth part, and any after it, are
+/// ignored.
+pub fn parse_step(s: &str) -> Option<Step> {
+    let mut p = s.split(':');
+    let t = p.next()?.parse().ok()?;
+    let i = p.next()?.parse().ok()?;
+    let id = p.next()?.parse().ok()?;
+    let side = match p.next() {
+        Some("cw") => Some(true),
+        Some("acw") => Some(false),
+        _ => None,
+    };
+    Some((t, i, id, side))
+}
+
+/// Parses a release-rate change written `rTICK:CHANGE`.
+pub fn parse_rate_step(s: &str) -> Option<RateStep> {
+    let (t, c) = s.strip_prefix('r')?.split_once(':')?;
+    Some((t.parse().ok()?, c.parse().ok()?))
 }
 
 /// The commands of level `n`'s demo, if it has one.

@@ -48,7 +48,10 @@ impl Plugin for MenuPlugin {
                     .chain()
                     .run_if(in_state(AppState::Menu)),
             )
-            .add_systems(OnExit(AppState::Menu), despawn_menu)
+            .add_systems(
+                OnExit(AppState::Menu),
+                crate::title::despawn::<crate::title::ScreenRoot>,
+            )
             .add_systems(Update, back_to_menu.run_if(in_state(AppState::Playing)));
     }
 }
@@ -119,9 +122,6 @@ struct Scroll(usize);
 struct ListLabels(Handle<Image>, Handle<Image>);
 
 fn load_labels(mut commands: Commands, mut data: ResMut<Data>, mut images: ResMut<Assets<Image>>) {
-    use bevy::asset::RenderAssetUsages;
-    use bevy::image::ImageSampler;
-    use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
     let d = &mut data.0;
     let (Ok(pal), Some(icons)) = (
         d.palette("GFX/LM3D.PAL"),
@@ -131,21 +131,7 @@ fn load_labels(mut commands: Commands, mut data: ResMut<Data>, mut images: ResMu
     ) else {
         return;
     };
-    let mut up = |img: &l3d_formats::image::IndexedImage| {
-        let mut image = Image::new(
-            Extent3d {
-                width: img.width as u32,
-                height: img.height as u32,
-                depth_or_array_layers: 1,
-            },
-            TextureDimension::D2,
-            img.to_rgba(&pal, true),
-            TextureFormat::Rgba8UnormSrgb,
-            RenderAssetUsages::RENDER_WORLD,
-        );
-        image.sampler = ImageSampler::nearest();
-        images.add(image)
-    };
+    let mut up = |img| images.add(crate::texture::indexed_image(img, &pal, true));
     if let (Some(inl), Some(clock)) = (icons.labels.first(), icons.labels.get(2)) {
         commands.insert_resource(ListLabels(up(inl), up(clock)));
     }
@@ -297,12 +283,6 @@ fn ensure_menu(
             RED,
             Some(n),
         );
-    }
-}
-
-fn despawn_menu(mut commands: Commands, roots: Query<Entity, With<crate::title::ScreenRoot>>) {
-    for e in &roots {
-        commands.entity(e).despawn();
     }
 }
 

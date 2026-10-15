@@ -5,19 +5,17 @@
 //! a turner takes a fourth part, `cw` or `acw`, for the side it points to.
 
 use l3d_formats::gamedata::{GameData, locate_data_dir};
+use l3d_sim::demos::{Step, apply_step, parse_step};
 use l3d_sim::{SUB, Simulation, Skill, State, TICKS_PER_SECOND};
 
 fn main() {
     let mut args = std::env::args().skip(1);
     let n: u32 = args.next().and_then(|a| a.parse().ok()).unwrap_or(0);
     let seconds: u32 = args.next().and_then(|a| a.parse().ok()).unwrap_or(60);
-    let assignments: Vec<(u64, usize, Skill, Option<&str>)> = args
+    let assignments: Vec<(Step, Skill)> = args
         .filter_map(|a| {
-            let a: &'static str = a.leak();
-            let mut p = a.split(':');
-            let mut num = || p.next()?.parse::<u64>().ok();
-            let (t, i, s) = (num()?, num()? as usize, Skill::from_id(num()? as u8)?);
-            Some((t, i, s, a.split(':').nth(3)))
+            let step = parse_step(&a)?;
+            Some((step, Skill::from_id(step.2)?))
         })
         .collect();
     let mut data = GameData::open(&locate_data_dir(None)).expect("open game data");
@@ -44,7 +42,7 @@ fn main() {
     for s in 1..=seconds {
         for _ in 0..TICKS_PER_SECOND {
             sim.step();
-            for &(t, i, skill, side) in &assignments {
+            for &(step @ (t, i, ..), skill) in &assignments {
                 if t == sim.tick {
                     // Why a refusal happens: none left, or the lemming can't
                     // take it now (falling, busy, stunned, gone ...).
@@ -53,12 +51,7 @@ fn main() {
                         Some(_) if sim.skills_left[skill as usize] == 0 => "none left".to_string(),
                         Some(l) => format!("lemming is {:?}", l.state),
                     };
-                    let ok = match (side, sim.lemmings.get(i).map(|l| l.dir)) {
-                        (Some("cw"), Some(d)) => sim.assign_turner(i, d.clockwise()),
-                        (Some("acw"), Some(d)) => sim.assign_turner(i, d.anticlockwise()),
-                        _ => sim.assign(i, skill),
-                    };
-                    if ok {
+                    if apply_step(&mut sim, step) {
                         println!("tick {t}: assign {} to lemming {i}: ok", skill.name());
                     } else {
                         println!(

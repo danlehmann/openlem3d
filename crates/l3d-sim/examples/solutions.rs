@@ -11,11 +11,7 @@ fn main() {
         let level = data.level(s.level).expect("level");
         let blocks = data.blocks(s.level).expect("blocks");
         let sim = play(s, &level, &blocks);
-        let need = if s.saves > 0 {
-            s.saves
-        } else {
-            level.save_requirement as u32
-        };
+        let need = s.need(&level);
         println!(
             "{:3} saved {:3} of {:3} need {:3} ended at tick {}",
             s.level, sim.counts.saved, level.lemmings, need, sim.tick

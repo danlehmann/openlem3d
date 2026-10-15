@@ -231,6 +231,22 @@ fn segments_between(segments: u8, from: u8, to: u8) -> u8 {
     segments & !((1u8 << from) - 1) & ((1u8 << to) - 1)
 }
 
+/// The middle of the cell containing sub-unit coordinate `v`, along one axis.
+fn mid(v: i32) -> i32 {
+    v.div_euclid(SUB) * SUB + SUB / 2
+}
+
+/// Whether a step from `from` to `to` along an axis heading `step` (±1)
+/// reaches `centre`, having started short of it.
+fn crosses(from: i32, to: i32, centre: i32, step: i32) -> bool {
+    (centre - from) * step > 0 && (centre - to) * step <= 0
+}
+
+/// The point `by` sub-units on from `p` along `d`, at the same height.
+fn ahead_of(p: [i32; 3], d: [i32; 3], by: i32) -> [i32; 3] {
+    [p[0] + d[0] * by, p[1], p[2] + d[2] * by]
+}
+
 /// The side an exit block's doorway faces: its +Z face, turned with the
 /// block's rotation (verified for all four rotations).
 fn door_of(b: l3d_formats::level::BlockCell) -> Dir {
@@ -284,6 +300,19 @@ impl Dir {
     /// (+X → −Z → −X → +Z).
     pub fn anticlockwise(self) -> Dir {
         self.clockwise().reverse()
+    }
+
+    /// The heading after meeting a deflector face with outward normal `n`
+    /// (x, z), as if reflected.
+    fn deflected(self, n: [i32; 2]) -> Dir {
+        let d = self.delta();
+        let k = d[0] * n[0] + d[2] * n[1];
+        match [d[0] - k * n[0], d[2] - k * n[1]] {
+            [1, 0] => Dir::PosX,
+            [-1, 0] => Dir::NegX,
+            [0, 1] => Dir::PosZ,
+            _ => Dir::NegZ,
+        }
     }
 
     /// Heading as an angle for rendering: radians in the same convention as
@@ -471,9 +500,34 @@ pub struct Lemming {
 }
 
 impl Lemming {
+    /// A lemming just released at `pos`, falling, heading `dir`.
+    fn new(pos: [i32; 3], dir: Dir) -> Self {
+        Lemming {
+            pos,
+            dir,
+            state: State::Falling { from_y: pos[1] },
+            state_ticks: 0,
+            climber: false,
+            floater: false,
+            fuse: None,
+            gone: false,
+            teleported: false,
+            passing: None,
+            landed: false,
+            pending: None,
+        }
+    }
+
     fn set_state(&mut self, s: State) {
         self.state = s;
         self.state_ticks = 0;
+    }
+
+    /// Starts falling from where it is.
+    fn start_falling(&mut self) {
+        self.set_state(State::Falling {
+            from_y: self.pos[1],
+        });
     }
 }
 
@@ -513,7 +567,6 @@ pub enum Event {
     Mined,
 }
 
-/// A stationary lemming that redirects walkers.
 /// Something the player did to a running level. With the tick it happened
 /// on (after that many steps), a list of these replays a game exactly.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -524,6 +577,7 @@ pub enum Command {
     Nuke,
 }
 
+/// A blocker or turner: a lemming that redirects walkers.
 #[derive(Debug, Clone, Copy)]
 struct Obstacle {
     /// The index of the lemming standing there.
@@ -783,20 +837,7 @@ impl Simulation {
             if self.release_timer == 0 {
                 let e = self.entrances[self.next_entrance % self.entrances.len()];
                 self.next_entrance += 1;
-                self.lemmings.push(Lemming {
-                    pos: e.spawn,
-                    dir: e.dir,
-                    state: State::Falling { from_y: e.spawn[1] },
-                    state_ticks: 0,
-                    climber: false,
-                    floater: false,
-                    fuse: None,
-                    gone: false,
-                    teleported: false,
-                    passing: None,
-                    landed: false,
-                    pending: None,
-                });
+                self.lemmings.push(Lemming::new(e.spawn, e.dir));
                 self.counts.released += 1;
                 // The countdown includes the releasing tick: the next release
                 // comes `release_interval` ticks after this one.
@@ -1001,66 +1042,10 @@ impl Simulation {
             State::Falling { from_y } => self.fall(l, from_y),
             State::Floating => self.float(l),
             State::Walking | State::Sliding => {
-                // A pending skill starts at the edge of the cell, where the
-                // next step would cross it, standing on the edge (before any
-                // fall beyond it); a digger at the middle of the cell, where the
-                // next step would reach or pass it (owner's observation: it
-                // starts in the middle of a block); a builder at the middle or
-                // the edge, whichever comes first ([LOAP]; the owner saw it walk
-                // on with the sack before building).
-                let d = l.dir.delta();
-                let (x, z) = (l.pos[0] + d[0] * WALK_SPEED, l.pos[2] + d[2] * WALK_SPEED);
-                let crossing = x.div_euclid(SUB) != l.pos[0].div_euclid(SUB)
-                    || z.div_euclid(SUB) != l.pos[2].div_euclid(SUB);
-                let edge = |v: i32, step: i32| {
-                    if step > 0 {
-                        (v.div_euclid(SUB) + 1) * SUB - 1
-                    } else if step < 0 {
-                        v.div_euclid(SUB) * SUB
-                    } else {
-                        v
-                    }
-                };
-                let mid = |v: i32| v.div_euclid(SUB) * SUB + SUB / 2;
-                let at_mid = |v: i32, step: i32| {
-                    step == 0
-                        || ((v - mid(v)) * step <= 0
-                            && (v + step * WALK_SPEED - mid(v)) * step >= 0)
-                };
-                let to_middle = matches!(l.pending, Some(State::Building { .. } | State::Digging));
-                if l.state == State::Walking
-                    && to_middle
-                    && at_mid(l.pos[0], d[0])
-                    && at_mid(l.pos[2], d[2])
-                    && let Some(s) = l.pending.take()
-                {
-                    if d[0] != 0 {
-                        l.pos[0] = mid(l.pos[0]);
-                    }
-                    if d[2] != 0 {
-                        l.pos[2] = mid(l.pos[2]);
-                    }
-                    l.set_state(s);
-                } else if l.state == State::Walking
-                    && l.pending == Some(State::Mining)
-                    && Self::to_edge(l.pos, d) - WALK_SPEED <= MINE_STANDOFF
-                    && let Some(s) = l.pending.take()
-                {
-                    // A miner a little earlier, in front of the block ahead
-                    // (owner's observation).
-                    if Self::to_edge(l.pos, d) > MINE_STANDOFF {
-                        l.pos = Self::mine_stand(l.pos, d);
-                    }
-                    l.set_state(s);
-                } else if l.state == State::Walking
-                    && crossing
-                    && (!to_middle || matches!(l.pending, Some(State::Building { .. })))
-                    && let Some(s) = l.pending.take()
-                {
-                    l.pos[0] = edge(l.pos[0], d[0]);
-                    l.pos[2] = edge(l.pos[2], d[2]);
-                    l.set_state(s);
-                } else {
+                if !(l.state == State::Walking && Self::take_up_pending(l)) {
+                    let d = l.dir.delta();
+                    let to_middle =
+                        matches!(l.pending, Some(State::Building { .. } | State::Digging));
                     let dir = l.dir;
                     self.walk(l, me, obstacles);
                     // Or at a wall that would turn the walker round, facing
@@ -1148,8 +1133,7 @@ impl Simulation {
                 // Standing still; fall if the ground disappears.
                 let (ground, _) = self.world.surface_below(l.pos[0], l.pos[1], l.pos[2]);
                 if ground < l.pos[1] - STEP_DOWN {
-                    let from = l.pos[1];
-                    l.set_state(State::Falling { from_y: from });
+                    l.start_falling();
                 }
             }
         }
@@ -1160,6 +1144,50 @@ impl Simulation {
         self.teleport(l);
         self.board_rope_slide(l);
         self.spring(l);
+    }
+
+    /// Starts a walker's pending skill if it has reached the place to: the
+    /// edge of its cell, where the next step would cross it, standing on the
+    /// edge (before any fall beyond it); a digger at the middle of the cell,
+    /// where the next step would reach or pass it (owner's observation: it
+    /// starts in the middle of a block); a builder at the middle or the
+    /// edge, whichever comes first ([LOAP]; the owner saw it walk on with
+    /// the sack before building); a miner [`MINE_STANDOFF`] before the edge,
+    /// in front of the block ahead (owner's observation). Returns whether
+    /// it started.
+    fn take_up_pending(l: &mut Lemming) -> bool {
+        let Some(s) = l.pending else {
+            return false;
+        };
+        let d = l.dir.delta();
+        let to_edge = Self::to_edge(l.pos, d);
+        let at_mid = |v: i32, step: i32| {
+            step == 0 || ((v - mid(v)) * step <= 0 && (v + step * WALK_SPEED - mid(v)) * step >= 0)
+        };
+        if matches!(s, State::Building { .. } | State::Digging)
+            && at_mid(l.pos[0], d[0])
+            && at_mid(l.pos[2], d[2])
+        {
+            for a in [0, 2] {
+                if d[a] != 0 {
+                    l.pos[a] = mid(l.pos[a]);
+                }
+            }
+        } else if s == State::Mining {
+            if to_edge - WALK_SPEED > MINE_STANDOFF {
+                return false;
+            }
+            if to_edge > MINE_STANDOFF {
+                l.pos = Self::mine_stand(l.pos, d);
+            }
+        } else if to_edge <= WALK_SPEED && s != State::Digging {
+            l.pos = ahead_of(l.pos, d, to_edge - 1);
+        } else {
+            return false;
+        }
+        l.pending = None;
+        l.set_state(s);
+        true
     }
 
     /// Killing traps take a lemming that reaches the middle of their cell,
@@ -1222,27 +1250,34 @@ impl Simulation {
             _ => return,
         };
         // Wait for the centre of the pad.
-        let pad = self.objects[here];
-        let centre = [pad.cell[0] * SUB + SUB / 2, pad.cell[2] * SUB + SUB / 2];
+        let centre = self.objects[here].feet();
         let d = l.dir.delta();
-        if (centre[0] - l.pos[0]) * d[0] + (centre[1] - l.pos[2]) * d[2] > 0 {
+        if (centre[0] - l.pos[0]) * d[0] + (centre[2] - l.pos[2]) * d[2] > 0 {
             return;
         }
         l.pos[0] = centre[0];
-        l.pos[2] = centre[1];
-        let o = self.objects[to];
+        l.pos[2] = centre[2];
         l.set_state(State::Teleporting {
-            to: [
-                o.cell[0] * SUB + SUB / 2,
-                o.surface,
-                o.cell[2] * SUB + SUB / 2,
-            ],
+            to: self.objects[to].feet(),
         });
     }
 
-    /// Rope slides: a lemming reaching a sender (an even value) rides to its
-    /// receiver (the next value up); with several of a value only the last
-    /// works [L3DEdit]. One lemming rides a rope at a time; others reaching
+    /// For a sender (an even value) the lemming at `p` stands on: the
+    /// sender and its receiver, the next value up. With several of a value
+    /// only the last works [L3DEdit].
+    fn sender_at(&self, p: [i32; 3]) -> Option<(usize, usize)> {
+        let last = |v: u8| self.objects.iter().rposition(|o| o.value == v);
+        let sender = self
+            .objects
+            .iter()
+            .position(|o| o.value % 2 == 0 && o.touches(p))?;
+        let value = self.objects[sender].value;
+        (last(value) == Some(sender)).then_some(())?;
+        Some((sender, last(value + 1)?))
+    }
+
+    /// Rope slides: a lemming reaching a sender rides to its receiver
+    /// ([`Self::sender_at`]). One lemming rides a rope at a time; others reaching
     /// the sender meanwhile walk on (owner's observation: at release rate
     /// 11 every other lemming of Practice "Rope Slide" is lost). Provisional:
     /// a straight line at [`ROPE_SPEED`], then it walks on in its old
@@ -1256,27 +1291,10 @@ impl Simulation {
         {
             return;
         }
-        let last = |v: u8| self.objects.iter().rposition(|o| o.value == v);
-        let Some(sender) = self
-            .objects
-            .iter()
-            .position(|o| o.value % 2 == 0 && o.touches(l.pos))
-        else {
+        let Some((_, receiver)) = self.sender_at(l.pos) else {
             return;
         };
-        let value = self.objects[sender].value;
-        if last(value) != Some(sender) {
-            return;
-        }
-        let Some(receiver) = last(value + 1) else {
-            return;
-        };
-        let o = self.objects[receiver];
-        let to = [
-            o.cell[0] * SUB + SUB / 2,
-            o.surface,
-            o.cell[2] * SUB + SUB / 2,
-        ];
+        let to = self.objects[receiver].feet();
         if self
             .lemmings
             .iter()
@@ -1287,9 +1305,8 @@ impl Simulation {
         l.set_state(State::OnRope { to });
     }
 
-    /// Springs: a walker stepping onto a sender (an even value) is thrown in
-    /// an arc onto its receiver (the next value up; the last of each value
-    /// works [L3DEdit]) and lands unhurt, walking on in its old direction.
+    /// Springs: a walker stepping onto a sender is thrown in an arc onto its
+    /// receiver ([`Self::sender_at`]) and lands unhurt, walking on in its old direction.
     /// Flight time and arc height are unmeasured. A sender still resting
     /// from a throw ([`SPRING_REST_PER_UNIT`]) lets a walker walk over it; the
     /// sender's rest then ends as usual, and it throws the next walker to
@@ -1300,19 +1317,13 @@ impl Simulation {
         {
             return;
         }
-        let last = |v: u8| self.objects.iter().rposition(|o| o.value == v);
-        let sender = self
-            .objects
-            .iter()
-            .position(|o| o.value % 2 == 0 && o.touches(l.pos));
-        if l.passing.map(|(s, _)| s) != sender || l.passing.is_some_and(|(_, d)| d != l.dir) {
+        let pair = self.sender_at(l.pos);
+        if l.passing.map(|(s, _)| s) != pair.map(|(s, _)| s)
+            || l.passing.is_some_and(|(_, d)| d != l.dir)
+        {
             l.passing = None;
         }
-        let Some(sender) = sender else {
-            return;
-        };
-        let value = self.objects[sender].value;
-        let (Some(receiver), true) = (last(value + 1), last(value) == Some(sender)) else {
+        let Some((sender, receiver)) = pair else {
             return;
         };
         if self.objects[sender].rest > 0 {
@@ -1321,12 +1332,7 @@ impl Simulation {
         if l.passing.is_some() {
             return;
         }
-        let o = self.objects[receiver];
-        let to = [
-            o.cell[0] * SUB + SUB / 2,
-            o.surface,
-            o.cell[2] * SUB + SUB / 2,
-        ];
+        let to = self.objects[receiver].feet();
         let span = ((to[0] - l.pos[0]) as f32).hypot((to[2] - l.pos[2]) as f32) / SUB as f32;
         let ticks = ((span * SPRING_TICKS_PER_UNIT) as u32).max(8);
         let peak = (span * SPRING_ARC * SUB as f32) as i32;
@@ -1403,11 +1409,7 @@ impl Simulation {
             // Still on the pad, stepping on at walking speed (measured: the
             // first pad's take-off is about 8 sub-units past the touch).
             let d = l.dir.delta();
-            let ahead = [
-                l.pos[0] + d[0] * WALK_SPEED,
-                l.pos[1],
-                l.pos[2] + d[2] * WALK_SPEED,
-            ];
+            let ahead = ahead_of(l.pos, d, WALK_SPEED);
             if !self.world.solid([ahead[0], ahead[1] + SUB / 8, ahead[2]]) {
                 l.pos = ahead;
             }
@@ -1429,19 +1431,12 @@ impl Simulation {
             .deflector_across(next[0], next[1], next[2])
             .filter(|n| d[0] * n[0] + d[2] * n[1] < 0)
         {
-            let k = d[0] * n[0] + d[2] * n[1];
-            l.dir = match [d[0] - k * n[0], d[2] - k * n[1]] {
-                [1, 0] => Dir::PosX,
-                [-1, 0] => Dir::NegX,
-                [0, 1] => Dir::PosZ,
-                _ => Dir::NegZ,
-            };
+            l.dir = l.dir.deflected(n);
             // Turned at the centre of the deflector's cell (inferred: lemmings
             // turned in the air at the far corner of Practice "Trampoline"
             // must land on the one-cell-wide back row).
-            let centre = |v: i32| v.div_euclid(SUB) * SUB + SUB / 2;
-            l.pos[0] = centre(next[0]);
-            l.pos[2] = centre(next[2]);
+            l.pos[0] = mid(next[0]);
+            l.pos[2] = mid(next[2]);
             l.pos[1] = y;
             advance(l);
             return;
@@ -1550,9 +1545,9 @@ impl Simulation {
         l.pos = next;
         advance(l);
     }
-    /// Ends a bomber: removes non-steel terrain around it.
-    /// Blows a hole: every column whose centre lies within the blast radius
-    /// of the bomber (across the ground) loses the same band, from half a
+
+    /// Ends a bomber by blowing a hole: every column whose centre lies within
+    /// the blast radius of the bomber (across the ground) loses the same band, from half a
     /// unit below its feet to a unit above them, so a wall it stands at goes
     /// whole and the crater floor is level (ours; a sphere left floating
     /// halves of walls and uneven floors that trapped walkers).
@@ -1580,20 +1575,25 @@ impl Simulation {
         l.set_state(State::Exploding);
     }
 
+    /// For feet at `p`, on a block or on the level floor: the flags of the
+    /// block stood on, and whether that is water.
+    fn underfoot(&self, p: [i32; 3], on_block: bool) -> (Option<u8>, bool) {
+        let f = on_block
+            .then(|| self.world.flags_at([p[0], p[1] - 1, p[2]]))
+            .flatten();
+        let wet = f.is_some_and(|f| f & flags::LIQUID != 0)
+            || (!on_block && self.world.floor(p[0], p[2]) == Floor::Water);
+        (f, wet)
+    }
+
     /// Lands a lemming on whatever is at its feet.
     fn land(&mut self, l: &mut Lemming, on_block: bool, fell: i32) {
         if self.bounce(l, fell) {
             return;
         }
         l.landed = true;
-        let ground_flags = if on_block {
-            self.world.flags_at([l.pos[0], l.pos[1] - 1, l.pos[2]])
-        } else {
-            None
-        };
-        let liquid = ground_flags.is_some_and(|f| f & flags::LIQUID != 0);
-        let water = !on_block && self.world.floor(l.pos[0], l.pos[2]) == Floor::Water;
-        if liquid || water {
+        let (ground_flags, wet) = self.underfoot(l.pos, on_block);
+        if wet {
             l.set_state(State::Drowning);
         } else if ground_flags.is_some_and(|f| f & flags::NO_SPLAT != 0) {
             l.set_state(State::Walking);
@@ -1614,11 +1614,7 @@ impl Simulation {
         } else {
             [0; 3]
         };
-        let ahead = [
-            l.pos[0] + d[0] * WALK_SPEED,
-            l.pos[1],
-            l.pos[2] + d[2] * WALK_SPEED,
-        ];
+        let ahead = ahead_of(l.pos, d, WALK_SPEED);
         if !self.world.solid([ahead[0], ahead[1] + SUB / 8, ahead[2]])
             && !self
                 .world
@@ -1661,8 +1657,7 @@ impl Simulation {
         {
             // Ceiling: let go and fall back.
             l.dir = l.dir.reverse();
-            let from = l.pos[1];
-            l.set_state(State::Falling { from_y: from });
+            l.start_falling();
             return;
         }
         l.pos[1] += CLIMB_SPEED;
@@ -1693,8 +1688,7 @@ impl Simulation {
             .world
             .surface_below(l.pos[0], l.pos[1] + STEP_UP, l.pos[2]);
         if ground < l.pos[1] - STEP_DOWN {
-            let from = l.pos[1];
-            l.set_state(State::Falling { from_y: from });
+            l.start_falling();
             false
         } else {
             l.pos[1] = ground;
@@ -1792,11 +1786,11 @@ impl Simulation {
             return;
         }
         // It climbs onto the new brick over the next ticks.
-        let _ = next;
         l.state = State::Building {
             bricks_left: bricks_left - 1,
         };
     }
+
     /// For a basher at work: the cell it is bashing, the segments it will
     /// remove there (the lower half-unit from its feet up), and the ticks
     /// since that stroke's cracks began (0 to [`BASH_TICKS`] − 1), once they
@@ -1825,7 +1819,7 @@ impl Simulation {
     /// would remove there.
     fn bash_cell_at(l: &Lemming, along: i32) -> ([i32; 3], u8) {
         let d = l.dir.delta();
-        let ahead = [l.pos[0] + d[0] * along, l.pos[1], l.pos[2] + d[2] * along];
+        let ahead = ahead_of(l.pos, d, along);
         let cell = Self::cell_of(ahead);
         // Segments from the feet up to about head height.
         let first = ((l.pos[1] - cell[1] * SUB) / (SUB / 4)).clamp(0, 3);
@@ -2045,8 +2039,7 @@ impl Simulation {
             .world
             .surface_below(l.pos[0], l.pos[1] + STEP_UP, l.pos[2]);
         if ground < l.pos[1] - MINE_DROP {
-            let from = l.pos[1];
-            l.set_state(State::Falling { from_y: from });
+            l.start_falling();
             return;
         }
         l.pos[1] = ground;
@@ -2069,12 +2062,7 @@ impl Simulation {
     /// Where a miner at `pos` facing `d` stands to mine the block ahead:
     /// [`MINE_STANDOFF`] before the far side of its cell.
     fn mine_stand(pos: [i32; 3], d: [i32; 3]) -> [i32; 3] {
-        let at = |v: i32, s: i32| match s.signum() {
-            1 => (v.div_euclid(SUB) + 1) * SUB - MINE_STANDOFF,
-            -1 => v.div_euclid(SUB) * SUB + MINE_STANDOFF - 1,
-            _ => v,
-        };
-        [at(pos[0], d[0]), pos[1], at(pos[2], d[2])]
+        ahead_of(pos, d, Self::to_edge(pos, d) - MINE_STANDOFF)
     }
 
     /// For a digger: the cell under it, the segments it is digging out there
@@ -2126,8 +2114,7 @@ impl Simulation {
                 }
                 let (ground, on_block) = self.world.surface_below(l.pos[0], l.pos[1], l.pos[2]);
                 if !on_block || ground < l.pos[1] - STEP_DOWN {
-                    let from = l.pos[1];
-                    l.set_state(State::Falling { from_y: from });
+                    l.start_falling();
                 } else {
                     l.pos[1] = ground;
                 }
@@ -2176,18 +2163,18 @@ impl Simulation {
             l.set_state(State::Exiting);
             return;
         }
-        let next = [l.pos[0] + d[0] * speed, l.pos[1], l.pos[2] + d[2] * speed];
+        let next = ahead_of(l.pos, d, speed);
+        let axis = if d[0] != 0 { 0 } else { 2 };
         // Blockers and turners: walking into one redirects the walker.
         // Splitters send walkers alternately left and right as they cross
         // the cell centre ([L3DEdit]: block 2 where non-solid). The first goes
         // right: in the original's demo of Practice "Splitter" the first
         // lemming seen went to its right and the next to its left (weak:
         // maybe not the very first).
-        let here = Self::cell_of([l.pos[0], l.pos[1], l.pos[2]]);
+        let here = Self::cell_of(l.pos);
         if let Some(s) = self.splitters.iter_mut().find(|(c, _)| *c == here) {
-            let axis = if d[0] != 0 { 0 } else { 2 };
-            let centre = here[axis] * SUB + SUB / 2;
-            if (centre - l.pos[axis]) * d[axis] > 0 && (centre - next[axis]) * d[axis] <= 0 {
+            let centre = mid(l.pos[axis]);
+            if crosses(l.pos[axis], next[axis], centre, d[axis]) {
                 l.pos[axis] = centre;
                 l.dir = if s.1 {
                     l.dir.anticlockwise()
@@ -2204,7 +2191,6 @@ impl Simulation {
                     && (p[2] - o.pos[2]).abs() < BLOCK_RADIUS
                     && (p[1] - o.pos[1]).abs() < SUB / 2
             };
-            let axis = if d[0] != 0 { 0 } else { 2 };
             let towards = (o.pos[axis] - l.pos[axis]) * d[axis] > 0;
             match o.turn_to {
                 // Blockers turn walkers back at arm's length, and turn back
@@ -2225,13 +2211,13 @@ impl Simulation {
                 // where it lands (measured on a test level: hatch lemmings
                 // landing about ¼ past the centre of a turner's cell).
                 Some(to) if to != l.dir && l.dir == o.heading && Self::cell_of(o.pos) == here => {
-                    let centre = o.pos[axis].div_euclid(SUB) * SUB + SUB / 2;
-                    if landed && (centre - l.pos[axis]) * d[axis] <= 0 {
+                    let centre = mid(l.pos[axis]);
+                    let past = (centre - l.pos[axis]) * d[axis] <= 0;
+                    if landed && past {
                         l.dir = to;
                         return;
                     }
-                    if (centre - l.pos[axis]) * d[axis] > 0 && (centre - next[axis]) * d[axis] <= 0
-                    {
+                    if crosses(l.pos[axis], next[axis], centre, d[axis]) {
                         l.pos[axis] = centre;
                         l.dir = to;
                         return;
@@ -2250,14 +2236,7 @@ impl Simulation {
             .filter(|&n| facing(n))
         {
             if self.deflector_across(next[0], l.pos[1], next[2]).is_some() {
-                let k = d[0] * n[0] + d[2] * n[1];
-                let out = [d[0] - k * n[0], d[2] - k * n[1]];
-                l.dir = match out {
-                    [1, 0] => Dir::PosX,
-                    [-1, 0] => Dir::NegX,
-                    [0, 1] => Dir::PosZ,
-                    _ => Dir::NegZ,
-                };
+                l.dir = l.dir.deflected(n);
                 return;
             }
             l.pos[0] = next[0];
@@ -2313,13 +2292,8 @@ impl Simulation {
         if ground >= l.pos[1] - STEP_DOWN {
             let stepped = (l.pos[1] - ground).max(0);
             l.pos[1] = ground;
-            let ground_flags = if on_block {
-                self.world.flags_at([l.pos[0], ground - 1, l.pos[2]])
-            } else {
-                None
-            };
-            let liquid = ground_flags.is_some_and(|f| f & flags::LIQUID != 0);
-            if liquid || (!on_block && self.world.floor(l.pos[0], l.pos[2]) == Floor::Water) {
+            let (ground_flags, wet) = self.underfoot(l.pos, on_block);
+            if wet {
                 l.set_state(State::Drowning);
             } else if !self.bounce(l, stepped) {
                 // Slippery tops and floors make walkers slide; leaving them,
@@ -2333,8 +2307,7 @@ impl Simulation {
                 };
             }
         } else {
-            let from = l.pos[1];
-            l.set_state(State::Falling { from_y: from });
+            l.start_falling();
         }
     }
 }

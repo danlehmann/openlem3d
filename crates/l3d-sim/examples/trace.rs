@@ -2,7 +2,8 @@
 //! `cargo run -p l3d-sim --example trace -- LEVEL [LEMMING] [TICKS] [EVERY]`.
 
 use l3d_formats::gamedata::{GameData, locate_data_dir};
-use l3d_sim::{SUB, Simulation};
+use l3d_sim::demos::{Step, apply_step, parse_step};
+use l3d_sim::{SUB, Simulation, Skill};
 
 fn main() {
     let mut args = std::env::args()
@@ -20,26 +21,19 @@ fn main() {
     // Optional assignments from the environment, comma-separated:
     // ASSIGN=tick:lemming:skill[:cw|acw],...
     let spec = std::env::var("ASSIGN").unwrap_or_default();
-    let assigns: Vec<Vec<&str>> = spec
+    let assigns: Vec<Step> = spec
         .split(',')
         .filter(|a| !a.is_empty())
-        .map(|a| a.split(':').collect())
+        .map(|a| parse_step(a).expect("tick:lemming:skill[:cw|acw]"))
         .collect();
     for t in 1..=ticks {
         sim.step();
         let now = sim.tick;
-        for a in assigns.iter().filter(|a| a[0].parse() == Ok(now)) {
-            let (i, s): (usize, u8) =
-                (a[1].parse().expect("lemming"), a[2].parse().expect("skill"));
-            let Some(skill) = l3d_sim::Skill::from_id(s) else {
+        for &step @ (_, i, id, _) in assigns.iter().filter(|a| a.0 == now) {
+            let Some(skill) = Skill::from_id(id) else {
                 continue;
             };
-            let dir = sim.lemmings[i].dir;
-            let ok = match a.get(3).copied() {
-                Some("cw") => sim.assign_turner(i, dir.clockwise()),
-                Some("acw") => sim.assign_turner(i, dir.anticlockwise()),
-                _ => sim.assign(i, skill),
-            };
+            let ok = apply_step(&mut sim, step);
             println!("assign {} to lemming {i}: {ok}", skill.name());
         }
         let Some(l) = sim.lemmings.get(which) else {

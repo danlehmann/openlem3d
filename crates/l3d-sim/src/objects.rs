@@ -68,6 +68,15 @@ impl Object {
             && p[2].div_euclid(SUB) == self.cell[2]
             && (self.surface - SUB / 8..=self.surface + SUB / 4).contains(&p[1])
     }
+
+    /// The middle of the surface it sits on, as a feet position.
+    pub fn feet(&self) -> [i32; 3] {
+        [
+            self.cell[0] * SUB + SUB / 2,
+            self.surface,
+            self.cell[2] * SUB + SUB / 2,
+        ]
+    }
 }
 
 /// The level's interactive objects. Objects that need a block to stand on

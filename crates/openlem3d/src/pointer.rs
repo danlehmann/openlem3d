@@ -11,12 +11,12 @@ use std::collections::HashMap;
 
 use bevy::asset::RenderAssetUsages;
 use bevy::prelude::*;
-use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use bevy::window::{CursorIcon, CustomCursor, CustomCursorImage, SystemCursorIcon};
 use l3d_formats::sheets;
 
 use crate::menu::AppState;
 use crate::scene_render::SceneCamera;
+use crate::texture::rgba_image;
 use crate::{Data, Game};
 
 pub struct PointerPlugin;
@@ -85,18 +85,7 @@ fn scaled(
             px[d..d + 4].copy_from_slice(&src[s..s + 4]);
         }
     }
-    let image = Image::new(
-        Extent3d {
-            width: size,
-            height: size,
-            depth_or_array_layers: 1,
-        },
-        TextureDimension::D2,
-        px,
-        TextureFormat::Rgba8UnormSrgb,
-        RenderAssetUsages::all(),
-    );
-    let h = images.add(image);
+    let h = images.add(rgba_image(size, size, px, RenderAssetUsages::all()));
     cells.scaled.insert((cell, size), h.clone());
     Some(h)
 }

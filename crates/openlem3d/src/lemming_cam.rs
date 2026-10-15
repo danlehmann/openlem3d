@@ -312,7 +312,7 @@ fn follow(
         highlight.lemming = Some(i);
     }
     let l = &sim.lemmings[i];
-    let feet = Vec3::from_array(l.pos.map(|v| v as f32 / SUB as f32));
+    let feet = Vec3::from_array(l.pos.map(crate::units));
     // Passing to another lemming, the head faces forward again (owner's
     // observation).
     if switched || *entered != Some(i) {

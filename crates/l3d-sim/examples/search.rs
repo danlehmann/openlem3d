@@ -6,7 +6,7 @@
 //! `cargo run --release -p l3d-sim --example search -- LEVEL SKILL LEMMINGS FROM TO STEP [TICK LEMMING SKILL]...`.
 
 use l3d_formats::gamedata::{GameData, locate_data_dir};
-use l3d_sim::demos::{Plan, Solution, play};
+use l3d_sim::demos::play_steps;
 
 fn main() {
     let a: Vec<u64> = std::env::args()
@@ -38,17 +38,7 @@ fn main() {
                 let mut steps = first.clone();
                 steps.push((t, i, skill as u8, side));
                 steps.sort_by_key(|s| s.0);
-                let steps: &'static [(u64, usize, u8, Option<bool>)] =
-                    Box::leak(steps.into_boxed_slice());
-                let sim = play(
-                    &Solution {
-                        level: n as u32,
-                        plan: Plan::At(steps),
-                        saves: 0,
-                    },
-                    &level,
-                    &blocks,
-                );
+                let sim = play_steps(&[], &steps, &level, &blocks);
                 best.push((sim.counts.saved, t, i, side));
             }
         }

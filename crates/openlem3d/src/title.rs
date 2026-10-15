@@ -6,10 +6,7 @@
 //! Nothing here makes the player wait: every screen takes input from its
 //! first frame, and the animations never block (`docs/GROUNDRULES.md`).
 
-use bevy::asset::RenderAssetUsages;
-use bevy::image::ImageSampler;
 use bevy::prelude::*;
-use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use l3d_formats::font::{Font, title_font};
 use l3d_formats::gamedata::Palette;
 use l3d_formats::icons::Icons;
@@ -17,6 +14,7 @@ use l3d_formats::image::IndexedImage;
 use l3d_formats::{sheets, title};
 
 use crate::menu::{AppState, MenuRating};
+use crate::texture::indexed_image;
 use crate::{CurrentLevel, Data};
 
 /// The original's screen, in which all positions are given.
@@ -145,22 +143,6 @@ pub(crate) struct Art {
     letters: Vec<Handle<Image>>,
 }
 
-fn to_image(img: &IndexedImage, pal: &Palette, transparent0: bool) -> Image {
-    let mut image = Image::new(
-        Extent3d {
-            width: img.width as u32,
-            height: img.height as u32,
-            depth_or_array_layers: 1,
-        },
-        TextureDimension::D2,
-        img.to_rgba(pal, transparent0),
-        TextureFormat::Rgba8UnormSrgb,
-        RenderAssetUsages::RENDER_WORLD,
-    );
-    image.sampler = ImageSampler::nearest();
-    image
-}
-
 /// Advance of a proportional glyph: one less than its last opaque column,
 /// counted from 1 (measured for the large font on the code screen).
 fn advance(g: &IndexedImage) -> f32 {
@@ -184,7 +166,7 @@ pub(crate) fn glyphs(
         images: f
             .glyphs
             .iter()
-            .map(|g| images.add(to_image(g, pal, true)))
+            .map(|g| images.add(indexed_image(g, pal, true)))
             .collect(),
         // Picture tiles (codes 123 and up in TITLE.FNT) join edge to edge.
         advances: f
@@ -234,7 +216,7 @@ fn load_art(mut commands: Commands, mut data: ResMut<Data>, mut images: ResMut<A
     let Ok(pal) = d.palette("GFX/LM3D.PAL") else {
         return;
     };
-    let mut add = |img: &IndexedImage, t: bool| images.add(to_image(img, &pal, t));
+    let mut add = |img: &IndexedImage, t: bool| images.add(indexed_image(img, &pal, t));
     let backdrop = d
         .gfx("BGRD", 0)
         .ok()

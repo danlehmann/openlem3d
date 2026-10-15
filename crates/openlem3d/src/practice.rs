@@ -6,16 +6,14 @@
 //! and its voice plays (`SOUND/SAMPLIST.TXT`); a green tick marks levels
 //! already completed.
 
-use bevy::asset::RenderAssetUsages;
-use bevy::image::ImageSampler;
 use bevy::prelude::*;
-use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use l3d_formats::icons::{Icons, panel as icon};
 use l3d_formats::image::IndexedImage;
 use l3d_formats::sheets;
 
 use crate::menu::AppState;
 use crate::settings::Settings;
+use crate::texture::indexed_image;
 use crate::title::{Art, ScreenRoot, at, image_at, spawn_screen};
 use crate::{CurrentLevel, Data};
 
@@ -108,26 +106,6 @@ struct Pics {
     umbrella: Option<Handle<Image>>,
 }
 
-fn upload(
-    img: &IndexedImage,
-    pal: &l3d_formats::gamedata::Palette,
-    images: &mut Assets<Image>,
-) -> Handle<Image> {
-    let mut image = Image::new(
-        Extent3d {
-            width: img.width as u32,
-            height: img.height as u32,
-            depth_or_array_layers: 1,
-        },
-        TextureDimension::D2,
-        img.to_rgba(pal, true),
-        TextureFormat::Rgba8UnormSrgb,
-        RenderAssetUsages::RENDER_WORLD,
-    );
-    image.sampler = ImageSampler::nearest();
-    images.add(image)
-}
-
 fn load(mut commands: Commands, mut data: ResMut<Data>, mut images: ResMut<Assets<Image>>) {
     let d = &mut data.0;
     let Ok(pal) = d.palette("GFX/LM3D.PAL") else {
@@ -155,7 +133,7 @@ fn load(mut commands: Commands, mut data: ResMut<Data>, mut images: ResMut<Asset
     }
     let mut up = |imgs: &[IndexedImage]| {
         imgs.iter()
-            .map(|i| upload(i, &pal, &mut images))
+            .map(|i| images.add(indexed_image(i, &pal, true)))
             .collect::<Vec<_>>()
     };
     let items = ITEMS
@@ -175,7 +153,7 @@ fn load(mut commands: Commands, mut data: ResMut<Data>, mut images: ResMut<Asset
         })
         .collect();
     let tick = up(&prac[TICK..=TICK]).remove(0);
-    let umbrella = umbrella.map(|u| upload(&u, &pal, &mut images));
+    let umbrella = umbrella.map(|u| images.add(indexed_image(&u, &pal, true)));
     commands.insert_resource(Pics {
         items,
         tick,

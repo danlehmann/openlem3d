@@ -233,10 +233,6 @@ impl Level {
         self.blocks[cell_index(x, y, z)] = cell.to_raw();
     }
 
-    pub fn block_raw(&self, x: usize, y: usize, z: usize) -> u16 {
-        self.blocks[cell_index(x, y, z)]
-    }
-
     pub fn object(&self, x: usize, y: usize, z: usize) -> ObjectCell {
         self.objects[cell_index(x, y, z)]
     }

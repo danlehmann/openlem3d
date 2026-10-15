@@ -77,11 +77,7 @@ fn practice_solutions_still_work() {
                 ));
             }
         }
-        let need = if s.saves > 0 {
-            s.saves
-        } else {
-            level.save_requirement as u32
-        };
+        let need = s.need(&level);
         if played.counts.saved < need {
             failures.push(format!(
                 "LEVEL.{:03} saved {} of {need}",

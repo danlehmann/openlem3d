@@ -90,11 +90,6 @@ impl Disc {
         self.tracks.iter().find(|t| t.mode != TrackMode::Audio)
     }
 
-    /// Audio tracks, in disc order.
-    pub fn audio_tracks(&self) -> impl Iterator<Item = &Track> {
-        self.tracks.iter().filter(|t| t.mode == TrackMode::Audio)
-    }
-
     /// Opens a reader over the user data of the first data track.
     pub fn data_reader(&self) -> Result<DataTrackReader, Error> {
         let track = self

@@ -5,9 +5,7 @@
 //! `cargo run --release -p l3d-sim --example retime -- [SPREAD] [PASSES] [THREADS]`.
 
 use l3d_formats::gamedata::{GameData, locate_data_dir};
-use l3d_sim::demos::{Plan, SOLUTIONS, Solution, play};
-
-type Step = (u64, usize, u8, Option<bool>);
+use l3d_sim::demos::{Plan, RateStep, SOLUTIONS, Step, play, play_steps};
 
 fn main() {
     let a: Vec<i64> = std::env::args()
@@ -21,11 +19,7 @@ fn main() {
     for (k, s) in SOLUTIONS.iter().enumerate() {
         let level = data.level(s.level).expect("level");
         let blocks = data.blocks(s.level).expect("blocks");
-        let need = if s.saves > 0 {
-            s.saves
-        } else {
-            level.save_requirement as u32
-        };
+        let need = s.need(&level);
         if play(s, &level, &blocks).counts.saved < need {
             jobs.push((k, level, blocks, need));
         }
@@ -36,25 +30,13 @@ fn main() {
             scope.spawn(|| {
                 while let Some((k, level, blocks, need)) = next.lock().unwrap().next() {
                     let s = &SOLUTIONS[k];
-                    let (rates, mut steps): (&'static [(u64, i32)], Vec<Step>) = match s.plan {
+                    let (rates, mut steps): (&[RateStep], Vec<Step>) = match s.plan {
                         Plan::At(st) => (&[], st.to_vec()),
                         Plan::Rated(r, st) => (r, st.to_vec()),
                         Plan::Each(_) => continue,
                     };
-                    let saved = |steps: &[Step]| {
-                        let steps: &'static [Step] = Box::leak(steps.to_vec().into_boxed_slice());
-                        let plan = if rates.is_empty() {
-                            Plan::At(steps)
-                        } else {
-                            Plan::Rated(rates, steps)
-                        };
-                        let t = Solution {
-                            level: s.level,
-                            plan,
-                            saves: s.saves,
-                        };
-                        play(&t, &level, &blocks).counts.saved
-                    };
+                    let saved =
+                        |steps: &[Step]| play_steps(rates, steps, &level, &blocks).counts.saved;
                     let mut best = saved(&steps);
                     'search: for _ in 0..passes {
                         let mut improved = false;

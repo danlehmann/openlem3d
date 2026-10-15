@@ -3,9 +3,9 @@
 use std::path::Path;
 
 use anyhow::{Context, Result};
-use l3d_formats::image::{IndexedImage, Palette, vga_palette};
-use l3d_formats::iso9660::IsoFs;
-use l3d_formats::{font::Font, icons::Icons, rnc, screen, sheets, title};
+use l3d_formats::gamedata::GameData;
+use l3d_formats::image::{IndexedImage, Palette};
+use l3d_formats::{font::Font, icons::Icons, screen, sheets, title};
 
 /// Names accepted by `l3d-tool ui`, in rendering order.
 pub const PARTS: [&str; 10] = [
@@ -23,17 +23,6 @@ pub const PARTS: [&str; 10] = [
 
 /// Background of contact sheets, chosen to stand apart from the game colours.
 const BACKDROP: [u8; 3] = [64, 0, 64];
-
-fn read(fs: &mut IsoFs, path: &str) -> Result<Vec<u8>> {
-    Ok(rnc::unpack_if_packed(
-        fs.read_path(path)
-            .with_context(|| format!("reading {path}"))?,
-    )?)
-}
-
-pub fn palette(fs: &mut IsoFs, path: &str) -> Result<Palette> {
-    Ok(vga_palette(&read(fs, path)?)?)
-}
 
 /// Lays `cells` out `per_row` across, each slot as large as the largest
 /// cell, `scale`× enlarged, with a 1-pixel (scaled) gap; draws index 0 as
@@ -75,7 +64,7 @@ fn font_sheet(out: &Path, font: &Font, scale: usize, pal: &Palette) -> Result<()
     contact(out, &font.glyphs, 16, scale, pal, false)
 }
 
-pub fn render(fs: &mut IsoFs, out: &Path, only: &[String], scale: usize) -> Result<()> {
+pub fn render(gd: &mut GameData, out: &Path, only: &[String], scale: usize) -> Result<()> {
     for name in only {
         anyhow::ensure!(
             PARTS.contains(&name.as_str()),
@@ -83,10 +72,10 @@ pub fn render(fs: &mut IsoFs, out: &Path, only: &[String], scale: usize) -> Resu
         );
     }
     let want = |p: &str| only.is_empty() || only.iter().any(|o| o == p);
-    let main = palette(fs, "GFX/LM3D.PAL")?;
+    let main = gd.palette("GFX/LM3D.PAL")?;
     let o = |f: &str| out.join(f);
     if want("title-mhc") {
-        let frames = title::decode_rle_cells(&read(fs, "GFX/TITLE.MHC")?, title::LOGO_WIDTH)?;
+        let frames = title::decode_rle_cells(&gd.read("GFX/TITLE.MHC")?, title::LOGO_WIDTH)?;
         println!(
             "TITLE.MHC: {} frames of {}x{}",
             frames.len(),
@@ -96,7 +85,7 @@ pub fn render(fs: &mut IsoFs, out: &Path, only: &[String], scale: usize) -> Resu
         contact(&o("title-mhc.png"), &frames, 4, scale, &main, true)?;
     }
     if want("title-menu") {
-        let menu = title::MenuArt::parse(&read(fs, "GFX/TITLE.RNC")?)?;
+        let menu = title::MenuArt::parse(&gd.read("GFX/TITLE.RNC")?)?;
         contact(
             &o("title-buttons.png"),
             &menu.buttons,
@@ -118,13 +107,13 @@ pub fn render(fs: &mut IsoFs, out: &Path, only: &[String], scale: usize) -> Resu
     if want("title-font") {
         font_sheet(
             &o("title-font.png"),
-            &l3d_formats::font::title_font(&read(fs, "GFX/TITLE.FNT")?)?,
+            &l3d_formats::font::title_font(&gd.read("GFX/TITLE.FNT")?)?,
             scale,
             &main,
         )?;
     }
     if want("lemmings-font") {
-        let l = title::LemmingLetters::parse(&read(fs, "GFX/LEMMINGS.FNT")?)?;
+        let l = title::LemmingLetters::parse(&gd.read("GFX/LEMMINGS.FNT")?)?;
         // Row 0: idle frames and the closing frame; then one row per letter.
         let mut cells: Vec<IndexedImage> = l.idle().to_vec();
         cells.push(l.frames[title::LETTER_TOTAL - 1].clone());
@@ -142,7 +131,7 @@ pub fn render(fs: &mut IsoFs, out: &Path, only: &[String], scale: usize) -> Resu
         )?;
     }
     if want("icons") {
-        let icons = Icons::parse(&read(fs, "GFX/ICONS.RNC")?)?;
+        let icons = Icons::parse(&gd.read("GFX/ICONS.RNC")?)?;
         contact(&o("icons-small.png"), &icons.small, 16, scale, &main, false)?;
         contact(&o("icons-panel.png"), &icons.panel, 16, scale, &main, false)?;
         let mut labels = vec![icons.umbrella.clone()];
@@ -162,7 +151,7 @@ pub fn render(fs: &mut IsoFs, out: &Path, only: &[String], scale: usize) -> Resu
         font_sheet(&o("icons-font-large.png"), &icons.large_font, scale, &main)?;
     }
     if want("sheets") || want("loading") {
-        let loading = screen::loading(&read(fs, "GFX/LOADING.RNC")?)?;
+        let loading = screen::loading(&gd.read("GFX/LOADING.RNC")?)?;
         if want("loading") {
             contact(
                 &o("loading.png"),
@@ -176,10 +165,10 @@ pub fn render(fs: &mut IsoFs, out: &Path, only: &[String], scale: usize) -> Resu
         if want("sheets") {
             for s in sheets::ALL {
                 let pal = match s.palette {
-                    Some(p) => palette(fs, p)?,
+                    Some(p) => gd.palette(p)?,
                     None => loading.palette,
                 };
-                let cells = s.cut(&read(fs, s.path)?)?;
+                let cells = s.cut(&gd.read(s.path)?)?;
                 let name = s
                     .path
                     .trim_start_matches("GFX/")
@@ -200,7 +189,7 @@ pub fn render(fs: &mut IsoFs, out: &Path, only: &[String], scale: usize) -> Resu
     }
     if want("intro") {
         for n in 1..=7 {
-            let lo = screen::intro(&read(fs, &format!("GFX/INTRO{n}.RNC"))?, screen::LOW_RES)?;
+            let lo = screen::intro(&gd.read(&format!("GFX/INTRO{n}.RNC"))?, screen::LOW_RES)?;
             contact(
                 &o(&format!("intro{n}.png")),
                 &[lo.image],
@@ -209,7 +198,7 @@ pub fn render(fs: &mut IsoFs, out: &Path, only: &[String], scale: usize) -> Resu
                 &lo.palette,
                 false,
             )?;
-            let hi = screen::intro(&read(fs, &format!("GFX/INTRO{n}.SVG"))?, screen::HIGH_RES)?;
+            let hi = screen::intro(&gd.read(&format!("GFX/INTRO{n}.SVG"))?, screen::HIGH_RES)?;
             contact(
                 &o(&format!("intro{n}-svg.png")),
                 &[hi.image],
@@ -226,8 +215,8 @@ pub fn render(fs: &mut IsoFs, out: &Path, only: &[String], scale: usize) -> Resu
                 ("RNC", "PAL", screen::LOW_RES),
                 ("SVG", "SVP", screen::HIGH_RES),
             ] {
-                let pal = palette(fs, &format!("GFX/SCENE{n:03}.{pal_ext}"))?;
-                let s = screen::scene(&read(fs, &format!("GFX/SCENE{n:03}.{ext}"))?, size)?;
+                let pal = gd.palette(&format!("GFX/SCENE{n:03}.{pal_ext}"))?;
+                let s = screen::scene(&gd.read(&format!("GFX/SCENE{n:03}.{ext}"))?, size)?;
                 let tag = ext.to_lowercase();
                 contact(
                     &o(&format!("scene{n:03}-{tag}.png")),
@@ -251,14 +240,15 @@ pub fn render(fs: &mut IsoFs, out: &Path, only: &[String], scale: usize) -> Resu
         }
     }
     if want("bmps") {
-        let paths: Vec<String> = fs
+        let paths: Vec<String> = gd
+            .fs
             .walk()?
             .into_iter()
             .filter(|(p, e)| !e.is_dir && p.to_ascii_uppercase().starts_with("BMPS/"))
             .map(|(p, _)| p)
             .collect();
         for p in paths {
-            let pic = screen::bmp(&read(fs, &p)?)?;
+            let pic = screen::bmp(&gd.read(&p)?)?;
             println!("{p}: {}x{}", pic.image.width, pic.image.height);
             let name = p
                 .trim_start_matches("BMPS/")
@@ -310,34 +300,34 @@ fn sheet_named(name: &str) -> Option<sheets::Sheet> {
 /// `labels`, the umbrella followed by the three labels; for fonts, glyph `i`
 /// is character code `33 + i`. `raw:PATH:WIDTH` is the whole file PATH as
 /// one image WIDTH pixels wide.
-pub fn sprite_set(fs: &mut IsoFs, name: &str) -> Result<Vec<IndexedImage>> {
+pub fn sprite_set(gd: &mut GameData, name: &str) -> Result<Vec<IndexedImage>> {
     let icons =
-        |fs: &mut IsoFs| -> Result<Icons> { Ok(Icons::parse(&read(fs, "GFX/ICONS.RNC")?)?) };
-    let menu = |fs: &mut IsoFs| -> Result<title::MenuArt> {
-        Ok(title::MenuArt::parse(&read(fs, "GFX/TITLE.RNC")?)?)
+        |gd: &mut GameData| -> Result<Icons> { Ok(Icons::parse(&gd.read("GFX/ICONS.RNC")?)?) };
+    let menu = |gd: &mut GameData| -> Result<title::MenuArt> {
+        Ok(title::MenuArt::parse(&gd.read("GFX/TITLE.RNC")?)?)
     };
     Ok(match name {
-        "logo" => title::decode_rle_cells(&read(fs, "GFX/TITLE.MHC")?, title::LOGO_WIDTH)?,
-        "buttons" => menu(fs)?.buttons,
-        "ratings" => menu(fs)?.ratings,
-        "faces" => menu(fs)?.faces,
-        "title-font" => l3d_formats::font::title_font(&read(fs, "GFX/TITLE.FNT")?)?.glyphs,
-        "letters" => title::LemmingLetters::parse(&read(fs, "GFX/LEMMINGS.FNT")?)?.frames,
-        "icons-small" => icons(fs)?.small,
-        "panel" => icons(fs)?.panel,
+        "logo" => title::decode_rle_cells(&gd.read("GFX/TITLE.MHC")?, title::LOGO_WIDTH)?,
+        "buttons" => menu(gd)?.buttons,
+        "ratings" => menu(gd)?.ratings,
+        "faces" => menu(gd)?.faces,
+        "title-font" => l3d_formats::font::title_font(&gd.read("GFX/TITLE.FNT")?)?.glyphs,
+        "letters" => title::LemmingLetters::parse(&gd.read("GFX/LEMMINGS.FNT")?)?.frames,
+        "icons-small" => icons(gd)?.small,
+        "panel" => icons(gd)?.panel,
         "labels" => {
-            let i = icons(fs)?;
+            let i = icons(gd)?;
             std::iter::once(i.umbrella).chain(i.labels).collect()
         }
-        "font-small" => icons(fs)?.small_font.glyphs,
-        "font-large" => icons(fs)?.large_font.glyphs,
+        "font-small" => icons(gd)?.small_font.glyphs,
+        "font-large" => icons(gd)?.large_font.glyphs,
         _ if name.starts_with("raw:") => {
             let (path, width) = name[4..]
                 .rsplit_once(':')
                 .context("expected raw:PATH:WIDTH")?;
             let width: usize = width.parse().context("raw width")?;
             anyhow::ensure!(width > 0, "raw width must be positive");
-            let data = read(fs, path)?;
+            let data = gd.read(path)?;
             let height = data.len() / width;
             vec![IndexedImage::new(
                 width,
@@ -346,7 +336,7 @@ pub fn sprite_set(fs: &mut IsoFs, name: &str) -> Result<Vec<IndexedImage>> {
             )?]
         }
         _ => match sheet_named(name) {
-            Some(s) => s.cut(&read(fs, s.path)?)?,
+            Some(s) => s.cut(&gd.read(s.path)?)?,
             None => anyhow::bail!(
                 "unknown sprite set {name}; expected one of {SETS:?} or raw:PATH:WIDTH"
             ),

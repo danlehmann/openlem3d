@@ -8,15 +8,13 @@
 //! original allows unless the level forbids it (flag `0x0008`).
 
 use bevy::asset::RenderAssetUsages;
-use bevy::image::ImageSampler;
 use bevy::prelude::*;
-use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
 use l3d_formats::blk::FaceDir;
 use l3d_formats::gamedata::Palette;
 use l3d_formats::level::{SIZE_X, SIZE_Y, SIZE_Z};
-use l3d_sim::SUB;
 
 use crate::menu::AppState;
+use crate::texture::rgba_image;
 use crate::{CurrentLevel, Data, Game, ViewCamera};
 
 pub struct MinimapPlugin;
@@ -85,19 +83,7 @@ pub fn frame_image() -> Image {
             }
         }
     }
-    let mut image = Image::new(
-        Extent3d {
-            width: N as u32,
-            height: N as u32,
-            depth_or_array_layers: 1,
-        },
-        TextureDimension::D2,
-        px,
-        TextureFormat::Rgba8UnormSrgb,
-        RenderAssetUsages::all(),
-    );
-    image.sampler = ImageSampler::nearest();
-    image
+    rgba_image(N as u32, N as u32, px, RenderAssetUsages::all())
 }
 
 /// Average colour of the non-transparent pixels.
@@ -205,18 +191,12 @@ fn build_base(
             }
         }
     }
-    let mut image = Image::new(
-        Extent3d {
-            width: MAP as u32,
-            height: MAP as u32,
-            depth_or_array_layers: 1,
-        },
-        TextureDimension::D2,
+    let image = rgba_image(
+        MAP as u32,
+        MAP as u32,
         vec![255; MAP * MAP * 4],
-        TextureFormat::Rgba8UnormSrgb,
         RenderAssetUsages::all(),
     );
-    image.sampler = ImageSampler::nearest();
     let handle = match &existing {
         Some(m) => {
             let _ = images.insert(&m.image, image);
@@ -260,11 +240,7 @@ fn draw(
         }
     };
     for l in sim.lemmings.iter().filter(|l| !l.gone) {
-        dot(
-            l.pos[0] as f32 / SUB as f32,
-            l.pos[2] as f32 / SUB as f32,
-            LEMMING,
-        );
+        dot(crate::units(l.pos[0]), crate::units(l.pos[2]), LEMMING);
     }
     if let Ok(v) = views.single() {
         dot(v.pos.x, v.pos.z, CAMERA);

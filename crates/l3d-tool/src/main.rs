@@ -5,7 +5,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use l3d_formats::{blk::BlockSet, disc::Disc, iso9660::IsoFs, level::Level, rnc};
+use l3d_formats::gamedata::{self, GameData, Palette};
+use l3d_formats::{disc::Disc, level::Level, mhc::MhcFile, rnc};
 
 mod ui;
 
@@ -299,18 +300,6 @@ enum Cmd {
     },
 }
 
-/// Reads a 256-entry 6-bit-per-channel VGA palette and scales it to 8 bits.
-fn load_palette(fs: &mut IsoFs, path: &str) -> Result<Vec<[u8; 3]>> {
-    let raw = fs.read_path(path)?;
-    anyhow::ensure!(raw.len() == 768, "palette is {} bytes", raw.len());
-    Ok(raw
-        .as_chunks::<3>()
-        .0
-        .iter()
-        .map(|c| [c[0], c[1], c[2]].map(|v| (v << 2) | (v >> 4)))
-        .collect())
-}
-
 fn write_png(path: &Path, width: u32, pixels: &[u8], pal: &[[u8; 3]]) -> Result<()> {
     let height = pixels.len() as u32 / width;
     let rgb: Vec<u8> = pixels[..(width * height) as usize]
@@ -389,17 +378,6 @@ impl Canvas {
     }
 }
 
-fn load_level(fs: &mut IsoFs, n: u32) -> Result<Level> {
-    let raw = fs.read_path(&format!("LEVELS/LEVEL.{n:03}"))?;
-    Ok(Level::parse(&rnc::unpack_if_packed(raw)?)?)
-}
-
-fn load_blk(fs: &mut IsoFs, n: u32) -> Result<BlockSet> {
-    Ok(BlockSet::parse(
-        &fs.read_path(&format!("LEVELS/BLK.{n:03}"))?,
-    )?)
-}
-
 /// Block ids that occur in the level's non-empty cells.
 fn used_ids(level: &Level) -> BTreeSet<u8> {
     level
@@ -409,15 +387,10 @@ fn used_ids(level: &Level) -> BTreeSet<u8> {
         .collect()
 }
 
-fn data_dir(cli: &Cli) -> PathBuf {
-    cli.data
-        .clone()
-        .or_else(|| std::env::var_os("OPENLEM3D_DATA").map(PathBuf::from))
-        .unwrap_or_else(|| PathBuf::from("gamedata"))
-}
-
-fn open_fs(disc: &Disc) -> Result<IsoFs> {
-    Ok(IsoFs::new(disc.data_reader()?)?)
+/// The main palette and the unpacked contents of the MHC sprite file at
+/// `path`.
+fn load_mhc(gd: &mut GameData, path: &str) -> Result<(Palette, Vec<u8>)> {
+    Ok((gd.palette("GFX/LM3D.PAL")?, gd.read(path)?))
 }
 
 /// Decodes a PNG into (width, height, RGB8 pixels).
@@ -681,255 +654,239 @@ fn best_cell_fit(
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
-    if let Cmd::ImgShift {
-        a,
-        b,
-        rows,
-        cols,
-        max,
-    } = &cli.cmd
-    {
-        let (ia, ib) = (read_rgb(a)?, read_rgb(b)?);
-        let (rows, cols) = (parse_range(rows)?, parse_range(cols)?);
-        let mut scores: Vec<(i32, f64)> = (-max..=*max)
-            .filter_map(|dx| region_diff(&ia, &ib, &rows, &cols, dx).map(|d| (dx, d)))
-            .collect();
-        scores.sort_by(|p, q| p.1.total_cmp(&q.1));
-        for (dx, d) in scores.iter().take(5) {
-            println!("shift {dx:+4}: mean abs diff {d:.2}");
-        }
-        return Ok(());
-    }
-    if let Cmd::ImgFind {
-        a,
-        b,
-        rows,
-        cols,
-        sx,
-        sy,
-    } = &cli.cmd
-    {
-        let (ia, src) = (read_rgb(a)?, read_rgb(b)?);
-        let (rows, cols) = (parse_range(rows)?, parse_range(cols)?);
-        let ib = {
-            let (w, h) = (
-                (src.0 as f64 * sx).round() as u32,
-                (src.1 as f64 * sy).round() as u32,
-            );
-            let mut px = Vec::with_capacity((w * h * 3) as usize);
-            for y in 0..h {
-                for x in 0..w {
-                    let (u, v) = (
-                        ((x as f64 / sx) as u32).min(src.0 - 1),
-                        ((y as f64 / sy) as u32).min(src.1 - 1),
-                    );
-                    let i = ((v * src.0 + u) * 3) as usize;
-                    px.extend_from_slice(&src.2[i..i + 3]);
-                }
-            }
-            (w, h, px)
-        };
-        let (bw, bh) = (ib.0 as i32, ib.1 as i32);
-        let px = |img: &(u32, u32, Vec<u8>), x: i32, y: i32| {
-            let i = ((y as u32 * img.0 + x as u32) * 3) as usize;
-            [img.2[i] as i32, img.2[i + 1] as i32, img.2[i + 2] as i32]
-        };
-        let mut best: Vec<(f64, i32, i32)> = Vec::new();
-        for oy in 0..=(bh - rows.len() as i32) {
-            for ox in 0..bw {
-                let mut sum = 0i64;
-                for y in rows.clone() {
-                    for x in cols.clone() {
-                        let p = px(&ia, x, y);
-                        let q = px(
-                            &ib,
-                            (ox + x - cols.start).rem_euclid(bw),
-                            oy + y - rows.start,
-                        );
-                        sum += (0..3).map(|c| (p[c] - q[c]).abs() as i64).sum::<i64>();
-                    }
-                }
-                best.push((sum as f64 / (rows.len() * cols.len() * 3) as f64, ox, oy));
-            }
-        }
-        best.sort_by(|p, q| p.0.total_cmp(&q.0));
-        for (d, x, y) in best.iter().take(5) {
-            println!(
-                "A({},{}) ~ B({x},{y}): mean abs diff {d:.2}",
-                cols.start, rows.start
-            );
-        }
-        return Ok(());
-    }
-    if let Cmd::ImgMontage {
-        shots,
-        rect,
-        per_row,
-        scale,
-        out,
-    } = &cli.cmd
-    {
-        let [x, y, w, h] = parse_rect(rect)?;
-        let (gap, label) = (2, 8);
-        let (cw, ch) = (w as usize * scale + gap, h as usize * scale + gap + label);
-        let rows = shots.len().div_ceil(*per_row);
-        let mut sheet = Canvas::new(cw * per_row, ch * rows, [40, 40, 40]);
-        for (k, shot) in shots.iter().enumerate() {
-            let img = read_rgb(shot)?;
-            let crop = crop_rgb(&img, [x, y, w, h]);
-            let (ox, oy) = ((k % per_row) * cw, (k / per_row) * ch);
-            sheet.number(ox + 1, oy + 1, k, 1, [255, 255, 0]);
-            for yy in 0..h as usize * scale {
-                for xx in 0..w as usize * scale {
-                    let i = ((yy / scale) * w as usize + xx / scale) * 3;
-                    let c = [crop[i], crop[i + 1], crop[i + 2]];
-                    sheet.fill_rect(ox + xx, oy + label + yy, 1, 1, c);
-                }
-            }
-        }
-        write_rgb_png(out, sheet.width as u32, &sheet.rgb)?;
-        return Ok(());
-    }
-    if let Cmd::ImgBlobs {
-        shots,
-        rect,
-        margin,
-        min_size,
-        background,
-    } = &cli.cmd
-    {
-        let [rx, ry, rw, rh] = parse_rect(rect)?;
-        let bg = background
-            .as_ref()
-            .map(|p| read_rgb(p).map(|img| crop_rgb(&img, [rx, ry, rw, rh])))
-            .transpose()?;
-        let (w, h) = (rw as usize, rh as usize);
-        for (k, shot) in shots.iter().enumerate() {
-            let crop = crop_rgb(&read_rgb(shot)?, [rx, ry, rw, rh]);
-            let mut mask: Vec<bool> = crop
-                .chunks(3)
-                .enumerate()
-                .map(|(i, p)| match &bg {
-                    Some(bg) => {
-                        (0..3)
-                            .map(|c| (p[c] as i32 - bg[i * 3 + c] as i32).abs())
-                            .sum::<i32>()
-                            > *margin
-                    }
-                    None => {
-                        let (r, g, b) = (p[0] as i32, p[1] as i32, p[2] as i32);
-                        b - r >= *margin && b - g >= *margin
-                    }
-                })
+    let dir = gamedata::locate_data_dir(cli.data.as_deref());
+    let open_context = || format!("opening CD image in {}", dir.display());
+    let open = || GameData::open(&dir).with_context(open_context);
+    match &cli.cmd {
+        Cmd::ImgShift {
+            a,
+            b,
+            rows,
+            cols,
+            max,
+        } => {
+            let (ia, ib) = (read_rgb(a)?, read_rgb(b)?);
+            let (rows, cols) = (parse_range(rows)?, parse_range(cols)?);
+            let mut scores: Vec<(i32, f64)> = (-max..=*max)
+                .filter_map(|dx| region_diff(&ia, &ib, &rows, &cols, dx).map(|d| (dx, d)))
                 .collect();
-            let mut blobs = Vec::new();
-            for start in 0..w * h {
-                if !mask[start] {
-                    continue;
+            scores.sort_by(|p, q| p.1.total_cmp(&q.1));
+            for (dx, d) in scores.iter().take(5) {
+                println!("shift {dx:+4}: mean abs diff {d:.2}");
+            }
+        }
+        Cmd::ImgFind {
+            a,
+            b,
+            rows,
+            cols,
+            sx,
+            sy,
+        } => {
+            let (ia, src) = (read_rgb(a)?, read_rgb(b)?);
+            let (rows, cols) = (parse_range(rows)?, parse_range(cols)?);
+            let ib = {
+                let (w, h) = (
+                    (src.0 as f64 * sx).round() as u32,
+                    (src.1 as f64 * sy).round() as u32,
+                );
+                let mut px = Vec::with_capacity((w * h * 3) as usize);
+                for y in 0..h {
+                    for x in 0..w {
+                        let (u, v) = (
+                            ((x as f64 / sx) as u32).min(src.0 - 1),
+                            ((y as f64 / sy) as u32).min(src.1 - 1),
+                        );
+                        let i = ((v * src.0 + u) * 3) as usize;
+                        px.extend_from_slice(&src.2[i..i + 3]);
+                    }
                 }
-                mask[start] = false;
-                let mut stack = vec![start];
-                let (mut x0, mut y0, mut x1, mut y1, mut n, mut sx, mut sy) =
-                    (w, h, 0, 0, 0usize, 0usize, 0usize);
-                while let Some(i) = stack.pop() {
-                    let (x, y) = (i % w, i / w);
-                    (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x), y1.max(y));
-                    (n, sx, sy) = (n + 1, sx + x, sy + y);
-                    for dy in -1i32..=1 {
-                        for dx in -1i32..=1 {
-                            let (nx, ny) = (x as i32 + dx, y as i32 + dy);
-                            if (0..w as i32).contains(&nx) && (0..h as i32).contains(&ny) {
-                                let j = ny as usize * w + nx as usize;
-                                if mask[j] {
-                                    mask[j] = false;
-                                    stack.push(j);
+                (w, h, px)
+            };
+            let (bw, bh) = (ib.0 as i32, ib.1 as i32);
+            let px = |img: &(u32, u32, Vec<u8>), x: i32, y: i32| {
+                let i = ((y as u32 * img.0 + x as u32) * 3) as usize;
+                [img.2[i] as i32, img.2[i + 1] as i32, img.2[i + 2] as i32]
+            };
+            let mut best: Vec<(f64, i32, i32)> = Vec::new();
+            for oy in 0..=(bh - rows.len() as i32) {
+                for ox in 0..bw {
+                    let mut sum = 0i64;
+                    for y in rows.clone() {
+                        for x in cols.clone() {
+                            let p = px(&ia, x, y);
+                            let q = px(
+                                &ib,
+                                (ox + x - cols.start).rem_euclid(bw),
+                                oy + y - rows.start,
+                            );
+                            sum += (0..3).map(|c| (p[c] - q[c]).abs() as i64).sum::<i64>();
+                        }
+                    }
+                    best.push((sum as f64 / (rows.len() * cols.len() * 3) as f64, ox, oy));
+                }
+            }
+            best.sort_by(|p, q| p.0.total_cmp(&q.0));
+            for (d, x, y) in best.iter().take(5) {
+                println!(
+                    "A({},{}) ~ B({x},{y}): mean abs diff {d:.2}",
+                    cols.start, rows.start
+                );
+            }
+        }
+        Cmd::ImgMontage {
+            shots,
+            rect,
+            per_row,
+            scale,
+            out,
+        } => {
+            let [x, y, w, h] = parse_rect(rect)?;
+            let (gap, label) = (2, 8);
+            let (cw, ch) = (w as usize * scale + gap, h as usize * scale + gap + label);
+            let rows = shots.len().div_ceil(*per_row);
+            let mut sheet = Canvas::new(cw * per_row, ch * rows, [40, 40, 40]);
+            for (k, shot) in shots.iter().enumerate() {
+                let img = read_rgb(shot)?;
+                let crop = crop_rgb(&img, [x, y, w, h]);
+                let (ox, oy) = ((k % per_row) * cw, (k / per_row) * ch);
+                sheet.number(ox + 1, oy + 1, k, 1, [255, 255, 0]);
+                for yy in 0..h as usize * scale {
+                    for xx in 0..w as usize * scale {
+                        let i = ((yy / scale) * w as usize + xx / scale) * 3;
+                        let c = [crop[i], crop[i + 1], crop[i + 2]];
+                        sheet.fill_rect(ox + xx, oy + label + yy, 1, 1, c);
+                    }
+                }
+            }
+            write_rgb_png(out, sheet.width as u32, &sheet.rgb)?;
+        }
+        Cmd::ImgBlobs {
+            shots,
+            rect,
+            margin,
+            min_size,
+            background,
+        } => {
+            let [rx, ry, rw, rh] = parse_rect(rect)?;
+            let bg = background
+                .as_ref()
+                .map(|p| read_rgb(p).map(|img| crop_rgb(&img, [rx, ry, rw, rh])))
+                .transpose()?;
+            let (w, h) = (rw as usize, rh as usize);
+            for (k, shot) in shots.iter().enumerate() {
+                let crop = crop_rgb(&read_rgb(shot)?, [rx, ry, rw, rh]);
+                let mut mask: Vec<bool> = crop
+                    .chunks(3)
+                    .enumerate()
+                    .map(|(i, p)| match &bg {
+                        Some(bg) => {
+                            (0..3)
+                                .map(|c| (p[c] as i32 - bg[i * 3 + c] as i32).abs())
+                                .sum::<i32>()
+                                > *margin
+                        }
+                        None => {
+                            let (r, g, b) = (p[0] as i32, p[1] as i32, p[2] as i32);
+                            b - r >= *margin && b - g >= *margin
+                        }
+                    })
+                    .collect();
+                let mut blobs = Vec::new();
+                for start in 0..w * h {
+                    if !mask[start] {
+                        continue;
+                    }
+                    mask[start] = false;
+                    let mut stack = vec![start];
+                    let (mut x0, mut y0, mut x1, mut y1, mut n, mut sx, mut sy) =
+                        (w, h, 0, 0, 0usize, 0usize, 0usize);
+                    while let Some(i) = stack.pop() {
+                        let (x, y) = (i % w, i / w);
+                        (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x), y1.max(y));
+                        (n, sx, sy) = (n + 1, sx + x, sy + y);
+                        for dy in -1i32..=1 {
+                            for dx in -1i32..=1 {
+                                let (nx, ny) = (x as i32 + dx, y as i32 + dy);
+                                if (0..w as i32).contains(&nx) && (0..h as i32).contains(&ny) {
+                                    let j = ny as usize * w + nx as usize;
+                                    if mask[j] {
+                                        mask[j] = false;
+                                        stack.push(j);
+                                    }
                                 }
                             }
                         }
                     }
+                    if n >= *min_size {
+                        blobs.push((
+                            x0,
+                            y0,
+                            x1,
+                            y1,
+                            n,
+                            sx as f64 / n as f64,
+                            sy as f64 / n as f64,
+                        ));
+                    }
                 }
-                if n >= *min_size {
-                    blobs.push((
-                        x0,
-                        y0,
-                        x1,
-                        y1,
-                        n,
-                        sx as f64 / n as f64,
-                        sy as f64 / n as f64,
-                    ));
-                }
+                blobs.sort_by(|a, b| a.5.total_cmp(&b.5));
+                let list: Vec<String> = blobs
+                    .iter()
+                    .map(|&(x0, y0, x1, y1, n, cx, cy)| {
+                        let (ox, oy) = (rx as usize, ry as usize);
+                        format!(
+                            "[{}..{} x {}..{} n{n} c({:.1},{:.1})]",
+                            x0 + ox,
+                            x1 + ox,
+                            y0 + oy,
+                            y1 + oy,
+                            cx + ox as f64,
+                            cy + oy as f64
+                        )
+                    })
+                    .collect();
+                println!("{k:4}: {}", list.join(" "));
             }
-            blobs.sort_by(|a, b| a.5.total_cmp(&b.5));
-            let list: Vec<String> = blobs
-                .iter()
-                .map(|&(x0, y0, x1, y1, n, cx, cy)| {
-                    let (ox, oy) = (rx as usize, ry as usize);
-                    format!(
-                        "[{}..{} x {}..{} n{n} c({:.1},{:.1})]",
-                        x0 + ox,
-                        x1 + ox,
-                        y0 + oy,
-                        y1 + oy,
-                        cx + ox as f64,
-                        cy + oy as f64
-                    )
-                })
-                .collect();
-            println!("{k:4}: {}", list.join(" "));
         }
-        return Ok(());
-    }
-    if let Cmd::ImgChanges {
-        shots,
-        rect,
-        tolerance,
-    } = &cli.cmd
-    {
-        let r = parse_rect(rect)?;
-        let mean_diff = |a: &[u8], b: &[u8]| {
-            a.iter()
-                .zip(b)
-                .map(|(p, q)| u64::from(p.abs_diff(*q)))
-                .sum::<u64>() as f64
-                / a.len() as f64
-        };
-        let mut seen: Vec<(Vec<u8>, usize)> = Vec::new();
-        let mut prev: Option<usize> = None;
-        for (k, shot) in shots.iter().enumerate() {
-            let crop = crop_rgb(&read_rgb(shot)?, r);
-            let id = match seen
-                .iter()
-                .position(|s| mean_diff(&s.0, &crop) <= *tolerance)
-            {
-                Some(i) => i,
-                None => {
-                    seen.push((crop, k));
-                    seen.len() - 1
-                }
+        Cmd::ImgChanges {
+            shots,
+            rect,
+            tolerance,
+        } => {
+            let r = parse_rect(rect)?;
+            let mean_diff = |a: &[u8], b: &[u8]| {
+                a.iter()
+                    .zip(b)
+                    .map(|(p, q)| u64::from(p.abs_diff(*q)))
+                    .sum::<u64>() as f64
+                    / a.len() as f64
             };
-            if prev != Some(id) {
-                println!(
-                    "frame {k:4}: content #{id} (first seen at frame {})",
-                    seen[id].1
-                );
-                prev = Some(id);
+            let mut seen: Vec<(Vec<u8>, usize)> = Vec::new();
+            let mut prev: Option<usize> = None;
+            for (k, shot) in shots.iter().enumerate() {
+                let crop = crop_rgb(&read_rgb(shot)?, r);
+                let id = match seen
+                    .iter()
+                    .position(|s| mean_diff(&s.0, &crop) <= *tolerance)
+                {
+                    Some(i) => i,
+                    None => {
+                        seen.push((crop, k));
+                        seen.len() - 1
+                    }
+                };
+                if prev != Some(id) {
+                    println!(
+                        "frame {k:4}: content #{id} (first seen at frame {})",
+                        seen[id].1
+                    );
+                    prev = Some(id);
+                }
             }
-        }
-        return Ok(());
-    }
-    let dir = data_dir(&cli);
-    let disc =
-        Disc::open_dir(&dir).with_context(|| format!("opening CD image in {}", dir.display()))?;
-    match &cli.cmd {
-        Cmd::ImgShift { .. }
-        | Cmd::ImgFind { .. }
-        | Cmd::ImgMontage { .. }
-        | Cmd::ImgChanges { .. }
-        | Cmd::ImgBlobs { .. } => {
-            unreachable!("handled before opening the disc")
         }
         Cmd::Tracks => {
+            let disc = Disc::open_dir(&dir).with_context(open_context)?;
             for t in &disc.tracks {
                 println!(
                     "{:2} {:?} {} sectors ({:.1}s) at byte {}",
@@ -942,9 +899,9 @@ fn main() -> Result<()> {
             }
         }
         Cmd::Ls => {
-            let mut fs = open_fs(&disc)?;
-            println!("volume: {}", fs.volume_id);
-            for (path, e) in fs.walk()? {
+            let mut gd = open()?;
+            println!("volume: {}", gd.fs.volume_id);
+            for (path, e) in gd.fs.walk()? {
                 if e.is_dir {
                     println!("{:>10}  {path}/", "");
                 } else {
@@ -957,13 +914,13 @@ fn main() -> Result<()> {
             out,
             unpack,
         } => {
-            let mut fs = open_fs(&disc)?;
+            let mut gd = open()?;
             let prefix = prefix.to_ascii_uppercase();
-            for (path, e) in fs.walk()? {
+            for (path, e) in gd.fs.walk()? {
                 if e.is_dir || !path.to_ascii_uppercase().starts_with(&prefix) {
                     continue;
                 }
-                let mut data = fs.read_file(&e)?;
+                let mut data = gd.fs.read_file(&e)?;
                 if *unpack && rnc::is_packed(&data) {
                     data = rnc::unpack(&data).with_context(|| format!("unpacking {path}"))?;
                 }
@@ -974,13 +931,13 @@ fn main() -> Result<()> {
             }
         }
         Cmd::RncCheck => {
-            let mut fs = open_fs(&disc)?;
+            let mut gd = open()?;
             let (mut ok, mut bad) = (0, 0);
-            for (path, e) in fs.walk()? {
+            for (path, e) in gd.fs.walk()? {
                 if e.is_dir {
                     continue;
                 }
-                let data = fs.read_file(&e)?;
+                let data = gd.fs.read_file(&e)?;
                 if !rnc::is_packed(&data) {
                     continue;
                 }
@@ -1005,12 +962,12 @@ fn main() -> Result<()> {
             println!("{ok} ok, {bad} failed");
         }
         Cmd::Levels => {
-            let mut fs = open_fs(&disc)?;
+            let mut gd = open()?;
             println!(
                 "num title                            tex land obj sgn sea ani trp sky wal thm mus lem save time  rr  flags"
             );
             for n in 0..100 {
-                let l = load_level(&mut fs, n)?;
+                let l = gd.level(n)?;
                 println!(
                     "{n:03} {:32} {:3} {:3} {:3} {:3} {:3} {:3} {:3} {:3} {:3} {:3} {:3} {:3} {:4} {:2}:{:02} {:3} {:04x}",
                     l.title,
@@ -1036,9 +993,9 @@ fn main() -> Result<()> {
         }
         Cmd::LevelMap { number, steel, ids } => {
             use l3d_formats::level::{SIZE_X, SIZE_Y, SIZE_Z};
-            let mut fs = open_fs(&disc)?;
-            let level = load_level(&mut fs, *number)?;
-            let blk = load_blk(&mut fs, *number)?;
+            let mut gd = open()?;
+            let level = gd.level(*number)?;
+            let blk = gd.blocks(*number)?;
             let is_steel =
                 |id: u8| blk.defs[id as usize].flags & l3d_formats::blk::flags::STEEL != 0;
             let header: String = (0..SIZE_X)
@@ -1067,9 +1024,9 @@ fn main() -> Result<()> {
             }
         }
         Cmd::Level { number } => {
-            let mut fs = open_fs(&disc)?;
-            let l = load_level(&mut fs, *number)?;
-            let blk = load_blk(&mut fs, *number)?;
+            let mut gd = open()?;
+            let l = gd.level(*number)?;
+            let blk = gd.blocks(*number)?;
             println!("title: {:?}  comment: {:?}", l.title, l.comment);
             println!("skills: {:?}", l.skills);
             println!("land polygons: {:?}", l.land_polygons);
@@ -1147,19 +1104,19 @@ fn main() -> Result<()> {
             }
         }
         Cmd::BlkMatch => {
-            let mut fs = open_fs(&disc)?;
+            let mut gd = open()?;
             let (mut own_bad, mut tex_bad) = (0, 0);
             for n in 0..100 {
-                let l = load_level(&mut fs, n)?;
+                let l = gd.level(n)?;
                 let used = used_ids(&l);
-                let own = load_blk(&mut fs, n)?;
+                let own = gd.blocks(n)?;
                 let own_missing_ids: Vec<u8> = used
                     .iter()
                     .copied()
                     .filter(|&i| own.defs[i as usize].is_placeholder())
                     .collect();
                 let own_missing = own_missing_ids.len();
-                let tex_missing = match load_blk(&mut fs, l.texture_set as u32) {
+                let tex_missing = match gd.blocks(l.texture_set as u32) {
                     Ok(b) => used
                         .iter()
                         .filter(|&&i| b.defs[i as usize].is_placeholder())
@@ -1178,8 +1135,8 @@ fn main() -> Result<()> {
             println!("levels with undefined used ids: own {own_bad}, by texture set {tex_bad}");
         }
         Cmd::PalInfo { path } => {
-            let mut fs = open_fs(&disc)?;
-            let raw = fs.read_path(path)?;
+            let mut gd = open()?;
+            let raw = gd.fs.read_path(path)?;
             println!(
                 "{} bytes, max component {}",
                 raw.len(),
@@ -1202,10 +1159,9 @@ fn main() -> Result<()> {
             labels,
             out,
         } => {
-            let mut fs = open_fs(&disc)?;
-            let pal = load_palette(&mut fs, "GFX/LM3D.PAL")?;
-            let data = rnc::unpack_if_packed(fs.read_path(path)?)?;
-            let mhc = l3d_formats::mhc::MhcFile::parse(&data, *size)?;
+            let mut gd = open()?;
+            let (pal, data) = load_mhc(&mut gd, path)?;
+            let mhc = MhcFile::parse(&data, *size)?;
             // Manifest summary: cells per animation and the flag values seen.
             let mut per_anim: BTreeMap<u8, (usize, BTreeSet<u8>)> = BTreeMap::new();
             for e in &mhc.entries {
@@ -1271,10 +1227,9 @@ fn main() -> Result<()> {
             cells,
             max_diff,
         } => {
-            let mut fs = open_fs(&disc)?;
-            let pal = load_palette(&mut fs, "GFX/LM3D.PAL")?;
-            let data = rnc::unpack_if_packed(fs.read_path(path)?)?;
-            let mhc = l3d_formats::mhc::MhcFile::parse(&data, *size)?;
+            let mut gd = open()?;
+            let (pal, data) = load_mhc(&mut gd, path)?;
+            let mhc = MhcFile::parse(&data, *size)?;
             let range = cell_range(cells.as_deref(), mhc.entries.len())?;
             let decoded: Vec<(usize, Vec<u8>)> = range
                 .map(|i| Ok((i, mhc.cell(i)?.pixels)))
@@ -1302,20 +1257,10 @@ fn main() -> Result<()> {
             jitter,
             top,
         } => {
-            let mut fs = open_fs(&disc)?;
-            let pal = load_palette(&mut fs, "GFX/LM3D.PAL")?;
-            let data = rnc::unpack_if_packed(fs.read_path(path)?)?;
-            let mhc = l3d_formats::mhc::MhcFile::parse(&data, *size)?;
-            let r: Vec<i32> = rect
-                .split(',')
-                .map(str::parse)
-                .collect::<Result<_, _>>()
-                .context("rect must be X,Y,W,H")?;
-            let rect: [i32; 4] = r
-                .try_into()
-                .ok()
-                .filter(|r: &[i32; 4]| r[2] > 0 && r[3] > 0)
-                .context("rect must be X,Y,W,H")?;
+            let mut gd = open()?;
+            let (pal, data) = load_mhc(&mut gd, path)?;
+            let mhc = MhcFile::parse(&data, *size)?;
+            let rect = parse_rect(rect)?;
             let placement = match scale {
                 Some(scale) => Placement::Search {
                     rect,
@@ -1352,7 +1297,7 @@ fn main() -> Result<()> {
         }
         Cmd::Ui { parts, scale, out } => {
             anyhow::ensure!(*scale > 0, "scale must be at least 1");
-            ui::render(&mut open_fs(&disc)?, out, parts, *scale)?;
+            ui::render(&mut open()?, out, parts, *scale)?;
         }
         Cmd::UiFind {
             shots,
@@ -1369,9 +1314,9 @@ fn main() -> Result<()> {
             save,
             top,
         } => {
-            let mut fs = open_fs(&disc)?;
-            let all = ui::sprite_set(&mut fs, set)?;
-            let pal = ui::palette(&mut fs, palette)?;
+            let mut gd = open()?;
+            let all = ui::sprite_set(&mut gd, set)?;
+            let pal = gd.palette(palette)?;
             let chosen: Vec<_> = cell_range(cells.as_deref(), all.len())?
                 .map(|k| {
                     let c = &all[k];
@@ -1449,9 +1394,9 @@ fn main() -> Result<()> {
             skip,
             out,
         } => {
-            let mut fs = open_fs(&disc)?;
-            let pal = load_palette(&mut fs, palette)?;
-            let data = rnc::unpack_if_packed(fs.read_path(path)?)?;
+            let mut gd = open()?;
+            let pal = gd.palette(palette)?;
+            let data = gd.read(path)?;
             write_png(out, *width, &data[*skip..], &pal)?;
             println!(
                 "{} bytes -> {}x{}",
