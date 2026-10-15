@@ -113,6 +113,8 @@ const BASH_SWING_TICKS: u32 = 8;
 /// across the broken block (a unit at walking speed, 32 ticks) a stroke
 /// takes 49 ticks (rough: one cell about every 3.5 s).
 pub const MINE_CRACK_TICKS: u32 = 17;
+/// Cells of the block a miner breaks, each with its segments being broken.
+pub type MineCells = Vec<([i32; 3], u8)>;
 /// How far each block a miner breaks lies below the last (owner's
 /// side-by-side comparison with the original in Practice "Miner": half a
 /// unit cut far too deep a trench; ours, a segment).
@@ -1946,7 +1948,7 @@ impl Simulation {
     /// the block ahead in column `ahead` (x, z): the cells there and the
     /// segments cleared in each, from [`MINE_DROP`] below the feet to a
     /// walker's headroom above them; and its feet afterwards.
-    fn mine_plan(feet: i32, ahead: [i32; 2]) -> (Vec<([i32; 3], u8)>, i32) {
+    fn mine_plan(feet: i32, ahead: [i32; 2]) -> (MineCells, i32) {
         // Feet are on a quarter-unit step. The cut's top: in Practice "Miner"
         // a miner starting on the plank (top 5¼) on the tower (top 5) leaves
         // ground above from its fourth block on (owner's observation).
@@ -1968,7 +1970,7 @@ impl Simulation {
 
     /// The plan for the block ahead of miner `l`: the column after the one
     /// it stands in.
-    fn mine_plan_for(l: &Lemming) -> (Vec<([i32; 3], u8)>, i32) {
+    fn mine_plan_for(l: &Lemming) -> (MineCells, i32) {
         let d = l.dir.delta();
         let c = Self::cell_of(l.pos);
         Self::mine_plan(l.pos[1], [c[0] + d[0], c[2] + d[2]])
@@ -1977,7 +1979,7 @@ impl Simulation {
     /// Of a miner's plan: the cells and segments with terrain in them, and
     /// whether all of it gives way to mining towards `d` (no steel, no
     /// one-way block facing elsewhere).
-    fn mine_present(&self, cells: &[([i32; 3], u8)], d: [i32; 3]) -> (Vec<([i32; 3], u8)>, bool) {
+    fn mine_present(&self, cells: &[([i32; 3], u8)], d: [i32; 3]) -> (MineCells, bool) {
         let present: Vec<_> = cells
             .iter()
             .filter_map(|&(c, mask)| {
@@ -1994,7 +1996,7 @@ impl Simulation {
     /// For a miner cracking the block ahead: the cells and segments being
     /// broken there, and the ticks since the cracks began (0 to
     /// [`MINE_CRACK_TICKS`] − 2). `None` otherwise.
-    pub fn mine_target(&self, l: &Lemming) -> Option<(Vec<([i32; 3], u8)>, u32)> {
+    pub fn mine_target(&self, l: &Lemming) -> Option<(MineCells, u32)> {
         if l.state != State::Mining || !(1..MINE_CRACK_TICKS).contains(&l.state_ticks) {
             return None;
         }

@@ -34,13 +34,13 @@ impl Default for Screen {
 
 impl Screen {
     /// A window position (the cursor's or a touch's) relative to the screen.
-    pub fn from_window(&self, p: Vec2) -> Vec2 {
+    pub fn on_screen(&self, p: Vec2) -> Vec2 {
         p - self.min
     }
 
     /// The cursor's position on the screen, if it is in the window.
     pub fn cursor(&self, window: &Window) -> Option<Vec2> {
-        window.cursor_position().map(|p| self.from_window(p))
+        window.cursor_position().map(|p| self.on_screen(p))
     }
 }
 

@@ -65,9 +65,7 @@ fn update(
     time: Res<Time<Real>>,
     settings: Res<Settings>,
     state: Res<State<crate::menu::AppState>>,
-    clear: Res<ClearColor>,
-    windows: Query<&Window>,
-    view: Res<crate::screen::Screen>,
+    (clear, windows, view): (Res<ClearColor>, Query<&Window>, Res<crate::screen::Screen>),
     mut pixelation: ResMut<Pixelation>,
     mut camera: ResMut<SceneCamera>,
 ) {

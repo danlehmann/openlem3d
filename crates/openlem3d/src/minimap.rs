@@ -270,7 +270,7 @@ fn click(
     } else {
         touches
             .iter_just_released()
-            .map(|t| screen.from_window(t.position()))
+            .map(|t| screen.on_screen(t.position()))
             .next()
     };
     let (Some(point), Ok((node, transform)), Ok(mut view)) =

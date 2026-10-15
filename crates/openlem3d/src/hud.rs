@@ -220,7 +220,7 @@ pub(crate) fn assign_on_pointer(
         touches
             .iter_just_released()
             .find(|t| t.distance().length() < crate::touch::TAP_SLOP)
-            .map(|t| screen.from_window(t.position()))
+            .map(|t| screen.on_screen(t.position()))
     };
     let Some(point) = point else { return };
     let size = screen.size;
