@@ -1,12 +1,14 @@
 //! Trackpad gestures: two or more fingers on the trackpad move the camera as
-//! two fingers on a touchscreen do (see `touch`). One finger is left to the
-//! pointer.
+//! two fingers on a touchscreen do (see `touch`), or with Shift as an
+//! action-button drag does. One finger is left to the pointer.
 //!
 //! Windows turns trackpad gestures into wheel scrolling, one axis at a time,
 //! for ordinary windows; the fingers themselves come from the precision
 //! touchpad's raw HID reports, read here on a thread of its own with a hidden
-//! window. On Android the (patched) winit reports them as pan and pinch
-//! gestures.
+//! window. macOS hands the fingers to views that ask for them, as touches
+//! on the trackpad's gesture events; its scrolling and magnifying for them
+//! are dropped before winit sees them. On Android the (patched) winit
+//! reports them as pan and pinch gestures.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -17,7 +19,7 @@ use bevy::prelude::*;
 
 use crate::ViewCamera;
 use crate::menu::AppState;
-use crate::touch::MOVE_PER_PX;
+use crate::touch::{Twist, TwoFingers, two_fingers};
 
 /// Trackpad travel across its whole width, in touchscreen pixels: the
 /// fingers move the camera as far as a drag this long on the screen.
@@ -35,7 +37,7 @@ pub struct TrackpadPlugin;
 
 impl Plugin for TrackpadPlugin {
     fn build(&self, app: &mut App) {
-        start();
+        start(app);
         app.init_resource::<Trackpad>().add_systems(
             Update,
             (trackpad_camera, gesture_camera)
@@ -52,6 +54,8 @@ pub struct Trackpad {
     previous: HashMap<u32, Vec2>,
     /// When two or more fingers were last down.
     last_gesture: Option<Instant>,
+    /// The fingers' twist so far.
+    twist: Twist,
 }
 
 impl Trackpad {
@@ -62,15 +66,23 @@ impl Trackpad {
     }
 }
 
-/// Two or more fingers: dragging moves the camera sideways and up and down,
-/// spreading them apart moves it forward, pinching back (as on a
-/// touchscreen).
-fn trackpad_camera(mut pad: ResMut<Trackpad>, mut cams: Query<&mut ViewCamera>) {
+/// Two or more fingers move the camera as two on a touchscreen do (see
+/// [`two_fingers`]), towards the pointer; with Shift, dragging turns and
+/// moves forward and back.
+fn trackpad_camera(
+    mut pad: ResMut<Trackpad>,
+    keys: Res<ButtonInput<KeyCode>>,
+    pointer: Pointer,
+    mut cams: Query<&mut ViewCamera>,
+) {
     let now: HashMap<u32, Vec2> = if game_has_focus() {
         contacts()
     } else {
         HashMap::new()
     };
+    if now.len() < 2 {
+        pad.twist = Twist::default();
+    }
     if now.len() >= 2 {
         pad.last_gesture = Some(Instant::now());
         // Only fingers seen last frame too count, so one landing or lifting
@@ -82,8 +94,17 @@ fn trackpad_camera(mut pad: ResMut<Trackpad>, mut cams: Query<&mut ViewCamera>) 
         if both.len() >= 2 {
             let n = both.len() as f32;
             let delta = both.iter().map(|(q, p)| *p - *q).sum::<Vec2>() / n;
-            let spread = both[0].1.distance(both[1].1) - both[0].0.distance(both[1].0);
-            move_camera(&mut cams, delta, spread);
+            let [(a0, a1), (b0, b1)] = [both[0], both[1]];
+            let fingers = TwoFingers {
+                delta,
+                spread: a1.distance(b1) - a0.distance(b0),
+                twist: pad.twist.turn((b0 - a0).angle_to(b1 - a1)),
+                turning: turning(&keys),
+                toward: pointer.ray(),
+            };
+            for mut cam in &mut cams {
+                two_fingers(&mut cam, &fingers, &pointer.game);
+            }
         }
     }
     pad.previous = now;
@@ -93,32 +114,55 @@ fn trackpad_camera(mut pad: ResMut<Trackpad>, mut cams: Query<&mut ViewCamera>) 
 fn gesture_camera(
     mut pans: MessageReader<PanGesture>,
     mut pinches: MessageReader<PinchGesture>,
-    windows: Query<&Window>,
     mut pad: ResMut<Trackpad>,
+    keys: Res<ButtonInput<KeyCode>>,
+    pointer: Pointer,
     mut cams: Query<&mut ViewCamera>,
 ) {
     // Physical pixels, as winit reports them.
-    let scale = windows.iter().next().map_or(1.0, |w| w.scale_factor());
+    let scale = pointer
+        .windows
+        .iter()
+        .next()
+        .map_or(1.0, |w| w.scale_factor());
     let delta = pans.read().map(|p| p.0).sum::<Vec2>() / scale;
     let spread = pinches.read().map(|p| p.0).sum::<f32>() * PINCH_SPREAD_PX;
     if delta == Vec2::ZERO && spread == 0.0 {
         return;
     }
     pad.last_gesture = Some(Instant::now());
-    move_camera(&mut cams, delta, spread);
+    let fingers = TwoFingers {
+        delta,
+        spread,
+        twist: 0.0,
+        turning: turning(&keys),
+        toward: pointer.ray(),
+    };
+    for mut cam in &mut cams {
+        two_fingers(&mut cam, &fingers, &pointer.game);
+    }
 }
 
-/// Dragging two fingers by `delta` moves the camera sideways and up and down,
-/// spreading them apart by `spread` moves it forward (pixels).
-fn move_camera(cams: &mut Query<&mut ViewCamera>, delta: Vec2, spread: f32) {
-    for mut cam in cams {
-        let fwd = cam.forward();
-        let right = Vec3::new(-fwd.z, 0.0, fwd.x);
-        cam.pos += -right * delta.x * MOVE_PER_PX
-            + Vec3::Y * delta.y * MOVE_PER_PX
-            + fwd * spread * MOVE_PER_PX;
-        cam.glide = None;
+/// Where the pointer is, for pinching towards it, and the level, for
+/// twisting about the spot there.
+#[derive(bevy::ecs::system::SystemParam)]
+struct Pointer<'w, 's> {
+    windows: Query<'w, 's, &'static Window>,
+    screen: Res<'w, crate::screen::Screen>,
+    camera: Res<'w, crate::scene_render::SceneCamera>,
+    game: Res<'w, crate::Game>,
+}
+
+impl Pointer<'_, '_> {
+    fn ray(&self) -> Option<Vec3> {
+        crate::pointer_ray(&self.windows, &self.screen, &self.camera)
     }
+}
+
+/// Whether two fingers dragging turn the camera, as an action-button drag
+/// does, rather than move it sideways and up and down.
+fn turning(keys: &ButtonInput<KeyCode>) -> bool {
+    keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight])
 }
 
 /// One finger on the trackpad, as the reading thread last saw it.
@@ -154,12 +198,145 @@ fn contacts() -> HashMap<u32, Vec2> {
         .unwrap_or_default()
 }
 
-#[cfg(not(windows))]
-fn start() {}
+#[cfg(not(any(windows, target_os = "macos")))]
+fn start(_: &mut App) {}
 
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "macos")))]
 fn game_has_focus() -> bool {
     false
+}
+
+#[cfg(target_os = "macos")]
+use mac::{game_has_focus, start};
+
+#[cfg(target_os = "macos")]
+mod mac {
+    use super::*;
+    use std::cell::Cell;
+    use std::ptr::NonNull;
+
+    use bevy::ecs::system::NonSendMarker;
+    use block2::RcBlock;
+    use objc2::MainThreadMarker;
+    use objc2::msg_send;
+    use objc2::rc::Retained;
+    use objc2_app_kit::{
+        NSApplication, NSEvent, NSEventMask, NSEventPhase, NSEventType, NSTouchPhase,
+        NSTouchTypeMask,
+    };
+
+    pub fn start(app: &mut App) {
+        app.add_systems(Update, watch);
+    }
+
+    /// The gesture events come only to the game's own windows.
+    pub fn game_has_focus() -> bool {
+        true
+    }
+
+    /// Asks the game's windows for the trackpad's touches (once each exists)
+    /// and starts watching the events that carry them.
+    fn watch(_: NonSendMarker, state: Res<State<AppState>>, mut monitoring: Local<bool>) {
+        let Some(mtm) = MainThreadMarker::new() else {
+            return;
+        };
+        PLAYING.set(*state.get() == AppState::Playing);
+        for window in NSApplication::sharedApplication(mtm).windows() {
+            if let Some(view) = window.contentView()
+                && !view.allowedTouchTypes().contains(NSTouchTypeMask::Indirect)
+            {
+                view.setAllowedTouchTypes(view.allowedTouchTypes() | NSTouchTypeMask::Indirect);
+            }
+        }
+        if !*monitoring {
+            *monitoring = true;
+            let handler = RcBlock::new(|event: NonNull<NSEvent>| -> *mut NSEvent {
+                let keep = see(unsafe { event.as_ref() });
+                if keep {
+                    event.as_ptr()
+                } else {
+                    std::ptr::null_mut()
+                }
+            });
+            let mask = NSEventMask::Gesture | NSEventMask::Magnify | NSEventMask::ScrollWheel;
+            // Watched for as long as the game runs.
+            std::mem::forget(unsafe {
+                NSEvent::addLocalMonitorForEventsMatchingMask_handler(mask, &handler)
+            });
+        }
+    }
+
+    thread_local! {
+        /// Whether the scrolling now (and its coasting after) comes from two
+        /// or more fingers on a trackpad.
+        static FINGERS_SCROLL: Cell<bool> = const { Cell::new(false) };
+        /// Whether a level is being played: elsewhere (menus) scrolling is
+        /// left as it is.
+        static PLAYING: Cell<bool> = const { Cell::new(false) };
+    }
+
+    /// Takes note of an event's fingers; whether it goes on to winit.
+    fn see(event: &NSEvent) -> bool {
+        let kind = event.r#type();
+        if kind == NSEventType::ScrollWheel {
+            // Scrolling by fingers (rather than a wheel) has a phase while
+            // they are down, a momentum phase while it coasts after.
+            if event.phase() != NSEventPhase::None {
+                FINGERS_SCROLL.set(fingers_down() >= 2);
+            } else if event.momentumPhase() == NSEventPhase::None {
+                FINGERS_SCROLL.set(false);
+            }
+            return !(PLAYING.get() && FINGERS_SCROLL.get());
+        }
+        // The fingers come with the touch events; pinching (which has none)
+        // moves the camera through them.
+        if kind == NSEventType::Gesture {
+            read_touches(event);
+            return true;
+        }
+        !(PLAYING.get() && kind == NSEventType::Magnify && fingers_down() >= 2)
+    }
+
+    /// The fingers on the trackpads as of a touch event.
+    fn read_touches(event: &NSEvent) {
+        let Ok(mut shared) = shared().lock() else {
+            return;
+        };
+        let now = Instant::now();
+        let touches = event.touchesMatchingPhase_inView(NSTouchPhase::Touching, None);
+        // Each event has all the fingers on its trackpad; those it lacks
+        // have left.
+        let mut devices = Vec::new();
+        for touch in touches.iter() {
+            let device = touch.device().map_or(0, |d| Retained::as_ptr(&d) as isize);
+            if !devices.contains(&device) {
+                devices.push(device);
+                shared.retain(|&(d, _), _| d != device);
+            }
+            // A palm resting on the pad is reported too.
+            if touch.isResting() {
+                continue;
+            }
+            let identity = touch.identity();
+            let hash: usize = unsafe { msg_send![&*identity, hash] };
+            let (p, size) = (touch.normalizedPosition(), touch.deviceSize());
+            let (w, h) = (
+                PAD_WIDTH_PX,
+                PAD_WIDTH_PX * (size.height / size.width.max(1.0)) as f32,
+            );
+            // From the pad's top left corner, as on Windows.
+            let pos = Vec2::new(p.x as f32 * w, (1.0 - p.y as f32) * h);
+            shared.insert((device, hash as u32), Contact { pos, seen: now });
+        }
+        if touches.is_empty() {
+            shared.clear();
+        }
+    }
+
+    /// How many fingers are on the trackpad with the most.
+    fn fingers_down() -> usize {
+        contacts().len()
+    }
 }
 
 #[cfg(windows)]
@@ -187,7 +364,7 @@ mod win {
     const Y: u16 = 0x31;
 
     /// Starts the thread that reads the trackpads.
-    pub fn start() {
+    pub fn start(_: &mut App) {
         let _ = std::thread::Builder::new()
             .name("trackpad".into())
             .spawn(|| unsafe { run() });

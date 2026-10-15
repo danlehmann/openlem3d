@@ -442,33 +442,16 @@ impl ViewCamera {
 /// non-empty cell within [`CAMERA_RADIUS`] whose present segments reach the
 /// camera's height, unless the block is flagged passable for the camera.
 fn camera_blocked(level: &Level, blocks: &BlockSet, p: Vec3) -> bool {
-    use l3d_formats::level::{SIZE_X, SIZE_Y, SIZE_Z};
     let r = CAMERA_RADIUS;
     for dx in [-r, r] {
         for dy in [-r, r] {
             for dz in [-r, r] {
-                let q = p + Vec3::new(dx, dy, dz);
-                let c = q.floor();
-                if c.x < 0.0
-                    || c.y < 0.0
-                    || c.z < 0.0
-                    || c.x >= SIZE_X as f32
-                    || c.y >= SIZE_Y as f32
-                    || c.z >= SIZE_Z as f32
-                {
-                    continue;
-                }
-                let b = level.block(c.x as usize, c.y as usize, c.z as usize);
-                if b.is_empty()
-                    || blocks
+                if let Some(b) = solid_cell(level, p + Vec3::new(dx, dy, dz))
+                    && !blocks
                         .defs
                         .get(b.id as usize)
                         .is_some_and(|d| d.flags & l3d_formats::blk::flags::NON_SOLID_CAMERA != 0)
                 {
-                    continue;
-                }
-                let seg = ((q.y - c.y) * 4.0) as u8;
-                if b.segments & (1 << seg.min(3)) != 0 {
                     return true;
                 }
             }
@@ -476,6 +459,69 @@ fn camera_blocked(level: &Level, blocks: &BlockSet, p: Vec3) -> bool {
     }
     false
 }
+
+/// The block at `p`, if it is there: a non-empty cell whose segment at
+/// that height is present.
+fn solid_cell(level: &Level, p: Vec3) -> Option<l3d_formats::level::BlockCell> {
+    use l3d_formats::level::{SIZE_X, SIZE_Y, SIZE_Z};
+    let c = p.floor();
+    if c.min_element() < 0.0 || c.x >= SIZE_X as f32 || c.y >= SIZE_Y as f32 || c.z >= SIZE_Z as f32
+    {
+        return None;
+    }
+    let b = level.block(c.x as usize, c.y as usize, c.z as usize);
+    let seg = ((p.y - c.y) * 4.0) as u8;
+    (!b.is_empty() && b.segments & (1 << seg.min(3)) != 0).then_some(b)
+}
+
+/// The direction from the camera through the pointer (as last drawn), if
+/// it is over the window.
+pub(crate) fn pointer_ray(
+    windows: &Query<&Window>,
+    screen: &screen::Screen,
+    camera: &SceneCamera,
+) -> Option<Vec3> {
+    screen_ray(screen, camera, screen.cursor(windows.iter().next()?)?)
+}
+
+/// The direction from the camera (as last drawn) through `p` on the screen.
+pub(crate) fn screen_ray(screen: &screen::Screen, camera: &SceneCamera, p: Vec2) -> Option<Vec3> {
+    let ndc = Vec2::new(
+        p.x / screen.size.x * 2.0 - 1.0,
+        1.0 - p.y / screen.size.y * 2.0,
+    );
+    let inverse = camera.view_proj.inverse();
+    let near = inverse.project_point3(ndc.extend(0.0));
+    let far = inverse.project_point3(ndc.extend(0.9));
+    (far - near).try_normalize()
+}
+
+/// The spot (`[x, z]`) the world turns about for a drag or twist along `dir`
+/// from the camera at `from`: the block there, or the ground, or (with no
+/// way given or nothing in it) the level's centre.
+pub(crate) fn spot_under(game: &Game, from: Vec3, dir: Option<Vec3>) -> Option<[f32; 2]> {
+    let hit = dir.and_then(|dir| {
+        let (level, ..) = game.terrain.as_ref()?;
+        first_solid(level, from, dir).or_else(|| {
+            let t = (scene_build::GROUND_Y - from.y) / dir.y;
+            (t > 0.0).then(|| from + dir * t)
+        })
+    });
+    hit.map(|p| [p.x, p.z])
+        .or_else(|| game.sim.as_ref().map(|sim| sim.centre()))
+}
+
+/// The first point along `dir` from `from` inside a block, if one is within
+/// [`PICK_RANGE`].
+fn first_solid(level: &Level, from: Vec3, dir: Vec3) -> Option<Vec3> {
+    const STEP: f32 = 0.05;
+    (1..=(PICK_RANGE / STEP) as usize)
+        .map(|i| from + dir * i as f32 * STEP)
+        .find(|&p| solid_cell(level, p).is_some())
+}
+
+/// How far the block under the pointer is looked for (grid units).
+const PICK_RANGE: f32 = 128.0;
 
 /// How close the camera may come to a block (grid units).
 const CAMERA_RADIUS: f32 = 0.2;
@@ -843,11 +889,13 @@ pub(crate) fn camera_controls(
     game: Res<Game>,
     mut last_free: Local<Option<Vec3>>,
     mut q: Query<&mut ViewCamera>,
-    (scroll, ui, mut held, trackpad): (
+    (scroll, ui, mut held, trackpad, mut eased, mut pivot): (
         Res<AccumulatedMouseScroll>,
         Query<&Interaction>,
         Local<[Option<f32>; 2]>,
         Res<trackpad::Trackpad>,
+        Local<Vec4>,
+        Local<Option<[f32; 2]>>,
     ),
 ) {
     // Pointer travel since a button went down over the view (not the
@@ -870,7 +918,7 @@ pub(crate) fn camera_controls(
     let action_dragging = track(action_drag, settings.action_button()) && enhanced;
     // Enhanced (ours, as touch): an action-button drag turns the view and
     // moves it forward and back, a camera-button drag moves it sideways and
-    // up and down, and the wheel moves it forward and back.
+    // up and down, and the wheel moves it towards the pointer and back.
     // Original: holding the camera button moves the camera as the arrow
     // under the pointer shows (see `pointer`; verified: a drag does not turn
     // the view, the arrow just follows the pointer), and the wheel raises and
@@ -885,6 +933,8 @@ pub(crate) fn camera_controls(
                 .and_then(|w| Some((screen.cursor(w)?, screen.size))),
         )
         .map(|(p, size)| pointer_region(p, size));
+    // The way through the pointer, for the wheel (Enhanced).
+    let toward = pointer_ray(&windows, &screen, &scene_cam);
     // Riding along with a lemming: no manual movement.
     let dt = if lemming_cam.following().is_some() {
         0.0
@@ -920,7 +970,24 @@ pub(crate) fn camera_controls(
         let arrows = key(KeyCode::ArrowRight) - key(KeyCode::ArrowLeft);
         let world_turn = key(KeyCode::KeyE) - key(KeyCode::KeyQ);
         let turn = arrows + world_turn;
-        cam.yaw += arrows * 1.8 * dt;
+        // The keys held: forward, sideways, up, turning. In Enhanced mode
+        // (ours) the camera eases into and out of their moves; the
+        // original's moves start and stop at once.
+        let pressed = Vec4::new(
+            held(KeyCode::KeyW, KeyCode::ArrowUp) - held(KeyCode::KeyS, KeyCode::ArrowDown),
+            key(KeyCode::KeyD) - key(KeyCode::KeyA),
+            held(KeyCode::KeyR, KeyCode::PageUp) - held(KeyCode::KeyF, KeyCode::PageDown),
+            arrows,
+        );
+        if !enhanced || lemming_cam.following().is_some() || gliding {
+            *eased = pressed;
+        } else {
+            *eased = eased.lerp(pressed, 1.0 - (-dt / KEY_EASE_SECONDS).exp());
+            if eased.abs().max_element() < 1e-3 {
+                *eased = pressed;
+            }
+        }
+        cam.yaw += eased.w * 1.8 * dt;
         if world_turn != 0.0
             && lemming_cam.following().is_none()
             && let Some(sim) = game.sim.as_ref()
@@ -937,6 +1004,22 @@ pub(crate) fn camera_controls(
             let fwd = cam.forward();
             let right = Vec3::new(-fwd.z, 0.0, fwd.x);
             drag += (-right * motion.delta.x + Vec3::Y * motion.delta.y) * touch::MOVE_PER_PX;
+        }
+        // A middle-button drag (Enhanced, ours) turns the world about the
+        // block under the pointer where it began (or the ground there, or
+        // the level's centre), as if dragging it round, and moves the camera
+        // up and down as a camera-button drag does.
+        if !mouse.pressed(MouseButton::Middle) || !enhanced || dt == 0.0 {
+            *pivot = None;
+        } else if mouse.just_pressed(MouseButton::Middle)
+            && !ui.iter().any(|i| *i != Interaction::None)
+        {
+            *pivot = spot_under(&game, cam.pos, toward);
+        }
+        let orbiting = pivot.is_some() && motion.delta != Vec2::ZERO;
+        if let Some(p) = *pivot {
+            cam.orbit(p, -motion.delta.x * touch::TURN_PER_PX);
+            drag += Vec3::Y * motion.delta.y * touch::MOVE_PER_PX;
         }
         // Region moves: forward, sideways and turning, from the 3×3 grid.
         let (ahead, side, spin) = region.map_or((0.0, 0.0, 0.0), |[c, r]| match (c, r) {
@@ -970,13 +1053,7 @@ pub(crate) fn camera_controls(
         } else {
             CAMERA_SPEED
         } * settings.camera_factor();
-        let mv = fwd
-            * (held(KeyCode::KeyW, KeyCode::ArrowUp) - held(KeyCode::KeyS, KeyCode::ArrowDown))
-            + right * (key(KeyCode::KeyD) - key(KeyCode::KeyA))
-            + Vec3::Y
-                * (held(KeyCode::KeyR, KeyCode::PageUp) - held(KeyCode::KeyF, KeyCode::PageDown))
-            + fwd * ahead
-            + right * side;
+        let mv = fwd * eased.x + right * eased.y + Vec3::Y * eased.z + fwd * ahead + right * side;
         cam.pos += mv * speed * dt + drag;
         // Scrolling that a trackpad gesture makes moves the camera through
         // its fingers instead (`trackpad`).
@@ -988,7 +1065,7 @@ pub(crate) fn camera_controls(
         if dt > 0.0 {
             cam.pos += notches
                 * if enhanced {
-                    fwd * WHEEL_STEP_AHEAD
+                    toward.unwrap_or(fwd) * WHEEL_STEP_AHEAD
                 } else {
                     Vec3::Y * WHEEL_STEP
                 };
@@ -999,7 +1076,10 @@ pub(crate) fn camera_controls(
                 || spin != 0.0
                 || dragging
                 || action_dragging
-                || mv != Vec3::ZERO
+                || pressed.truncate() != Vec3::ZERO
+                || orbiting
+                || ahead != 0.0
+                || side != 0.0
                 || notches != 0.0);
         if manual {
             cam.glide = None;
@@ -1239,6 +1319,9 @@ const DRAG_SLOP: f32 = 6.0;
 pub const CAMERA_SPEED: f32 = 6.0;
 /// Camera rise per wheel notch (grid units).
 const WHEEL_STEP: f32 = 0.25;
+/// How quickly the camera eases into and out of the keys' moves in Enhanced
+/// mode: the time constant, in seconds (ours).
+const KEY_EASE_SECONDS: f32 = 0.12;
 /// Camera travel forward per wheel notch in Enhanced mode (grid units).
 const WHEEL_STEP_AHEAD: f32 = 0.5;
 

@@ -629,7 +629,10 @@ turning; our speeds, not measured). Enhanced mode (ours) drops the holds and the
 pointer stays the cross-hair over the view) and drives the camera as touch
 does: an action-button drag turns the view and moves it forward and back, a
 camera-button drag moves it sideways and up and down, and the wheel moves
-it forward and back. A press on a lemming still acts on it at once.
+it towards the pointer and back. A middle-button drag turns the world
+about the block under the pointer (and raises and lowers the camera), and
+the keys' moves ease in and out.
+A press on a lemming still acts on it at once.
 
 **Demos.** Practice briefings offer "Enter = Demo" (verified), which plays a
 recorded solution with "Demo" at the bottom left; it ends with a nuke and

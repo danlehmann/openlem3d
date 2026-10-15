@@ -69,12 +69,27 @@ extracting.
 
 ## Controls
 
+The camera's four moves on each device (mouse: Enhanced mode; trackpad:
+two fingers on a Windows precision touchpad, a Mac's or an Android
+touchpad):
+
+| Move | Keys | Mouse | Trackpad | Touch |
+|---|---|---|---|---|
+| Drive: turn, forward and back | ← →, W S | action-button drag | Shift + drag | one-finger drag |
+| Pan: sideways, up and down | A D, R F | camera-button drag | drag | two-finger drag |
+| Zoom | W S | wheel, towards the pointer | pinch, towards the pointer | pinch, towards the fingers |
+| Turn the level | Q E, about its centre | middle-drag, about the spot under the pointer | twist, about the spot under the pointer | twist, about the spot under the fingers |
+
+On Android the trackpad doesn't twist, and pans or pinches but not both at
+once. In detail:
+
 | Action | Keyboard / mouse | Touch |
 |---|---|---|
 | Move | W A S D, or ↑ ↓; or hold the right button still over the view: the pointer's arrow shows the way (top: forward, bottom: back, bottom corners: sideways, top corners: forward while turning); click the minimap | one-finger drag (up/down) |
 | Turn | ← →, right-drag, or hold the right button at the left or right edge | one-finger drag (left/right) |
 | Turn the level about its centre | Q / E, or hold the turn arrows | hold the turn arrows |
-| Up / down | R / F, or the mouse wheel | two-finger drag (up/down; left/right moves sideways; spread or pinch moves forward or back); on Windows the same with two fingers on a precision trackpad |
+| Turn the level about a spot | middle-drag from the spot (up and down: height; Enhanced) | twist two fingers |
+| Up / down | R / F, or the mouse wheel (Enhanced: towards the pointer and back) | two-finger drag (up/down; left/right moves sideways; spread or pinch moves towards the fingers or back); the same with two fingers on a trackpad (pinching towards the pointer), and with Shift the drag turns and moves forward or back |
 | Preset cameras | 1–4, or click the camera to cycle (the camera glides there while the level waits; moving it yourself stops the glide) | tap the camera to cycle |
 | Pause (skills can be selected but not given while paused) | P or Space, or click the paws | tap the paws |
 | Fast-forward | Enter, or click the ▶ icon | tap the ▶ icon |

@@ -16,6 +16,9 @@ pub const TAP_SLOP: f32 = 12.0;
 pub const TURN_PER_PX: f32 = 0.006;
 /// Camera travel per pixel of drag (grid units).
 pub const MOVE_PER_PX: f32 = 0.02;
+/// How far two fingers twist (radians) before the world turns with them, so
+/// that dragging and pinching don't turn it by the way (ours).
+const TWIST_START: f32 = 0.2;
 
 pub struct TouchPlugin;
 
@@ -53,33 +56,107 @@ fn touch_over_mouse(touches: Res<Touches>, mut windows: Query<&mut Window>) {
 }
 
 /// One finger: horizontal drag turns, vertical drag moves forward/back.
-/// Two fingers: drag strafes sideways and changes height; spreading them
-/// apart moves forward, pinching them together back.
-fn touch_camera(touches: Res<Touches>, ui: Query<&Interaction>, mut cams: Query<&mut ViewCamera>) {
+/// Two fingers: as [`two_fingers`].
+fn touch_camera(
+    touches: Res<Touches>,
+    ui: Query<&Interaction>,
+    (screen, camera, game): (
+        Res<crate::screen::Screen>,
+        Res<crate::scene_render::SceneCamera>,
+        Res<crate::Game>,
+    ),
+    mut twist: Local<Twist>,
+    mut cams: Query<&mut ViewCamera>,
+) {
+    let active: Vec<_> = touches.iter().collect();
+    if active.len() < 2 {
+        *twist = Twist::default();
+    }
     if ui.iter().any(|i| *i == Interaction::Pressed) {
         return;
     }
-    let active: Vec<_> = touches.iter().collect();
     let Some(first) = active.first() else { return };
     // Ignore fingers that have not left the tap radius: they may be taps.
     if active.len() == 1 && first.distance().length() < TAP_SLOP {
         return;
     }
     let delta = active.iter().map(|t| t.delta()).sum::<Vec2>() / active.len() as f32;
+    if let [a, b, ..] = active[..] {
+        let (now, before) = (
+            (a.position(), b.position()),
+            (a.previous_position(), b.previous_position()),
+        );
+        let fingers = TwoFingers {
+            delta,
+            spread: now.0.distance(now.1) - before.0.distance(before.1),
+            twist: twist.turn((before.1 - before.0).angle_to(now.1 - now.0)),
+            turning: false,
+            toward: crate::screen_ray(&screen, &camera, screen.on_screen((now.0 + now.1) / 2.0)),
+        };
+        for mut cam in &mut cams {
+            two_fingers(&mut cam, &fingers, &game);
+        }
+        return;
+    }
     for mut cam in &mut cams {
         let fwd = cam.forward();
-        let right = Vec3::new(-fwd.z, 0.0, fwd.x);
-        if active.len() == 1 {
-            cam.yaw += delta.x * TURN_PER_PX;
-            cam.pos += fwd * delta.y * MOVE_PER_PX;
-        } else {
-            cam.pos += -right * delta.x * MOVE_PER_PX + Vec3::Y * delta.y * MOVE_PER_PX;
-            // Spreading two fingers apart moves forward, pinching them
-            // together back.
-            let (a, b) = (active[0], active[1]);
-            let spread = a.position().distance(b.position())
-                - a.previous_position().distance(b.previous_position());
-            cam.pos += fwd * spread * MOVE_PER_PX;
-        }
+        cam.yaw += delta.x * TURN_PER_PX;
+        cam.pos += fwd * delta.y * MOVE_PER_PX;
+    }
+}
+
+/// Two fingers' move since the last frame, on a touchscreen or trackpad
+/// (pixels and radians).
+pub(crate) struct TwoFingers {
+    /// How far they moved together.
+    pub delta: Vec2,
+    /// How much further apart they are.
+    pub spread: f32,
+    /// How far they turned round each other, clockwise on the screen (see
+    /// [`Twist`]).
+    pub twist: f32,
+    /// Whether dragging turns the camera rather than moving it sideways.
+    pub turning: bool,
+    /// The way from the camera through where they are (or the pointer).
+    pub toward: Option<Vec3>,
+}
+
+/// Two fingers: dragging moves the camera sideways and up and down (or,
+/// `turning`, turns it and moves it forward and back, as one finger does);
+/// spreading them apart moves it towards where they are, pinching them
+/// together back; twisting them turns the world about the spot there, as if
+/// turning it with them.
+pub(crate) fn two_fingers(cam: &mut ViewCamera, f: &TwoFingers, game: &crate::Game) {
+    let fwd = cam.forward();
+    let right = Vec3::new(-fwd.z, 0.0, fwd.x);
+    if f.turning {
+        cam.yaw += f.delta.x * TURN_PER_PX;
+        cam.pos += fwd * f.delta.y * MOVE_PER_PX;
+    } else {
+        cam.pos += (-right * f.delta.x + Vec3::Y * f.delta.y) * MOVE_PER_PX;
+    }
+    cam.pos += f.toward.unwrap_or(fwd) * f.spread * MOVE_PER_PX;
+    if f.twist != 0.0
+        && let Some(spot) = crate::spot_under(game, cam.pos, f.toward)
+    {
+        cam.orbit(spot, f.twist);
+    }
+    cam.glide = None;
+}
+
+/// A two-finger twist so far: it turns the world only once it has gone past
+/// [`TWIST_START`].
+#[derive(Default)]
+pub(crate) struct Twist {
+    total: f32,
+    on: bool,
+}
+
+impl Twist {
+    /// How far a twist by `angle` turns the world.
+    pub fn turn(&mut self, angle: f32) -> f32 {
+        self.total += angle;
+        self.on |= self.total.abs() > TWIST_START;
+        if self.on { angle } else { 0.0 }
     }
 }
