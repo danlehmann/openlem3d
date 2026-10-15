@@ -1,6 +1,7 @@
 //! Level selection: every level is available from the start, grouped by
 //! difficulty rating (`docs/spec/level.md` for the file numbering).
 
+use bevy::input::mouse::MouseScrollUnit;
 use bevy::prelude::*;
 
 use crate::{CurrentLevel, Data};
@@ -113,9 +114,10 @@ const ROWS_SHOWN: usize = 10;
 const RED: Color = Color::srgb(1.0, 0.1, 0.1);
 const HOVER: Color = Color::srgb(1.0, 0.9, 0.2);
 
-/// How far the list is scrolled, in rows.
+/// How far the list is scrolled, in rows (a wheel, trackpad or finger
+/// scrolls it smoothly, the keys by whole rows).
 #[derive(Resource, Default)]
-struct Scroll(usize);
+struct Scroll(f32);
 
 /// The IN and clock labels.
 #[derive(Resource)]
@@ -215,7 +217,7 @@ fn ensure_menu(
             ListBody,
             at(
                 0.0,
-                -(scroll.0 as f32) * ROW_STEP,
+                -scroll.0 * ROW_STEP,
                 320.0,
                 ROW_STEP * LEVELS_PER_RATING as f32,
             ),
@@ -297,56 +299,40 @@ fn menu_input(
     mut wheel: MessageReader<bevy::input::mouse::MouseWheel>,
     touches: Res<Touches>,
     screen: Res<crate::screen::Screen>,
-    mut drag: Local<f32>,
+    windows: Query<&Window>,
     mut scroll: ResMut<Scroll>,
     mut rating: ResMut<MenuRating>,
     roots: Query<Entity, With<crate::title::ScreenRoot>>,
     mut current: ResMut<CurrentLevel>,
     mut next: ResMut<NextState<AppState>>,
 ) {
-    let max = LEVELS_PER_RATING as usize - ROWS_SHOWN;
-    let mut delta: i32 = wheel
+    let max = (LEVELS_PER_RATING as usize - ROWS_SHOWN) as f32;
+    // Scrolling and dragging move the rows as far as the wheel or fingers
+    // go (a wheel notch a row).
+    let row_px = ROW_STEP * (screen.size.x / 320.0).min(screen.size.y / 200.0);
+    let scale = windows.iter().next().map_or(1.0, |w| w.scale_factor());
+    let mut delta: f32 = wheel
         .read()
-        .map(|w| {
-            if w.y > 0.0 {
-                -1
-            } else if w.y < 0.0 {
-                1
-            } else {
-                0
-            }
+        .map(|w| match w.unit {
+            MouseScrollUnit::Line => -w.y,
+            MouseScrollUnit::Pixel => -w.y / scale / row_px,
         })
         .sum();
-    if keys.just_pressed(KeyCode::ArrowDown) {
-        delta += 1;
+    delta -= touches.iter().map(|t| t.delta().y).sum::<f32>() / row_px;
+    // The keys step to whole rows.
+    let steps = keys.just_pressed(KeyCode::ArrowDown) as i32
+        - keys.just_pressed(KeyCode::ArrowUp) as i32
+        + (keys.just_pressed(KeyCode::PageDown) as i32 - keys.just_pressed(KeyCode::PageUp) as i32)
+            * ROWS_SHOWN as i32;
+    if steps != 0 {
+        delta += (scroll.0 + steps as f32).round() - scroll.0;
     }
-    if keys.just_pressed(KeyCode::ArrowUp) {
-        delta -= 1;
-    }
-    if keys.just_pressed(KeyCode::PageDown) {
-        delta += ROWS_SHOWN as i32;
-    }
-    if keys.just_pressed(KeyCode::PageUp) {
-        delta -= ROWS_SHOWN as i32;
-    }
-    // Dragging a finger up or down scrolls a row per row height moved.
-    let row_px = ROW_STEP * (screen.size.x / 320.0).min(screen.size.y / 200.0);
-    for t in touches.iter() {
-        *drag -= t.delta().y;
-    }
-    while drag.abs() >= row_px {
-        delta += drag.signum() as i32;
-        *drag -= drag.signum() * row_px;
-    }
-    if touches.iter().next().is_none() {
-        *drag = 0.0;
-    }
-    if delta != 0 {
-        scroll.0 = (scroll.0 as i32 + delta).clamp(0, max as i32) as usize;
+    if delta != 0.0 {
+        scroll.0 = (scroll.0 + delta).clamp(0.0, max);
         for mut a in &mut bodies {
             *a = crate::title::at(
                 0.0,
-                -(scroll.0 as f32) * ROW_STEP,
+                -scroll.0 * ROW_STEP,
                 320.0,
                 ROW_STEP * LEVELS_PER_RATING as f32,
             );
@@ -357,7 +343,7 @@ fn menu_input(
         - keys.just_pressed(KeyCode::ArrowLeft) as i32;
     if step != 0 {
         rating.0 = (rating.0 as i32 + step).rem_euclid(PRACTICE as i32) as usize;
-        scroll.0 = 0;
+        scroll.0 = 0.0;
         for e in &roots {
             commands.entity(e).despawn();
         }
