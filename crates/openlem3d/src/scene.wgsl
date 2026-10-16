@@ -19,6 +19,9 @@ struct Uniforms {
     // The view's top-left corner in the framebuffer (the camera's viewport):
     // xy for the sky, 0 when the scene is rendered small; zw for the stretch.
     origin: vec4<f32>,
+    // x: how much brighter than its palette colour a fully glowing texel is
+    // drawn; 0 when glow is off.
+    post: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> u: Uniforms;
@@ -39,7 +42,18 @@ struct VIn {
     // in the texture, the frame is chosen inside each repeat, and `offset`
     // is then a uv drift per second instead of a billboard offset.
     @location(4) anim: vec2<f32>,
+    // Light from glowing things nearby, linear RGB (`light.rs`); used only
+    // while glowing.
+    @location(5) light: vec3<f32>,
 };
+
+/// Alpha steps from a plain texel to a fully glowing one (`glow.rs`).
+const GLOW_STEPS: f32 = 120.0;
+
+/// A texel's glow (0–1) from its alpha (`glow.rs`).
+fn glow_of(a: f32) -> f32 {
+    return clamp((1.0 - a) * 255.0 / GLOW_STEPS, 0.0, 1.0);
+}
 
 /// Animation frames per second of animated sprites (unverified).
 const ANIM_FPS: f32 = 8.0;
@@ -50,6 +64,7 @@ struct VOut {
     @location(1) params: vec2<f32>,
     // For tiled surfaces: frame count and current frame; x = 0 otherwise.
     @location(2) tile: vec2<f32>,
+    @location(3) light: vec3<f32>,
 };
 
 @vertex
@@ -66,6 +81,10 @@ fn vs(v: VIn) -> VOut {
         frame = select(2.0 * n - 2.0 - s, s, s < n);
     }
     o.params = v.params;
+    // The lights flicker together, a little (ours).
+    let t = u.sky.w;
+    let flicker = 0.9 + 0.06 * sin(t * 7.3) + 0.04 * sin(t * 17.9 + 1.3);
+    o.light = select(vec3(0.0), v.light * flicker, u.post.x > 0.0);
     if (v.anim.y < 0.0) {
         o.clip = u.view_proj * vec4(v.pos, 1.0);
         o.uv = v.uv + v.offset * u.sky.w;
@@ -99,7 +118,9 @@ fn fs(v: VOut) -> @location(0) vec4<f32> {
     }
     // Brightness darkens the palette colours as the original does, i.e. in
     // sRGB space; the sampled colour is linear, so the factor is linearised.
-    return vec4(c.rgb * pow(v.params.x, 2.2), 1.0);
+    // Glowing texels (alpha below 1) are lifted above white.
+    let glow = glow_of(c.a);
+    return vec4(c.rgb * (pow(v.params.x, 2.2) + v.light) * (1.0 + glow * u.post.x), 1.0);
 }
 
 // Sky: a full-screen triangle. Above the horizon the sky image is stretched
@@ -134,7 +155,12 @@ fn fs_sky(v: SkyOut) -> @location(0) vec4<f32> {
         // All-round sky: a horizontally wrapping panorama stretched over the
         // full screen height (provisional).
         let full = vec2(col / dims.x, clamp(p.y / (480.0 * u.sky.z), 0.0, 0.999));
-        return vec4(textureSampleLevel(tex, samp, full, 0.0).rgb, 1.0);
+        let c = textureSampleLevel(tex, samp, full, 0.0);
+        // Its stars glow, each twinkling at its own pace.
+        let texel = floor(fract(full) * dims);
+        let phase = noise(texel) * 6.2832;
+        let twinkle = 0.65 + 0.35 * sin(u.sky.w * (1.5 + noise(texel.yx))  + phase);
+        return vec4(c.rgb * (1.0 + glow_of(c.a) * twinkle * u.post.x), 1.0);
     }
     let row = clamp(p.y / u.sky.y, 0.0, 1.0) * dims.y;
     let uv = vec2(col / dims.x, min(row, dims.y - 0.5) / dims.y);
@@ -148,4 +174,118 @@ fn fs_stretch(v: SkyOut) -> @location(0) vec4<f32> {
     let screen = vec2<f32>(textureDimensions(tex)) * u.view.zw;
     let at = (v.clip.xy - u.origin.zw) / screen;
     return vec4(textureSampleLevel(tex, samp, at, 0.0).rgb, 1.0);
+}
+
+// Present: the glowing scene (bound as `tex`, at the view's size) onto the
+// screen. Each channel clips at white on its own, so a glowing flame runs
+// from red through yellow to a white core as its channels fill up (a fade
+// towards white instead turned red flames pink). Then a dither of under
+// half a screen step, which breaks the smooth glow gradients into noise
+// instead of bands.
+
+fn to_srgb(c: vec3<f32>) -> vec3<f32> {
+    return select(1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, c * 12.92, c <= vec3(0.0031308));
+}
+
+fn from_srgb(c: vec3<f32>) -> vec3<f32> {
+    return select(pow((c + 0.055) / 1.055, vec3(2.4)), c / 12.92, c <= vec3(0.04045));
+}
+
+/// Interleaved gradient noise (Jimenez 2014): 0–1, even over the screen.
+fn noise(p: vec2<f32>) -> f32 {
+    return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
+}
+
+@fragment
+fn fs_present(v: SkyOut) -> @location(0) vec4<f32> {
+    let at = (v.clip.xy - u.origin.zw) / vec2<f32>(textureDimensions(tex));
+    let c = textureSampleLevel(tex, samp, at, 0.0).rgb;
+    // The screen stores sRGB in 8 bits: dither in those steps.
+    let s = to_srgb(clamp(c, vec3(0.0), vec3(1.0))) + (noise(v.clip.xy) - 0.5) * 0.8 / 255.0;
+    return vec4(from_srgb(clamp(s, vec3(0.0), vec3(1.0))), 1.0);
+}
+
+// Bloom: a full-screen triangle with texture coordinates over the target.
+
+struct PostOut {
+    @builtin(position) clip: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+};
+
+@vertex
+fn vs_post(@builtin(vertex_index) i: u32) -> PostOut {
+    let p = vec2(f32((i << 1u) & 2u), f32(i & 2u));
+    var o: PostOut;
+    o.clip = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+    o.uv = vec2(p.x, 1.0 - p.y);
+    return o;
+}
+
+/// How strongly the blurred glow is added to the picture (ours, by eye).
+const BLOOM_STRENGTH: f32 = 0.4;
+
+/// `c`, or black if any channel is infinite or not a number: one such
+/// texel would otherwise spread over the whole picture. Tested on the bits,
+/// which fast-math compilers cannot assume away.
+fn finite(c: vec3<f32>) -> vec3<f32> {
+    let exponent = bitcast<vec3<u32>>(c) & vec3(0x7f800000u);
+    return select(c, vec3(0.0), any(exponent == vec3(0x7f800000u)));
+}
+
+/// The part of a colour above white: only that blooms.
+fn above_white(c: vec3<f32>) -> vec3<f32> {
+    return max(finite(c) - vec3(1.0), vec3(0.0));
+}
+
+/// Half-size average of `tex` around `uv`: the centre and four diagonal
+/// bilinear taps a texel out (dual-filter downsampling).
+fn down(uv: vec2<f32>, threshold: bool) -> vec3<f32> {
+    let o = 1.0 / vec2<f32>(textureDimensions(tex));
+    var taps = array<vec2<f32>, 5>(
+        uv, uv + o, uv - o, uv + vec2(o.x, -o.y), uv + vec2(-o.x, o.y)
+    );
+    var sum = vec3(0.0);
+    for (var k = 0; k < 5; k++) {
+        var c = textureSampleLevel(tex, samp, taps[k], 0.0).rgb;
+        if (threshold) {
+            c = above_white(c);
+        }
+        sum += c * select(1.0, 4.0, k == 0);
+    }
+    return sum / 8.0;
+}
+
+/// Tent-filtered sample of the smaller level `tex` at `uv`
+/// (dual-filter upsampling).
+fn up(uv: vec2<f32>) -> vec3<f32> {
+    let o = 1.0 / vec2<f32>(textureDimensions(tex));
+    let s = textureSampleLevel(tex, samp, uv + vec2(-2.0 * o.x, 0.0), 0.0).rgb
+        + textureSampleLevel(tex, samp, uv + vec2(2.0 * o.x, 0.0), 0.0).rgb
+        + textureSampleLevel(tex, samp, uv + vec2(0.0, -2.0 * o.y), 0.0).rgb
+        + textureSampleLevel(tex, samp, uv + vec2(0.0, 2.0 * o.y), 0.0).rgb
+        + 2.0 * textureSampleLevel(tex, samp, uv + o, 0.0).rgb
+        + 2.0 * textureSampleLevel(tex, samp, uv - o, 0.0).rgb
+        + 2.0 * textureSampleLevel(tex, samp, uv + vec2(o.x, -o.y), 0.0).rgb
+        + 2.0 * textureSampleLevel(tex, samp, uv + vec2(-o.x, o.y), 0.0).rgb;
+    return s / 12.0;
+}
+
+@fragment
+fn fs_bloom_first(v: PostOut) -> @location(0) vec4<f32> {
+    return vec4(down(v.uv, true), 1.0);
+}
+
+@fragment
+fn fs_bloom_down(v: PostOut) -> @location(0) vec4<f32> {
+    return vec4(down(v.uv, false), 1.0);
+}
+
+@fragment
+fn fs_bloom_up(v: PostOut) -> @location(0) vec4<f32> {
+    return vec4(up(v.uv), 1.0);
+}
+
+@fragment
+fn fs_bloom_add(v: PostOut) -> @location(0) vec4<f32> {
+    return vec4(finite(up(v.uv)) * BLOOM_STRENGTH, 1.0);
 }

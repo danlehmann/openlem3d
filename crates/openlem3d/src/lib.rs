@@ -9,10 +9,12 @@ mod briefing;
 mod codes;
 mod confirm;
 mod fade;
+mod glow;
 mod hud;
 mod lemming_cam;
 mod lemming_render;
 mod level_mesh;
+mod light;
 mod menu;
 mod minimap;
 mod music;
@@ -95,6 +97,8 @@ pub struct Options {
     /// With `--screenshot`, also save a frame each simulation tick into a
     /// directory from some seconds in (`--record DIR:FROM`), as `TICK.png`.
     record: Option<(PathBuf, f32)>,
+    /// Draw glowing things plainly (`--no-glow`), for comparison.
+    no_glow: bool,
 }
 
 fn parse_args() -> Options {
@@ -117,6 +121,7 @@ fn parse_args() -> Options {
         briefing: false,
         press: Vec::new(),
         record: None,
+        no_glow: false,
     };
     let mut args = std::env::args().skip(1);
     while let Some(a) = args.next() {
@@ -145,6 +150,7 @@ fn parse_args() -> Options {
                 ));
             }
             "--no-hud" => o.no_hud = true,
+            "--no-glow" => o.no_glow = true,
             "--screen" => {
                 o.screen = match val().as_str() {
                     "title" => menu::AppState::Title,

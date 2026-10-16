@@ -19,8 +19,8 @@ use bevy::render::{Render, RenderApp, RenderSystems};
 use wgpu::util::DeviceExt;
 
 /// Floats per vertex: position (3), uv (2), brightness (1), cutout flag (1),
-/// billboard offset (2), animation frame count and uv stride (2).
-pub const VERTEX_FLOATS: usize = 11;
+/// billboard offset (2), animation frame count and uv stride (2), light (3).
+pub const VERTEX_FLOATS: usize = 14;
 
 /// What the scene shows. `version` changes whenever the content does; the
 /// renderer re-uploads only then.
@@ -42,6 +42,9 @@ pub struct SceneData {
     pub sky_surround: bool,
     /// Texture for the per-frame sprites in [`SceneSprites`].
     pub sprite_atlas: Option<RgbaImage>,
+    /// The level's lights, kept to light the blocks again when they are
+    /// rebuilt (not drawn themselves).
+    pub lights: Vec<crate::light::Light>,
 }
 
 /// Geometry rebuilt every frame (moving sprites such as lemmings), textured
@@ -92,6 +95,9 @@ pub struct SceneCamera {
     /// The colour behind the scene, linear RGBA, for the low-resolution
     /// target (the screen itself is cleared to the camera's colour).
     pub clear: Vec4,
+    /// Let glowing texels shine and bloom (`crate::glow`); only when the
+    /// scene is drawn at the screen's resolution.
+    pub glow: bool,
 }
 
 pub struct SceneRenderPlugin;
@@ -123,7 +129,15 @@ impl Plugin for SceneRenderPlugin {
 }
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
-const UNIFORM_SIZE: u64 = 128;
+/// The scene's colour format while glowing: room above white.
+const HDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
+const UNIFORM_SIZE: u64 = 144;
+/// How much brighter than its palette colour a fully glowing texel is drawn
+/// (ours, tuned by eye).
+const GLOW_GAIN: f32 = 3.0;
+/// The most halvings of the bloom chain, and the smallest size worth one.
+const BLOOM_LEVELS: usize = 6;
+const BLOOM_MIN_SIZE: u32 = 8;
 /// Sky texels panned per full turn for the 320-wide all-round skies: three
 /// repeats of the panorama, close to the 1024 of the other skies and a
 /// whole number of repeats, so no turn shows a seam (provisional).
@@ -135,15 +149,11 @@ struct SceneGpu {
     layout: wgpu::BindGroupLayout,
     shader: wgpu::ShaderModule,
     sampler: wgpu::Sampler,
+    /// Smooth sampling, for the bloom chain.
+    linear: wgpu::Sampler,
     uniforms: wgpu::Buffer,
-    /// Geometry, sky and stretch pipelines and the colour format they were
-    /// built for.
-    pipelines: Option<(
-        wgpu::TextureFormat,
-        wgpu::RenderPipeline,
-        wgpu::RenderPipeline,
-        wgpu::RenderPipeline,
-    )>,
+    /// Pipelines per colour format drawn into.
+    pipelines: Vec<(wgpu::TextureFormat, Pipelines)>,
     /// The low-resolution colour target: its size and format, its view, and
     /// the bind group that samples it.
     low: Option<(
@@ -159,6 +169,8 @@ struct SceneGpu {
     sprite_atlas: Option<wgpu::BindGroup>,
     /// Per-frame sprite geometry: buffers (grown as needed) and index count.
     sprites: Option<(wgpu::Buffer, wgpu::Buffer, u32)>,
+    /// The glowing scene's targets, made anew when the size changes.
+    hdr: Option<HdrTargets>,
     /// Depth buffer and its size.
     depth: Option<((u32, u32), wgpu::TextureView)>,
     /// The part of the colour target drawn in (the camera's viewport): its
@@ -168,6 +180,32 @@ struct SceneGpu {
     /// Uploaded textures by their texel data, kept while the content still
     /// uses that data (a terrain change re-uploads geometry only).
     textures: Vec<(Arc<[u8]>, wgpu::BindGroup)>,
+}
+
+struct Pipelines {
+    geometry: wgpu::RenderPipeline,
+    sky: wgpu::RenderPipeline,
+    /// Copies an offscreen scene onto the screen: stretched, or glowing.
+    stretch: wgpu::RenderPipeline,
+    present: wgpu::RenderPipeline,
+    /// Bloom: the glow above white, halved; a further halving; and a level
+    /// blurred back up and added to the one above (or to the scene).
+    bloom_first: wgpu::RenderPipeline,
+    bloom_down: wgpu::RenderPipeline,
+    bloom_up: wgpu::RenderPipeline,
+    bloom_add: wgpu::RenderPipeline,
+}
+
+/// The scene drawn in [`HDR_FORMAT`], and the bloom chain's levels, each
+/// half the size of the one before.
+#[derive(Clone)]
+struct HdrTargets {
+    size: (u32, u32),
+    view: wgpu::TextureView,
+    /// The scene sampled sharp (copied to the screen) and smooth (bloom).
+    sharp: wgpu::BindGroup,
+    smooth: wgpu::BindGroup,
+    levels: Vec<(wgpu::TextureView, wgpu::BindGroup)>,
 }
 
 struct UploadedLayer {
@@ -223,6 +261,12 @@ impl FromWorld for SceneGpu {
             min_filter: wgpu::FilterMode::Nearest,
             ..Default::default()
         });
+        let linear = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("scene bloom"),
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
         let uniforms = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("scene uniforms"),
             size: UNIFORM_SIZE,
@@ -233,14 +277,16 @@ impl FromWorld for SceneGpu {
             layout,
             shader,
             sampler,
+            linear,
             uniforms,
-            pipelines: None,
+            pipelines: Vec::new(),
             low: None,
             version: None,
             layers: Vec::new(),
             sky: None,
             sprite_atlas: None,
             sprites: None,
+            hdr: None,
             depth: None,
             target_origin: (0, 0),
             target_size: (1, 1),
@@ -250,9 +296,10 @@ impl FromWorld for SceneGpu {
 }
 
 impl SceneGpu {
-    fn ensure_pipelines(&mut self, device: &wgpu::Device, format: wgpu::TextureFormat) {
-        if self.pipelines.as_ref().is_some_and(|(f, ..)| *f == format) {
-            return;
+    /// The pipelines drawing into `format`, made on first use.
+    fn pipelines(&mut self, device: &wgpu::Device, format: wgpu::TextureFormat) -> &Pipelines {
+        if let Some(i) = self.pipelines.iter().position(|(f, _)| *f == format) {
+            return &self.pipelines[i].1;
         }
         let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("scene"),
@@ -269,7 +316,7 @@ impl SceneGpu {
                     array_stride: (VERTEX_FLOATS * 4) as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
                     attributes: &wgpu::vertex_attr_array![
-                        0 => Float32x3, 1 => Float32x2, 2 => Float32x2, 3 => Float32x2, 4 => Float32x2
+                        0 => Float32x3, 1 => Float32x2, 2 => Float32x2, 3 => Float32x2, 4 => Float32x2, 5 => Float32x3
                     ],
                 }],
                 compilation_options: Default::default(),
@@ -319,28 +366,124 @@ impl SceneGpu {
             multiview_mask: None,
             cache: None,
         });
-        let stretch = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("scene stretch"),
-            layout: Some(&pl),
-            vertex: wgpu::VertexState {
-                module: &self.shader,
-                entry_point: Some("vs_sky"),
-                buffers: &[],
-                compilation_options: Default::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &self.shader,
-                entry_point: Some("fs_stretch"),
-                targets: &[Some(format.into())],
-                compilation_options: Default::default(),
-            }),
-            primitive: Default::default(),
-            depth_stencil: None,
-            multisample: Default::default(),
-            multiview_mask: None,
-            cache: None,
-        });
-        self.pipelines = Some((format, geometry, sky, stretch));
+        // A full-screen triangle with no depth, optionally added onto what
+        // is there.
+        let full_screen = |label, vertex, fragment, add: bool| {
+            let blend = add.then_some(wgpu::BlendState {
+                color: wgpu::BlendComponent {
+                    src_factor: wgpu::BlendFactor::One,
+                    dst_factor: wgpu::BlendFactor::One,
+                    operation: wgpu::BlendOperation::Add,
+                },
+                alpha: wgpu::BlendComponent::OVER,
+            });
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(label),
+                layout: Some(&pl),
+                vertex: wgpu::VertexState {
+                    module: &self.shader,
+                    entry_point: Some(vertex),
+                    buffers: &[],
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &self.shader,
+                    entry_point: Some(fragment),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format,
+                        blend,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                primitive: Default::default(),
+                depth_stencil: None,
+                multisample: Default::default(),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+        let pipelines = Pipelines {
+            geometry,
+            sky,
+            stretch: full_screen("scene stretch", "vs_sky", "fs_stretch", false),
+            present: full_screen("scene present", "vs_sky", "fs_present", false),
+            bloom_first: full_screen("bloom first", "vs_post", "fs_bloom_first", false),
+            bloom_down: full_screen("bloom down", "vs_post", "fs_bloom_down", false),
+            bloom_up: full_screen("bloom up", "vs_post", "fs_bloom_up", true),
+            bloom_add: full_screen("bloom add", "vs_post", "fs_bloom_add", true),
+        };
+        self.pipelines.push((format, pipelines));
+        &self.pipelines.last().unwrap().1
+    }
+
+    /// A bind group sampling `view` with `sampler`.
+    fn bind_view(
+        &self,
+        device: &wgpu::Device,
+        view: &wgpu::TextureView,
+        sampler: &wgpu::Sampler,
+    ) -> wgpu::BindGroup {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("scene target"),
+            layout: &self.layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.uniforms.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(sampler),
+                },
+            ],
+        })
+    }
+
+    /// The glowing scene's targets for a view of `size`.
+    fn hdr_targets(&mut self, device: &wgpu::Device, size: (u32, u32)) -> HdrTargets {
+        if self.hdr.as_ref().is_none_or(|h| h.size != size) {
+            let target = |label, (w, h): (u32, u32)| {
+                device
+                    .create_texture(&wgpu::TextureDescriptor {
+                        label: Some(label),
+                        size: wgpu::Extent3d {
+                            width: w,
+                            height: h,
+                            depth_or_array_layers: 1,
+                        },
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format: HDR_FORMAT,
+                        usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                            | wgpu::TextureUsages::TEXTURE_BINDING,
+                        view_formats: &[],
+                    })
+                    .create_view(&Default::default())
+            };
+            let view = target("scene hdr", size);
+            let mut levels = Vec::new();
+            let mut s = size;
+            while levels.len() < BLOOM_LEVELS && s.0.min(s.1) / 2 >= BLOOM_MIN_SIZE {
+                s = (s.0 / 2, s.1 / 2);
+                let v = target("scene bloom", s);
+                let b = self.bind_view(device, &v, &self.linear);
+                levels.push((v, b));
+            }
+            self.hdr = Some(HdrTargets {
+                size,
+                sharp: self.bind_view(device, &view, &self.sampler),
+                smooth: self.bind_view(device, &view, &self.linear),
+                view,
+                levels,
+            });
+        }
+        self.hdr.clone().unwrap()
     }
 
     /// The low-resolution colour target of `size` in `format`, made anew
@@ -373,24 +516,7 @@ impl SceneGpu {
                     view_formats: &[],
                 })
                 .create_view(&Default::default());
-            let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("scene low resolution"),
-                layout: &self.layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: self.uniforms.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::TextureView(&view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: wgpu::BindingResource::Sampler(&self.sampler),
-                    },
-                ],
-            });
+            let bind = self.bind_view(device, &view, &self.sampler);
             self.low = Some((size, format, view, bind));
         }
         let (_, _, view, bind) = self.low.as_ref().unwrap();
@@ -514,12 +640,11 @@ fn prepare_scene(
     // The viewport's corner in the target, for shaders working in framebuffer
     // pixels: the sky's (none when rendered small), then the stretch's.
     let (x, y) = (gpu.target_origin.0 as f32, gpu.target_origin.1 as f32);
-    let sky = if renders_small(camera.pixels, (w, h)) {
-        [0.0, 0.0]
-    } else {
-        [x, y]
-    };
+    let small = renders_small(camera.pixels, (w, h));
+    let glow = camera.glow && !small;
+    let sky = if small || glow { [0.0, 0.0] } else { [x, y] };
     uniforms.extend([sky[0], sky[1], x, y]);
+    uniforms.extend([if glow { GLOW_GAIN } else { 0.0 }, 0.0, 0.0, 0.0]);
     queue.write_buffer(&gpu.uniforms, 0, &f32_bytes(&uniforms));
     upload_sprites(device, &queue, &mut gpu, &sprites);
     if gpu.version == Some(content.version) {
@@ -631,37 +756,50 @@ fn draw_scene(
     gpu.target_origin = (viewport.x, viewport.y);
     gpu.target_size = size;
     let format = target.main_texture_format();
-    gpu.ensure_pipelines(&device, format);
-    // Rendered small and stretched over the screen, or at the screen's size.
+    // Rendered small and stretched over the screen, or at the screen's size:
+    // offscreen in floating point while glowing, else straight onto it.
     let low = renders_small(camera.pixels, size).then(|| {
         let s = (camera.pixels.x, camera.pixels.y);
         (s, gpu.low_target(&device, s, format))
     });
+    let hdr = (camera.glow && low.is_none()).then(|| gpu.hdr_targets(&device, size));
+    let scene_format = if hdr.is_some() { HDR_FORMAT } else { format };
+    gpu.pipelines(&device, scene_format);
+    gpu.pipelines(&device, HDR_FORMAT);
+    gpu.pipelines(&device, format);
     let depth = gpu.depth_view(
         &device,
-        low.as_ref().map_or((full.width, full.height), |l| l.0),
+        match (&low, &hdr) {
+            (Some(l), _) => l.0,
+            (_, Some(h)) => h.size,
+            _ => (full.width, full.height),
+        },
     );
     let gpu = &*gpu;
     if gpu.layers.is_empty() && gpu.sky.is_none() && gpu.sprites.is_none() {
         return;
     }
-    let (_, geometry, sky_pipeline, stretch) = gpu.pipelines.as_ref().unwrap();
-    let color = match &low {
-        Some((_, (view, _))) => wgpu::RenderPassColorAttachment {
-            view,
-            depth_slice: None,
-            resolve_target: None,
-            ops: wgpu::Operations {
-                load: wgpu::LoadOp::Clear(wgpu::Color {
-                    r: camera.clear.x as f64,
-                    g: camera.clear.y as f64,
-                    b: camera.clear.z as f64,
-                    a: camera.clear.w as f64,
-                }),
-                store: wgpu::StoreOp::Store,
-            },
+    let find = |f| &gpu.pipelines.iter().find(|(g, _)| *g == f).unwrap().1;
+    let (scene_p, hdr_p, screen_p) = (find(scene_format), find(HDR_FORMAT), find(format));
+    let clear = wgpu::LoadOp::Clear(wgpu::Color {
+        r: camera.clear.x as f64,
+        g: camera.clear.y as f64,
+        b: camera.clear.z as f64,
+        a: camera.clear.w as f64,
+    });
+    let offscreen = |view| wgpu::RenderPassColorAttachment {
+        view,
+        depth_slice: None,
+        resolve_target: None,
+        ops: wgpu::Operations {
+            load: clear,
+            store: wgpu::StoreOp::Store,
         },
-        None => target.get_color_attachment(),
+    };
+    let color = match (&low, &hdr) {
+        (Some((_, (view, _))), _) => offscreen(view),
+        (_, Some(h)) => offscreen(&h.view),
+        _ => target.get_color_attachment(),
     };
     let encoder = ctx.command_encoder();
     let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -677,15 +815,15 @@ fn draw_scene(
         }),
         ..Default::default()
     });
-    if low.is_none() {
+    if low.is_none() && hdr.is_none() {
         set_viewport(&mut pass, viewport);
     }
     if let Some(sky) = &gpu.sky {
-        pass.set_pipeline(sky_pipeline);
+        pass.set_pipeline(&scene_p.sky);
         pass.set_bind_group(0, sky, &[]);
         pass.draw(0..3, 0..1);
     }
-    pass.set_pipeline(geometry);
+    pass.set_pipeline(&scene_p.geometry);
     for layer in &gpu.layers {
         pass.set_bind_group(0, &layer.bind_group, &[]);
         pass.set_vertex_buffer(0, layer.vertices.slice(..));
@@ -701,7 +839,52 @@ fn draw_scene(
         pass.draw_indexed(0..*n, 0, 0..1);
     }
     drop(pass);
-    if let Some((_, (_, bind))) = &low {
+    // Bloom: halve the glow above white down the chain, then blur each
+    // level back up into the one above.
+    if let Some(h) = &hdr {
+        let mut step = |into: &wgpu::TextureView, load, pipeline, from: &wgpu::BindGroup| {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("scene bloom"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: into,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                ..Default::default()
+            });
+            pass.set_pipeline(pipeline);
+            pass.set_bind_group(0, from, &[]);
+            pass.draw(0..3, 0..1);
+        };
+        let black = wgpu::LoadOp::Clear(wgpu::Color::BLACK);
+        for (k, (view, _)) in h.levels.iter().enumerate() {
+            match k {
+                0 => step(view, black, &hdr_p.bloom_first, &h.smooth),
+                _ => step(view, black, &hdr_p.bloom_down, &h.levels[k - 1].1),
+            }
+        }
+        for k in (1..h.levels.len()).rev() {
+            step(
+                &h.levels[k - 1].0,
+                wgpu::LoadOp::Load,
+                &hdr_p.bloom_up,
+                &h.levels[k].1,
+            );
+        }
+        if let Some((_, first)) = h.levels.first() {
+            step(&h.view, wgpu::LoadOp::Load, &hdr_p.bloom_add, first);
+        }
+    }
+    let shown = match (&low, &hdr) {
+        (Some((_, (_, bind))), _) => Some((bind, &screen_p.stretch)),
+        (_, Some(h)) => Some((&h.sharp, &screen_p.present)),
+        _ => None,
+    };
+    if let Some((bind, pipeline)) = shown {
         let color = target.get_color_attachment();
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("scene stretch"),
@@ -709,7 +892,7 @@ fn draw_scene(
             ..Default::default()
         });
         set_viewport(&mut pass, viewport);
-        pass.set_pipeline(stretch);
+        pass.set_pipeline(pipeline);
         pass.set_bind_group(0, bind, &[]);
         pass.draw(0..3, 0..1);
     }

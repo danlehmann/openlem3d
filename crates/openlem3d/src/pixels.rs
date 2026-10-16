@@ -66,6 +66,7 @@ fn update(
     settings: Res<Settings>,
     state: Res<State<crate::menu::AppState>>,
     (clear, windows, view): (Res<ClearColor>, Query<&Window>, Res<crate::screen::Screen>),
+    options: Res<crate::Options>,
     mut pixelation: ResMut<Pixelation>,
     mut camera: ResMut<SceneCamera>,
 ) {
@@ -104,6 +105,7 @@ fn update(
         }
     }
     camera.clear = clear.0.to_linear().to_vec4();
+    camera.glow = settings.enhanced && !options.no_glow;
     let Some(window) = windows.iter().next() else {
         return;
     };

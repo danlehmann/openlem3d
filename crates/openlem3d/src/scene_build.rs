@@ -5,7 +5,9 @@ use l3d_formats::blk::{BlockSet, FaceDir};
 use l3d_formats::gamedata::{GameData, Palette};
 use l3d_formats::level::{BlockCell, LandVertex, Level, SIZE_X, SIZE_Z};
 
+use crate::glow;
 use crate::level_mesh::{self, LevelMesh};
+use crate::light::{self, Light};
 use crate::scene_render::{RgbaImage, SceneData, SceneLayer, VERTEX_FLOATS};
 
 /// Height of the ground plane (sea and land): the top of grid layer 0.
@@ -30,11 +32,23 @@ const SEA_MARGIN: f32 = 4000.0;
 
 /// Converts indexed pixels to RGBA; palette index 0 becomes transparent.
 pub fn indexed_to_rgba(pixels: &[u8], width: u32, pal: &Palette) -> RgbaImage {
+    glowing_rgba(pixels, width, pal, |_| 0.0)
+}
+
+/// [`indexed_to_rgba`], with pixel `p` glowing by `glow(p)` (see
+/// [`crate::glow`]).
+fn glowing_rgba(
+    pixels: &[u8],
+    width: u32,
+    pal: &Palette,
+    glow: impl Fn(usize) -> f32,
+) -> RgbaImage {
     let texels = pixels
         .iter()
-        .flat_map(|&i| {
+        .enumerate()
+        .flat_map(|(p, &i)| {
             let [r, g, b] = pal[i as usize];
-            [r, g, b, if i == 0 { 0 } else { 255 }]
+            [r, g, b, glow::alpha(i, glow(p))]
         })
         .collect();
     RgbaImage {
@@ -55,6 +69,8 @@ struct Vertex {
     offset: [f32; 2],
     /// Animation frame count and uv stride between frames.
     anim: [f32; 2],
+    /// Light from glowing things nearby (`crate::light`), linear RGB.
+    light: [f32; 3],
 }
 
 impl Vertex {
@@ -66,6 +82,7 @@ impl Vertex {
             cutout,
             offset: [0.0; 2],
             anim: [1.0, 0.0],
+            light: [0.0; 3],
         }
     }
 
@@ -75,6 +92,7 @@ impl Vertex {
         out.extend([self.brightness, if self.cutout { 1.0 } else { 0.0 }]);
         out.extend(self.offset);
         out.extend(self.anim);
+        out.extend(self.light);
     }
 }
 
@@ -165,6 +183,7 @@ impl LayerBuilder {
                 cutout: true,
                 offset: off,
                 anim,
+                light: [0.0; 3],
             }
             .push(&mut self.vertices);
         }
@@ -225,13 +244,19 @@ impl LayerBuilder {
 }
 
 /// Interleaves the block mesh (opaque and cutout parts) into one layer.
-fn block_layer(mesh: &LevelMesh, texture: RgbaImage) -> SceneLayer {
+fn block_layer(
+    mesh: &LevelMesh,
+    texture: RgbaImage,
+    lights: &[Light],
+    level: &Level,
+) -> SceneLayer {
     let mut b = LayerBuilder::default();
     for (part, cutout) in [(&mesh.opaque, false), (&mesh.cutout, true)] {
         let base = b.base();
         for i in 0..part.positions.len() {
             let mut v = Vertex::fixed(part.positions[i], part.uvs[i], part.colors[i][0], cutout);
             v.anim = part.anims[i];
+            v.light = light::shine(lights, level, part.positions[i], part.normals[i]);
             v.push(&mut b.vertices);
         }
         b.indices.extend(part.indices.iter().map(|i| i + base));
@@ -418,7 +443,101 @@ fn trap_layer(data: &mut GameData, level: &Level, pal: &Palette) -> Option<Scene
             1.0,
         );
     }
-    (!b.indices.is_empty()).then(|| b.finish(indexed_to_rgba(&traps, 64, pal)))
+    let trap = level.trap_type;
+    (!b.indices.is_empty()).then(|| {
+        b.finish(glowing_rgba(&traps, 64, pal, |p| {
+            glow::trap(trap, traps[p], pal)
+        }))
+    })
+}
+
+/// Where in its cell an animated object (`0x50`–`0x5B`) stands, from the
+/// cell's centre, and which half of its frames it shows (the left or right
+/// 32 texels), if only one.
+fn anim_object_spot(kind: u8) -> (f32, f32, Option<f32>) {
+    match kind {
+        0x52 => (0.5, 0.5, None),
+        0x53 => (0.5, -0.5, None),
+        0x54..=0x5B => {
+            let corner =
+                [(-0.5, -0.5), (-0.5, 0.5), (0.5, 0.5), (0.5, -0.5)][(kind as usize - 0x54) % 4];
+            (
+                corner.0,
+                corner.1,
+                Some(if kind < 0x58 { 0.0 } else { 32.0 }),
+            )
+        }
+        _ => (0.0, 0.0, None),
+    }
+}
+
+/// The level's lights (`crate::light`): its glowing animated objects, where
+/// their flame or lamp is (near the top of the sprite), and the flames of
+/// its wall torches, just in front of the face showing them.
+fn level_lights(
+    data: &mut GameData,
+    level: &Level,
+    tex: &[u8],
+    mesh: &LevelMesh,
+    pal: &Palette,
+) -> Vec<Light> {
+    let mut lights = Vec::new();
+    let anim = (level.anim_object != 0xFF)
+        .then(|| data.gfx("ANIMOBJ", level.anim_object).ok())
+        .flatten();
+    if let Some(anim) = anim
+        && let Some(colour) = light::glow_colour(
+            &anim,
+            &glow::anim_object(level.anim_object, &anim, pal),
+            pal,
+        )
+    {
+        for (x, y, z, block, o) in level.cells() {
+            if !(0x50..=0x5B).contains(&o.kind) || o.kind == 0x51 {
+                continue;
+            }
+            let (dx, dz, _) = anim_object_spot(o.kind);
+            let pos = [
+                x as f32 + 0.5 + dx,
+                object_base_y(y, block) + 0.8,
+                z as f32 + 0.5 + dz,
+            ];
+            lights.push(Light { pos, colour });
+        }
+    }
+    let lit = glow::texture(level.texture_set, tex, pal);
+    if let Some(colour) = light::glow_colour(tex, &lit, pal) {
+        for part in [&mesh.opaque, &mesh.cutout] {
+            for t in part.indices.as_chunks::<3>().0 {
+                let [a, b, c] = [t[0], t[1], t[2]].map(|i| i as usize);
+                let tile = ([a, b, c]
+                    .map(|i| part.uvs[i][1])
+                    .into_iter()
+                    .fold(f32::MAX, f32::min)
+                    * level_mesh::TILES as f32
+                    + 1e-3) as usize;
+                if !glow::torch_tile(level.texture_set, tile) {
+                    continue;
+                }
+                let n = part.normals[a];
+                let centre = [0, 1, 2].map(|k| {
+                    (part.positions[a][k] + part.positions[b][k] + part.positions[c][k]) / 3.0
+                        + n[k] * 0.35
+                });
+                // A face's two triangles give one light.
+                if lights.iter().any(|l: &Light| {
+                    (0..3).map(|k| (l.pos[k] - centre[k]).powi(2)).sum::<f32>() < 0.5
+                }) {
+                    continue;
+                }
+                lights.push(Light {
+                    pos: centre,
+                    colour,
+                });
+            }
+        }
+    }
+    lights
 }
 
 /// Sprite layers for static (`OBJ`) and animated (`ANIMOBJ`) objects.
@@ -444,20 +563,7 @@ fn object_layers(data: &mut GameData, level: &Level, pal: &Palette) -> Vec<Scene
             }
             0x50..=0x5B => {
                 // 0x51 animates the four 64×64 OBJ frames; the rest use ANIMOBJ.
-                let (dx, dz, half) = match o.kind {
-                    0x52 => (0.5, 0.5, None),
-                    0x53 => (0.5, -0.5, None),
-                    0x54..=0x5B => {
-                        let corner = [(-0.5, -0.5), (-0.5, 0.5), (0.5, 0.5), (0.5, -0.5)]
-                            [(o.kind as usize - 0x54) % 4];
-                        (
-                            corner.0,
-                            corner.1,
-                            Some(if o.kind < 0x58 { 0.0 } else { 32.0 }),
-                        )
-                    }
-                    _ => (0.0, 0.0, None),
-                };
+                let (dx, dz, half) = anim_object_spot(o.kind);
                 let anchor = [cx + dx, base_y, cz + dz];
                 if o.kind == 0x51 {
                     if obj.is_some() {
@@ -482,7 +588,8 @@ fn object_layers(data: &mut GameData, level: &Level, pal: &Palette) -> Vec<Scene
     if let Some(anim) = anim
         && !animated.indices.is_empty()
     {
-        layers.push(animated.finish(indexed_to_rgba(&anim, 64, pal)));
+        let lit = glow::anim_object(level.anim_object, &anim, pal);
+        layers.push(animated.finish(glowing_rgba(&anim, 64, pal, |p| lit[p])));
     }
     layers
 }
@@ -704,7 +811,7 @@ pub const TRAP_FRAME: u32 = 64;
 fn lemming_atlas(
     data: &mut GameData,
     pal: &Palette,
-    traps: Option<&[u8]>,
+    traps: Option<(u8, &[u8])>,
     door: &[u8],
     tiles: &[u8],
 ) -> Result<RgbaImage, l3d_formats::Error> {
@@ -744,14 +851,20 @@ fn lemming_atlas(
         }
     }
     let frame = (TRAP_FRAME * TRAP_FRAME) as usize;
-    for (k, f) in traps
-        .unwrap_or_default()
+    let (trap, trap_pixels) = traps.unwrap_or_default();
+    for (k, f) in trap_pixels
         .chunks_exact(frame)
         .take(TRAP_ATLAS_CELLS as usize)
         .enumerate()
     {
         put_sized(TRAP_ATLAS_FIRST + k as u32, f, TRAP_FRAME);
     }
+    // Only the trap frames and some lemming cells glow.
+    let trap_cells = TRAP_ATLAS_FIRST..TRAP_ATLAS_FIRST + TRAP_ATLAS_CELLS;
+    let cell_of = |p: usize| {
+        let (x, y) = (p as u32 % w, p as u32 / w);
+        y / LEMMING_CELL * ATLAS_COLUMNS + x / LEMMING_CELL
+    };
     let sheet = &l3d_formats::sheets::BOMBNUMB;
     if let Ok(digits) = data.read(sheet.path).and_then(|raw| sheet.cut(&raw)) {
         for (k, d) in digits.iter().take(8).enumerate() {
@@ -785,7 +898,16 @@ fn lemming_atlas(
             pixels[dst..dst + 64].copy_from_slice(&f[(y * 64) as usize..(y * 64 + 64) as usize]);
         }
     }
-    let mut image = indexed_to_rgba(&pixels, w, pal);
+    let mut image = glowing_rgba(&pixels, w, pal, |p| {
+        let cell = cell_of(p);
+        if trap_cells.contains(&cell) {
+            glow::trap(trap, pixels[p], pal)
+        } else if cell < n {
+            glow::lemming(cell, pixels[p], pal)
+        } else {
+            0.0
+        }
+    });
     // The crack frames: `OVERLAY.000` holds 1-bit 64×64 frames, 8 bytes per
     // row, the most significant bit leftmost (`docs/spec/graphics.md`).
     if let Ok(overlay) = data.read("GFX/OVERLAY.000") {
@@ -866,6 +988,8 @@ pub fn rebuild_blocks(
             sim.world.cut([x, y, z].map(|v| v as i32)) as f32 / 4.0
         }),
         texture,
+        &scene.lights,
+        level,
     );
     let brick_texture = out.layers[layer + 1].texture.clone();
     out.layers[layer + 1] = brick_layer(&sim.world.bricks, brick_texture);
@@ -1032,10 +1156,17 @@ pub fn build(data: &mut GameData, n: u32, show: Show) -> Result<BuiltLevel, l3d_
         }
     }
     let block_layer_index = scene.layers.len();
-    scene
-        .layers
-        .push(block_layer(&mesh, indexed_to_rgba(&tex, 64, &pal)));
-    // Builders' bricks, right after the blocks (see ebuild_blocks).
+    scene.lights = level_lights(data, &level, &tex, &mesh, &pal);
+    scene.layers.push(block_layer(
+        &mesh,
+        {
+            let lit = glow::texture(level.texture_set, &tex, &pal);
+            glowing_rgba(&tex, 64, &pal, |p| lit[p])
+        },
+        &scene.lights,
+        &level,
+    ));
+    // Builders' bricks, right after the blocks (see rebuild_blocks).
     let brick_tile = tex
         .get(BRICK_TILE * 64 * 64..(BRICK_TILE + 1) * 64 * 64)
         .unwrap_or_default();
@@ -1060,7 +1191,8 @@ pub fn build(data: &mut GameData, n: u32, show: Show) -> Result<BuiltLevel, l3d_
     let door = tex
         .get(door..(door + 4 * 64 * 64).min(tex.len()))
         .unwrap_or_default();
-    scene.sprite_atlas = lemming_atlas(data, &pal, traps.as_deref(), door, &tex).ok();
+    let traps = traps.as_deref().map(|t| (level.trap_type, t));
+    scene.sprite_atlas = lemming_atlas(data, &pal, traps, door, &tex).ok();
 
     if show.sky
         && level.sky_gfx != 0xFF
@@ -1079,7 +1211,8 @@ pub fn build(data: &mut GameData, n: u32, show: Show) -> Result<BuiltLevel, l3d_
                 let transposed: Vec<u8> = (0..200)
                     .flat_map(|y| (0..320).map(move |x| src[x * 200 + y]))
                     .collect();
-                scene.sky = Some(indexed_to_rgba(&transposed, 320, &pal));
+                let lit = glow::stars(&transposed, 320, &pal);
+                scene.sky = Some(glowing_rgba(&transposed, 320, &pal, |p| lit[p]));
                 scene.sky_surround = true;
             }
             _ => {}
