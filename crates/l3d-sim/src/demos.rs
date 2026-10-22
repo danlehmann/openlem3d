@@ -161,6 +161,7 @@ pub const SOLUTIONS: &[Solution] = &[
             (362, 7, 7, None),
             (413, 8, 7, None),
             (464, 9, 7, None),
+            (770, 1, 1, Some(false)),
         ],
     ),
     at(
@@ -642,6 +643,20 @@ pub const SOLUTIONS: &[Solution] = &[
     // Taxing levels, by the published walkthroughs (Taxing 13 "Motherboard"
     // by xeye's route).
     at(
+        51,
+        &[
+            (885, 79, 3, None),
+            (1062, 79, 3, None),
+            (1254, 79, 3, None),
+            (1428, 79, 3, None),
+            (1540, 0, 7, None),
+            (1745, 79, 3, None),
+            (1903, 0, 3, None),
+            (2190, 79, 4, None),
+            (2358, 0, 4, None),
+        ],
+    ),
+    at(
         52,
         &[
             (590, 0, 0, None),
@@ -711,6 +726,21 @@ pub const SOLUTIONS: &[Solution] = &[
         ),
         saves: 0,
     },
+    // Taxing 20 "Death Slide", partly by the published walkthrough.
+    at(
+        59,
+        &[
+            (1, 0, 7, None),
+            (82, 1, 7, None),
+            (385, 0, 1, Some(true)),
+            (500, 1, 3, None),
+            (635, 1, 5, None),
+            (700, 2, 3, None),
+            (1275, 2, 1, Some(true)),
+            (1470, 3, 0, None),
+            (1600, 4, 3, None),
+        ],
+    ),
     // Mayhem levels, play-tested in the simulation; Mayhem 8 "Across the
     // Network" by a route of our own, Mayhem 4 "Driving Range" partly.
     at(
@@ -1171,11 +1201,11 @@ pub const SOLUTIONS: &[Solution] = &[
             &[
                 (5, 0, 7, None),
                 (60, 1, 7, None),
-                (310, 0, 0, None),
-                (540, 1, 4, None),
+                (180, 0, 3, None),
+                (544, 1, 4, None),
                 (1200, 1, 4, None),
-                (1245, 15, 4, None),
-                (1300, 0, 2, None),
+                (1500, 4, 4, None),
+                (1650, 0, 2, None),
             ],
         ),
         saves: 0,

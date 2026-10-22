@@ -1571,7 +1571,8 @@ impl Simulation {
                         .fold(0u8, |m, seg| m | 1 << seg);
                     let c = [cx, cy, cz];
                     let low = mask.trailing_zeros();
-                    let above_band = self.world.present(c) & !mask & (0xF << low);
+                    let above_band =
+                        self.world.present(c) & !mask & 0xFu8.checked_shl(low).unwrap_or(0);
                     // A shaped block losing its top is shaved flat and keeps
                     // its slopes below the cut, as for the digger (blasts on
                     // a hill of 45° ramps in the original left flat steps
@@ -1674,9 +1675,11 @@ impl Simulation {
         let ahead = [l.pos[0] + d[0] * REACH, l.pos[2] + d[2] * REACH];
         if self
             .world
-            .solid([l.pos[0], l.pos[1] + HEAD_HEIGHT + CLIMB_SPEED, l.pos[2]])
+            .terrain_solid([l.pos[0], l.pos[1] + HEAD_HEIGHT + CLIMB_SPEED, l.pos[2]])
         {
-            // Ceiling: let go and fall back.
+            // Ceiling: let go and fall back. Bricks are no ceiling: in the
+            // original a climber climbed a wall straight past the first
+            // brick of a builder standing at its top edge.
             l.dir = l.dir.reverse();
             l.start_falling();
             return;
@@ -2257,7 +2260,18 @@ impl Simulation {
             .filter(|&n| facing(n))
         {
             if self.deflector_across(next[0], l.pos[1], next[2]).is_some() {
-                l.dir = l.dir.deflected(n);
+                // A climber climbs the face instead (the original: a climber
+                // landing from Taxing 20 "Death Slide"'s hatch climbed the
+                // deflector column the walkers are turned at). As at a wall,
+                // only a face reaching down to its feet.
+                if l.climber
+                    && l.pending.is_none()
+                    && self.world.solid([ahead[0], l.pos[1] + SUB / 8, ahead[1]])
+                {
+                    l.set_state(State::Climbing);
+                } else {
+                    l.dir = l.dir.deflected(n);
+                }
                 return;
             }
             l.pos[0] = next[0];
