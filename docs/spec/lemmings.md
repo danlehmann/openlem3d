@@ -106,7 +106,7 @@ else is **guessed** from the contact sheet's appearance.
 | 514–523 | Electrocution: normal and X-ray skeleton frames alternating | 5 × 2 | Guessed (pairs 514/515 front … 522/523 back). |
 | 524–533 | Electrocution cloud (gathers, lightning, shrinks) | 1 × 10 | Guessed. View-independent. Drawn over a zapped lemming, spread over its death (unmeasured). |
 | 534–537 | Smoke puff, shrinking (bomber explosion) | 1 × 4 | Guessed. View-independent. |
-| 538–562 | Arms spread sideways, one leg kicking up | 5 × 5 | Unknown. Earlier taken for the climber (the back block resembles the climber skill icon), but it shows a lemming standing, not hauling itself up (owner). Drawn for sliding on ice, guessed: sliders spread both arms (observed), and the blocker's pose that stood in before looked wrong (owner). |
+| 538–562 | Slider: arms spread sideways, one leg kicking up | 5 × 5 | **Verified** on Practice "Slippery" (camera moved close with cdcopy): a lemming sliding away from the camera matched the back block, cells 558–562, frame by frame, in the order 0, 1, 2, 3, 4, 3, 2, 1 (a ping-pong, the arms rocking), one frame about every 74 ms. Earlier taken for the climber, but it shows a lemming standing, not hauling itself up (owner). |
 | 563–567 | Film camera (the other cameras' markers in the world, not a lemming) | 5 × 1 | **Verified** (see [camera.md](camera.md), "Camera markers"): only 563 (front), 565 (side) and 567 (back) were ever seen. |
 
 Not found: an exit animation (lemmings were not seen exiting), the bomber

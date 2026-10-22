@@ -824,6 +824,20 @@ pub const SOLUTIONS: &[Solution] = &[
         ),
         saves: 0,
     },
+    // Mayhem 11 "Across the Network" by the owner's route, the one the
+    // original's walkthrough video plays (saving 75 there too).
+    at(
+        70,
+        &[
+            (252, 1, 0, None),
+            (538, 0, 1, Some(false)),
+            (593, 6, 1, Some(false)),
+            (760, 5, 4, None),
+            (800, 6, 2, None),
+            (1090, 2, 3, None),
+            (1245, 12, 4, None),
+        ],
+    ),
     at(
         71,
         &[

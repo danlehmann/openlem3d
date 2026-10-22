@@ -134,7 +134,7 @@ lemming would die on release. Read Z-first, all of them are inside.
 | `0x0800` | Land texture drawn at half scale |
 | `0x1000` | Minimap disabled: map and frame are both absent (observed on `LEVEL.019`, `044` and `062`, the only levels with the flag among those seen; levels without it showed the minimap) |
 | `0x2000`, `0x4000` | Unknown |
-| `0x8000` | Lemmings are zapped instead of drowning |
+| `0x8000` | Liquid zaps lemmings instead of drowning them (verified for the sea on `LEVEL.070`) |
 
 ### Preset cameras
 

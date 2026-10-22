@@ -150,6 +150,8 @@ enum Playback {
     /// mirrored (verified for falls); the side views as stored, which face
     /// the way the lemming goes (mirrored, it fell looking backwards).
     MirroredCycle(&'static [u32]),
+    /// The listed frame indices in a loop, every view as stored.
+    Cycle(&'static [u32]),
 }
 
 /// One action's animation: `frames` cells per angle block starting at `first`.
@@ -183,6 +185,10 @@ const fn once(first: u32, frames: u32, angles: Angles) -> Anim {
 /// middle.
 const FALL_CYCLE: &[u32] = &[2, 3, 4, 3, 2, 1, 0, 1];
 
+/// Sliding frame order: a ping-pong over the five frames, the arms rocking
+/// one way and back (verified frame by frame on Practice "Slippery").
+const SLIDE_CYCLE: &[u32] = &[0, 1, 2, 3, 4, 3, 2, 1];
+
 /// The animation for a state (cell ranges from `docs/spec/lemmings.md`).
 fn anim_for(state: State) -> Anim {
     use Angles::*;
@@ -205,9 +211,16 @@ fn anim_for(state: State) -> Anim {
         // drawn from the fuse (see `build`).
         State::Exploding => once(534, 4, One),
         State::Floating => anim(296, 5, Eight),
-        // Arms spread on ice (observed): the otherwise unused pose with arms
-        // spread and one leg kicking up (guessed).
-        State::Sliding => anim(538, 5, Five),
+        // Arms spread on ice: the pose with arms spread and one leg kicking
+        // up, played as a ping-pong (both verified: a lemming sliding away
+        // from the camera matched cells 558–562, the back view, in this
+        // order, one frame per tick).
+        State::Sliding => Anim {
+            first: 538,
+            frames: 5,
+            angles: Five,
+            playback: Playback::Cycle(SLIDE_CYCLE),
+        },
         // Hanging from the handle by one raised hand: the floater's pose
         // (owner's picture of the original).
         State::OnRope { .. } => anim(296, 5, Eight),
@@ -240,6 +253,7 @@ fn cell_for(a: Anim, view: ViewAngle, ticks: u32) -> (u32, bool) {
         Playback::Loop => (step % a.frames, false),
         Playback::Once => (step.min(a.frames - 1), false),
         Playback::MirroredCycle(cycle) => (cycle[step as usize % cycle.len()], true),
+        Playback::Cycle(cycle) => (cycle[step as usize % cycle.len()], false),
     };
     let (block, mirror) = match a.angles {
         Angles::Eight => (view.round_index(), false),
@@ -992,6 +1006,11 @@ pub fn build(
             // observation).
             State::Mining if l.state_ticks >= l3d_sim::MINE_CRACK_TICKS => {
                 cell_for(anim_for(State::Walking), view, l.state_ticks)
+            }
+            // A basher walks up to the next wall, before the first and
+            // between blocks (owner's observation).
+            State::Bashing if l.bash_walk_ticks > 0 => {
+                cell_for(anim_for(State::Walking), view, l.bash_walk_ticks)
             }
             // A builder on its way to the middle of its cell carries the
             // sack already (owner's observation).

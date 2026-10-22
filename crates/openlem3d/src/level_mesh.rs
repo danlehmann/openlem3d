@@ -283,7 +283,8 @@ fn dir_offset(d: FaceDir) -> [i32; 3] {
 }
 
 /// Texture coordinates within a tile for a local point, projected onto the
-/// source face's plane. `v` runs down the tile.
+/// source face's plane. `v` runs down the tile. A top face has the tile's
+/// top edge on the block's +Z side and its left edge on +X.
 fn tile_uv(src: FaceDir, p: [f32; 3]) -> [f32; 2] {
     let [x, y, z] = p;
     match src {
@@ -291,7 +292,7 @@ fn tile_uv(src: FaceDir, p: [f32; 3]) -> [f32; 2] {
         FaceDir::NegZ => [1.0 - x, 1.0 - y],
         FaceDir::PosX => [1.0 - z, 1.0 - y],
         FaceDir::NegX => [z, 1.0 - y],
-        FaceDir::PosY => [x, z],
+        FaceDir::PosY => [1.0 - x, 1.0 - z],
         FaceDir::NegY => [x, 1.0 - z],
     }
 }

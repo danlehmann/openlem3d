@@ -52,6 +52,12 @@ Every file is exactly 1,408 bytes: 64 definitions × 22 bytes, uncompressed.
 | 1 | Modifiers |
 | 2 | Shading: 0 = unchanged, up to 8 = darkest [L3DEdit]. Each step darkens the colours by about 7 % (verified: the steel spire of `LEVEL.068`, shading 7, shows tile 67 at about 0.45 of its colour in the original, matched by 1 − 7 × 0.07 applied to the palette colours) |
 
+A top face shows its tile with the tile's top edge along the block's +Z side
+and its left edge along +X, turning with the block's rotation (**verified** on
+Mayhem 11 "Across the Network", `LEVEL.070`: the chip lettered "T1086" across
+three cells of rotation 1, and the chip borders, match the original only this
+way).
+
 ### Flags (unverified, [L3DEdit])
 
 | Bit | Meaning |

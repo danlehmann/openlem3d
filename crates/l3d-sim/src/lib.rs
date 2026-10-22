@@ -499,6 +499,9 @@ pub struct Lemming {
     /// miners walk on until they cross into the next cell along their
     /// heading, then take it up (measured in the original's Practice demos).
     pub pending: Option<State>,
+    /// Ticks a basher has walked on towards its next wall since it last
+    /// bashed; 0 while it bashes.
+    pub bash_walk_ticks: u32,
 }
 
 impl Lemming {
@@ -517,12 +520,14 @@ impl Lemming {
             passing: None,
             landed: false,
             pending: None,
+            bash_walk_ticks: 0,
         }
     }
 
     fn set_state(&mut self, s: State) {
         self.state = s;
         self.state_ticks = 0;
+        self.bash_walk_ticks = 0;
     }
 
     /// Starts falling from where it is.
@@ -1608,6 +1613,16 @@ impl Simulation {
         (f, wet)
     }
 
+    /// What becomes of a lemming whose feet are in liquid, the sea or a liquid
+    /// block top: it drowns, unless the level makes liquid electric.
+    fn sunk(&self) -> State {
+        if self.world.liquid_zaps {
+            State::Zapped
+        } else {
+            State::Drowning
+        }
+    }
+
     /// Lands a lemming on whatever is at its feet.
     fn land(&mut self, l: &mut Lemming, on_block: bool, fell: i32) {
         if self.bounce(l, fell) {
@@ -1616,7 +1631,7 @@ impl Simulation {
         l.landed = true;
         let (ground_flags, wet) = self.underfoot(l.pos, on_block);
         if wet {
-            l.set_state(State::Drowning);
+            l.set_state(self.sunk());
         } else if ground_flags.is_some_and(|f| f & flags::NO_SPLAT != 0) {
             l.set_state(State::Walking);
         } else if fell >= SPLAT_HEIGHT {
@@ -1913,11 +1928,13 @@ impl Simulation {
             // On through the gap; the next stroke starts at the wall.
             l.pos[0] += d[0] * WALK_SPEED;
             l.pos[2] += d[2] * WALK_SPEED;
+            l.bash_walk_ticks += 1;
             if self.settle(l) {
                 l.state_ticks = 0;
             }
             return;
         }
+        l.bash_walk_ticks = 0;
         if !Self::bash_stroke_ends(l.state_ticks) {
             return;
         }
@@ -2329,7 +2346,7 @@ impl Simulation {
             l.pos[1] = ground;
             let (ground_flags, wet) = self.underfoot(l.pos, on_block);
             if wet {
-                l.set_state(State::Drowning);
+                l.set_state(self.sunk());
             } else if !self.bounce(l, stepped) {
                 // Slippery tops and floors make walkers slide; leaving them,
                 // they walk.

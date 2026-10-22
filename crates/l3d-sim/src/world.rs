@@ -16,6 +16,9 @@ pub const GROUND: i32 = SUB;
 /// Level header flag: the whole level bottom is solid ground.
 const FLAG_BOTTOM_SOLID: u16 = 0x0080;
 
+/// Level header flag: liquid zaps lemmings instead of drowning them.
+const FLAG_LIQUID_ZAPS: u16 = 0x8000;
+
 /// What lies at the ground plane under a column outside any block.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Floor {
@@ -31,6 +34,9 @@ pub struct World {
     /// Convex land polygons as `(x, z)` corner points, in grid units.
     land: Vec<Vec<(i32, i32)>>,
     bottom_solid: bool,
+    /// Liquid (the sea and liquid block tops) zaps lemmings instead of
+    /// drowning them.
+    pub liquid_zaps: bool,
     /// Header byte `0x157`: bit 0, the level bottom is slippery; bit 1, the
     /// land is.
     slippery_floor: u8,
@@ -107,6 +113,7 @@ impl World {
             cells,
             land,
             bottom_solid: level.flags & FLAG_BOTTOM_SOLID != 0,
+            liquid_zaps: level.flags & FLAG_LIQUID_ZAPS != 0,
             slippery_floor: level.flags2 & 3,
             changes: Vec::new(),
             bricks: Vec::new(),
