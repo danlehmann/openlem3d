@@ -242,7 +242,7 @@ fn briefing_input(
     choices: Query<(&Interaction, &Choice)>,
     keys: Res<ButtonInput<KeyCode>>,
     mouse: Res<ButtonInput<MouseButton>>,
-    touches: Res<Touches>,
+    lifted: crate::touch::Lifted,
     mut preview: ResMut<Preview>,
     current: Res<CurrentLevel>,
     mut next: ResMut<NextState<AppState>>,
@@ -261,7 +261,7 @@ fn briefing_input(
         || on(Choice::Preview);
     let go = (mouse.just_pressed(MouseButton::Left) && !on_prompt)
         || keys.just_pressed(KeyCode::Space)
-        || (touches.any_just_released() && !on_prompt)
+        || (lifted.any() && !on_prompt)
         || keys
             .get_just_pressed()
             .any(|k| !matches!(k, KeyCode::Escape | KeyCode::Enter | KeyCode::NumpadEnter));
@@ -337,7 +337,7 @@ fn preview(
     time: Res<Time>,
     mut keys: ResMut<ButtonInput<KeyCode>>,
     mut mouse: ResMut<ButtonInput<MouseButton>>,
-    touches: Res<Touches>,
+    lifted: crate::touch::Lifted,
     choices: Query<(&Interaction, &Choice)>,
     mut current: ResMut<CurrentLevel>,
     mut state: ResMut<Preview>,
@@ -392,7 +392,7 @@ fn preview(
     let on_prompt = choices.iter().any(|(i, _)| *i != Interaction::None);
     let any = keys.get_just_pressed().next().is_some()
         || (mouse.get_just_pressed().next().is_some() && !on_prompt)
-        || (touches.any_just_released() && !on_prompt);
+        || (lifted.any() && !on_prompt);
     let Ok(mut view) = views.single_mut() else {
         return;
     };
@@ -458,7 +458,7 @@ fn has_demo(level: u32) -> bool {
 fn end_demo(
     mut keys: ResMut<ButtonInput<KeyCode>>,
     mut mouse: ResMut<ButtonInput<MouseButton>>,
-    touches: Res<Touches>,
+    lifted: crate::touch::Lifted,
     mut game: ResMut<Game>,
     mut current: ResMut<CurrentLevel>,
     mut next: ResMut<NextState<AppState>>,
@@ -468,7 +468,7 @@ fn end_demo(
     };
     if keys.get_just_pressed().next().is_some()
         || mouse.get_just_pressed().next().is_some()
-        || touches.any_just_released()
+        || lifted.any()
     {
         keys.clear();
         mouse.clear();

@@ -261,7 +261,7 @@ fn results_input(
     choices: Query<(&Interaction, &Choice)>,
     keys: Res<ButtonInput<KeyCode>>,
     mouse: Res<ButtonInput<MouseButton>>,
-    touches: Res<Touches>,
+    lifted: crate::touch::Lifted,
     outcome: Option<Res<Outcome>>,
     mut current: ResMut<CurrentLevel>,
     mut next: ResMut<NextState<AppState>>,
@@ -278,7 +278,7 @@ fn results_input(
         || on(Choice::Menu);
     let go = on(Choice::Next)
         || (mouse.just_pressed(MouseButton::Left) && !on_prompt)
-        || (touches.any_just_released() && !on_prompt)
+        || (lifted.any() && !on_prompt)
         || keys.any_just_pressed([KeyCode::Space, KeyCode::Enter, KeyCode::NumpadEnter]);
     if menu {
         next.set(crate::menu::level_menu(o.level));

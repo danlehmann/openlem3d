@@ -305,6 +305,7 @@ fn menu_input(
     roots: Query<Entity, With<crate::title::ScreenRoot>>,
     mut current: ResMut<CurrentLevel>,
     mut next: ResMut<NextState<AppState>>,
+    mut tapped: Local<Option<u32>>,
 ) {
     let max = (LEVELS_PER_RATING as usize - ROWS_SHOWN) as f32;
     // Scrolling and dragging move the rows as far as the wheel or fingers
@@ -359,8 +360,34 @@ fn menu_input(
             node.color = colour;
         }
     }
-    if let Some((_, row)) = rows.iter().find(|(i, _)| **i == Interaction::Pressed) {
-        current.number = row.0;
+    // A finger chooses a row by tapping it (lifting without having dragged)
+    // rather than by landing on it, so that it can drag the list; the mouse
+    // chooses on the click.
+    let pressed = rows
+        .iter()
+        .find(|(i, _)| **i == Interaction::Pressed)
+        .map(|(_, r)| r.0);
+    let chosen = if touches.iter().next().is_some() || touches.any_just_released() {
+        if touches.any_just_pressed() {
+            *tapped = pressed;
+        }
+        let dragged = touches
+            .iter()
+            .chain(touches.iter_just_released())
+            .any(|t| t.distance().length() >= crate::touch::TAP_SLOP);
+        if dragged {
+            *tapped = None;
+        }
+        if touches.any_just_released() {
+            tapped.take()
+        } else {
+            None
+        }
+    } else {
+        pressed
+    };
+    if let Some(row) = chosen {
+        current.number = row;
         current.loaded = None;
         next.set(AppState::Briefing);
     }

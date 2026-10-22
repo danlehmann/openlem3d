@@ -3,6 +3,9 @@
 //! is fully playable without a keyboard. Taps on lemmings are handled by the
 //! HUD.
 
+use std::collections::HashMap;
+
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 
 use crate::ViewCamera;
@@ -24,18 +27,23 @@ pub struct TouchPlugin;
 
 impl Plugin for TouchPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            touch_camera
-                .before(crate::camera_controls)
-                .run_if(in_state(AppState::Playing)),
-        )
-        .add_systems(
-            PreUpdate,
-            touch_over_mouse
-                .after(bevy::input::InputSystems)
-                .before(bevy::ui::UiSystems::Focus),
-        );
+        app.init_resource::<TouchStarts>()
+            .add_systems(
+                PreUpdate,
+                record_touch_starts.after(bevy::input::InputSystems),
+            )
+            .add_systems(
+                Update,
+                touch_camera
+                    .before(crate::camera_controls)
+                    .run_if(in_state(AppState::Playing)),
+            )
+            .add_systems(
+                PreUpdate,
+                touch_over_mouse
+                    .after(bevy::input::InputSystems)
+                    .before(bevy::ui::UiSystems::Focus),
+            );
     }
 }
 
@@ -52,6 +60,42 @@ fn touch_over_mouse(touches: Res<Touches>, mut windows: Query<&mut Window>) {
         if window.physical_cursor_position().is_some() {
             window.set_physical_cursor_position(None);
         }
+    }
+}
+
+/// The screen each finger now down (or just lifted) landed on.
+#[derive(Resource, Default)]
+pub struct TouchStarts(HashMap<u64, AppState>);
+
+fn record_touch_starts(
+    touches: Res<Touches>,
+    state: Res<State<AppState>>,
+    mut starts: ResMut<TouchStarts>,
+) {
+    starts
+        .0
+        .retain(|&id, _| touches.get_pressed(id).is_some() || touches.just_released(id));
+    for t in touches.iter_just_pressed() {
+        starts.0.insert(t.id(), *state.get());
+    }
+}
+
+/// Fingers lifting on the screen they landed on. A finger that chose
+/// something on one screen (landing on a level in the practice grid, say)
+/// is then not also a tap on the next, which would skip it.
+#[derive(SystemParam)]
+pub struct Lifted<'w> {
+    touches: Res<'w, Touches>,
+    starts: Res<'w, TouchStarts>,
+    state: Res<'w, State<AppState>>,
+}
+
+impl Lifted<'_> {
+    /// Whether a finger that landed on this screen lifted.
+    pub fn any(&self) -> bool {
+        self.touches
+            .iter_just_released()
+            .any(|t| self.starts.0.get(&t.id()) == Some(self.state.get()))
     }
 }
 

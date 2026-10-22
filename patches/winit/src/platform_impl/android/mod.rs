@@ -472,7 +472,8 @@ impl<T: 'static> EventLoop<T> {
 
     /// openlem3d patch: a touchpad gesture, which Android reports as fingers
     /// on the mouse pointer's source (a two-finger swipe as one finger moving
-    /// as the fingers do, a pinch as two), as pan and pinch gestures.
+    /// as the fingers do, a pinch as two), as pan and pinch gestures, and a
+    /// swipe as scrolling too.
     fn handle_touchpad_gesture<F>(&mut self, motion_event: &MotionEvent<'_>, callback: &mut F)
     where
         F: FnMut(event::Event<T>, &RootAEL),
@@ -527,6 +528,15 @@ impl<T: 'static> EventLoop<T> {
                     moved.iter().map(|(b, a)| a.y - b.y).sum::<f32>() / n,
                 );
                 send(self, event::WindowEvent::PanGesture { device_id, delta, phase });
+                if moved.len() == 1 {
+                    // A two-finger swipe also scrolls, as on other platforms
+                    // (the content following the fingers).
+                    let delta = event::MouseScrollDelta::PixelDelta(PhysicalPosition::new(
+                        delta.x as f64,
+                        delta.y as f64,
+                    ));
+                    send(self, event::WindowEvent::MouseWheel { device_id, delta, phase });
+                }
                 if let [(b0, a0), (b1, a1), ..] = moved[..] {
                     let distance = |p: PhysicalPosition<f32>, q: PhysicalPosition<f32>| {
                         ((p.x - q.x).powi(2) + (p.y - q.y).powi(2)).sqrt()
