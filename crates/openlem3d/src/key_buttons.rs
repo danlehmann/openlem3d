@@ -18,7 +18,12 @@ use crate::ui::{Button, ImageNode, Interaction, Node, px};
 
 /// The colour of a button's text under the pointer (as the level list's).
 const HOVER: Color = Color::srgb(1.0, 0.9, 0.2);
-/// The level button's distance from the top of the screen, original pixels.
+/// The level button's centre and bottom, original pixels: under the panel's
+/// right-hand icons, below the umbrella (ours).
+const LEVEL_BUTTON_CENTRE: f32 = 284.0;
+const LEVEL_BUTTON_BOTTOM: f32 = 197.0;
+/// Where it goes when the skill row reaches under the icons: its distance
+/// from the top of the screen, original pixels.
 const LEVEL_BUTTON_TOP: f32 = 3.0;
 
 pub struct KeyButtonsPlugin;
@@ -135,9 +140,11 @@ pub(crate) fn spawn_text_button(
     commands.entity(parent).add_child(button);
 }
 
-/// The button in a level, centred at the top of the screen: "Restart" (Esc
-/// restarts the level, or asks to in Enhanced mode), or "Menu" during a
-/// replay (Esc leaves for the level list). Hidden in the lemming view
+/// The button in a level, at the bottom right under the panel's icons, or
+/// centred at the top of the screen when the window is too narrow for it to
+/// clear the skill row there (the panel keeps the row to the left and the
+/// icons to the right): "Restart" (Esc restarts the level, or asks to in Enhanced mode), or
+/// "Menu" during a replay (Esc leaves for the level list). Hidden in the lemming view
 /// (where Esc leaves the view; the panel's arrow does that) and while the
 /// restart question is up.
 #[derive(Component)]
@@ -182,6 +189,16 @@ fn level_button(
     let s = (size.y / 200.0).max(1.0);
     let (glyphs, width) = font.layout(text);
     let colour = Color::WHITE;
+    let skills_end = crate::panel::SKILL_BUTTONS[8].0 + 32.0;
+    let right = size.x - (320.0 - LEVEL_BUTTON_CENTRE) * s - width * s / 2.0;
+    let (left, top) = if right >= skills_end * s {
+        (
+            right,
+            size.y - (200.0 - LEVEL_BUTTON_BOTTOM + font.size.y) * s,
+        )
+    } else {
+        ((size.x - width * s) / 2.0, LEVEL_BUTTON_TOP * s)
+    };
     let button = commands
         .spawn((
             LevelButton,
@@ -191,8 +208,8 @@ fn level_button(
                 colour,
             },
             Node {
-                left: px(((size.x - width * s) / 2.0).round()),
-                top: px(LEVEL_BUTTON_TOP * s),
+                left: px(left.round()),
+                top: px(top.round()),
                 width: px(width * s),
                 height: px(font.size.y * s),
                 ..default()
