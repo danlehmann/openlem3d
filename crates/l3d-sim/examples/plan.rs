@@ -35,4 +35,14 @@ fn main() {
         sim.log.len(),
         steps.len() + rates.len(),
     );
+    // Optional: the lemmings still out at the end, with FATES set.
+    if std::env::var_os("FATES").is_some() {
+        for (i, l) in sim.lemmings.iter().enumerate().filter(|(_, l)| !l.gone) {
+            let p = l.pos.map(|v| v as f32 / l3d_sim::SUB as f32);
+            println!(
+                "lemming {i}: {:?} at ({:.2}, {:.2}, {:.2}) heading {:?}",
+                l.state, p[0], p[1], p[2], l.dir
+            );
+        }
+    }
 }
