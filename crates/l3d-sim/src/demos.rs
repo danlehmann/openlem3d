@@ -887,6 +887,20 @@ pub const SOLUTIONS: &[Solution] = &[
             (1855, 1, 6, None),
         ],
     ),
+    // Mayhem 15 "Hole in One, Two, Three!", by the published walkthrough.
+    at(
+        74,
+        &[
+            (185, 1, 4, None),
+            (335, 0, 3, None),
+            (630, 0, 3, None),
+            (730, 2, 4, None),
+            (798, 0, 6, None),
+            (1060, 2, 4, None),
+            (1090, 0, 3, None),
+            (1257, 2, 4, None),
+        ],
+    ),
     Solution {
         level: 76,
         plan: Plan::Rated(
