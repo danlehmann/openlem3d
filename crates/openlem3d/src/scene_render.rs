@@ -12,10 +12,11 @@ use std::sync::Arc;
 use bevy::core_pipeline::Core2dSystems;
 use bevy::core_pipeline::schedule::Core2d;
 use bevy::prelude::*;
+use bevy::render::batching::gpu_preprocessing::{GpuPreprocessingMode, GpuPreprocessingSupport};
 use bevy::render::extract_resource::{ExtractResource, ExtractResourcePlugin};
 use bevy::render::renderer::{RenderContext, RenderDevice, RenderQueue, ViewQuery};
 use bevy::render::view::{ExtractedView, ViewTarget};
-use bevy::render::{Render, RenderApp, RenderSystems};
+use bevy::render::{Render, RenderApp, RenderStartup, RenderSystems};
 use wgpu::util::DeviceExt;
 
 /// Floats per vertex: position (3), uv (2), brightness (1), cutout flag (1),
@@ -117,7 +118,12 @@ impl Plugin for SceneRenderPlugin {
         };
         render_app
             .add_systems(Render, prepare_scene.in_set(RenderSystems::Prepare))
-            .add_systems(Core2d, draw_scene.before(Core2dSystems::MainPass));
+            .add_systems(Core2d, draw_scene.before(Core2dSystems::MainPass))
+            .add_systems(
+                RenderStartup,
+                no_gpu_preprocessing
+                    .after(bevy::render::init_gpu_resource::<GpuPreprocessingSupport>),
+            );
     }
 
     fn finish(&self, app: &mut App) {
@@ -914,6 +920,15 @@ fn set_viewport(pass: &mut wgpu::RenderPass, viewport: UVec4) {
         0.0,
         1.0,
     );
+}
+
+/// Turns off Bevy's GPU mesh preprocessing and culling, which the game, drawing
+/// no meshes, doesn't use. Where Bevy thinks the GPU supports culling it builds
+/// compute shaders for it at startup anyway, and the Pixel 11 Pro's PowerVR
+/// driver crashes compiling them (Bevy holds the Pixel 10 back, but doesn't
+/// know the 11).
+fn no_gpu_preprocessing(mut support: ResMut<GpuPreprocessingSupport>) {
+    support.max_supported_mode = GpuPreprocessingMode::None;
 }
 
 fn f32_bytes(v: &[f32]) -> Vec<u8> {
