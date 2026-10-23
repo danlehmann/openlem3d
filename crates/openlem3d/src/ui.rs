@@ -17,11 +17,9 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use bevy::ecs::system::SystemParam;
-use bevy::input::InputSystems;
-use bevy::prelude::*;
-use l3d_engine::asset::{AssetEvent, AssetId, Assets, Handle};
-use l3d_engine::image::Image;
+use l3d_engine::ecs::system::SystemParam;
+use l3d_engine::input::InputSystems;
+use l3d_engine::prelude::*;
 
 use crate::gpu::{Gpu, TARGET_FORMAT};
 use crate::screen::Screen;
@@ -31,12 +29,6 @@ pub struct UiPlugin;
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<UiStack>()
-            .init_resource::<Assets<Image>>()
-            .add_message::<AssetEvent<Image>>()
-            .add_systems(
-                Last,
-                Assets::<Image>::update.in_set(l3d_engine::asset::AssetSystems),
-            )
             .add_systems(
                 PreUpdate,
                 focus.in_set(UiSystems::Focus).after(InputSystems),

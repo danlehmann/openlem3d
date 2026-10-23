@@ -8,10 +8,10 @@
 //! input never shows one.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
-use bevy::asset::RenderAssetUsages;
-use bevy::prelude::*;
-use bevy::window::{CursorIcon, CustomCursor, CustomCursorImage, SystemCursorIcon};
+use l3d_engine::prelude::*;
+use l3d_engine::window::{CursorIcon, CustomCursor, SystemCursorIcon};
 use l3d_formats::sheets;
 
 use crate::menu::AppState;
@@ -39,7 +39,7 @@ const CELL: f32 = 16.0;
 #[derive(Resource)]
 struct Cells {
     rgba: Vec<(Vec<u8>, UVec2)>,
-    scaled: HashMap<(usize, u32), Handle<Image>>,
+    scaled: HashMap<(usize, u32), Arc<[u8]>>,
 }
 
 fn load(mut commands: Commands, mut data: ResMut<Data>) {
@@ -65,15 +65,18 @@ fn load(mut commands: Commands, mut data: ResMut<Data>) {
     });
 }
 
-/// Cell `cell` scaled (nearest neighbour) to `size`×`size` pixels.
-fn scaled(
-    cells: &mut Cells,
-    cell: usize,
-    size: u32,
-    images: &mut Assets<Image>,
-) -> Option<Handle<Image>> {
-    if let Some(h) = cells.scaled.get(&(cell, size)) {
-        return Some(h.clone());
+/// Cell `cell` scaled (nearest neighbour) to `size`×`size` pixels, as the
+/// pointer.
+fn scaled(cells: &mut Cells, cell: usize, size: u32) -> Option<CustomCursor> {
+    let cursor = |rgba: &Arc<[u8]>| CustomCursor {
+        key: cell as u64,
+        width: size as u16,
+        height: size as u16,
+        rgba: rgba.clone(),
+        hotspot: ((size / 2) as u16, (size / 2) as u16),
+    };
+    if let Some(rgba) = cells.scaled.get(&(cell, size)) {
+        return Some(cursor(rgba));
     }
     let (src, dim) = cells.rgba.get(cell)?;
     let mut px = vec![0u8; (size * size * 4) as usize];
@@ -85,19 +88,9 @@ fn scaled(
             px[d..d + 4].copy_from_slice(&src[s..s + 4]);
         }
     }
-    let h = images.add(Image::new(
-        wgpu::Extent3d {
-            width: size,
-            height: size,
-            depth_or_array_layers: 1,
-        },
-        wgpu::TextureDimension::D2,
-        px,
-        wgpu::TextureFormat::Rgba8UnormSrgb,
-        RenderAssetUsages::all(),
-    ));
-    cells.scaled.insert((cell, size), h.clone());
-    Some(h)
+    let rgba: Arc<[u8]> = px.into();
+    cells.scaled.insert((cell, size), rgba.clone());
+    Some(cursor(&rgba))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -113,7 +106,6 @@ fn update(
     settings: Res<crate::settings::Settings>,
     windows: Query<(Entity, &Window, Option<&CursorIcon>)>,
     screen: Res<crate::screen::Screen>,
-    mut images: ResMut<Assets<Image>>,
 ) {
     let (Some(mut cells), Ok((entity, window, icon))) = (cells, windows.single()) else {
         return;
@@ -149,12 +141,8 @@ fn update(
     };
     // Physical pixels: the cursor image is not scaled by the system.
     let pixels = (CELL * (window.physical_height() as f32 / 200.0).max(1.0)).round() as u32;
-    let wanted = match cell.and_then(|c| scaled(&mut cells, c, pixels, &mut images)) {
-        Some(handle) => CursorIcon::Custom(CustomCursor::Image(CustomCursorImage {
-            handle,
-            hotspot: ((pixels / 2) as u16, (pixels / 2) as u16),
-            ..default()
-        })),
+    let wanted = match cell.and_then(|c| scaled(&mut cells, c, pixels)) {
+        Some(cursor) => CursorIcon::Custom(cursor),
         None => CursorIcon::System(SystemCursorIcon::Default),
     };
     if icon != Some(&wanted) {

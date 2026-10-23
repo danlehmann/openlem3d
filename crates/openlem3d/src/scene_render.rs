@@ -8,8 +8,8 @@
 
 use std::sync::Arc;
 
-use bevy::ecs::system::SystemParam;
-use bevy::prelude::*;
+use l3d_engine::ecs::system::SystemParam;
+use l3d_engine::prelude::*;
 use wgpu::util::DeviceExt;
 
 use crate::gpu::{Gpu, TARGET_FORMAT};

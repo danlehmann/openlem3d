@@ -4,7 +4,7 @@
 //! Esc or a preset camera key (1–4) returns to the previous view, as does
 //! the lemming leaving play.
 
-use bevy::prelude::*;
+use l3d_engine::prelude::*;
 use l3d_sim::SUB;
 
 use crate::hud::{Highlight, SelectedSkill};

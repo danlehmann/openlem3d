@@ -2,7 +2,7 @@
 //! (`docs/spec/ui-graphics.md`, "Screen transitions"). Only the fade-in is
 //! kept: the new screen is up, and takes input, from its first frame.
 
-use bevy::prelude::*;
+use l3d_engine::prelude::*;
 
 use crate::menu::AppState;
 use crate::ui::{BackgroundColor, GlobalZIndex, Node, percent};

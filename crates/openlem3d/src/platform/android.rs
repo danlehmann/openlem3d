@@ -3,10 +3,10 @@
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use bevy::android::android_activity::AndroidApp;
-use bevy::log::warn;
 use jni::objects::{JObject, JObjectArray, JString, JValue};
 use jni::{JNIEnv, JavaVM};
+use l3d_engine::android::android_activity::AndroidApp;
+use l3d_engine::log::warn;
 
 /// `Activity.FULLSCREEN_MODE_REQUEST_EXIT` (and `_ENTER`, one more).
 const FULLSCREEN_MODE_REQUEST_EXIT: i32 = 0;
@@ -19,7 +19,7 @@ const TRANSIENT_BARS_BY_SWIPE: i32 = 2;
 static FULL_SCREEN: AtomicBool = AtomicBool::new(false);
 
 pub fn app() -> &'static AndroidApp {
-    bevy::android::ANDROID_APP
+    l3d_engine::android::ANDROID_APP
         .get()
         .expect("android_main stores the AndroidApp before the game starts")
 }

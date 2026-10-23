@@ -7,9 +7,7 @@
 //! the original). Clicking it moves the camera over that spot, as the
 //! original allows unless the level forbids it (flag `0x0008`).
 
-use bevy::prelude::*;
-use l3d_engine::asset::{Assets, Handle};
-use l3d_engine::image::Image;
+use l3d_engine::prelude::*;
 use l3d_formats::blk::FaceDir;
 use l3d_formats::gamedata::Palette;
 use l3d_formats::level::{SIZE_X, SIZE_Y, SIZE_Z};

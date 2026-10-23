@@ -4,7 +4,7 @@
 //! code that measures the screen or places things by the pointer uses
 //! [`Screen`] rather than the window.
 
-use bevy::prelude::*;
+use l3d_engine::prelude::*;
 
 pub struct ScreenPlugin;
 
@@ -49,7 +49,7 @@ impl Screen {
 
 /// Fills the screen where the game has it to itself (see
 /// `platform::full_screen`) whenever the window gains focus.
-fn full_screen(mut focus: MessageReader<bevy::window::WindowFocused>) {
+fn full_screen(mut focus: MessageReader<l3d_engine::window::WindowFocused>) {
     if focus.read().any(|f| f.focused) {
         crate::platform::full_screen();
     }

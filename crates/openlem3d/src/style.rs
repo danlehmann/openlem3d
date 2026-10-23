@@ -4,7 +4,7 @@
 //! title screen shows it and switches it when clicked; Tab switches it on
 //! the title and during a level, where the new mode is named briefly.
 
-use bevy::prelude::*;
+use l3d_engine::prelude::*;
 
 use crate::menu::AppState;
 use crate::settings::Settings;

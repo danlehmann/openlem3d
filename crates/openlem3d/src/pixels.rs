@@ -5,7 +5,7 @@
 //! into the detailed picture, or coarsens it back (ours); the level waits
 //! meanwhile.
 
-use bevy::prelude::*;
+use l3d_engine::prelude::*;
 
 use crate::scene_render::SceneCamera;
 use crate::settings::Settings;

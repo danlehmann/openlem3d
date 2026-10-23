@@ -48,7 +48,7 @@ pub mod prelude {
     pub use crate::image::Image;
     pub use crate::input::{ButtonInput, KeyCode, MouseButton, Touch, Touches};
     pub use crate::math::*;
-    pub use crate::state::{NextState, OnEnter, OnExit, State, States, in_state};
+    pub use crate::state::{NextState, OnEnter, OnExit, OnTransition, State, States, in_state};
     pub use crate::time::{Fixed, Real, Time, Virtual};
     pub use crate::window::{PrimaryWindow, Window};
 

@@ -1,6 +1,6 @@
 //! States, as Bevy had them: a [`State`] resource, a [`NextState`] to ask
-//! for a change, and the [`OnEnter`] and [`OnExit`] schedules run when one
-//! happens. A change asked for is made between [`PreUpdate`] and the fixed
+//! for a change, and the [`OnExit`], [`OnTransition`] and [`OnEnter`]
+//! schedules run, in that order, when one happens. A change asked for is made between [`PreUpdate`] and the fixed
 //! steps, and always runs both schedules, even for the state it is already
 //! in.
 //!
@@ -66,6 +66,13 @@ pub struct OnEnter<S: States>(pub S);
 #[derive(ScheduleLabel, Debug, Clone, PartialEq, Eq, Hash)]
 pub struct OnExit<S: States>(pub S);
 
+/// Runs when the state changes from `exited` to `entered`.
+#[derive(ScheduleLabel, Debug, Clone, PartialEq, Eq, Hash)]
+pub struct OnTransition<S: States> {
+    pub exited: S,
+    pub entered: S,
+}
+
 /// A run condition: whether the state is `state`.
 pub fn in_state<S: States>(state: S) -> impl FnMut(Option<Res<State<S>>>) -> bool + Clone {
     move |current: Option<Res<State<S>>>| current.is_some_and(|c| c.0 == state)
@@ -93,6 +100,10 @@ pub(crate) fn apply<S: States>(world: &mut World) {
         return;
     };
     let exited = std::mem::replace(&mut world.resource_mut::<State<S>>().0, entered.clone());
-    let _ = world.try_run_schedule(OnExit(exited));
+    let _ = world.try_run_schedule(OnExit(exited.clone()));
+    let _ = world.try_run_schedule(OnTransition {
+        exited,
+        entered: entered.clone(),
+    });
     let _ = world.try_run_schedule(OnEnter(entered));
 }

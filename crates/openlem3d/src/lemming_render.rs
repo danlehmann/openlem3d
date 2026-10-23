@@ -8,7 +8,7 @@
 
 use std::f32::consts::{FRAC_PI_4, TAU};
 
-use bevy::math::Vec3;
+use l3d_engine::math::Vec3;
 use l3d_sim::objects::ObjectKind;
 use l3d_sim::{SUB, Simulation, State};
 

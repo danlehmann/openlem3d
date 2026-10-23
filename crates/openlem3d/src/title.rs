@@ -6,9 +6,7 @@
 //! Nothing here makes the player wait: every screen takes input from its
 //! first frame, and the animations never block (`docs/GROUNDRULES.md`).
 
-use bevy::prelude::*;
-use l3d_engine::asset::{Assets, Handle};
-use l3d_engine::image::Image;
+use l3d_engine::prelude::*;
 use l3d_formats::font::{Font, title_font};
 use l3d_formats::gamedata::Palette;
 use l3d_formats::icons::Icons;
@@ -1025,7 +1023,7 @@ fn spawn_code(
 }
 
 fn code_input(
-    mut events: MessageReader<bevy::input::keyboard::KeyboardInput>,
+    mut events: MessageReader<l3d_engine::input::KeyboardInput>,
     mouse: Res<ButtonInput<MouseButton>>,
     time: Res<Time>,
     mut code: ResMut<CodeText>,
@@ -1033,7 +1031,7 @@ fn code_input(
     mut next: ResMut<NextState<AppState>>,
     mut sfx: MessageWriter<crate::sfx::Sfx>,
 ) {
-    use bevy::input::keyboard::Key;
+    use l3d_engine::input::{Key, NamedKey};
     let now = time.elapsed_secs();
     let mut any = mouse.get_just_pressed().next().is_some();
     for k in events.read() {
@@ -1047,9 +1045,9 @@ fn code_input(
         // Return, Backspace and Esc by the key too: Android reports Return
         // (from its on-screen keyboard at least) as the character "\n".
         let key = match k.key_code {
-            KeyCode::Enter | KeyCode::NumpadEnter => Key::Enter,
-            KeyCode::Backspace => Key::Backspace,
-            KeyCode::Escape => Key::Escape,
+            Some(KeyCode::Enter | KeyCode::NumpadEnter) => Key::Named(NamedKey::Enter),
+            Some(KeyCode::Backspace) => Key::Named(NamedKey::Backspace),
+            Some(KeyCode::Escape) => Key::Named(NamedKey::Escape),
             _ => k.logical_key.clone(),
         };
         match &key {
@@ -1061,15 +1059,15 @@ fn code_input(
                     }
                 }
             }
-            Key::Backspace => {
+            Key::Named(NamedKey::Backspace) => {
                 if let Some((c, _)) = code.letters.pop() {
                     let slot = code.letters.len();
                     code.erasing.retain(|e| e.0 != slot);
                     code.erasing.push((slot, c, now));
                 }
             }
-            Key::Escape => next.set(AppState::Title),
-            Key::Enter => {
+            Key::Named(NamedKey::Escape) => next.set(AppState::Title),
+            Key::Named(NamedKey::Enter) => {
                 let text: String = code.letters.iter().map(|(c, _)| *c as char).collect();
                 match crate::codes::level_for_code(&text) {
                     Some(n) => {
@@ -1160,7 +1158,7 @@ fn attract(
     time: Res<Time>,
     keys: Res<ButtonInput<KeyCode>>,
     mouse: Res<ButtonInput<MouseButton>>,
-    motion: Res<bevy::input::mouse::AccumulatedMouseMotion>,
+    motion: Res<l3d_engine::input::AccumulatedMouseMotion>,
     touches: Res<Touches>,
     mut data: ResMut<Data>,
     mut game: ResMut<crate::Game>,

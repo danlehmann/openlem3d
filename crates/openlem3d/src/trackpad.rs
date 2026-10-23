@@ -14,8 +14,8 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use bevy::input::gestures::{PanGesture, PinchGesture};
-use bevy::prelude::*;
+use l3d_engine::input::{PanGesture, PinchGesture};
+use l3d_engine::prelude::*;
 
 use crate::ViewCamera;
 use crate::menu::AppState;
@@ -146,7 +146,7 @@ fn gesture_camera(
 
 /// Where the pointer is, for pinching towards it, and the level, for
 /// twisting about the spot there.
-#[derive(bevy::ecs::system::SystemParam)]
+#[derive(l3d_engine::ecs::system::SystemParam)]
 struct Pointer<'w, 's> {
     windows: Query<'w, 's, &'static Window>,
     screen: Res<'w, crate::screen::Screen>,
@@ -216,8 +216,8 @@ mod mac {
     use std::cell::Cell;
     use std::ptr::NonNull;
 
-    use bevy::ecs::system::NonSendMarker;
     use block2::RcBlock;
+    use l3d_engine::ecs::system::NonSendMarker;
     use objc2::MainThreadMarker;
     use objc2::msg_send;
     use objc2::rc::Retained;

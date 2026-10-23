@@ -64,3 +64,23 @@ impl Rect {
         r
     }
 }
+
+/// An axis-aligned rectangle of whole pixels, from `min` to `max`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct URect {
+    pub min: UVec2,
+    pub max: UVec2,
+}
+
+impl URect {
+    pub fn from_corners(a: UVec2, b: UVec2) -> Self {
+        URect {
+            min: a.min(b),
+            max: a.max(b),
+        }
+    }
+
+    pub fn size(&self) -> UVec2 {
+        self.max - self.min
+    }
+}

@@ -11,9 +11,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use bevy::ecs::system::NonSendMarker;
-use bevy::prelude::*;
-use bevy::window::{PresentMode, PrimaryWindow, RawHandleWrapper};
+use l3d_engine::ecs::system::NonSendMarker;
+use l3d_engine::prelude::*;
+use l3d_engine::window::{PresentMode, PrimaryWindow, WindowHandle};
 
 use crate::scene_render::{SceneGpu, SceneInput};
 use crate::screen::Screen;
@@ -59,7 +59,7 @@ pub struct Gpu {
 
 impl Gpu {
     /// The device for the window `handle`, and the window's surface.
-    fn new(handle: &RawHandleWrapper) -> (Gpu, wgpu::Surface<'static>) {
+    fn new(handle: &WindowHandle) -> (Gpu, wgpu::Surface<'static>) {
         let mut desc = wgpu::InstanceDescriptor::new_without_display_handle_from_env();
         // Vulkan on Windows-on-ARM (Adreno) loses the device after a few
         // seconds, so Windows defaults to DX12. `WGPU_BACKEND` overrides.
@@ -68,23 +68,23 @@ impl Gpu {
         }
         let instance = wgpu::Instance::new(desc);
         let surface = create_surface(&instance, handle);
-        let adapter = bevy::tasks::block_on(
-            instance.request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::from_env()
-                    .unwrap_or(wgpu::PowerPreference::HighPerformance),
-                force_fallback_adapter: false,
-                compatible_surface: Some(&surface),
-            }),
-        )
-        .expect("no GPU found");
+        let adapter =
+            pollster::block_on(
+                instance.request_adapter(&wgpu::RequestAdapterOptions {
+                    power_preference: wgpu::PowerPreference::from_env()
+                        .unwrap_or(wgpu::PowerPreference::HighPerformance),
+                    force_fallback_adapter: false,
+                    compatible_surface: Some(&surface),
+                }),
+            )
+            .expect("no GPU found");
         info!("{:?}", adapter.get_info());
-        let (device, queue) =
-            bevy::tasks::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-                label: Some("openlem3d"),
-                required_limits: adapter.limits(),
-                ..Default::default()
-            }))
-            .expect("could not open the GPU");
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            label: Some("openlem3d"),
+            required_limits: adapter.limits(),
+            ..Default::default()
+        }))
+        .expect("could not open the GPU");
         // Logged rather than fatal, as Bevy's renderer did.
         device.on_uncaptured_error(Arc::new(|e| error!("GPU error: {e}")));
         let gpu = Gpu {
@@ -116,14 +116,10 @@ impl Gpu {
     }
 }
 
-fn create_surface(instance: &wgpu::Instance, handle: &RawHandleWrapper) -> wgpu::Surface<'static> {
-    let target = wgpu::SurfaceTargetUnsafe::RawHandle {
-        raw_display_handle: Some(handle.get_display_handle()),
-        raw_window_handle: handle.get_window_handle(),
-    };
-    // SAFETY: the surface is dropped when bevy_winit takes the handle away
-    // (before the window goes), and the window lives as long as the handle.
-    unsafe { instance.create_surface_unsafe(target) }.expect("could not draw into the window")
+fn create_surface(instance: &wgpu::Instance, handle: &WindowHandle) -> wgpu::Surface<'static> {
+    instance
+        .create_surface(handle.0.clone())
+        .expect("could not draw into the window")
 }
 
 /// The window's surface and how it is configured.
@@ -357,7 +353,7 @@ fn render(
     // Surfaces want the main thread on macOS.
     _main_thread: NonSendMarker,
     mut renderer: ResMut<Renderer>,
-    windows: Query<(&Window, Option<Ref<RawHandleWrapper>>), With<PrimaryWindow>>,
+    windows: Query<(&Window, Option<Ref<WindowHandle>>), With<PrimaryWindow>>,
     screen: Res<Screen>,
     clear: Res<ClearColor>,
     scene_input: SceneInput,

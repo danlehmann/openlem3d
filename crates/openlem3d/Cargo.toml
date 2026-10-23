@@ -8,21 +8,12 @@ license.workspace = true
 [dependencies]
 l3d-formats.workspace = true
 l3d-engine.workspace = true
+# The ECS the game's systems run in (l3d-engine's); its derives name it.
+bevy_ecs = { version = "0.19.1", default-features = false, features = ["std"] }
+# Waits for wgpu's adapter and device.
+pollster = "0.4"
 # Saves --screenshot images.
 png.workspace = true
-# Only what the game uses: it draws everything with its own wgpu renderer
-# (no bevy_render, bevy_ui, sprites, glTF or scenes), shows no text, and
-# plays its sounds with the engine's own audio.
-bevy = { version = "0.19.1", default-features = false, features = [
-    "default_app",
-    "std",
-    "multi_threaded",
-    "bevy_winit",
-    "x11",
-    "wayland",
-    "custom_cursor",
-    "android-native-activity",
-] }
 wgpu = "29.0.4"
 l3d-sim.workspace = true
 

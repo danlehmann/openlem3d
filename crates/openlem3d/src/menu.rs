@@ -1,16 +1,14 @@
 //! Level selection: every level is available from the start, grouped by
 //! difficulty rating (`docs/spec/level.md` for the file numbering).
 
-use bevy::input::mouse::MouseScrollUnit;
-use bevy::prelude::*;
-use l3d_engine::asset::{Assets, Handle};
-use l3d_engine::image::Image;
+use l3d_engine::input::MouseScrollUnit;
+use l3d_engine::prelude::*;
 
 use crate::ui::{Button, ImageNode, Interaction, Node, Overflow};
 use crate::{CurrentLevel, Data};
 
 /// Whether the player is choosing a level or playing one.
-#[derive(States, Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum AppState {
     /// The title screen (main menu).
     #[default]
@@ -303,7 +301,7 @@ fn menu_input(
     mut glyphs: Query<(&ListRow, &mut ImageNode)>,
     mut bodies: Query<&mut crate::title::At, With<ListBody>>,
     keys: Res<ButtonInput<KeyCode>>,
-    mut wheel: MessageReader<bevy::input::mouse::MouseWheel>,
+    mut wheel: MessageReader<l3d_engine::input::MouseWheel>,
     touches: Res<Touches>,
     screen: Res<crate::screen::Screen>,
     windows: Query<&Window>,

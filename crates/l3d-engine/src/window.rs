@@ -116,8 +116,8 @@ pub struct Window {
     /// Android, whether its on-screen keyboard is up).
     pub ime_enabled: bool,
     pub focused: bool,
-    /// The pointer, in physical pixels in the window.
-    cursor: Option<Vec2>,
+    /// The pointer, in physical pixels in the window, if it is over it.
+    pub cursor: Option<Vec2>,
 }
 
 impl Default for Window {

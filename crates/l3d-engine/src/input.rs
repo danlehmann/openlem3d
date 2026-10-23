@@ -12,7 +12,7 @@ use bevy_ecs::prelude::*;
 use bevy_ecs::schedule::SystemSet;
 use glam::Vec2;
 pub use winit::event::{ElementState as ButtonState, MouseButton, TouchPhase};
-pub use winit::keyboard::{Key, KeyCode, NativeKey, SmolStr};
+pub use winit::keyboard::{Key, KeyCode, NamedKey, NativeKey, SmolStr};
 
 use crate::app::App;
 

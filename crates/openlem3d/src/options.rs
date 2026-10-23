@@ -5,9 +5,7 @@
 //! settings that mean something here are offered. Esc also saves and
 //! leaves.
 
-use bevy::prelude::*;
-use l3d_engine::asset::{Assets, Handle};
-use l3d_engine::image::Image;
+use l3d_engine::prelude::*;
 use l3d_formats::icons::Icons;
 
 use crate::Data;
@@ -291,7 +289,7 @@ fn apply_window(
     mut windows: Query<&mut Window>,
     mut applied: Local<Option<bool>>,
 ) {
-    use bevy::window::{MonitorSelection, WindowMode};
+    use l3d_engine::window::{MonitorSelection, WindowMode};
     for mut w in &mut windows {
         let mode = if settings.fullscreen {
             WindowMode::BorderlessFullscreen(MonitorSelection::Current)

@@ -3,7 +3,7 @@
 //! paused level. Y or Return restarts; N or Esc carries on. The answers can
 //! be tapped or clicked too (see `key_buttons`).
 
-use bevy::prelude::*;
+use l3d_engine::prelude::*;
 
 use crate::key_buttons::KeyButton;
 use crate::menu::AppState;

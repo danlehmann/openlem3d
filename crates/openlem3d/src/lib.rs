@@ -42,8 +42,8 @@ mod ui;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseScrollUnit};
-use bevy::prelude::*;
+use l3d_engine::input::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseScrollUnit};
+use l3d_engine::prelude::*;
 use l3d_formats::blk::BlockSet;
 use l3d_formats::gamedata::{GameData, locate_data_dir};
 use l3d_formats::level::{CameraPreset, Level};
@@ -193,7 +193,15 @@ fn parse_args() -> Options {
     o
 }
 
-#[bevy_main]
+/// Android's entry point: keeps the app the system started and runs the
+/// game.
+#[cfg(target_os = "android")]
+#[unsafe(no_mangle)]
+fn android_main(app: l3d_engine::android::android_activity::AndroidApp) {
+    let _ = l3d_engine::android::ANDROID_APP.set(app);
+    main();
+}
+
 pub fn main() {
     let opts = parse_args();
     // Before the window shows, so the game doesn't lay itself out around
@@ -209,24 +217,21 @@ pub fn main() {
         std::process::exit(1);
     });
     App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "openlem3d".into(),
-                present_mode: if opts.turbo {
-                    bevy::window::PresentMode::AutoNoVsync
-                } else {
-                    default()
-                },
-                resolution: match opts.size {
-                    Some((w, h)) => {
-                        bevy::window::WindowResolution::new(w, h).with_scale_factor_override(1.0)
-                    }
-                    None => default(),
-                },
-                ..default()
-            }),
+        .with_window(Window {
+            title: "openlem3d".into(),
+            present_mode: if opts.turbo {
+                l3d_engine::window::PresentMode::AutoNoVsync
+            } else {
+                default()
+            },
+            resolution: match opts.size {
+                Some((w, h)) => {
+                    l3d_engine::window::WindowResolution::new(w, h).with_scale_factor_override(1.0)
+                }
+                None => default(),
+            },
             ..default()
-        }))
+        })
         .add_plugins((
             SceneRenderPlugin,
             hud::HudPlugin,
@@ -268,7 +273,10 @@ pub fn main() {
             None => opts.screen,
         })
         .add_systems(Update, (screenshot_when_ready, hide_ui))
-        .add_systems(PreUpdate, scripted_presses.after(bevy::input::InputSystems))
+        .add_systems(
+            PreUpdate,
+            scripted_presses.after(l3d_engine::input::InputSystems),
+        )
         .insert_resource(Game::default())
         .insert_resource(Time::<Fixed>::from_hz(l3d_sim::TICKS_PER_SECOND as f64))
         .init_resource::<PresetIndex>()
@@ -1319,10 +1327,12 @@ pub fn pointer_region(p: Vec2, size: Vec2) -> [usize; 2] {
 
 /// With `--turbo`, game time runs up to a thousand times real time, up to
 /// ten seconds of it per frame: the simulation steps as fast as the machine
-/// allows (rendering only now and then).
+/// allows (rendering only now and then). The limit is on the frame's real
+/// time (10 ms, a thousand times over); `--wait` and `--press` land within
+/// a frame of their time.
 fn turbo(opts: Res<Options>, mut time: ResMut<Time<Virtual>>) {
     if opts.turbo {
-        time.set_max_delta(std::time::Duration::from_secs(10));
+        time.set_max_delta(std::time::Duration::from_millis(10));
         time.set_relative_speed(1000.0);
     }
 }

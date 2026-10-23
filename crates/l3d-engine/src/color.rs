@@ -31,6 +31,10 @@ impl LinearRgba {
     pub fn to_f32_array(self) -> [f32; 4] {
         [self.red, self.green, self.blue, self.alpha]
     }
+
+    pub fn to_vec4(self) -> glam::Vec4 {
+        glam::Vec4::from_array(self.to_f32_array())
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

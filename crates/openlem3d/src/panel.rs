@@ -4,9 +4,7 @@
 //! height. On wider windows the right-hand column keeps to the right edge and
 //! the skill row to the bottom left.
 
-use bevy::prelude::*;
-use l3d_engine::asset::{Assets, Handle};
-use l3d_engine::image::Image;
+use l3d_engine::prelude::*;
 use l3d_formats::font::Font;
 use l3d_formats::icons::{Icons, panel as icon};
 use l3d_formats::image::IndexedImage;

@@ -34,7 +34,7 @@ pub fn config_dir() -> Option<PathBuf> {
 pub fn insets() -> [u32; 4] {
     #[cfg(target_os = "android")]
     return android::insets().unwrap_or_else(|e| {
-        bevy::log::warn_once!("could not read the window insets: {e}");
+        l3d_engine::warn_once!("could not read the window insets: {e}");
         [0; 4]
     });
     #[cfg(not(target_os = "android"))]

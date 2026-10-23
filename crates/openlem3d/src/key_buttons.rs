@@ -5,10 +5,10 @@
 //! Pressing one sends that key's input, so the key's own handling serves
 //! both (ours).
 
-use bevy::input::ButtonState;
-use bevy::input::keyboard::{Key, KeyboardInput, NativeKey};
-use bevy::prelude::*;
-use bevy::window::PrimaryWindow;
+use l3d_engine::input::ButtonState;
+use l3d_engine::input::{Key, KeyboardInput, NamedKey, NativeKey};
+use l3d_engine::prelude::*;
+use l3d_engine::window::PrimaryWindow;
 
 use crate::lemming_cam::LemmingCam;
 use crate::menu::AppState;
@@ -60,7 +60,7 @@ fn press(
     };
     let mut send = |key: KeyCode, state: ButtonState| {
         input.write(KeyboardInput {
-            key_code: key,
+            key_code: Some(key),
             logical_key: logical(key),
             state,
             text: None,
@@ -84,8 +84,8 @@ fn press(
 /// The key a [`KeyButton`]'s key produces.
 fn logical(key: KeyCode) -> Key {
     match key {
-        KeyCode::Escape => Key::Escape,
-        KeyCode::Enter => Key::Enter,
+        KeyCode::Escape => Key::Named(NamedKey::Escape),
+        KeyCode::Enter => Key::Named(NamedKey::Enter),
         KeyCode::KeyY => Key::Character("y".into()),
         KeyCode::KeyN => Key::Character("n".into()),
         _ => Key::Unidentified(NativeKey::Unidentified),
