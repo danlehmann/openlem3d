@@ -69,8 +69,8 @@ pub const HATCH_OPEN_TICKS: u32 = 10;
 /// about one cell long).
 const BLAST_RADIUS: i32 = SUB;
 /// How far below and above the bomber's feet the blast reaches.
-const BLAST_BELOW: i32 = SUB / 2;
-const BLAST_ABOVE: i32 = SUB;
+const BLAST_BELOW: i32 = SUB / 4;
+const BLAST_ABOVE: i32 = SUB / 2;
 /// Ticks per segment dug (measured: 3.0 ± 0.1 s per quarter unit through
 /// Practice "Digger"'s bridge, seen side-on, with the first quarter gone
 /// one period after the assignment).
@@ -1627,10 +1627,11 @@ impl Simulation {
     }
 
     /// Ends a bomber by blowing a hole: every column whose centre lies within
-    /// the blast radius of the bomber (across the ground) loses the same band, from half a
-    /// unit below its feet to a unit above them, so a wall it stands at goes
-    /// whole and the crater floor is level (ours; a sphere left floating
-    /// halves of walls and uneven floors that trapped walkers).
+    /// the blast radius of the bomber (across the ground) loses the same band,
+    /// from a quarter unit below its feet to half a unit above them, so the
+    /// crater floor is level (verified on a changed "Team Work", 2026-10-23:
+    /// a bomber on a 1-unit platform took its top quarter, one cell long; on
+    /// a changed "One Way" a wall beside a bomber lost its lower half).
     fn explode(&mut self, l: &mut Lemming) {
         let r = BLAST_RADIUS;
         let (lo, hi) = (l.pos[1] - BLAST_BELOW, l.pos[1] + BLAST_ABOVE);
