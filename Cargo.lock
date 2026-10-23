@@ -526,22 +526,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bevy_audio"
-version = "0.19.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "750809b7b007dd6de6e5c730e67973027a3d22392fa7fd6f5331f8cefb489a18"
-dependencies = [
- "bevy_app",
- "bevy_asset",
- "bevy_ecs",
- "bevy_math",
- "bevy_reflect",
- "bevy_transform",
- "rodio",
- "tracing",
-]
-
-[[package]]
 name = "bevy_camera"
 version = "0.19.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -821,7 +805,6 @@ dependencies = [
  "bevy_android",
  "bevy_app",
  "bevy_asset",
- "bevy_audio",
  "bevy_clipboard",
  "bevy_color",
  "bevy_derive",
@@ -2620,12 +2603,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dfa686283ad6dd069f105e5ab091b04c62850d3e4cf5d67debad1933f55023df"
 
 [[package]]
-name = "hound"
-version = "3.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "62adaabb884c94955b19907d60019f4e145d091c75345379e70d1ee696f7854f"
-
-[[package]]
 name = "icu_collections"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2911,6 +2888,17 @@ name = "khronos_api"
 version = "3.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e2db585e1d738fc771bf08a151420d3ed193d9d895a36df7f6f8a9456b911ddc"
+
+[[package]]
+name = "l3d-engine"
+version = "0.1.0"
+dependencies = [
+ "bevy_ecs",
+ "glam",
+ "log",
+ "rodio",
+ "winit",
+]
 
 [[package]]
 name = "l3d-formats"
@@ -3644,6 +3632,7 @@ dependencies = [
  "bevy",
  "block2 0.6.2",
  "jni 0.21.1",
+ "l3d-engine",
  "l3d-formats",
  "l3d-sim",
  "objc2 0.6.5",
@@ -4112,10 +4101,8 @@ checksum = "d0a536bb79db59098ef71a4dd4246c02eb87b316deceb1b68e0cde7167ec01eb"
 dependencies = [
  "cpal",
  "dasp_sample",
- "hound",
  "num-rational",
  "thiserror 2.0.21",
- "tracing",
 ]
 
 [[package]]

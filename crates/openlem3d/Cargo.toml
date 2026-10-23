@@ -7,9 +7,10 @@ license.workspace = true
 
 [dependencies]
 l3d-formats.workspace = true
+l3d-engine.workspace = true
 # Only what the game uses: it draws everything with its own wgpu renderer
 # (no bevy_render, bevy_ui, sprites, glTF or scenes), shows no text, and
-# plays WAV sounds.
+# plays its sounds with the engine's own audio.
 bevy = { version = "0.19.1", default-features = false, features = [
     "default_app",
     "std",
@@ -18,8 +19,6 @@ bevy = { version = "0.19.1", default-features = false, features = [
     "x11",
     "wayland",
     "custom_cursor",
-    "bevy_audio",
-    "wav",
     # Saves --screenshot images.
     "png",
     "android-native-activity",
@@ -55,5 +54,5 @@ objc2-app-kit = { version = "0.3", default-features = false, features = [
 ] }
 
 [target.'cfg(target_os = "android")'.dependencies]
-# For the window insets (`src/platform.rs`); the version Bevy's audio uses.
+# For the window insets (`src/platform.rs`); the version the sound output (cpal) uses.
 jni = "0.21"

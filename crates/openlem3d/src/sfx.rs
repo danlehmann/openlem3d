@@ -4,10 +4,9 @@
 //! sounds here. Muting the music (M) mutes these too.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
-use bevy::audio::{AudioPlayer, AudioSource, PlaybackSettings, Volume};
 use bevy::prelude::*;
+use l3d_engine::audio::{Audio, Sound};
 use l3d_formats::sound::Sample;
 use l3d_sim::{Event, Skill};
 
@@ -73,19 +72,18 @@ pub const CAMERA_VOICES: [&str; 4] = [
     "VOXFX/CAMRA4",
 ];
 
-/// Uploaded samples, loaded on first use (`None` when missing or empty).
+/// Samples, loaded on first use (`None` when missing or empty).
 #[derive(Resource, Default)]
-struct Sounds(HashMap<&'static str, Option<Handle<AudioSource>>>);
+struct Sounds(HashMap<&'static str, Option<Sound>>);
 
 /// Effect volume relative to full scale.
 const VOLUME: f32 = 0.8;
 
 fn play(
-    mut commands: Commands,
+    audio: Res<Audio>,
     mut requests: MessageReader<Sfx>,
     mut sounds: ResMut<Sounds>,
     mut data: ResMut<Data>,
-    mut sources: ResMut<Assets<AudioSource>>,
     muted: Res<crate::music::MusicMuted>,
     settings: Res<crate::settings::Settings>,
 ) {
@@ -96,24 +94,20 @@ fn play(
             continue;
         }
         played.push(name);
-        let handle = sounds.0.entry(name).or_insert_with(|| {
+        let sound = sounds.0.entry(name).or_insert_with(|| {
             let sample = data
                 .0
                 .read(&format!("SOUND/{name}.U8"))
                 .ok()
                 .and_then(|b| Sample::parse(&b).ok())?;
-            (!sample.data.is_empty()).then(|| {
-                sources.add(AudioSource {
-                    bytes: Arc::from(sample.to_wav()),
-                })
+            (!sample.data.is_empty()).then(|| Sound {
+                channels: 1,
+                rate: sample.rate,
+                samples: sample.data.iter().map(|&s| s as i16 * 256).collect(),
             })
         });
-        if let Some(h) = handle {
-            commands.spawn((
-                AudioPlayer::new(h.clone()),
-                PlaybackSettings::DESPAWN
-                    .with_volume(Volume::Linear(VOLUME * settings.effects_volume())),
-            ));
+        if let Some(sound) = sound {
+            audio.play(sound, VOLUME * settings.effects_volume());
         }
     }
 }

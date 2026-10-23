@@ -780,9 +780,9 @@ pub(crate) fn load_level(
     opts: Res<Options>,
     mut scene: ResMut<SceneContent>,
     mut game: ResMut<Game>,
-    (mut sources, music, muted, settings): (
-        ResMut<Assets<bevy::audio::AudioSource>>,
-        music::MusicQuery,
+    (audio, mut music, muted, settings): (
+        Res<l3d_engine::audio::Audio>,
+        ResMut<music::LevelMusic>,
         Res<music::MusicMuted>,
         Res<settings::Settings>,
     ),
@@ -852,9 +852,8 @@ pub(crate) fn load_level(
     game.save_requirement = level.save_requirement as u32;
     let track = music::track_for(level.theme, level.music);
     music::play_track(
-        &mut commands,
-        &mut sources,
-        &music::current(&music),
+        &mut music,
+        &audio,
         &data.0.disc,
         track,
         music::volume(&muted, &settings),

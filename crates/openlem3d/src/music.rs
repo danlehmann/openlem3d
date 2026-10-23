@@ -3,15 +3,13 @@
 //! A level's theme and music index select the track. Every pair that the
 //! 100 levels use was observed in the original game (`docs/spec/disc.md`).
 
-use std::sync::Arc;
-
-use bevy::audio::{AudioPlayer, AudioSource, PlaybackSettings, Volume};
 use bevy::prelude::*;
+use l3d_engine::audio::{Audio, Playing, Sound};
 use l3d_formats::disc::Disc;
 
-/// The entity playing the current level's music.
-#[derive(Component)]
-pub struct LevelMusic;
+/// The current level's music, while it plays.
+#[derive(Resource, Default)]
+pub struct LevelMusic(Option<Playing>);
 
 /// Whether music is muted (M toggles).
 #[derive(Resource, Default)]
@@ -23,6 +21,8 @@ impl Plugin for MusicPlugin {
     fn build(&self, app: &mut App) {
         use crate::menu::AppState;
         app.init_resource::<MusicMuted>()
+            .init_resource::<LevelMusic>()
+            .insert_resource(Audio::open())
             .add_systems(Update, toggle_mute);
         // Music plays only in levels, not on the briefing or in the menus
         // (verified); the options screen opened from a level keeps it.
@@ -85,41 +85,10 @@ pub fn track_for(theme: u8, music: u8) -> u8 {
     2 + ((theme - 1) * 2 + (music & 1)) % 23
 }
 
-/// Wraps 44.1 kHz 16-bit stereo PCM in a RIFF/WAVE header.
-fn wav_bytes(samples: &[i16]) -> Vec<u8> {
-    let data_len = (samples.len() * 2) as u32;
-    let mut out = Vec::with_capacity(44 + data_len as usize);
-    out.extend_from_slice(b"RIFF");
-    out.extend_from_slice(&(36 + data_len).to_le_bytes());
-    out.extend_from_slice(b"WAVEfmt ");
-    out.extend_from_slice(&16u32.to_le_bytes()); // fmt chunk size
-    out.extend_from_slice(&1u16.to_le_bytes()); // PCM
-    out.extend_from_slice(&2u16.to_le_bytes()); // channels
-    out.extend_from_slice(&44_100u32.to_le_bytes());
-    out.extend_from_slice(&(44_100u32 * 4).to_le_bytes()); // byte rate
-    out.extend_from_slice(&4u16.to_le_bytes()); // block align
-    out.extend_from_slice(&16u16.to_le_bytes()); // bits per sample
-    out.extend_from_slice(b"data");
-    out.extend_from_slice(&data_len.to_le_bytes());
-    for s in samples {
-        out.extend_from_slice(&s.to_le_bytes());
-    }
-    out
-}
-
 /// Replaces the playing music with CD track `track` (1-based), looping at
 /// `volume` (linear).
-pub fn play_track(
-    commands: &mut Commands,
-    sources: &mut Assets<AudioSource>,
-    existing: &[Entity],
-    disc: &Disc,
-    track: u8,
-    volume: f32,
-) {
-    for e in existing {
-        commands.entity(*e).despawn();
-    }
+pub fn play_track(music: &mut LevelMusic, audio: &Audio, disc: &Disc, track: u8, volume: f32) {
+    music.0 = None;
     let Some(t) = disc.tracks.iter().find(|t| t.number == track) else {
         warn!("no CD track {track}");
         return;
@@ -131,23 +100,14 @@ pub fn play_track(
             return;
         }
     };
-    let handle = sources.add(AudioSource {
-        bytes: Arc::from(wav_bytes(&samples)),
-    });
-    commands.spawn((
-        AudioPlayer::new(handle),
-        PlaybackSettings::LOOP.with_volume(Volume::Linear(volume)),
-        LevelMusic,
-    ));
+    let sound = Sound {
+        channels: 2,
+        rate: 44_100,
+        samples: samples.into(),
+    };
+    music.0 = audio.play_looped(&sound, volume);
     info!("playing CD track {track}");
 }
-
-/// Entities currently playing level music.
-pub fn current(q: &Query<Entity, With<LevelMusic>>) -> Vec<Entity> {
-    q.iter().collect()
-}
-
-pub type MusicQuery<'w, 's> = Query<'w, 's, Entity, With<LevelMusic>>;
 
 /// The music volume: the setting, or silence while muted.
 pub fn volume(muted: &MusicMuted, settings: &crate::settings::Settings) -> f32 {
@@ -163,20 +123,18 @@ fn toggle_mute(
     keys: Res<ButtonInput<KeyCode>>,
     settings: Res<crate::settings::Settings>,
     mut muted: ResMut<MusicMuted>,
-    mut sinks: Query<&mut AudioSink, With<LevelMusic>>,
+    music: Res<LevelMusic>,
 ) {
     if keys.just_pressed(KeyCode::KeyM) {
         muted.0 = !muted.0;
     }
-    if muted.is_changed() || settings.is_changed() {
-        for mut sink in &mut sinks {
-            sink.set_volume(Volume::Linear(volume(&muted, &settings)));
-        }
+    if (muted.is_changed() || settings.is_changed())
+        && let Some(playing) = &music.0
+    {
+        playing.set_volume(volume(&muted, &settings));
     }
 }
 
-fn stop(mut commands: Commands, music: Query<Entity, With<LevelMusic>>) {
-    for e in &music {
-        commands.entity(e).despawn();
-    }
+fn stop(mut music: ResMut<LevelMusic>) {
+    music.0 = None;
 }
