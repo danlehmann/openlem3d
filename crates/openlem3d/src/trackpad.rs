@@ -23,6 +23,7 @@ use crate::touch::{Twist, TwoFingers, two_fingers};
 
 /// Trackpad travel across its whole width, in touchscreen pixels: the
 /// fingers move the camera as far as a drag this long on the screen.
+#[cfg(any(windows, target_os = "macos"))]
 const PAD_WIDTH_PX: f32 = 1200.0;
 /// How long after the fingers leave the trackpad its wheel scrolling (which
 /// Windows keeps sending, coasting) is ignored.
