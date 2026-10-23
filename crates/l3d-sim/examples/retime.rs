@@ -25,48 +25,74 @@ fn main() {
         }
     }
     let next = std::sync::Mutex::new(jobs.into_iter());
+    // Levels run one per worker; each worker tries its shifts on `inner`
+    // threads of its own.
+    let inner = (threads / 3).max(1);
     std::thread::scope(|scope| {
-        for _ in 0..threads {
+        for _ in 0..threads.div_ceil(inner) {
             scope.spawn(|| {
-                while let Some((k, level, blocks, need)) = next.lock().unwrap().next() {
+                loop {
+                    let job = next.lock().unwrap().next();
+                    let Some((k, level, blocks, need)) = job else {
+                        break;
+                    };
                     let s = &SOLUTIONS[k];
                     let (rates, mut steps): (&[RateStep], Vec<Step>) = match s.plan {
                         Plan::At(st) => (&[], st.to_vec()),
                         Plan::Rated(r, st) => (r, st.to_vec()),
                         Plan::Each(_) => continue,
                     };
-                    let saved =
-                        |steps: &[Step]| play_steps(rates, steps, &level, &blocks).counts.saved;
+                    // Saves first, then assignments taken, then fewer dead: a
+                    // route that saves none yet still gets nearer.
+                    let saved = |steps: &[Step]| {
+                        let sim = play_steps(rates, steps, &level, &blocks);
+                        (sim.counts.saved, sim.log.len(), -(sim.counts.dead as i64))
+                    };
                     let mut best = saved(&steps);
                     'search: for _ in 0..passes {
                         let mut improved = false;
                         for j in 0..steps.len() {
                             let t0 = steps[j].0 as i64;
-                            let mut found = None;
-                            let tries = (1..=spread)
+                            let trials: Vec<Vec<Step>> = (1..=spread)
                                 .flat_map(|d| [-d, d])
-                                .flat_map(|d| [(d, false), (d, true)]);
-                            for (d, rest) in tries {
-                                if t0 + d < 0 {
-                                    continue;
-                                }
-                                let mut trial = steps.clone();
-                                for (m, s) in trial.iter_mut().enumerate() {
-                                    if m == j || (rest && m > j) {
-                                        s.0 = (s.0 as i64 + d).max(0) as u64;
+                                .flat_map(|d| [(d, false), (d, true)])
+                                .filter(|&(d, _)| t0 + d >= 0)
+                                .map(|(d, rest)| {
+                                    let mut trial = steps.clone();
+                                    for (m, s) in trial.iter_mut().enumerate() {
+                                        if m == j || (rest && m > j) {
+                                            s.0 = (s.0 as i64 + d).max(0) as u64;
+                                        }
                                     }
-                                }
-                                trial.sort_by_key(|s| s.0);
-                                let n = saved(&trial);
-                                if n > best && found.as_ref().is_none_or(|(m, _)| n > *m) {
-                                    found = Some((n, trial));
+                                    trial.sort_by_key(|s| s.0);
+                                    trial
+                                })
+                                .collect();
+                            // Saves per trial, in trial order, so the pick
+                            // is the same however the threads interleave.
+                            let chunk = trials.len().div_ceil(inner).max(1);
+                            let counts: Vec<(u32, usize, i64)> = std::thread::scope(|s| {
+                                let parts: Vec<_> = trials
+                                    .chunks(chunk)
+                                    .map(|c| {
+                                        s.spawn(move || {
+                                            c.iter().map(|t| saved(t)).collect::<Vec<_>>()
+                                        })
+                                    })
+                                    .collect();
+                                parts.into_iter().flat_map(|p| p.join().unwrap()).collect()
+                            });
+                            let mut found: Option<((u32, usize, i64), usize)> = None;
+                            for (i, &n) in counts.iter().enumerate() {
+                                if n > best && found.is_none_or(|(m, _)| n > m) {
+                                    found = Some((n, i));
                                 }
                             }
-                            if let Some((n, trial)) = found {
+                            if let Some((n, i)) = found {
                                 best = n;
-                                steps = trial;
+                                steps = trials[i].clone();
                                 improved = true;
-                                if best >= need {
+                                if best.0 >= need {
                                     break 'search;
                                 }
                             }
@@ -75,10 +101,10 @@ fn main() {
                             break;
                         }
                     }
-                    let mark = if best >= need { "SOLVED" } else { "short" };
+                    let mark = if best.0 >= need { "SOLVED" } else { "short" };
                     println!(
-                        "solution {k} LEVEL.{:03}: {best} of {need} {mark}\n{steps:?}",
-                        s.level
+                        "solution {k} LEVEL.{:03}: {} of {need} {mark}\n{steps:?}",
+                        s.level, best.0
                     );
                 }
             });
