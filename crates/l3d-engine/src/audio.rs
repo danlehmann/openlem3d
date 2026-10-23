@@ -6,10 +6,7 @@ use std::num::NonZero;
 use std::sync::Arc;
 use std::time::Duration;
 
-use bevy_ecs::prelude::*;
 use rodio::{Player, Source};
-
-use crate::app::App;
 
 /// A sound: interleaved 16-bit samples.
 #[derive(Debug, Clone)]
@@ -20,7 +17,7 @@ pub struct Sound {
 }
 
 /// The sound output, if the system has one.
-#[derive(Resource, Default)]
+#[derive(Default)]
 pub struct Audio {
     output: Option<rodio::MixerDeviceSink>,
 }
@@ -113,8 +110,4 @@ impl Source for Pcm {
     fn total_duration(&self) -> Option<Duration> {
         None
     }
-}
-
-pub(crate) fn setup(app: &mut App) {
-    app.insert_resource(Audio::open());
 }

@@ -7,37 +7,19 @@ use l3d_engine::audio::{Audio, Playing, Sound};
 use l3d_engine::prelude::*;
 use l3d_formats::disc::Disc;
 
-/// The current level's music, while it plays.
-#[derive(Resource, Default)]
-pub struct LevelMusic(Option<Playing>);
+use crate::World;
+use crate::menu::AppState;
+
+/// The current level's music, while it plays, and the volume last given it.
+#[derive(Default)]
+pub struct LevelMusic {
+    playing: Option<Playing>,
+    volume: f32,
+}
 
 /// Whether music is muted (M toggles).
-#[derive(Resource, Default)]
+#[derive(Default)]
 pub struct MusicMuted(pub bool);
-
-pub struct MusicPlugin;
-
-impl Plugin for MusicPlugin {
-    fn build(&self, app: &mut App) {
-        use crate::menu::AppState;
-        app.init_resource::<MusicMuted>()
-            .init_resource::<LevelMusic>()
-            .insert_resource(Audio::open())
-            .add_systems(Update, toggle_mute);
-        // Music plays only in levels, not on the briefing or in the menus
-        // (verified); the options screen opened from a level keeps it.
-        for state in [
-            AppState::Title,
-            AppState::Code,
-            AppState::Menu,
-            AppState::Practice,
-            AppState::Briefing,
-            AppState::Results,
-        ] {
-            app.add_systems(OnEnter(state), stop);
-        }
-    }
-}
 
 /// CD tracks observed in the original for (theme, music index) pairs
 /// (`docs/spec/disc.md`, "Level music").
@@ -88,7 +70,7 @@ pub fn track_for(theme: u8, music: u8) -> u8 {
 /// Replaces the playing music with CD track `track` (1-based), looping at
 /// `volume` (linear).
 pub fn play_track(music: &mut LevelMusic, audio: &Audio, disc: &Disc, track: u8, volume: f32) {
-    music.0 = None;
+    music.playing = None;
     let Some(t) = disc.tracks.iter().find(|t| t.number == track) else {
         warn!("no CD track {track}");
         return;
@@ -105,7 +87,8 @@ pub fn play_track(music: &mut LevelMusic, audio: &Audio, disc: &Disc, track: u8,
         rate: 44_100,
         samples: samples.into(),
     };
-    music.0 = audio.play_looped(&sound, volume);
+    music.playing = audio.play_looped(&sound, volume);
+    music.volume = volume;
     info!("playing CD track {track}");
 }
 
@@ -119,22 +102,25 @@ pub fn volume(muted: &MusicMuted, settings: &crate::settings::Settings) -> f32 {
 }
 
 /// M mutes; the playing music follows the mute and the volume setting.
-fn toggle_mute(
-    keys: Res<ButtonInput<KeyCode>>,
-    settings: Res<crate::settings::Settings>,
-    mut muted: ResMut<MusicMuted>,
-    music: Res<LevelMusic>,
-) {
-    if keys.just_pressed(KeyCode::KeyM) {
-        muted.0 = !muted.0;
+pub(crate) fn toggle_mute(w: &mut World) {
+    if w.e.input.keys.just_pressed(KeyCode::KeyM) {
+        w.muted.0 = !w.muted.0;
     }
-    if (muted.is_changed() || settings.is_changed())
-        && let Some(playing) = &music.0
-    {
-        playing.set_volume(volume(&muted, &settings));
+    let v = volume(&w.muted, &w.settings);
+    let music = &mut w.music;
+    if v != music.volume {
+        music.volume = v;
+        if let Some(playing) = &music.playing {
+            playing.set_volume(v);
+        }
     }
 }
 
-fn stop(mut music: ResMut<LevelMusic>) {
-    music.0 = None;
+/// Music plays only in levels, not on the briefing or in the menus
+/// (verified); the options screen opened from a level keeps it.
+pub(crate) fn enter(w: &mut World, state: AppState) {
+    use AppState::*;
+    if matches!(state, Title | Code | Menu | Practice | Briefing | Results) {
+        w.music.playing = None;
+    }
 }

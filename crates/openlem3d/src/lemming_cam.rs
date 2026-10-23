@@ -8,33 +8,12 @@ use l3d_engine::prelude::*;
 use l3d_sim::SUB;
 
 use crate::hud::{Highlight, SelectedSkill};
-use crate::menu::AppState;
-use crate::{Game, ViewCamera};
-
-pub struct LemmingCamPlugin;
-
-impl Plugin for LemmingCamPlugin {
-    fn build(&self, app: &mut App) {
-        app.init_resource::<LemmingCam>()
-            .add_systems(
-                Update,
-                (
-                    toggle_keys.before(crate::menu::back_to_menu),
-                    follow.before(crate::camera_controls),
-                )
-                    .chain()
-                    .run_if(in_state(AppState::Playing)),
-            )
-            .add_systems(OnExit(AppState::Playing), |mut cam: ResMut<LemmingCam>| {
-                *cam = LemmingCam::Off
-            });
-    }
-}
+use crate::{ViewCamera, World};
 
 /// Camera position and yaw to return to.
 pub type SavedView = (Vec3, f32);
 
-#[derive(Resource, Default, Clone, Copy, PartialEq)]
+#[derive(Default, Clone, Copy, PartialEq)]
 pub enum LemmingCam {
     #[default]
     Off,
@@ -112,7 +91,7 @@ impl LemmingCam {
         self.follow(i, view);
         highlight.on = true;
         highlight.lemming = Some(i);
-        selected.0 = None;
+        selected.set(None);
     }
 
     pub fn picking(&self) -> bool {
@@ -223,16 +202,10 @@ fn off_deflectors(world: &l3d_sim::World, mut eye: Vec3) -> Vec3 {
     eye
 }
 
-pub(crate) fn toggle_keys(
-    mut keys: ResMut<ButtonInput<KeyCode>>,
-    mut cam: ResMut<LemmingCam>,
-    mut highlight: ResMut<Highlight>,
-    mut selected: ResMut<SelectedSkill>,
-    mut views: Query<&mut ViewCamera>,
-) {
-    let Ok(mut view) = views.single_mut() else {
-        return;
-    };
+pub(crate) fn toggle_keys(w: &mut World) {
+    let keys = &mut w.e.input.keys;
+    let cam = &mut w.lemming_cam;
+    let (highlight, selected, view) = (&mut w.highlight, &mut w.selected, &mut w.view);
     let presets = [
         KeyCode::Digit1,
         KeyCode::Digit2,
@@ -240,34 +213,38 @@ pub(crate) fn toggle_keys(
         KeyCode::Digit4,
     ];
     if keys.just_pressed(KeyCode::KeyV) || keys.just_pressed(KeyCode::KeyI) {
-        cam.face(&mut highlight, &mut selected, &mut view);
+        cam.face(highlight, selected, view);
     } else if keys.just_pressed(KeyCode::Escape) && *cam != LemmingCam::Off {
         // Esc leaves the lemming view, not the level.
         keys.clear_just_pressed(KeyCode::Escape);
-        cam.turn_off(&mut view);
+        cam.turn_off(view);
     } else if keys.any_just_pressed(presets) {
         // The preset key itself places the camera.
         *cam = LemmingCam::Off;
     }
 }
 
-#[allow(clippy::too_many_arguments)] // Bevy system parameters
-fn follow(
-    time: Res<Time>,
-    fixed: Res<Time<Fixed>>,
-    game: Res<Game>,
-    opts: Res<crate::Options>,
-    mut started: Local<bool>,
-    mut sway: Local<f32>,
-    mut entered: Local<Option<usize>>,
-    mut trail: Local<Trail>,
-    mut cam: ResMut<LemmingCam>,
-    mut highlight: ResMut<Highlight>,
-    mut views: Query<&mut ViewCamera>,
-) {
-    let Ok(mut view) = views.single_mut() else {
-        return;
-    };
+/// What following a lemming keeps between frames.
+#[derive(Default)]
+pub(crate) struct Follow {
+    started: bool,
+    sway: f32,
+    entered: Option<usize>,
+    trail: Trail,
+}
+
+/// Leaving the level leaves the lemming view.
+pub(crate) fn exit_level(w: &mut World) {
+    w.lemming_cam = LemmingCam::Off;
+}
+
+pub(crate) fn follow(w: &mut World) {
+    let (time, fixed) = (w.e.time.game, w.e.time.fixed);
+    let (game, opts) = (&w.game, &w.opts);
+    let f = &mut w.follow;
+    let (started, sway, entered, trail) =
+        (&mut f.started, &mut f.sway, &mut f.entered, &mut f.trail);
+    let (cam, highlight, view) = (&mut w.lemming_cam, &mut w.highlight, &mut w.view);
     // `--follow N`: ride with lemming N as soon as it appears.
     if let Some(i) = opts.follow
         && !*started
@@ -307,7 +284,7 @@ fn follow(
         };
         i = next;
         switched = true;
-        cam.follow(i, &view);
+        cam.follow(i, view);
         highlight.on = true;
         highlight.lemming = Some(i);
     }

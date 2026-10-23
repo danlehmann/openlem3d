@@ -1,23 +1,20 @@
-//! Clocks, as Bevy had them. [`Time<Real>`] is the wall clock;
-//! [`Time<Virtual>`] is game time, which follows it but takes at most
-//! `max_delta` a frame and can run faster; [`Time<Fixed>`] steps through
-//! game time at a fixed rate. Plain [`Time`] is game time, or the fixed
-//! clock during [`FixedUpdate`](crate::app::FixedUpdate).
+//! Clocks. [`Time<Real>`] is the wall clock; [`Time<Virtual>`] is game
+//! time, which follows it but takes at most `max_delta` of it a frame and
+//! can run faster; [`Time<Fixed>`] steps through game time at a fixed rate,
+//! as the game asks it to ([`Clocks::fixed_step`]).
 
 use std::time::{Duration, Instant};
 
-use bevy_ecs::prelude::*;
-
 /// A clock: how long the last step took and how long it has run, with
 /// what drives it (`T`).
-#[derive(Resource, Debug, Clone, Copy, Default)]
-pub struct Time<T: Default + Send + Sync + 'static = ()> {
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Time<T: Default = ()> {
     delta: Duration,
     elapsed: Duration,
     context: T,
 }
 
-impl<T: Default + Send + Sync + 'static> Time<T> {
+impl<T: Default> Time<T> {
     pub fn delta(&self) -> Duration {
         self.delta
     }
@@ -34,21 +31,9 @@ impl<T: Default + Send + Sync + 'static> Time<T> {
         self.elapsed.as_secs_f32()
     }
 
-    pub fn elapsed_secs_f64(&self) -> f64 {
-        self.elapsed.as_secs_f64()
-    }
-
     fn advance(&mut self, delta: Duration) {
         self.delta = delta;
         self.elapsed += delta;
-    }
-
-    fn as_generic(&self) -> Time {
-        Time {
-            delta: self.delta,
-            elapsed: self.elapsed,
-            context: (),
-        }
     }
 }
 
@@ -75,7 +60,7 @@ impl Default for Virtual {
 }
 
 impl Time<Virtual> {
-    /// The most game time one frame may take, however long it took.
+    /// The most wall-clock time one frame may count, however long it took.
     pub fn set_max_delta(&mut self, max: Duration) {
         self.context.max_delta = max;
     }
@@ -104,15 +89,8 @@ impl Default for Fixed {
 }
 
 impl Time<Fixed> {
-    pub fn from_hz(hz: f64) -> Self {
-        Time {
-            delta: Duration::ZERO,
-            elapsed: Duration::ZERO,
-            context: Fixed {
-                timestep: Duration::from_secs_f64(1.0 / hz),
-                overstep: Duration::ZERO,
-            },
-        }
+    pub fn set_hz(&mut self, hz: f64) {
+        self.context.timestep = Duration::from_secs_f64(1.0 / hz);
     }
 
     pub fn timestep(&self) -> Duration {
@@ -125,39 +103,42 @@ impl Time<Fixed> {
     }
 }
 
-/// Moves the clocks on to now, at the start of a frame (the first frame
-/// takes no time).
-pub(crate) fn advance(world: &mut World) {
-    let now = Instant::now();
-    let mut real = world.resource_mut::<Time<Real>>();
-    let delta = real.context.last.map_or(Duration::ZERO, |last| now - last);
-    real.context.last = Some(now);
-    real.advance(delta);
-    let mut game = world.resource_mut::<Time<Virtual>>();
-    let delta = delta
-        .min(game.context.max_delta)
-        .mul_f64(game.context.relative_speed);
-    game.advance(delta);
-    let generic = game.as_generic();
-    *world.resource_mut::<Time>() = generic;
-    world.resource_mut::<Time<Fixed>>().context.overstep += delta;
+/// The three clocks.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Clocks {
+    pub real: Time<Real>,
+    pub game: Time<Virtual>,
+    pub fixed: Time<Fixed>,
 }
 
-/// Runs `step` once for each fixed step due, with plain [`Time`] set to
-/// the fixed clock meanwhile.
-pub(crate) fn run_fixed(world: &mut World, mut step: impl FnMut(&mut World)) {
-    let game = *world.resource::<Time>();
-    loop {
-        let mut fixed = world.resource_mut::<Time<Fixed>>();
-        let timestep = fixed.context.timestep;
-        if fixed.context.overstep < timestep {
-            break;
-        }
-        fixed.context.overstep -= timestep;
-        fixed.advance(timestep);
-        let generic = fixed.as_generic();
-        *world.resource_mut::<Time>() = generic;
-        step(world);
+impl Clocks {
+    /// Moves the clocks on to now, at the start of a frame (the first frame
+    /// takes no time).
+    pub(crate) fn advance(&mut self) {
+        let now = Instant::now();
+        let real = self
+            .real
+            .context
+            .last
+            .map_or(Duration::ZERO, |last| now - last);
+        self.real.context.last = Some(now);
+        self.real.advance(real);
+        let game = real
+            .min(self.game.context.max_delta)
+            .mul_f64(self.game.context.relative_speed);
+        self.game.advance(game);
+        self.fixed.context.overstep += game;
     }
-    *world.resource_mut::<Time>() = game;
+
+    /// Takes the next fixed step if one is due: call until it says no.
+    pub fn fixed_step(&mut self) -> bool {
+        let f = &mut self.fixed;
+        if f.context.overstep < f.context.timestep {
+            return false;
+        }
+        f.context.overstep -= f.context.timestep;
+        let step = f.context.timestep;
+        f.advance(step);
+        true
+    }
 }

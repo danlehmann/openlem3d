@@ -6,17 +6,10 @@
 
 use l3d_engine::prelude::*;
 
-pub struct ScreenPlugin;
-
-impl Plugin for ScreenPlugin {
-    fn build(&self, app: &mut App) {
-        app.init_resource::<Screen>()
-            .add_systems(First, (update, full_screen));
-    }
-}
+use crate::World;
 
 /// The usable part of the window, in logical pixels.
-#[derive(Resource, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub struct Screen {
     /// Its top-left corner in the window.
     pub min: Vec2,
@@ -49,8 +42,8 @@ impl Screen {
 
 /// Fills the screen where the game has it to itself (see
 /// `platform::full_screen`) whenever the window gains focus.
-fn full_screen(mut focus: MessageReader<l3d_engine::window::WindowFocused>) {
-    if focus.read().any(|f| f.focused) {
+pub(crate) fn full_screen(w: &mut World) {
+    if w.e.input.focus.contains(&true) {
         crate::platform::full_screen();
     }
 }
@@ -59,20 +52,15 @@ fn full_screen(mut focus: MessageReader<l3d_engine::window::WindowFocused>) {
 /// the window does, but asking is not free on Android.
 const INSETS_POLL: f32 = 0.25;
 
-fn update(
-    time: Res<Time<Real>>,
-    windows: Query<&Window>,
-    mut screen: ResMut<Screen>,
-    mut insets: Local<Option<(f32, [u32; 4])>>,
-) {
-    let Some(window) = windows.iter().next() else {
-        return;
-    };
-    let now = time.elapsed_secs();
+pub(crate) fn update(w: &mut World) {
+    let window = &w.e.window;
+    let now = w.e.time.real.elapsed_secs();
+    let insets = &mut w.insets;
     if insets.is_none_or(|(at, _)| now - at >= INSETS_POLL) {
         *insets = Some((now, crate::platform::insets()));
     }
     let [left, top, right, bottom] = insets.map_or([0; 4], |(_, i)| i);
+    let screen = &mut w.screen;
     let full = UVec2::new(window.physical_width(), window.physical_height());
     let min = UVec2::new(left, top).min(full);
     let size = (full - min)

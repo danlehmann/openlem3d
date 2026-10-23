@@ -4,6 +4,8 @@
 //! height. On wider windows the right-hand column keeps to the right edge and
 //! the skill row to the bottom left.
 
+use std::collections::HashMap;
+
 use l3d_engine::prelude::*;
 use l3d_formats::font::Font;
 use l3d_formats::icons::{Icons, panel as icon};
@@ -11,49 +13,12 @@ use l3d_formats::image::IndexedImage;
 use l3d_formats::sheets;
 use l3d_sim::Skill;
 
-use crate::hud::SelectedSkill;
 use crate::lemming_cam::LemmingCam;
 use crate::menu::AppState;
 use crate::screen::Screen;
 use crate::texture::indexed_image;
-use crate::ui::{Button, ImageNode, Interaction, Node, Visibility, percent, px};
-use crate::{Data, Game, LevelInfo, PresetIndex, ViewCamera};
-
-pub struct PanelPlugin;
-
-impl Plugin for PanelPlugin {
-    fn build(&self, app: &mut App) {
-        app.init_resource::<SkillFlash>()
-            .add_systems(Startup, (load_art, spawn_panel).chain())
-            .add_systems(
-                Update,
-                (
-                    layout,
-                    buttons,
-                    held_buttons,
-                    skill_keys_select,
-                    animate,
-                    glyph_texts,
-                    caption,
-                )
-                    .chain()
-                    .run_if(in_state(AppState::Playing)),
-            )
-            .add_systems(
-                Update,
-                height_bar
-                    .before(crate::camera_controls)
-                    .run_if(in_state(AppState::Playing)),
-            )
-            .add_systems(Update, (show_in_play, show_minimap))
-            .add_systems(
-                Update,
-                select_first_skill.after(crate::load_level).run_if(
-                    in_state(AppState::Playing).and_then(resource_changed::<crate::CurrentLevel>),
-                ),
-            );
-    }
-}
+use crate::ui::{Interaction, Node, NodeId, Ui, UiNode, percent, px};
+use crate::{Game, World};
 
 /// The original's screen size, in which all positions are given.
 const SCREEN: Vec2 = Vec2::new(320.0, 200.0);
@@ -84,7 +49,7 @@ const EXPLOSION_FPS: f32 = 14.0;
 const DOUBLE_CLICK_SECONDS: f32 = 0.5;
 
 /// Panel graphics, uploaded once.
-#[derive(Resource)]
+#[derive(Clone)]
 struct Art {
     panel: Vec<Handle<Image>>,
     labels: Vec<Handle<Image>>,
@@ -98,6 +63,7 @@ struct Art {
 }
 
 /// A font's glyph images by character code, and its advance per character.
+#[derive(Clone)]
 struct Glyphs {
     first: u8,
     images: Vec<Handle<Image>>,
@@ -121,8 +87,9 @@ impl Glyphs {
     }
 }
 
-fn load_art(mut commands: Commands, mut data: ResMut<Data>, mut images: ResMut<Assets<Image>>) {
-    let d = &mut data.0;
+pub(crate) fn load_art(w: &mut World) {
+    let d = &mut w.data.0;
+    let images = &mut w.e.images;
     let Ok(pal) = d.palette("GFX/LM3D.PAL") else {
         return;
     };
@@ -155,7 +122,7 @@ fn load_art(mut commands: Commands, mut data: ResMut<Data>, mut images: ResMut<A
     };
     let small = glyphs(&icons.small_font, 5.0, 3.0, &mut add);
     let large = glyphs(&icons.large_font, 7.0, 4.0, &mut add);
-    commands.insert_resource(Art {
+    w.panel.art = Some(Art {
         panel: icons.panel.iter().map(&mut add).collect(),
         labels: icons.labels.iter().map(&mut add).collect(),
         umbrella: add(&icons.umbrella),
@@ -169,14 +136,14 @@ fn load_art(mut commands: Commands, mut data: ResMut<Data>, mut images: ResMut<A
 
 /// Where an element sits: its top-left corner in the original's 320×200
 /// screen, and its size there.
-#[derive(Component, Clone, Copy)]
+#[derive(Clone, Copy)]
 struct PanelPos {
     at: Vec2,
     size: Vec2,
 }
 
 /// What clicking an element does.
-#[derive(Component, Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Action {
     Skill(Skill),
     Nuke,
@@ -194,7 +161,7 @@ enum Action {
 
 /// A right-aligned string drawn with a panel font; `right` is the x of the
 /// last glyph's cell.
-#[derive(Component)]
+#[derive(Clone, Copy)]
 struct GlyphText {
     large: bool,
     right: f32,
@@ -214,21 +181,8 @@ enum Value {
     CameraNumber,
 }
 
-/// One glyph slot of a [`GlyphText`], counted from the right.
-#[derive(Component)]
-struct GlyphSlot(usize);
-
-#[derive(Component)]
-struct PanelRoot;
-
-/// The height bar down the right edge, and its knob.
-#[derive(Component)]
-struct HeightBar;
-#[derive(Component)]
-struct Knob;
-
 /// Elements whose picture changes with the game state.
-#[derive(Component, Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum Animated {
     Skill(Skill),
     FastForward,
@@ -242,157 +196,207 @@ enum Animated {
     Nuke,
 }
 
-fn spawn_panel(mut commands: Commands, art: Option<Res<Art>>, mut images: ResMut<Assets<Image>>) {
-    let Some(art) = art else { return };
-    let root = commands
-        .spawn((
-            PanelRoot,
-            Node {
-                width: percent(100),
-                height: percent(100),
-                ..default()
-            },
-        ))
-        .id();
-    let item = |commands: &mut Commands,
-                at: Vec2,
-                size: Vec2,
-                image: Handle<Image>,
-                action: Option<Action>,
-                anim: Option<Animated>| {
-        let mut e = commands.spawn((
-            PanelPos { at, size },
-            ImageNode::new(image),
-            Node::default(),
-        ));
+/// The panel: its pictures, its root and items (with their places), the
+/// buttons' actions, the animated items, the counters' glyph slots, the
+/// height bar, knob, minimap and its frame, the caption with its text, and
+/// what its systems keep between frames.
+#[derive(Default)]
+pub(crate) struct Panel {
+    art: Option<Art>,
+    root: Option<NodeId>,
+    pos: HashMap<NodeId, PanelPos>,
+    actions: Vec<(NodeId, Action)>,
+    animated: Vec<(NodeId, Animated)>,
+    texts: Vec<(GlyphText, Vec<NodeId>)>,
+    bar: Option<NodeId>,
+    knob: Option<NodeId>,
+    map: Option<NodeId>,
+    frame: Option<NodeId>,
+    caption: Option<(NodeId, String)>,
+    last_bomb_click: Option<f32>,
+    carry: f32,
+    nuked_at: Option<f32>,
+    /// A skill given straight to the highlighted lemming, and when (real
+    /// seconds): its button plays its animation once, though nothing is
+    /// selected (owner's observation).
+    flash: Option<(Skill, f32)>,
+    /// The writes to the selected skill seen.
+    select_seen: u64,
+}
+
+/// Builds the panel: its items, each placed by [`PanelPos`].
+struct Builder<'a> {
+    ui: &'a mut Ui,
+    panel: &'a mut Panel,
+    root: NodeId,
+}
+
+impl Builder<'_> {
+    fn item(
+        &mut self,
+        at: Vec2,
+        size: Vec2,
+        image: Handle<Image>,
+        action: Option<Action>,
+        anim: Option<Animated>,
+    ) -> NodeId {
+        let mut n = UiNode::image(image);
+        if action.is_some() {
+            n = n.button();
+        }
+        let id = self.ui.child(self.root, n);
+        self.panel.pos.insert(id, PanelPos { at, size });
         if let Some(a) = action {
-            e.insert((Button, a));
+            self.panel.actions.push((id, a));
         }
         if let Some(a) = anim {
-            e.insert(a);
+            self.panel.animated.push((id, a));
         }
-        let id = e.id();
-        commands.entity(root).add_child(id);
         id
+    }
+
+    fn text(&mut self, art: &Art, large: bool, right: f32, y: f32, value: Value, slots: usize) {
+        let glyphs = if large { &art.large } else { &art.small };
+        let t = self.ui.child(self.root, UiNode::new());
+        let mut ids = Vec::new();
+        for i in 0..slots {
+            let at = Vec2::new(right - glyphs.digit_advance * i as f32, y);
+            let s = self.ui.child(t, UiNode::image(Handle::default()).hidden());
+            self.panel.pos.insert(
+                s,
+                PanelPos {
+                    at,
+                    size: glyphs.size,
+                },
+            );
+            ids.push(s);
+        }
+        self.panel.texts.push((
+            GlyphText {
+                large,
+                right,
+                y,
+                value,
+            },
+            ids,
+        ));
+    }
+}
+
+pub(crate) fn spawn_panel(w: &mut World) {
+    if w.panel.art.is_none() {
+        return;
+    }
+    let frame = w.e.images.add(crate::minimap::frame_image());
+    let root = w.ui.root(UiNode::new().layout(Node {
+        width: percent(100),
+        height: percent(100),
+        ..default()
+    }));
+    let mut panel = std::mem::take(&mut w.panel);
+    let art = panel.art.take().expect("checked above");
+    let art = &art;
+    panel.root = Some(root);
+    let mut b = Builder {
+        ui: &mut w.ui,
+        panel: &mut panel,
+        root,
     };
+    // The minimap and its frame (the map image arrives with the level).
     let icon24 = Vec2::splat(24.0);
     let p = |i: usize| art.panel[i].clone();
-    // The minimap and its frame (the map image arrives with the level).
-    let frame = images.add(crate::minimap::frame_image());
-    let frame = item(
-        &mut commands,
-        Vec2::ZERO,
-        Vec2::splat(70.0),
-        frame,
+    let frame = b.item(Vec2::ZERO, Vec2::splat(70.0), frame, None, None);
+    b.panel.frame = Some(frame);
+    let map = b.item(
+        Vec2::splat(3.0),
+        Vec2::splat(64.0),
+        Handle::default(),
         None,
         None,
     );
-    commands.entity(frame).insert(MinimapFrame);
-    let map = commands
-        .spawn((
-            PanelPos {
-                at: Vec2::splat(3.0),
-                size: Vec2::splat(64.0),
-            },
-            ImageNode::default(),
-            Node::default(),
-            Button,
-            crate::minimap::MinimapView,
-            Visibility::Hidden,
-        ))
-        .id();
-    commands.entity(root).add_child(map);
+    if let Some(n) = b.ui.get_mut(map) {
+        *n = std::mem::take(n).button().hidden();
+    }
+    b.panel.map = Some(map);
     // Right-hand column.
-    item(
-        &mut commands,
+    b.item(
         Vec2::new(260.0, 0.0),
         Vec2::new(32.0, 16.0),
         art.labels[0].clone(),
         None,
         None,
     );
-    item(
-        &mut commands,
+    b.item(
         Vec2::new(260.0, 16.0),
         Vec2::new(32.0, 16.0),
         art.labels[1].clone(),
         None,
         None,
     );
-    item(
-        &mut commands,
+    b.item(
         Vec2::new(260.0, 32.0),
         Vec2::new(32.0, 16.0),
         art.labels[2].clone(),
         None,
         None,
     );
-    item(
-        &mut commands,
+    b.item(
         Vec2::new(260.0, 48.0),
         icon24,
         p(icon::BOMB),
         Some(Action::Nuke),
         Some(Animated::Nuke),
     );
-    item(
-        &mut commands,
+    b.item(
         Vec2::new(284.0, 48.0),
         icon24,
         p(icon::PLAY),
         Some(Action::FastForward),
         Some(Animated::FastForward),
     );
-    item(
-        &mut commands,
+    b.item(
         Vec2::new(260.0, 72.0),
         icon24,
         p(icon::CAMERA),
         Some(Action::Camera),
         None,
     );
-    item(
-        &mut commands,
+    b.item(
         Vec2::new(284.0, 72.0),
         icon24,
         p(icon::PAUSE.start),
         Some(Action::Pause),
         Some(Animated::Paws),
     );
-    item(
-        &mut commands,
+    b.item(
         Vec2::new(260.0, 96.0),
         icon24,
         p(icon::TURN_CLOCKWISE + 1),
         Some(Action::TurnClockwise),
         Some(Animated::TurnClockwise),
     );
-    item(
-        &mut commands,
+    b.item(
         Vec2::new(284.0, 96.0),
         icon24,
         p(icon::TURN_ANTICLOCKWISE + 1),
         Some(Action::TurnAnticlockwise),
         Some(Animated::TurnAnticlockwise),
     );
-    item(
-        &mut commands,
+    b.item(
         Vec2::new(260.0, 120.0),
         icon24,
         p(icon::MINUS + 1),
         Some(Action::Slower),
         Some(Animated::Slower),
     );
-    item(
-        &mut commands,
+    b.item(
         Vec2::new(284.0, 120.0),
         icon24,
         p(icon::PLUS + 1),
         Some(Action::Faster),
         Some(Animated::Faster),
     );
-    item(
-        &mut commands,
+    b.item(
         Vec2::new(274.0, 143.0),
         Vec2::splat(32.0),
         art.umbrella.clone(),
@@ -401,35 +405,34 @@ fn spawn_panel(mut commands: Commands, art: Option<Res<Art>>, mut images: ResMut
     );
     // The height bar down the right edge, a button so that it is not part
     // of the view.
-    let bar = item(
-        &mut commands,
+    let bar = b.item(
         Vec2::new(BAR_X, 0.0),
         Vec2::new(12.0, SCREEN.y),
         art.height_bar.clone(),
         None,
         None,
     );
-    commands.entity(bar).insert((Button, HeightBar));
-    let knob = item(
-        &mut commands,
+    if let Some(n) = b.ui.get_mut(bar) {
+        *n = std::mem::take(n).button();
+    }
+    b.panel.bar = Some(bar);
+    let knob = b.item(
         Vec2::new(BAR_X + 2.0, 0.0),
         Vec2::new(9.0, 8.0),
         art.knob.clone(),
         None,
         None,
     );
-    commands.entity(knob).insert(Knob);
+    b.panel.knob = Some(knob);
     // Bottom row.
-    item(
-        &mut commands,
+    b.item(
         Vec2::new(0.0, 172.0),
         icon24,
         p(icon::RED_DOWN),
         Some(Action::Arrow),
         Some(Animated::Arrow),
     );
-    item(
-        &mut commands,
+    b.item(
         Vec2::new(24.0, 172.0),
         icon24,
         p(icon::FACE + 1),
@@ -437,8 +440,7 @@ fn spawn_panel(mut commands: Commands, art: Option<Res<Art>>, mut images: ResMut
         Some(Animated::Face),
     );
     for (skill, (x, cells)) in Skill::ALL.into_iter().zip(SKILL_BUTTONS) {
-        item(
-            &mut commands,
+        b.item(
             Vec2::new(x, SKILL_Y),
             Vec2::splat(32.0),
             art.skills[cells[0]].clone(),
@@ -447,56 +449,20 @@ fn spawn_panel(mut commands: Commands, art: Option<Res<Art>>, mut images: ResMut
         );
     }
     // Numbers.
-    let text =
-        |commands: &mut Commands, large: bool, right: f32, y: f32, value: Value, slots: usize| {
-            let glyphs = if large { &art.large } else { &art.small };
-            let t = commands
-                .spawn((
-                    GlyphText {
-                        large,
-                        right,
-                        y,
-                        value,
-                    },
-                    Node::default(),
-                ))
-                .id();
-            commands.entity(root).add_child(t);
-            for i in 0..slots {
-                let at = Vec2::new(right - glyphs.digit_advance * i as f32, y);
-                let s = commands
-                    .spawn((
-                        GlyphSlot(i),
-                        PanelPos {
-                            at,
-                            size: glyphs.size,
-                        },
-                        ImageNode::default(),
-                        Node::default(),
-                        Visibility::Hidden,
-                    ))
-                    .id();
-                commands.entity(t).add_child(s);
-            }
-        };
-    text(&mut commands, true, 299.0, 2.0, Value::In, 3);
-    text(&mut commands, true, 299.0, 18.0, Value::Out, 3);
-    text(&mut commands, true, 299.0, 34.0, Value::Time, 4);
-    text(&mut commands, false, 272.0, 140.0, Value::MinRate, 2);
-    text(&mut commands, false, 296.0, 140.0, Value::Rate, 2);
-    text(&mut commands, false, 269.0, 80.0, Value::CameraNumber, 1);
+    b.text(art, true, 299.0, 2.0, Value::In, 3);
+    b.text(art, true, 299.0, 18.0, Value::Out, 3);
+    b.text(art, true, 299.0, 34.0, Value::Time, 4);
+    b.text(art, false, 272.0, 140.0, Value::MinRate, 2);
+    b.text(art, false, 296.0, 140.0, Value::Rate, 2);
+    b.text(art, false, 269.0, 80.0, Value::CameraNumber, 1);
     for (skill, (x, _)) in Skill::ALL.into_iter().zip(SKILL_BUTTONS) {
-        text(
-            &mut commands,
-            false,
-            x + 17.0,
-            188.0,
-            Value::SkillCount(skill),
-            2,
-        );
+        b.text(art, false, x + 17.0, 188.0, Value::SkillCount(skill), 2);
     }
-    let c = commands.spawn((Caption::default(), Node::default())).id();
-    commands.entity(root).add_child(c);
+    let c = b.ui.child(root, UiNode::new());
+    b.panel.caption = Some((c, String::new()));
+    w.minimap_view.0 = panel.map;
+    panel.art = Some(art.clone());
+    w.panel = panel;
 }
 
 /// Screen pixels per original pixel.
@@ -507,54 +473,53 @@ fn scale(screen: &Screen) -> f32 {
 /// Places every element: the skill row keeps to the bottom left, the
 /// right-hand column (x ≥ 256) to the top right and the height bar to the
 /// right edge, the rest to the top left.
-fn layout(screen: Res<Screen>, mut items: Query<(&PanelPos, &mut Node)>) {
-    let s = scale(&screen);
-    let (w, h) = (screen.size.x, screen.size.y);
-    for (p, mut node) in &mut items {
+fn layout(w: &mut World) {
+    let s = scale(&w.screen);
+    let (width, height) = (w.screen.size.x, w.screen.size.y);
+    let panel = &mut w.panel;
+    panel.pos.retain(|id, _| w.ui.contains(*id));
+    for (&id, p) in &panel.pos {
+        let Some(n) = w.ui.get_mut(id) else { continue };
         let x = if p.at.x >= BAR_X || (p.at.y < 160.0 && p.at.x >= 256.0) {
-            w - (SCREEN.x - p.at.x) * s
+            width - (SCREEN.x - p.at.x) * s
         } else {
             p.at.x * s
         };
         let y = if p.at.y >= 160.0 {
-            h - (SCREEN.y - p.at.y) * s
+            height - (SCREEN.y - p.at.y) * s
         } else {
             p.at.y * s
         };
-        node.left = px(x);
-        node.top = px(y);
-        node.width = px(p.size.x * s);
-        node.height = px(p.size.y * s);
+        n.node.left = px(x);
+        n.node.top = px(y);
+        n.node.width = px(p.size.x * s);
+        n.node.height = px(p.size.y * s);
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn buttons(
-    pressed: Query<(&Interaction, &Action), Changed<Interaction>>,
-    mut selected: ResMut<SelectedSkill>,
-    mut game: ResMut<Game>,
-    mut lemming_cam: ResMut<LemmingCam>,
-    mut views: Query<&mut ViewCamera>,
-    cameras: Option<Res<LevelInfo>>,
-    mut preset: ResMut<PresetIndex>,
-    mut sfx: MessageWriter<crate::sfx::Sfx>,
-    mut highlight: ResMut<crate::hud::Highlight>,
-    mut pending_turner: ResMut<crate::hud::PendingTurner>,
-    scene_camera: Res<crate::scene_render::SceneCamera>,
-    screen: Res<Screen>,
-    (time, mut last_bomb_click, mut flash): (
-        Res<Time<Real>>,
-        Local<Option<f32>>,
-        ResMut<SkillFlash>,
-    ),
-) {
-    for (interaction, action) in &pressed {
-        if *interaction != Interaction::Pressed {
-            continue;
-        }
+fn buttons(w: &mut World) {
+    let now = w.e.time.real.elapsed_secs();
+    let (selected, game, lemming_cam, view) = (
+        &mut w.selected,
+        &mut w.game,
+        &mut w.lemming_cam,
+        &mut w.view,
+    );
+    let (cameras, preset, sfx, highlight) = (&w.info, &mut w.preset, &mut w.sfx, &mut w.highlight);
+    let (pending_turner, scene_camera, screen) = (&mut w.pending, &w.camera, &w.screen);
+    let panel = &mut w.panel;
+    let pressed: Vec<Action> = panel
+        .actions
+        .iter()
+        .filter(|&&(id, _)| w.ui.just_pressed(id))
+        .map(|&(_, a)| a)
+        .collect();
+    let time = w.e.time.real;
+    let _ = now;
+    for action in pressed {
         let paused = game.paused;
         let Some(sim) = &mut game.sim else { return };
-        match *action {
+        match action {
             Action::Skill(s) => {
                 // A skill with none left can't be selected (verified). Paused,
                 // it is only selected, not given to the highlighted lemming.
@@ -570,22 +535,18 @@ fn buttons(
                             if sim.can_assign(i, s) {
                                 pending_turner.0 = Some(i);
                                 highlight.last_skill = Some(s);
-                                flash.0 = Some((s, time.elapsed_secs()));
+                                panel.flash = Some((s, time.elapsed_secs()));
                             }
                         }
                         Some(i) => {
                             let ok = sim.assign(i, s);
                             if ok {
                                 highlight.last_skill = Some(s);
-                                flash.0 = Some((s, time.elapsed_secs()));
+                                panel.flash = Some((s, time.elapsed_secs()));
                             }
-                            sfx.write(crate::sfx::Sfx(if ok {
-                                "VOXFX/OK2"
-                            } else {
-                                "VOXFX/UH_UH1"
-                            }));
+                            sfx.play(if ok { "VOXFX/OK2" } else { "VOXFX/UH_UH1" });
                         }
-                        None => selected.0 = Some(s),
+                        None => selected.set(Some(s)),
                     }
                 }
             }
@@ -593,21 +554,24 @@ fn buttons(
             // Alt+Q works at once.
             Action::Nuke => {
                 let now = time.elapsed_secs();
-                if last_bomb_click.is_some_and(|t| now - t <= DOUBLE_CLICK_SECONDS) {
-                    *last_bomb_click = None;
+                if panel
+                    .last_bomb_click
+                    .is_some_and(|t| now - t <= DOUBLE_CLICK_SECONDS)
+                {
+                    panel.last_bomb_click = None;
                     if !sim.nuked {
-                        sfx.write(crate::sfx::Sfx("VOXFX/GEDDON1"));
+                        sfx.play("VOXFX/GEDDON1");
                     }
                     sim.nuke();
                 } else {
-                    *last_bomb_click = Some(now);
+                    panel.last_bomb_click = Some(now);
                 }
             }
             Action::FastForward => game.fast_forward = !game.fast_forward,
             Action::Pause => game.paused = !game.paused,
             Action::Camera => {
-                if let (Some(cams), Ok(mut view)) = (&cameras, views.single_mut()) {
-                    preset.0 = (preset.0 + 1) % 4;
+                if let Some(cams) = cameras {
+                    preset.set((preset.0 + 1) % 4);
                     let (pos, yaw) = cams.slots[preset.0];
                     view.glide_to(pos, yaw);
                     *lemming_cam = LemmingCam::Off;
@@ -626,28 +590,24 @@ fn buttons(
                         .map(|k| (i + k) % n)
                         .find(|&j| !sim.lemmings[j].gone)
                         .unwrap_or(i);
-                    if let Ok(view) = views.single() {
-                        lemming_cam.ride(next, &mut highlight, &mut selected, view);
-                    }
+                    lemming_cam.ride(next, highlight, selected, view);
                 } else if highlight.on {
                     // The last skill given while highlighting becomes the
                     // selected one (owner's observation).
-                    selected.0 = highlight.last_skill;
+                    selected.set(highlight.last_skill);
                     *highlight = crate::hud::Highlight::default();
                 } else {
-                    selected.0 = None;
+                    selected.set(None);
                     let size = screen.size;
                     *highlight = crate::hud::Highlight {
                         on: true,
-                        lemming: crate::hud::nearest_to_centre(sim, &scene_camera, size),
+                        lemming: crate::hud::nearest_to_centre(sim, scene_camera, size),
                         last_skill: None,
                     };
                 }
             }
             Action::LemmingCam => {
-                if let Ok(mut view) = views.single_mut() {
-                    lemming_cam.face(&mut highlight, &mut selected, &mut view);
-                }
+                lemming_cam.face(highlight, selected, view);
             }
             Action::TurnClockwise | Action::TurnAnticlockwise | Action::Slower | Action::Faster => {
             }
@@ -659,20 +619,18 @@ fn buttons(
 /// initial delay (verified); the turn arrows turn the world about the
 /// level's centre while held (owner's observation: they turn the whole
 /// level, not the camera), or turn the head riding along with a lemming.
-fn held_buttons(
-    held: Query<(&Interaction, &Action)>,
-    keys: Res<ButtonInput<KeyCode>>,
-    time: Res<Time>,
-    mut carry: Local<f32>,
-    mut game: ResMut<Game>,
-    lemming_cam: Res<LemmingCam>,
-    mut views: Query<&mut ViewCamera>,
-) {
+fn held_buttons(w: &mut World) {
+    let (keys, time, ui, panel) = (&w.e.input.keys, w.e.time.game, &w.ui, &mut w.panel);
+    let (game, lemming_cam, view) = (&mut w.game, &w.lemming_cam, &mut w.view);
     const RATE_STEPS_PER_SECOND: f32 = 70.0;
     let down = |a: Action| {
-        held.iter()
-            .any(|(i, b)| *i == Interaction::Pressed && *b == a)
+        panel
+            .actions
+            .iter()
+            .any(|&(id, b)| b == a && ui.pressed(id))
     };
+    let turn =
+        down(Action::TurnAnticlockwise) as i32 as f32 - down(Action::TurnClockwise) as i32 as f32;
     let slower = down(Action::Slower)
         || keys.pressed(KeyCode::Minus)
         || keys.pressed(KeyCode::NumpadSubtract);
@@ -681,25 +639,21 @@ fn held_buttons(
     if let Some(sim) = &mut game.sim {
         let first = keys.just_pressed(KeyCode::Minus) || keys.just_pressed(KeyCode::Equal);
         if slower != faster {
-            *carry += time.delta_secs() * RATE_STEPS_PER_SECOND;
+            panel.carry += time.delta_secs() * RATE_STEPS_PER_SECOND;
             // A tap changes the rate by at least one.
             let steps = if first {
-                (*carry as i32).max(1)
+                (panel.carry as i32).max(1)
             } else {
-                *carry as i32
+                panel.carry as i32
             };
-            *carry -= steps as f32;
+            panel.carry -= steps as f32;
             sim.adjust_release_rate(if faster { steps } else { -steps });
         } else {
-            *carry = 0.0;
+            panel.carry = 0.0;
         }
     }
-    let turn =
-        down(Action::TurnAnticlockwise) as i32 as f32 - down(Action::TurnClockwise) as i32 as f32;
     // Riding along, they turn the head instead.
-    if turn != 0.0
-        && let Ok(mut view) = views.single_mut()
-    {
+    if turn != 0.0 {
         if lemming_cam.following().is_none() {
             if let Some(sim) = game.sim.as_ref() {
                 view.orbit(sim.centre(), -turn * crate::ORBIT_SPEED * time.delta_secs());
@@ -741,89 +695,80 @@ fn height_at(y: f32) -> f32 {
 /// or down, at the camera keys' speed, to the height whose knob would sit
 /// under the pointer (verified: the original's camera climbs and sinks
 /// until the knob reaches the pointer; its left button does nothing there).
-#[allow(clippy::too_many_arguments)] // Bevy system parameters
-fn height_bar(
-    windows: Query<&Window>,
-    screen: Res<Screen>,
-    mouse: Res<ButtonInput<MouseButton>>,
-    settings: Res<crate::settings::Settings>,
-    time: Res<Time>,
-    lemming_cam: Res<LemmingCam>,
-    bars: Query<&Interaction, With<HeightBar>>,
-    mut knobs: Query<&mut PanelPos, With<Knob>>,
-    mut views: Query<&mut ViewCamera>,
-) {
-    let Ok(mut view) = views.single_mut() else {
-        return;
-    };
+fn height_bar(w: &mut World) {
+    let (window, screen, mouse) = (&w.e.window, &w.screen, &w.e.input.mouse);
+    let (settings, time, lemming_cam) = (&w.settings, w.e.time.game, &w.lemming_cam);
+    let view = &mut w.view;
     let held = mouse.pressed(settings.turn_button())
         || (settings.enhanced && mouse.pressed(settings.action_button()));
+    let on_bar = w
+        .panel
+        .bar
+        .is_some_and(|b| w.ui.interaction(b) != Interaction::None);
     if held
         && lemming_cam.following().is_none()
-        && bars.iter().any(|i| *i != Interaction::None)
-        && let Ok(window) = windows.single()
+        && on_bar
         && let Some(p) = screen.cursor(window)
     {
-        let target = height_at(p.y / scale(&screen) - KNOB_CENTRE);
+        let target = height_at(p.y / scale(screen) - KNOB_CENTRE);
         let step = crate::CAMERA_SPEED * settings.camera_factor() * time.delta_secs();
         view.pos.y += (target - view.pos.y).clamp(-step, step);
         view.glide = None;
     }
-    for mut knob in &mut knobs {
+    if let Some(knob) = w.panel.knob.and_then(|k| w.panel.pos.get_mut(&k)) {
         knob.at.y = knob_at(view.pos.y) - KNOB_YELLOW;
     }
 }
 
 /// F1–F9 also only select skills that are left.
-fn skill_keys_select(game: Res<Game>, mut selected: ResMut<SelectedSkill>) {
-    if let (Some(sim), Some(s)) = (&game.sim, selected.0)
+fn skill_keys_select(w: &mut World) {
+    let selected = &mut w.selected;
+    let changed = w.panel.select_seen != selected.1;
+    if let (Some(sim), Some(s)) = (&w.game.sim, selected.0)
         && sim.skills_left[s as usize] == 0
-        && selected.is_changed()
+        && changed
     {
-        selected.0 = None;
+        selected.set(None);
     }
+    w.panel.select_seen = selected.1;
 }
 
 /// A level starts with the first slot, the blocker, selected if it has any,
 /// otherwise with nothing selected (level 2 started with the blocker; the
 /// Practice "Bomber", with only bombers, with nothing, owner's observation).
-fn select_first_skill(game: Res<Game>, mut selected: ResMut<SelectedSkill>) {
-    selected.0 = game
-        .sim
-        .as_ref()
-        .filter(|sim| sim.skills_left[Skill::Blocker as usize] > 0)
-        .map(|_| Skill::Blocker);
+pub(crate) fn select_first_skill(w: &mut World) {
+    w.selected.set(
+        w.game
+            .sim
+            .as_ref()
+            .filter(|sim| sim.skills_left[Skill::Blocker as usize] > 0)
+            .map(|_| Skill::Blocker),
+    );
 }
 
-#[allow(clippy::too_many_arguments)]
-fn animate(
-    art: Option<Res<Art>>,
-    time: Res<Time>,
-    game: Res<Game>,
-    selected: Res<SelectedSkill>,
-    lemming_cam: Res<LemmingCam>,
-    held: Query<(&Interaction, &Action)>,
-    keys: Res<ButtonInput<KeyCode>>,
-    mut items: Query<(&Animated, &mut ImageNode)>,
-    highlight: Res<crate::hud::Highlight>,
-    mut nuked_at: Local<Option<f32>>,
-    (flash, real): (Res<SkillFlash>, Res<Time<Real>>),
-) {
-    let Some(art) = art else { return };
+fn animate(w: &mut World) {
+    let (time, real) = (w.e.time.game, w.e.time.real);
+    let (game, selected, lemming_cam) = (&w.game, &w.selected, &w.lemming_cam);
+    let (keys, highlight) = (&w.e.input.keys, &w.highlight);
+    let (ui, panel) = (&mut w.ui, &mut w.panel);
+    let Some(art) = &panel.art else { return };
     let t = time.elapsed_secs();
     let nuked = game.sim.as_ref().is_some_and(|s| s.nuked);
-    match (nuked, *nuked_at) {
-        (true, None) => *nuked_at = Some(t),
-        (false, Some(_)) => *nuked_at = None,
+    match (nuked, panel.nuked_at) {
+        (true, None) => panel.nuked_at = Some(t),
+        (false, Some(_)) => panel.nuked_at = None,
         _ => {}
     }
-    let nuked_at = *nuked_at;
+    let nuked_at = panel.nuked_at;
     let down = |a: Action| {
-        held.iter()
-            .any(|(i, b)| *i == Interaction::Pressed && *b == a)
+        panel
+            .actions
+            .iter()
+            .any(|&(id, b)| b == a && ui.pressed(id))
     };
-    for (anim, mut node) in &mut items {
-        let image = match *anim {
+    let mut images = Vec::new();
+    for &(id, anim) in &panel.animated {
+        let image = match anim {
             Animated::Skill(s) => {
                 let cells = SKILL_BUTTONS[s as usize].1;
                 // The selected skill animates while any are left, but never
@@ -834,8 +779,8 @@ fn animate(
                     .sim
                     .as_ref()
                     .is_some_and(|sim| sim.skills_left[s as usize] > 0);
-                let once = flash
-                    .0
+                let once = panel
+                    .flash
                     .filter(|&(f, _)| f == s)
                     .map(|(_, at)| ((real.elapsed_secs() - at) * SKILL_FPS / 4.0) as usize)
                     .filter(|&k| k < cells.len());
@@ -898,9 +843,10 @@ fn animate(
                 None => art.panel[icon::BOMB].clone(),
             },
         };
-        if node.image != image {
-            node.image = image;
-        }
+        images.push((id, image));
+    }
+    for (id, image) in images {
+        ui.set_image(id, &image);
     }
 }
 
@@ -929,17 +875,12 @@ fn value_string(v: Value, game: &Game, preset: usize) -> String {
 }
 
 /// Fills each counter's glyph slots, right-aligned.
-fn glyph_texts(
-    art: Option<Res<Art>>,
-    game: Res<Game>,
-    preset: Res<PresetIndex>,
-    texts: Query<(&GlyphText, &Children)>,
-    mut slots: Query<(&GlyphSlot, &mut PanelPos, &mut ImageNode, &mut Visibility)>,
-) {
-    let Some(art) = art else { return };
-    for (text, children) in &texts {
+fn glyph_texts(w: &mut World) {
+    let panel = &mut w.panel;
+    let Some(art) = &panel.art else { return };
+    for (text, slots) in &panel.texts {
         let glyphs = if text.large { &art.large } else { &art.small };
-        let s = value_string(text.value, &game, preset.0);
+        let s = value_string(text.value, &w.game, w.preset.0);
         // Positions from the right: each character's cell x.
         // Each character's cell starts its own advance left of the next one's
         // ("3:53": digits at 281, 292, 299 and the colon at 288).
@@ -950,72 +891,41 @@ fn glyph_texts(
                 .map_or(text.right, |&(next_x, _)| next_x - glyphs.advance(c));
             placed.push((x, c));
         }
-        for child in children.iter() {
-            let Ok((slot, mut pos, mut node, mut vis)) = slots.get_mut(child) else {
-                continue;
-            };
-            match placed
-                .get(slot.0)
-                .and_then(|&(x, c)| Some((x, glyphs.get(c)?)))
-            {
+        for (i, &id) in slots.iter().enumerate() {
+            let Some(n) = w.ui.get_mut(id) else { continue };
+            match placed.get(i).and_then(|&(x, c)| Some((x, glyphs.get(c)?))) {
                 Some((x, image)) => {
-                    pos.at = Vec2::new(x, text.y);
-                    if node.image != image {
-                        node.image = image;
+                    if let Some(p) = panel.pos.get_mut(&id) {
+                        p.at = Vec2::new(x, text.y);
                     }
-                    *vis = Visibility::Inherited;
+                    n.set_image(&image);
+                    n.set_visible(true);
                 }
-                None => *vis = Visibility::Hidden,
+                None => n.set_visible(false),
             }
         }
     }
 }
 
-/// The minimap's frame.
-#[derive(Component)]
-struct MinimapFrame;
-
 /// Shows the level's minimap image and its frame, unless the level hides
 /// its minimap; then neither shows (observed on `LEVEL.019`, `044`, `062`).
-fn show_minimap(
-    map: Option<Res<crate::minimap::Minimap>>,
-    mut views: Query<(&mut ImageNode, &mut Visibility), With<crate::minimap::MinimapView>>,
-    mut frames: Query<&mut Visibility, (With<MinimapFrame>, Without<crate::minimap::MinimapView>)>,
-) {
-    let Some(map) = map else { return };
-    let v = if map.shown {
-        Visibility::Inherited
-    } else {
-        Visibility::Hidden
-    };
-    for mut vis in &mut frames {
-        vis.set_if_neq(v);
+pub(crate) fn show_minimap(w: &mut World) {
+    let Some(map) = &w.minimap else { return };
+    if let Some(n) = w.panel.frame.and_then(|f| w.ui.get_mut(f)) {
+        n.set_visible(map.shown);
     }
-    for (mut node, mut vis) in &mut views {
-        if node.image != map.image {
-            node.image = map.image.clone();
-        }
-        vis.set_if_neq(v);
+    if let Some(n) = w.panel.map.and_then(|m| w.ui.get_mut(m)) {
+        n.set_image(&map.image);
+        n.set_visible(map.shown);
     }
 }
 
 /// The panel shows while playing, but not during the level preview (an
 /// interstitial in the original, without the panel).
-fn show_in_play(
-    state: Res<State<AppState>>,
-    opts: Res<crate::Options>,
-    preview: Res<crate::briefing::Preview>,
-    mut roots: Query<&mut Visibility, With<PanelRoot>>,
-) {
-    let v = if *state.get() == AppState::Playing && !opts.no_hud && !preview.active {
-        Visibility::Inherited
-    } else {
-        Visibility::Hidden
-    };
-    for mut vis in &mut roots {
-        if *vis != v {
-            *vis = v;
-        }
+pub(crate) fn show_in_play(w: &mut World) {
+    let shown = w.state == AppState::Playing && !w.opts.no_hud && !w.preview.active;
+    if let Some(root) = w.panel.root {
+        w.ui.set_visible(root, shown);
     }
 }
 
@@ -1023,9 +933,6 @@ fn show_in_play(
 /// (position estimated): "Replaying" and "Click to Play" during a replay,
 /// otherwise the state of the lemming under the pointer, as in the original
 /// ("Walker", "Sliding").
-#[derive(Component, Default)]
-struct Caption(String);
-
 const CAPTION_AT: Vec2 = Vec2::new(3.0, 158.0);
 /// Seconds each replay message shows (estimated).
 const REPLAY_BLINK: f32 = 1.5;
@@ -1055,76 +962,74 @@ fn state_name(l: &l3d_sim::Lemming) -> Option<&'static str> {
     })
 }
 
-#[allow(clippy::too_many_arguments)]
-fn caption(
-    mut commands: Commands,
-    art: Option<Res<crate::title::Art>>,
-    game: Res<Game>,
-    time: Res<Time>,
-    camera: Res<crate::scene_render::SceneCamera>,
-    windows: Query<&Window>,
-    screen: Res<Screen>,
-    ui: Query<&Interaction>,
-    lemming_cam: Res<LemmingCam>,
-    mut captions: Query<(Entity, &mut Caption)>,
-) {
-    let Some(font) = art.as_ref().and_then(|a| a.large.as_ref()) else {
+fn caption(w: &mut World) {
+    let Some(font) = w.art.as_ref().and_then(|a| a.large.as_ref()) else {
         return;
     };
-    let Ok((entity, mut shown)) = captions.single_mut() else {
+    let Some((node, shown)) = &mut w.panel.caption else {
         return;
     };
+    let game = &w.game;
     let text = if game.replay.as_ref().is_some_and(|r| r.demo.is_some()) {
         "Demo"
     } else if game.replay.is_some() {
-        if ((time.elapsed_secs() / REPLAY_BLINK) as u32).is_multiple_of(2) {
+        if ((w.e.time.game.elapsed_secs() / REPLAY_BLINK) as u32).is_multiple_of(2) {
             "Replaying"
         } else {
             "Click to Play"
         }
     } else {
         (|| {
-            let window = windows.single().ok()?;
-            let point = screen.cursor(window)?;
-            if ui.iter().any(|i| *i != Interaction::None) {
+            let point = w.screen.cursor(&w.e.window)?;
+            if w.ui.any_active() {
                 return None;
             }
             let sim = game.sim.as_ref()?;
             // Riding along, not the lemming ridden with.
             let i = crate::hud::lemming_near(
                 sim,
-                &camera,
-                screen.size,
+                &w.camera,
+                w.screen.size,
                 point,
-                lemming_cam.following(),
+                w.lemming_cam.following(),
             )?;
             state_name(&sim.lemmings[i])
         })()
         .unwrap_or("")
     };
-    if shown.0 == text {
+    if shown == text {
         return;
     }
-    shown.0 = text.to_string();
-    commands.entity(entity).despawn_children();
+    *shown = text.to_string();
+    let node = *node;
+    for c in w.ui.children(node).to_vec() {
+        w.ui.remove(c);
+    }
     let (glyphs, _) = font.layout(text);
     for (x, image) in glyphs {
-        let g = commands
-            .spawn((
-                PanelPos {
-                    at: CAPTION_AT + Vec2::X * x,
-                    size: font.size,
-                },
-                ImageNode::new(image),
-                Node::default(),
-            ))
-            .id();
-        commands.entity(entity).add_child(g);
+        let g = w.ui.child(node, UiNode::image(image));
+        w.panel.pos.insert(
+            g,
+            PanelPos {
+                at: CAPTION_AT + Vec2::X * x,
+                size: font.size,
+            },
+        );
     }
 }
 
-/// A skill given straight to the highlighted lemming, and when (real
-/// seconds): its button plays its animation once, though nothing is
-/// selected (owner's observation).
-#[derive(Resource, Default)]
-struct SkillFlash(Option<(Skill, f32)>);
+/// The panel's systems while playing, in order.
+pub(crate) fn update(w: &mut World) {
+    layout(w);
+    buttons(w);
+    held_buttons(w);
+    skill_keys_select(w);
+    animate(w);
+    glyph_texts(w);
+    caption(w);
+}
+
+/// Before the camera moves: the height bar.
+pub(crate) fn before_camera(w: &mut World) {
+    height_bar(w);
+}

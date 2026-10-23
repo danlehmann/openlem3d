@@ -8,8 +8,6 @@ license.workspace = true
 [dependencies]
 l3d-formats.workspace = true
 l3d-engine.workspace = true
-# The ECS the game's systems run in (l3d-engine's); its derives name it.
-bevy_ecs = { version = "0.19.1", default-features = false, features = ["std"] }
 # Waits for wgpu's adapter and device.
 pollster = "0.4"
 # Saves --screenshot images.

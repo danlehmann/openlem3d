@@ -16,44 +16,9 @@ use l3d_formats::screen;
 
 use crate::menu::AppState;
 use crate::texture::indexed_image;
-use crate::title::{Art, At, Canvas, at, image_at};
-use crate::ui::{BackgroundColor, Button, ImageNode, Interaction, Node, percent};
-use crate::{CurrentLevel, Data, Game, ViewCamera};
+use crate::ui::{Interaction, Node, NodeId, Ui, UiNode, percent};
+use crate::{Data, World};
 
-pub struct BriefingPlugin;
-
-impl Plugin for BriefingPlugin {
-    fn build(&self, app: &mut App) {
-        app.init_resource::<Preview>()
-            .add_systems(
-                Update,
-                (spawn_briefing, briefing_input)
-                    .chain()
-                    .run_if(in_state(AppState::Briefing)),
-            )
-            .add_systems(
-                OnExit(AppState::Briefing),
-                crate::title::despawn::<BriefingRoot>,
-            )
-            .add_systems(
-                Update,
-                preview
-                    .before(crate::camera_controls)
-                    .run_if(in_state(AppState::Playing)),
-            )
-            .add_systems(Update, preview_overlay.after(preview))
-            .add_systems(
-                Update,
-                end_demo
-                    .before(crate::menu::back_to_menu)
-                    .before(crate::hud::assign_on_pointer)
-                    .before(crate::lemming_cam::toggle_keys)
-                    .run_if(in_state(AppState::Playing)),
-            );
-    }
-}
-
-/// The briefing canvas: the scene pictures' size.
 const SCREEN: Vec2 = Vec2::new(640.0, 480.0);
 /// Text is the panel's large font at this scale (estimated from captures).
 const TEXT_SCALE: f32 = 1.5;
@@ -61,10 +26,48 @@ const TOP_Y: f32 = 6.0;
 const PROMPT_Y: f32 = 438.0;
 const LABEL_Y: f32 = 445.0;
 
-#[derive(Component)]
-struct BriefingRoot;
+/// The briefing's screen and the preview's overlay, their choices, the
+/// scene pictures loaded so far (by theme), and the preview's centre.
+#[derive(Default)]
+pub(crate) struct Briefing {
+    root: Option<NodeId>,
+    overlay: Option<NodeId>,
+    choices: Vec<(NodeId, Choice)>,
+    cache: HashMap<u8, Option<ScenePics>>,
+    centre: Option<(u32, Vec3, bool)>,
+}
 
-/// A theme's picture and its four prompt cells, uploaded.
+impl Briefing {
+    /// Whether `c` is pressed.
+    fn on(&self, ui: &Ui, c: Choice) -> bool {
+        self.choices.iter().any(|&(id, k)| k == c && ui.pressed(id))
+    }
+
+    /// Whether the pointer is on a choice.
+    fn on_prompt(&self, ui: &Ui) -> bool {
+        self.choices
+            .iter()
+            .any(|&(id, _)| ui.interaction(id) != Interaction::None)
+    }
+
+    fn scene(
+        &mut self,
+        data: &mut Data,
+        theme: u8,
+        images: &mut Assets<Image>,
+    ) -> Option<ScenePics> {
+        self.cache
+            .entry(theme)
+            .or_insert_with(|| load_scene(data, theme, images))
+            .clone()
+    }
+}
+
+/// Leaving the briefing takes its screen away.
+pub(crate) fn exit(w: &mut World) {
+    w.ui.remove_opt(&mut w.briefing.root);
+}
+
 #[derive(Clone)]
 pub(crate) struct ScenePics {
     pub(crate) picture: Handle<Image>,
@@ -97,73 +100,55 @@ pub(crate) fn load_scene(
 }
 
 /// Builds the briefing when it is shown and doesn't exist yet.
-#[allow(clippy::too_many_arguments)]
-fn spawn_briefing(
-    mut commands: Commands,
-    art: Option<Res<Art>>,
-    current: Res<CurrentLevel>,
-    mut data: ResMut<Data>,
-    mut images: ResMut<Assets<Image>>,
-    mut cache: Local<HashMap<u8, Option<ScenePics>>>,
-    roots: Query<(), With<BriefingRoot>>,
-    mut preview: ResMut<Preview>,
-    mut next: ResMut<NextState<AppState>>,
-) {
-    if !roots.is_empty() {
+pub(crate) fn spawn_briefing(w: &mut World) {
+    if w.briefing.root.is_some() {
         return;
     }
+    let n = w.current.number;
     // A Practice briefing is the flyover itself, with the details and the
     // Demo prompt over it, not the theme picture (`docs/spec/camera.md`).
-    if has_demo(current.number) {
-        *preview = Preview {
+    if has_demo(n) {
+        w.preview = Preview {
             active: true,
             practice: true,
             ..default()
         };
-        next.set(AppState::Playing);
+        w.next_state = Some(AppState::Playing);
         return;
     }
-    let Ok(level) = data.0.level(current.number) else {
+    let Ok(level) = w.data.0.level(n) else {
         return;
     };
-    let pics = cache
-        .entry(level.theme)
-        .or_insert_with(|| load_scene(&mut data, level.theme, &mut images))
-        .clone();
-    let root = commands
-        .spawn((
-            BriefingRoot,
-            Node {
+    let pics = w.briefing.scene(&mut w.data, level.theme, &mut w.e.images);
+    let ui = &mut w.ui;
+    let root = ui.root(
+        UiNode::new()
+            .layout(Node {
                 width: percent(100),
                 height: percent(100),
                 ..default()
-            },
-            BackgroundColor(Color::BLACK),
-        ))
-        .id();
-    let canvas = commands.spawn((Canvas(SCREEN), Node::default())).id();
-    commands.entity(root).add_child(canvas);
-    let add = |commands: &mut Commands, bundle: (ImageNode, At, Node)| {
-        let e = commands.spawn(bundle).id();
-        commands.entity(canvas).add_child(e);
-    };
+            })
+            .background(Color::BLACK),
+    );
+    w.briefing.root = Some(root);
+    let canvas = ui.child(root, UiNode::new().canvas(SCREEN));
     if let Some(p) = &pics {
-        add(
-            &mut commands,
-            image_at(p.picture.clone(), at(0.0, 0.0, SCREEN.x, SCREEN.y)),
+        ui.child(
+            canvas,
+            UiNode::image(p.picture.clone()).at(0.0, 0.0, SCREEN.x, SCREEN.y),
         );
         // Left button, right button, the two halves of the ENTER key.
         let prompt = |i: usize| p.prompts.get(i).cloned();
         for (i, x) in [(0, 25.0), (2, 268.0), (3, 300.0), (1, 522.0)] {
             if let Some(h) = prompt(i) {
-                add(&mut commands, image_at(h, at(x, PROMPT_Y, 32.0, 32.0)));
+                ui.child(canvas, UiNode::image(h).at(x, PROMPT_Y, 32.0, 32.0));
             }
         }
     }
-    let Some(font) = art.as_ref().and_then(|a| a.large.as_ref()) else {
+    let Some(font) = w.art.as_ref().and_then(|a| a.large.as_ref()) else {
         return;
     };
-    let text = |commands: &mut Commands, s: &str, x: f32, y: f32, right_aligned: bool| {
+    let mut text = |s: &str, x: f32, y: f32, right_aligned: bool| {
         let (glyphs, width) = font.layout(s);
         let left = if right_aligned {
             x - width * TEXT_SCALE
@@ -171,99 +156,77 @@ fn spawn_briefing(
             x
         };
         for (gx, image) in glyphs {
-            let r = at(
-                left + gx * TEXT_SCALE,
-                y,
-                font.size.x * TEXT_SCALE,
-                font.size.y * TEXT_SCALE,
+            ui.child(
+                canvas,
+                UiNode::image(image).at(
+                    left + gx * TEXT_SCALE,
+                    y,
+                    font.size.x * TEXT_SCALE,
+                    font.size.y * TEXT_SCALE,
+                ),
             );
-            add(commands, image_at(image, r));
         }
     };
-    text(&mut commands, "Level", 21.0, TOP_Y, false);
+    text("Level", 21.0, TOP_Y, false);
+    text(&(n + 1).to_string(), 158.0, TOP_Y, true);
+    text(level.title.trim(), 169.0, TOP_Y, false);
+    text("Continue", 61.0, LABEL_Y, false);
     text(
-        &mut commands,
-        &(current.number + 1).to_string(),
-        158.0,
-        TOP_Y,
-        true,
-    );
-    text(&mut commands, level.title.trim(), 169.0, TOP_Y, false);
-    text(&mut commands, "Continue", 61.0, LABEL_Y, false);
-    text(
-        &mut commands,
-        if has_demo(current.number) {
-            "Demo"
-        } else {
-            "Preview"
-        },
+        if has_demo(n) { "Demo" } else { "Preview" },
         342.0,
         LABEL_Y,
         false,
     );
-    text(&mut commands, "Menu", 561.0, LABEL_Y, false);
+    text("Menu", 561.0, LABEL_Y, false);
     // Clicking or tapping a prompt picks it; anywhere else continues.
-    for (choice, x, w) in [
+    for (choice, x, width) in [
         (Choice::Preview, 268.0, 150.0),
         (Choice::Menu, 522.0, 110.0),
     ] {
-        let e = commands
-            .spawn((choice, Button, at(x, PROMPT_Y, w, 32.0), Node::default()))
-            .id();
-        commands.entity(canvas).add_child(e);
+        let id =
+            w.ui.child(canvas, UiNode::new().button().at(x, PROMPT_Y, width, 32.0));
+        w.briefing.choices.push((id, choice));
     }
 }
 
-/// A clickable prompt.
-#[derive(Component, Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum Choice {
     Preview,
     Menu,
 }
 
-#[allow(clippy::too_many_arguments)]
-fn briefing_input(
-    choices: Query<(&Interaction, &Choice)>,
-    keys: Res<ButtonInput<KeyCode>>,
-    mouse: Res<ButtonInput<MouseButton>>,
-    lifted: crate::touch::Lifted,
-    mut preview: ResMut<Preview>,
-    current: Res<CurrentLevel>,
-    mut next: ResMut<NextState<AppState>>,
-) {
-    let on = |c: Choice| {
-        choices
-            .iter()
-            .any(|(i, k)| *i == Interaction::Pressed && *k == c)
-    };
-    let on_prompt = choices.iter().any(|(i, _)| *i != Interaction::None);
+pub(crate) fn briefing_input(w: &mut World) {
+    let lifted = crate::touch::lifted(w);
+    let b = &mut w.briefing;
+    b.choices.retain(|&(id, _)| w.ui.contains(id));
+    let (keys, mouse) = (&w.e.input.keys, &w.e.input.mouse);
+    let on_prompt = b.on_prompt(&w.ui);
     let back = mouse.just_pressed(MouseButton::Right)
         || keys.just_pressed(KeyCode::Escape)
-        || on(Choice::Menu);
+        || b.on(&w.ui, Choice::Menu);
     let show = keys.just_pressed(KeyCode::Enter)
         || keys.just_pressed(KeyCode::NumpadEnter)
-        || on(Choice::Preview);
+        || b.on(&w.ui, Choice::Preview);
     let go = (mouse.just_pressed(MouseButton::Left) && !on_prompt)
         || keys.just_pressed(KeyCode::Space)
-        || (lifted.any() && !on_prompt)
+        || (lifted && !on_prompt)
         || keys
             .get_just_pressed()
             .any(|k| !matches!(k, KeyCode::Escape | KeyCode::Enter | KeyCode::NumpadEnter));
     if back {
-        next.set(crate::menu::level_menu(current.number));
+        w.next_state = Some(crate::menu::level_menu(w.current.number));
     } else if show {
-        *preview = Preview {
+        w.preview = Preview {
             active: true,
             ..default()
         };
-        next.set(AppState::Playing);
+        w.next_state = Some(AppState::Playing);
     } else if go {
-        next.set(AppState::Playing);
+        w.next_state = Some(AppState::Playing);
     }
 }
 
-/// The level preview: the camera circles the level while it waits.
-#[derive(Resource, Default)]
+#[derive(Default)]
 pub struct Preview {
     pub active: bool,
     /// A Practice level's briefing: Enter plays the demo, and the way back
@@ -316,30 +279,26 @@ fn preview_centre(level: &l3d_formats::level::Level, blocks: &l3d_formats::blk::
     Vec3::new(mid.x, UNSET_HEIGHT, mid.y)
 }
 
-#[allow(clippy::too_many_arguments)]
-fn preview(
-    time: Res<Time>,
-    mut keys: ResMut<ButtonInput<KeyCode>>,
-    mut mouse: ResMut<ButtonInput<MouseButton>>,
-    lifted: crate::touch::Lifted,
-    choices: Query<(&Interaction, &Choice)>,
-    mut current: ResMut<CurrentLevel>,
-    mut state: ResMut<Preview>,
-    mut game: ResMut<Game>,
-    mut data: ResMut<Data>,
-    mut views: Query<&mut ViewCamera>,
-    mut preset: ResMut<crate::PresetIndex>,
-    mut next: ResMut<NextState<AppState>>,
-    mut centre: Local<Option<(u32, Vec3, bool)>>,
-) {
-    if !state.active {
+pub(crate) fn preview(w: &mut World) {
+    if !w.preview.active {
         return;
     }
-    let on = |c: Choice| {
-        choices
-            .iter()
-            .any(|(i, k)| *i == Interaction::Pressed && *k == c)
+    w.briefing.choices.retain(|&(id, _)| w.ui.contains(id));
+    let lifted = crate::touch::lifted(w);
+    let (on_menu, on_preview, on_prompt) = (
+        w.briefing.on(&w.ui, Choice::Menu),
+        w.briefing.on(&w.ui, Choice::Preview),
+        w.briefing.on_prompt(&w.ui),
+    );
+    let on = |c: Choice| match c {
+        Choice::Menu => on_menu,
+        Choice::Preview => on_preview,
     };
+    let time = w.e.time.game;
+    let (keys, mouse) = (&mut w.e.input.keys, &mut w.e.input.mouse);
+    let (current, state, game, data) = (&mut w.current, &mut w.preview, &mut w.game, &mut w.data);
+    let (view, preset, next) = (&mut w.view, &mut w.preset, &mut w.next_state);
+    let centre = &mut w.briefing.centre;
     // Right click (or Esc) goes back to the level list, as in the original;
     // any other key, click or tap starts the level.
     if state.started
@@ -350,7 +309,7 @@ fn preview(
         state.active = false;
         game.paused = false;
         current.loaded = None;
-        next.set(crate::menu::level_menu(current.number));
+        *next = Some(crate::menu::level_menu(current.number));
         return;
     }
     // On a Practice level Enter plays the demo from the start; it returns
@@ -373,13 +332,9 @@ fn preview(
         current.loaded = None;
         return;
     }
-    let on_prompt = choices.iter().any(|(i, _)| *i != Interaction::None);
     let any = keys.get_just_pressed().next().is_some()
         || (mouse.get_just_pressed().next().is_some() && !on_prompt)
-        || (lifted.any() && !on_prompt);
-    let Ok(mut view) = views.single_mut() else {
-        return;
-    };
+        || (lifted && !on_prompt);
     // The level starts from camera 1: the camera glides there from where
     // the flyover left it, the level still waiting; input meanwhile skips
     // the rest.
@@ -397,7 +352,7 @@ fn preview(
     if state.started && any {
         if let Some((level, ..)) = game.terrain.as_ref() {
             view.glide_to_preset(&level.cameras[0]);
-            preset.0 = 0;
+            preset.set(0);
         }
         state.gliding = true;
         return;
@@ -433,43 +388,30 @@ fn preview(
 
 /// Practice levels offer a demo (as the original's "Enter = Demo") instead
 /// of the preview.
+pub(crate) fn end_demo(w: &mut World) {
+    let Some(back_to) = w.game.replay.as_ref().and_then(|r| r.demo) else {
+        return;
+    };
+    let lifted = crate::touch::lifted(w);
+    let (keys, mouse) = (&mut w.e.input.keys, &mut w.e.input.mouse);
+    if keys.get_just_pressed().next().is_some()
+        || mouse.get_just_pressed().next().is_some()
+        || lifted
+    {
+        keys.clear();
+        mouse.clear();
+        w.game.replay = None;
+        w.current.loaded = None;
+        w.next_state = Some(back_to);
+    }
+}
+
 fn has_demo(level: u32) -> bool {
     level >= crate::menu::PRACTICE as u32 * crate::menu::LEVELS_PER_RATING
         && l3d_sim::demos::solution(level).is_some()
 }
 
 /// Any key, click or tap ends a demo, back to where it was started.
-fn end_demo(
-    mut keys: ResMut<ButtonInput<KeyCode>>,
-    mut mouse: ResMut<ButtonInput<MouseButton>>,
-    lifted: crate::touch::Lifted,
-    mut game: ResMut<Game>,
-    mut current: ResMut<CurrentLevel>,
-    mut next: ResMut<NextState<AppState>>,
-) {
-    let Some(back_to) = game.replay.as_ref().and_then(|r| r.demo) else {
-        return;
-    };
-    if keys.get_just_pressed().next().is_some()
-        || mouse.get_just_pressed().next().is_some()
-        || lifted.any()
-    {
-        keys.clear();
-        mouse.clear();
-        game.replay = None;
-        current.loaded = None;
-        next.set(back_to);
-    }
-}
-
-/// The preview's overlay, as in the original: the level's details in white
-/// with a dark shadow at the top left, and Continue (left button) and Menu
-/// (right button) along the bottom. The panel is hidden meanwhile.
-#[derive(Component)]
-struct PreviewRoot;
-
-/// Lines of the preview's details (wording from the original; where the
-/// numbers sit in each line is estimated).
 fn preview_lines(n: u32, level: &l3d_formats::level::Level) -> [String; 6] {
     let rating = crate::menu::RATINGS
         .get((n / crate::menu::LEVELS_PER_RATING) as usize)
@@ -488,100 +430,75 @@ fn preview_lines(n: u32, level: &l3d_formats::level::Level) -> [String; 6] {
     ]
 }
 
-#[allow(clippy::too_many_arguments)]
-fn preview_overlay(
-    mut commands: Commands,
-    state: Res<Preview>,
-    art: Option<Res<Art>>,
-    current: Res<CurrentLevel>,
-    game: Res<Game>,
-    mut data: ResMut<Data>,
-    mut images: ResMut<Assets<Image>>,
-    mut cache: Local<HashMap<u8, Option<ScenePics>>>,
-    roots: Query<Entity, With<PreviewRoot>>,
-) {
+pub(crate) fn preview_overlay(w: &mut World) {
+    let state = &w.preview;
     if !state.active || state.gliding {
-        for e in &roots {
-            commands.entity(e).despawn();
-        }
+        w.ui.remove_opt(&mut w.briefing.overlay);
         return;
     }
     // Until the level is loaded, the terrain is still the previous level's.
-    if !roots.is_empty() || current.loaded != Some(current.number) {
+    let n = w.current.number;
+    if w.briefing.overlay.is_some() || w.current.loaded != Some(n) {
         return;
     }
     let (Some(font), Some((level, ..))) = (
-        art.as_ref().and_then(|a| a.large.as_ref()),
-        game.terrain.as_ref(),
+        w.art.as_ref().and_then(|a| a.large.as_ref()),
+        w.game.terrain.as_ref(),
     ) else {
         return;
     };
-    let root = commands
-        .spawn((
-            PreviewRoot,
-            Node {
-                width: percent(100),
-                height: percent(100),
-                ..default()
-            },
-        ))
-        .id();
-    let canvas = commands.spawn((Canvas(SCREEN), Node::default())).id();
-    commands.entity(root).add_child(canvas);
-    let add = |commands: &mut Commands, mut bundle: (ImageNode, At, Node), shade: Option<Color>| {
-        if let Some(c) = shade {
-            bundle.0.color = c;
-        }
-        let e = commands.spawn(bundle).id();
-        commands.entity(canvas).add_child(e);
-    };
-    let text = |commands: &mut Commands, s: &str, x: f32, y: f32| {
+    let practice = state.practice;
+    let ui = &mut w.ui;
+    let root = ui.root(UiNode::new().layout(Node {
+        width: percent(100),
+        height: percent(100),
+        ..default()
+    }));
+    w.briefing.overlay = Some(root);
+    let canvas = ui.child(root, UiNode::new().canvas(SCREEN));
+    let text = |ui: &mut Ui, s: &str, x: f32, y: f32| {
         let (glyphs, _) = font.layout(s);
         // The shadow first, then the text.
         for (shadow, dx) in [(Some(Color::srgba(0.0, 0.0, 0.0, 0.7)), 2.0), (None, 0.0)] {
             for (gx, image) in glyphs.iter() {
-                let r = at(
+                let mut g = UiNode::image(image.clone()).at(
                     x + gx * TEXT_SCALE + dx,
                     y + dx,
                     font.size.x * TEXT_SCALE,
                     font.size.y * TEXT_SCALE,
                 );
-                add(commands, image_at(image.clone(), r), shadow);
+                if let Some(c) = shadow {
+                    g = g.tint(c);
+                }
+                ui.child(canvas, g);
             }
         }
     };
-    for (k, line) in preview_lines(current.number, level).iter().enumerate() {
-        text(&mut commands, line, 21.0, TOP_Y + 26.0 * k as f32);
+    for (k, line) in preview_lines(n, level).iter().enumerate() {
+        text(ui, line, 21.0, TOP_Y + 26.0 * k as f32);
     }
-    let pics = cache
-        .entry(level.theme)
-        .or_insert_with(|| load_scene(&mut data, level.theme, &mut images))
-        .clone();
+    let pics = w.briefing.scene(&mut w.data, level.theme, &mut w.e.images);
     if let Some(p) = &pics {
         // Left button, right button and, on a Practice level, the two halves
         // of the ENTER key.
-        let enter: &[(usize, f32)] = if state.practice {
+        let enter: &[(usize, f32)] = if practice {
             &[(2, 268.0), (3, 300.0)]
         } else {
             &[]
         };
         for &(i, x) in [(0, 25.0), (1, 522.0)].iter().chain(enter) {
             if let Some(h) = p.prompts.get(i).cloned() {
-                add(
-                    &mut commands,
-                    image_at(h, at(x, PROMPT_Y, 32.0, 32.0)),
-                    None,
-                );
+                ui.child(canvas, UiNode::image(h).at(x, PROMPT_Y, 32.0, 32.0));
             }
         }
     }
-    text(&mut commands, "Continue", 61.0, LABEL_Y);
-    text(&mut commands, "Menu", 561.0, LABEL_Y);
-    if state.practice {
-        text(&mut commands, "Demo", 342.0, LABEL_Y);
+    text(ui, "Continue", 61.0, LABEL_Y);
+    text(ui, "Menu", 561.0, LABEL_Y);
+    if practice {
+        text(ui, "Demo", 342.0, LABEL_Y);
     }
     // Clicking or tapping a prompt picks it; anywhere else continues.
-    let buttons: &[(Choice, f32, f32)] = if state.practice {
+    let buttons: &[(Choice, f32, f32)] = if practice {
         &[
             (Choice::Preview, 268.0, 150.0),
             (Choice::Menu, 522.0, 110.0),
@@ -589,10 +506,8 @@ fn preview_overlay(
     } else {
         &[(Choice::Menu, 522.0, 110.0)]
     };
-    for &(choice, x, w) in buttons {
-        let e = commands
-            .spawn((choice, Button, at(x, PROMPT_Y, w, 32.0), Node::default()))
-            .id();
-        commands.entity(canvas).add_child(e);
+    for &(choice, x, width) in buttons {
+        let id = ui.child(canvas, UiNode::new().button().at(x, PROMPT_Y, width, 32.0));
+        w.briefing.choices.push((id, choice));
     }
 }

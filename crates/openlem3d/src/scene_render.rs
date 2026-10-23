@@ -8,7 +8,6 @@
 
 use std::sync::Arc;
 
-use l3d_engine::ecs::system::SystemParam;
 use l3d_engine::prelude::*;
 use wgpu::util::DeviceExt;
 
@@ -20,7 +19,7 @@ pub const VERTEX_FLOATS: usize = 14;
 
 /// What the scene shows. `version` changes whenever the content does; the
 /// renderer re-uploads only then.
-#[derive(Resource, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct SceneContent {
     pub version: u64,
     pub data: Option<Arc<SceneData>>,
@@ -45,7 +44,7 @@ pub struct SceneData {
 
 /// Geometry rebuilt every frame (moving sprites such as lemmings), textured
 /// with [`SceneData::sprite_atlas`].
-#[derive(Resource, Clone, Default)]
+#[derive(Clone, Default)]
 pub struct SceneSprites {
     /// Interleaved vertices, [`VERTEX_FLOATS`] per vertex.
     pub vertices: Vec<f32>,
@@ -70,7 +69,7 @@ pub struct RgbaImage {
 }
 
 /// Per-frame view parameters.
-#[derive(Resource, Clone, Copy, Default)]
+#[derive(Clone, Copy, Default)]
 pub struct SceneCamera {
     /// World to clip space, wgpu conventions (depth 0..1).
     pub view_proj: Mat4,
@@ -96,22 +95,11 @@ pub struct SceneCamera {
     pub glow: bool,
 }
 
-pub struct SceneRenderPlugin;
-
-impl Plugin for SceneRenderPlugin {
-    fn build(&self, app: &mut App) {
-        app.init_resource::<SceneContent>()
-            .init_resource::<SceneCamera>()
-            .init_resource::<SceneSprites>();
-    }
-}
-
 /// What a frame draws of the scene.
-#[derive(SystemParam)]
-pub struct SceneInput<'w> {
-    content: Res<'w, SceneContent>,
-    sprites: Res<'w, SceneSprites>,
-    camera: Res<'w, SceneCamera>,
+pub struct SceneInput<'a> {
+    pub content: &'a SceneContent,
+    pub sprites: &'a SceneSprites,
+    pub camera: &'a SceneCamera,
 }
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
@@ -745,11 +733,11 @@ impl SceneGpu {
             self,
             device,
             &gpu.queue,
-            &input.content,
-            &input.sprites,
-            &input.camera,
+            input.content,
+            input.sprites,
+            input.camera,
         );
-        draw(self, device, encoder, target, full, viewport, &input.camera);
+        draw(self, device, encoder, target, full, viewport, input.camera);
     }
 }
 

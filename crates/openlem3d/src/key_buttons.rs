@@ -5,16 +5,14 @@
 //! Pressing one sends that key's input, so the key's own handling serves
 //! both (ours).
 
-use l3d_engine::input::ButtonState;
-use l3d_engine::input::{Key, KeyboardInput, NamedKey, NativeKey};
+use l3d_engine::input::{ButtonState, Key, KeyboardInput, NamedKey, NativeKey};
 use l3d_engine::prelude::*;
-use l3d_engine::window::PrimaryWindow;
 
+use crate::World;
 use crate::lemming_cam::LemmingCam;
 use crate::menu::AppState;
-use crate::screen::Screen;
-use crate::title::{Art, Glyphs, at, image_at};
-use crate::ui::{Button, ImageNode, Interaction, Node, px};
+use crate::title::Glyphs;
+use crate::ui::{Interaction, Node, NodeId, Ui, UiNode, px};
 
 /// The colour of a button's text under the pointer (as the level list's).
 const HOVER: Color = Color::srgb(1.0, 0.9, 0.2);
@@ -26,57 +24,57 @@ const LEVEL_BUTTON_BOTTOM: f32 = 197.0;
 /// from the top of the screen, original pixels.
 const LEVEL_BUTTON_TOP: f32 = 3.0;
 
-pub struct KeyButtonsPlugin;
-
-impl Plugin for KeyButtonsPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_systems(PreUpdate, press.after(crate::ui::UiSystems::Focus))
-            .add_systems(Update, (hover, level_button));
-    }
-}
-
-/// A button that presses `key`; its text (its children) is drawn in
+/// What a button presses: `key`; its text (its children) is drawn in
 /// `colour`, or in the hover colour under the pointer.
-#[derive(Component, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub struct KeyButton {
     pub key: KeyCode,
     pub colour: Color,
 }
 
+/// The key buttons there are, and the keys pressed for one frame.
+#[derive(Default)]
+pub(crate) struct KeyButtons {
+    buttons: Vec<(NodeId, KeyButton)>,
+    held: Vec<KeyCode>,
+    /// The level button, with its text and the screen size it was made for.
+    level: Option<(NodeId, &'static str, Vec2)>,
+}
+
+impl KeyButtons {
+    /// Makes node `id` (a button) press `button.key`.
+    pub(crate) fn add(&mut self, id: NodeId, button: KeyButton) {
+        self.buttons.push((id, button));
+    }
+}
+
 /// Sends a pressed button's key as keyboard input, released the next frame.
-/// The key's state changes at once too, as a real key's does: Bevy takes in
-/// the input only the next frame, when the screen may already have changed
-/// on the input itself (the code screen's Esc then exited the title screen).
-/// Taking it in again then changes nothing.
-fn press(
-    buttons: Query<(&Interaction, &KeyButton), Changed<Interaction>>,
-    windows: Query<Entity, With<PrimaryWindow>>,
-    mut input: MessageWriter<KeyboardInput>,
-    mut keys: ResMut<ButtonInput<KeyCode>>,
-    mut held: Local<Vec<KeyCode>>,
-) {
-    let Ok(window) = windows.single() else {
-        return;
-    };
+/// The key's state changes at once too, as a real key's does.
+pub(crate) fn press(w: &mut World) {
+    let ui = &w.ui;
+    let kb = &mut w.key_buttons;
+    kb.buttons.retain(|(id, _)| ui.contains(*id));
+    let input = &mut w.e.input;
     let mut send = |key: KeyCode, state: ButtonState| {
-        input.write(KeyboardInput {
+        input.keyboard.push(KeyboardInput {
             key_code: Some(key),
             logical_key: logical(key),
             state,
             text: None,
             repeat: false,
-            window,
         });
+        match state {
+            ButtonState::Pressed => input.keys.press(key),
+            ButtonState::Released => input.keys.release(key),
+        }
     };
-    for key in held.drain(..) {
+    for key in kb.held.drain(..) {
         send(key, ButtonState::Released);
-        keys.release(key);
     }
-    for (i, b) in &buttons {
-        if *i == Interaction::Pressed {
+    for (id, b) in &kb.buttons {
+        if ui.just_pressed(*id) {
             send(b.key, ButtonState::Pressed);
-            keys.press(b.key);
-            held.push(b.key);
+            kb.held.push(b.key);
         }
     }
 }
@@ -92,19 +90,20 @@ fn logical(key: KeyCode) -> Key {
     }
 }
 
-fn hover(
-    buttons: Query<(&Interaction, &KeyButton, Option<&Children>), Changed<Interaction>>,
-    mut glyphs: Query<&mut ImageNode>,
-) {
-    for (i, b, children) in &buttons {
-        let colour = if *i == Interaction::None {
+pub(crate) fn hover(w: &mut World) {
+    let ui = &mut w.ui;
+    for (id, b) in &w.key_buttons.buttons {
+        if !ui.changed(*id) {
+            continue;
+        }
+        let colour = if ui.interaction(*id) == Interaction::None {
             b.colour
         } else {
             HOVER
         };
-        for &c in children.into_iter().flatten() {
-            if let Ok(mut g) = glyphs.get_mut(c) {
-                g.color = colour;
+        for c in ui.children(*id).to_vec() {
+            if let Some(g) = ui.get_mut(c) {
+                g.set_tint(colour);
             }
         }
     }
@@ -114,8 +113,9 @@ fn hover(
 /// `x` and its top at `y` (canvas pixels).
 #[allow(clippy::too_many_arguments)] // the text's place, look and key
 pub(crate) fn spawn_text_button(
-    commands: &mut Commands,
-    parent: Entity,
+    ui: &mut Ui,
+    buttons: &mut KeyButtons,
+    parent: NodeId,
     font: &Glyphs,
     text: &str,
     x: f32,
@@ -124,20 +124,16 @@ pub(crate) fn spawn_text_button(
     key: KeyCode,
 ) {
     let (glyphs, width) = font.layout(text);
-    let button = commands
-        .spawn((
-            Button,
-            KeyButton { key, colour },
-            at(x, y, width, font.size.y),
-            Node::default(),
-        ))
-        .id();
+    let button = ui.child(parent, UiNode::new().button().at(x, y, width, font.size.y));
+    buttons.add(button, KeyButton { key, colour });
     for (gx, image) in glyphs {
-        let (node, a, n) = image_at(image, at(gx, 0.0, font.size.x, font.size.y));
-        let g = commands.spawn((node.with_color(colour), a, n)).id();
-        commands.entity(button).add_child(g);
+        ui.child(
+            button,
+            UiNode::image(image)
+                .tint(colour)
+                .at(gx, 0.0, font.size.x, font.size.y),
+        );
     }
-    commands.entity(parent).add_child(button);
 }
 
 /// The button in a level, at the bottom right under the panel's icons, or
@@ -147,44 +143,30 @@ pub(crate) fn spawn_text_button(
 /// "Menu" during a replay (Esc leaves for the level list). Hidden in the lemming view
 /// (where Esc leaves the view; the panel's arrow does that) and while the
 /// restart question is up.
-#[derive(Component)]
-struct LevelButton;
-
-#[allow(clippy::too_many_arguments)] // Bevy system parameters
-fn level_button(
-    mut commands: Commands,
-    art: Option<Res<Art>>,
-    state: Res<State<AppState>>,
-    game: Res<crate::Game>,
-    cam: Res<LemmingCam>,
-    confirm: Res<crate::confirm::RestartConfirm>,
-    screen: Res<Screen>,
-    buttons: Query<Entity, With<LevelButton>>,
-    mut shown: Local<Option<(&'static str, Vec2)>>,
-) {
-    let label = (*state.get() == AppState::Playing
-        && *cam == LemmingCam::Off
-        && confirm.0.is_none())
+pub(crate) fn level_button(w: &mut World) {
+    let label = (w.state == AppState::Playing
+        && w.lemming_cam == LemmingCam::Off
+        && w.confirm.question.is_none())
     .then(|| {
-        if game.replay.is_some() {
+        if w.game.replay.is_some() {
             "Menu"
         } else {
             "Restart"
         }
     });
-    let wanted = label.map(|l| (l, screen.size));
-    if *shown == wanted {
+    let size = w.screen.size;
+    let shown = w.key_buttons.level.map(|(_, t, s)| (t, s));
+    let wanted = label.map(|l| (l, size));
+    if shown == wanted {
         return;
     }
-    for e in &buttons {
-        commands.entity(e).despawn();
+    if let Some((id, ..)) = w.key_buttons.level.take() {
+        w.ui.remove(id);
     }
-    *shown = None;
-    let (Some((text, size)), Some(font)) = (wanted, art.as_ref().and_then(|a| a.large.as_ref()))
+    let (Some((text, size)), Some(font)) = (wanted, w.art.as_ref().and_then(|a| a.large.as_ref()))
     else {
         return;
     };
-    *shown = wanted;
     // Original pixels, scaled as the panel is.
     let s = (size.y / 200.0).max(1.0);
     let (glyphs, width) = font.layout(text);
@@ -199,35 +181,31 @@ fn level_button(
     } else {
         ((size.x - width * s) / 2.0, LEVEL_BUTTON_TOP * s)
     };
-    let button = commands
-        .spawn((
-            LevelButton,
-            Button,
-            KeyButton {
-                key: KeyCode::Escape,
-                colour,
-            },
-            Node {
-                left: px(left.round()),
-                top: px(top.round()),
-                width: px(width * s),
+    let ui = &mut w.ui;
+    let button = ui.root(UiNode::new().button().layout(Node {
+        left: px(left.round()),
+        top: px(top.round()),
+        width: px(width * s),
+        height: px(font.size.y * s),
+        ..default()
+    }));
+    w.key_buttons.add(
+        button,
+        KeyButton {
+            key: KeyCode::Escape,
+            colour,
+        },
+    );
+    w.key_buttons.level = Some((button, text, size));
+    for (gx, image) in glyphs {
+        ui.child(
+            button,
+            UiNode::image(image).tint(colour).layout(Node {
+                left: px(gx * s),
+                width: px(font.size.x * s),
                 height: px(font.size.y * s),
                 ..default()
-            },
-        ))
-        .id();
-    for (gx, image) in glyphs {
-        let g = commands
-            .spawn((
-                ImageNode::new(image).with_color(colour),
-                Node {
-                    left: px(gx * s),
-                    width: px(font.size.x * s),
-                    height: px(font.size.y * s),
-                    ..default()
-                },
-            ))
-            .id();
-        commands.entity(button).add_child(g);
+            }),
+        );
     }
 }

@@ -1,13 +1,11 @@
 [package]
 name = "l3d-engine"
-description = "The few engine pieces openlem3d needs: a window, input, time, states, assets and sound around an ECS"
+description = "The few engine pieces openlem3d needs: a window, input, clocks, pictures and sound"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
-# The ECS the game's systems run in, on one thread.
-bevy_ecs = { version = "0.19.1", default-features = false, features = ["std"] }
 glam = "0.32"
 log = { version = "0.4", features = ["std"] }
 rodio = { version = "0.22", default-features = false, features = ["playback"] }

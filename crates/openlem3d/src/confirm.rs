@@ -5,28 +5,17 @@
 
 use l3d_engine::prelude::*;
 
+use crate::World;
 use crate::key_buttons::KeyButton;
-use crate::menu::AppState;
-use crate::title::{Art, At, Canvas, at, image_at};
-use crate::ui::{BackgroundColor, Button, ImageNode, Node, percent};
+use crate::ui::{Node, NodeId, UiNode, percent};
 
-pub struct ConfirmPlugin;
-
-impl Plugin for ConfirmPlugin {
-    fn build(&self, app: &mut App) {
-        app.init_resource::<RestartConfirm>()
-            .add_systems(Update, show.run_if(in_state(AppState::Playing)))
-            .add_systems(OnExit(AppState::Playing), close);
-    }
+/// The open question, holding whether the level was paused before it, and
+/// its overlay.
+#[derive(Default)]
+pub(crate) struct Confirm {
+    pub(crate) question: Option<bool>,
+    root: Option<NodeId>,
 }
-
-/// The open question, holding whether the level was paused before it.
-#[derive(Resource, Default)]
-pub(crate) struct RestartConfirm(pub(crate) Option<bool>);
-
-/// The question's overlay.
-#[derive(Component)]
-struct ConfirmRoot;
 
 /// The overlay's canvas: the briefing's, shared with the mode notice.
 const SCREEN: Vec2 = Vec2::new(640.0, 480.0);
@@ -34,49 +23,36 @@ const SCALE: f32 = 3.0;
 const LINES: [&str; 2] = ["Restart level?", "Y / N"];
 const TOP: f32 = 180.0;
 
-fn close(
-    mut commands: Commands,
-    mut confirm: ResMut<RestartConfirm>,
-    roots: Query<Entity, With<ConfirmRoot>>,
-) {
-    confirm.0 = None;
-    for e in &roots {
-        commands.entity(e).despawn();
-    }
+/// Leaving the level closes the question.
+pub(crate) fn close(w: &mut World) {
+    w.confirm.question = None;
+    w.ui.remove_opt(&mut w.confirm.root);
 }
 
 /// Builds the overlay when the question opens and removes it when it closes.
-fn show(
-    mut commands: Commands,
-    confirm: Res<RestartConfirm>,
-    art: Option<Res<Art>>,
-    roots: Query<Entity, With<ConfirmRoot>>,
-) {
-    if confirm.0.is_none() {
-        for e in &roots {
-            commands.entity(e).despawn();
-        }
+pub(crate) fn show(w: &mut World) {
+    if w.confirm.question.is_none() {
+        w.ui.remove_opt(&mut w.confirm.root);
         return;
     }
-    if !roots.is_empty() {
+    if w.confirm.root.is_some() {
         return;
     }
-    let Some(font) = art.as_ref().and_then(|a| a.large.as_ref()) else {
+    let Some(font) = w.art.as_ref().and_then(|a| a.large.as_ref()) else {
         return;
     };
-    let root = commands
-        .spawn((
-            ConfirmRoot,
-            Node {
+    let ui = &mut w.ui;
+    let root = ui.root(
+        UiNode::new()
+            .layout(Node {
                 width: percent(100),
                 height: percent(100),
                 ..default()
-            },
-            BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.4)),
-        ))
-        .id();
-    let canvas = commands.spawn((Canvas(SCREEN), Node::default())).id();
-    commands.entity(root).add_child(canvas);
+            })
+            .background(Color::srgba(0.0, 0.0, 0.0, 0.4)),
+    );
+    w.confirm.root = Some(root);
+    let canvas = ui.child(root, UiNode::new().canvas(SCREEN));
     for (row, line) in LINES.iter().enumerate() {
         let (glyphs, width) = font.layout(line);
         let left = (SCREEN.x - width * SCALE) / 2.0;
@@ -84,20 +60,16 @@ fn show(
         // A dark shadow, then the text.
         for (shade, d) in [(Some(Color::srgba(0.0, 0.0, 0.0, 0.7)), 2.0), (None, 0.0)] {
             for (x, image) in &glyphs {
-                let mut bundle: (ImageNode, At, Node) = image_at(
-                    image.clone(),
-                    at(
-                        left + x * SCALE + d,
-                        y + d,
-                        font.size.x * SCALE,
-                        font.size.y * SCALE,
-                    ),
+                let mut glyph = UiNode::image(image.clone()).at(
+                    left + x * SCALE + d,
+                    y + d,
+                    font.size.x * SCALE,
+                    font.size.y * SCALE,
                 );
                 if let Some(c) = shade {
-                    bundle.0.color = c;
+                    glyph = glyph.tint(c);
                 }
-                let g = commands.spawn(bundle).id();
-                commands.entity(canvas).add_child(g);
+                ui.child(canvas, glyph);
             }
         }
     }
@@ -115,17 +87,18 @@ fn show(
         (left - pad, mid, KeyCode::KeyY),
         (mid, right, KeyCode::KeyN),
     ] {
-        let b = commands
-            .spawn((
-                Button,
-                KeyButton {
-                    key,
-                    colour: Color::WHITE,
-                },
-                at(x0, y - pad / 2.0, x1 - x0, font.size.y * SCALE + pad),
-                Node::default(),
-            ))
-            .id();
-        commands.entity(canvas).add_child(b);
+        let b = ui.child(
+            canvas,
+            UiNode::new()
+                .button()
+                .at(x0, y - pad / 2.0, x1 - x0, font.size.y * SCALE + pad),
+        );
+        w.key_buttons.add(
+            b,
+            KeyButton {
+                key,
+                colour: Color::WHITE,
+            },
+        );
     }
 }

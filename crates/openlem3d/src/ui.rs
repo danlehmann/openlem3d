@@ -1,49 +1,29 @@
 //! The UI: pictures and coloured rectangles, placed by hand on top of the
-//! scene, and the buttons among them. Every node is positioned absolutely
-//! inside its parent, so this is a small stand-in for the part of bevy_ui
-//! the game used, with the same names and the same behaviour:
+//! scene, and the buttons among them, as a tree of nodes in [`Ui`]. Every
+//! node is positioned absolutely inside its parent, as the part of bevy_ui
+//! the game first used, with the same behaviour:
 //!
 //! - layout in physical pixels, each edge rounded to a whole pixel, so that
 //!   scaled pixel art lands on the same pixels as before;
-//! - a node's children drawn after it, in order; nodes without a parent, and
-//!   ones with a [`GlobalZIndex`], drawn by that index and then in the order
-//!   they were spawned;
-//! - [`Interaction`] for every node under the pointer (the cursor, else the
-//!   first touch), from the top down to the first [`Button`], which takes it;
-//!   other nodes let it through. Hidden nodes take none.
+//! - a node's children drawn after it, in order; the roots drawn by their
+//!   [`UiNode::z`] and then in the order they were added;
+//! - [`Interaction`] for every interactive node under the pointer (the
+//!   cursor, else the first touch), from the top down to the first button,
+//!   which takes it; other nodes let it through. Hidden nodes take none.
+//!
+//! A canvas ([`UiNode::canvas`]) is a rectangle of the original's pixels,
+//! scaled to fit the screen and centred; nodes placed with [`UiNode::at`]
+//! are given in its pixels.
 //!
 //! Drawing is one instanced wgpu pipeline, over the scene (`crate::gpu`).
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
 
-use l3d_engine::ecs::system::SystemParam;
-use l3d_engine::input::InputSystems;
+use l3d_engine::input::Input;
 use l3d_engine::prelude::*;
 
 use crate::gpu::{Gpu, TARGET_FORMAT};
 use crate::screen::Screen;
-
-pub struct UiPlugin;
-
-impl Plugin for UiPlugin {
-    fn build(&self, app: &mut App) {
-        app.init_resource::<UiStack>()
-            .add_systems(
-                PreUpdate,
-                focus.in_set(UiSystems::Focus).after(InputSystems),
-            )
-            .add_systems(PostUpdate, layout.in_set(UiSystems::Layout));
-    }
-}
-
-#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
-pub enum UiSystems {
-    /// Sets [`Interaction`] from the pointer (PreUpdate).
-    Focus,
-    /// Places every node (PostUpdate).
-    Layout,
-}
 
 /// A length: none, in logical pixels, or a percentage of the parent's.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -90,22 +70,9 @@ pub fn percent(v: impl ValNum) -> Val {
     Val::Percent(v.to_f32())
 }
 
-/// Whether a node clips its children to its inside.
+/// Where a node is placed inside its parent (inside the parent's border); a
+/// root is placed on the [`Screen`].
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct Overflow {
-    clip: bool,
-}
-
-impl Overflow {
-    pub fn clip() -> Self {
-        Overflow { clip: true }
-    }
-}
-
-/// A rectangle of the UI, placed inside its parent's (inside the parent's
-/// border); a node without a parent is placed on the [`Screen`].
-#[derive(Component, Clone, Debug, Default, PartialEq)]
-#[require(ComputedUi, SpawnOrder, Visibility)]
 pub struct Node {
     pub left: Val,
     pub top: Val,
@@ -113,31 +80,17 @@ pub struct Node {
     pub height: Val,
     /// The border's width, on all four sides.
     pub border: Val,
-    pub overflow: Overflow,
+    /// Whether the node clips its children to its inside.
+    pub clip: bool,
 }
 
-/// Fills the node.
-#[derive(Component, Clone, Copy, Debug, PartialEq)]
-pub struct BackgroundColor(pub Color);
-
-/// Colours the node's [`Node::border`].
-#[derive(Component, Clone, Copy, Debug, PartialEq)]
-pub struct BorderColor(pub Color);
-
 /// A picture as large as fits in the node, keeping its shape, in the middle;
-/// tinted by `color`. None by default.
-#[derive(Component, Clone, Debug)]
-#[require(Node)]
+/// tinted by `color`.
+#[derive(Clone, Debug)]
 pub struct ImageNode {
     pub image: Handle<Image>,
     pub color: Color,
     pub flip_x: bool,
-}
-
-impl Default for ImageNode {
-    fn default() -> Self {
-        ImageNode::new(Handle::default())
-    }
 }
 
 impl ImageNode {
@@ -148,15 +101,10 @@ impl ImageNode {
             flip_x: false,
         }
     }
-
-    pub fn with_color(mut self, color: Color) -> Self {
-        self.color = color;
-        self
-    }
 }
 
 /// What the pointer is doing to a node.
-#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Interaction {
     Pressed,
     Hovered,
@@ -164,27 +112,17 @@ pub enum Interaction {
     None,
 }
 
-/// A node that takes the pointer from the nodes below it.
-#[derive(Component, Clone, Copy, Debug, Default)]
-#[require(Node, Interaction)]
-pub struct Button;
-
 /// Whether a node is drawn (and takes the pointer): as its parent is, or
 /// not at all.
-#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Visibility {
     #[default]
     Inherited,
     Hidden,
 }
 
-/// Draws the node and its children above the other roots: by this index,
-/// then in the order they were spawned. Only for nodes without a parent.
-#[derive(Component, Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
-pub struct GlobalZIndex(pub i32);
-
-/// Where a node ended up, after [`UiSystems::Layout`].
-#[derive(Component, Clone, Copy, Debug, Default)]
+/// Where a node ended up, after [`Ui::layout`].
+#[derive(Clone, Copy, Debug, Default)]
 pub struct ComputedUi {
     /// In logical pixels, on the [`Screen`].
     pub rect: Rect,
@@ -198,20 +136,518 @@ pub struct ComputedUi {
     visible: bool,
 }
 
-/// When a node was spawned, ordering the roots.
-#[derive(Component, Clone, Copy, Debug)]
-struct SpawnOrder(u64);
+/// A node of the UI. Build one with the methods, then add it to a [`Ui`].
+#[derive(Clone, Debug, Default)]
+pub struct UiNode {
+    pub node: Node,
+    /// Fills the node.
+    pub background: Option<Color>,
+    /// Colours the node's [`Node::border`].
+    pub border_color: Option<Color>,
+    pub image: Option<ImageNode>,
+    pub visibility: Visibility,
+    /// For roots: drawn above the roots with a lower one.
+    pub z: i32,
+    /// Takes the pointer from the nodes below it.
+    pub button: bool,
+    /// Has an [`Interaction`] (buttons always do).
+    pub interactive: bool,
+    pub interaction: Interaction,
+    /// The interaction the frame before ([`Ui::focus`] keeps it).
+    previous: Interaction,
+    /// The node's rectangle in canvas pixels, relative to its parent.
+    pub at: Option<Rect>,
+    /// This node is the canvas, of this size in the original's pixels.
+    pub canvas: Option<Vec2>,
+    pub computed: ComputedUi,
+    parent: Option<NodeId>,
+    children: Vec<NodeId>,
+    /// When it was added, ordering the roots.
+    order: u64,
+}
 
-impl Default for SpawnOrder {
-    fn default() -> Self {
-        static NEXT: AtomicU64 = AtomicU64::new(0);
-        SpawnOrder(NEXT.fetch_add(1, Ordering::Relaxed))
+impl UiNode {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// A node showing `image`.
+    pub fn image(image: Handle<Image>) -> Self {
+        UiNode {
+            image: Some(ImageNode::new(image)),
+            ..default()
+        }
+    }
+
+    /// Places the node at `x`, `y`, `w`×`h` canvas pixels in its parent.
+    pub fn at(mut self, x: f32, y: f32, w: f32, h: f32) -> Self {
+        self.at = Some(Rect::new(x, y, x + w, y + h));
+        self
+    }
+
+    pub fn layout(mut self, node: Node) -> Self {
+        self.node = node;
+        self
+    }
+
+    pub fn background(mut self, color: Color) -> Self {
+        self.background = Some(color);
+        self
+    }
+
+    pub fn border(mut self, width: Val, color: Color) -> Self {
+        self.node.border = width;
+        self.border_color = Some(color);
+        self
+    }
+
+    /// Tints the picture.
+    pub fn tint(mut self, color: Color) -> Self {
+        if let Some(i) = &mut self.image {
+            i.color = color;
+        }
+        self
+    }
+
+    pub fn flip_x(mut self, flip: bool) -> Self {
+        if let Some(i) = &mut self.image {
+            i.flip_x = flip;
+        }
+        self
+    }
+
+    pub fn button(mut self) -> Self {
+        self.button = true;
+        self.interactive = true;
+        self
+    }
+
+    pub fn hidden(mut self) -> Self {
+        self.visibility = Visibility::Hidden;
+        self
+    }
+
+    pub fn visible_if(mut self, shown: bool) -> Self {
+        self.visibility = if shown {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
+        self
+    }
+
+    pub fn z(mut self, z: i32) -> Self {
+        self.z = z;
+        self
+    }
+
+    pub fn canvas(mut self, size: Vec2) -> Self {
+        self.canvas = Some(size);
+        self
+    }
+
+    pub fn set_visible(&mut self, shown: bool) {
+        self.visibility = if shown {
+            Visibility::Inherited
+        } else {
+            Visibility::Hidden
+        };
+    }
+
+    /// Shows `image` (if it isn't already).
+    pub fn set_image(&mut self, image: &Handle<Image>) {
+        match &mut self.image {
+            Some(i) if i.image == *image => {}
+            Some(i) => i.image = image.clone(),
+            None => self.image = Some(ImageNode::new(image.clone())),
+        }
+    }
+
+    pub fn set_tint(&mut self, color: Color) {
+        if let Some(i) = &mut self.image {
+            i.color = color;
+        }
     }
 }
 
-/// Every node, back to front.
-#[derive(Resource, Default)]
-struct UiStack(Vec<Entity>);
+/// A node's id in its [`Ui`]; it finds nothing once the node is removed.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct NodeId {
+    index: u32,
+    generation: u32,
+}
+
+#[derive(Default)]
+struct Slot {
+    generation: u32,
+    node: Option<UiNode>,
+}
+
+/// Every node of the UI.
+#[derive(Default)]
+pub struct Ui {
+    slots: Vec<Slot>,
+    free: Vec<u32>,
+    next_order: u64,
+    /// Every node, back to front, as last laid out.
+    stack: Vec<NodeId>,
+    /// Nodes pressed and released in one frame, reset the next.
+    reset: Vec<NodeId>,
+}
+
+impl Ui {
+    /// Adds `node` as the last child of `parent`, or as a root.
+    pub fn add(&mut self, parent: Option<NodeId>, mut node: UiNode) -> NodeId {
+        node.parent = parent.filter(|&p| self.get(p).is_some());
+        node.children.clear();
+        node.order = self.next_order;
+        self.next_order += 1;
+        let index = match self.free.pop() {
+            Some(i) => i,
+            None => {
+                self.slots.push(Slot::default());
+                self.slots.len() as u32 - 1
+            }
+        };
+        let slot = &mut self.slots[index as usize];
+        slot.node = Some(node);
+        let id = NodeId {
+            index,
+            generation: slot.generation,
+        };
+        if let Some(p) = parent.and_then(|p| self.get_mut(p)) {
+            p.children.push(id);
+        }
+        id
+    }
+
+    pub fn root(&mut self, node: UiNode) -> NodeId {
+        self.add(None, node)
+    }
+
+    pub fn child(&mut self, parent: NodeId, node: UiNode) -> NodeId {
+        self.add(Some(parent), node)
+    }
+
+    pub fn get(&self, id: NodeId) -> Option<&UiNode> {
+        let slot = self.slots.get(id.index as usize)?;
+        (slot.generation == id.generation)
+            .then_some(slot.node.as_ref())
+            .flatten()
+    }
+
+    pub fn get_mut(&mut self, id: NodeId) -> Option<&mut UiNode> {
+        let slot = self.slots.get_mut(id.index as usize)?;
+        (slot.generation == id.generation)
+            .then_some(slot.node.as_mut())
+            .flatten()
+    }
+
+    pub fn contains(&self, id: NodeId) -> bool {
+        self.get(id).is_some()
+    }
+
+    pub fn children(&self, id: NodeId) -> &[NodeId] {
+        self.get(id).map_or(&[], |n| &n.children)
+    }
+
+    /// Removes the node and everything under it.
+    pub fn remove(&mut self, id: NodeId) {
+        let Some(node) = self.get(id) else { return };
+        if let Some(p) = node.parent.and_then(|p| self.get_mut(p)) {
+            p.children.retain(|&c| c != id);
+        }
+        let mut todo = vec![id];
+        while let Some(id) = todo.pop() {
+            let slot = &mut self.slots[id.index as usize];
+            if let Some(n) = slot.node.take() {
+                todo.extend(n.children);
+                slot.generation = slot.generation.wrapping_add(1);
+                self.free.push(id.index);
+            }
+        }
+    }
+
+    /// Removes the node `id` holds, if any, and forgets it.
+    pub fn remove_opt(&mut self, id: &mut Option<NodeId>) {
+        if let Some(id) = id.take() {
+            self.remove(id);
+        }
+    }
+
+    /// The roots, in the order added.
+    pub fn roots(&self) -> impl Iterator<Item = NodeId> + '_ {
+        self.nodes()
+            .filter(|(_, n)| n.parent.is_none())
+            .map(|(id, _)| id)
+    }
+
+    /// Every node, in no particular order.
+    pub fn nodes(&self) -> impl Iterator<Item = (NodeId, &UiNode)> {
+        self.slots.iter().enumerate().filter_map(|(i, s)| {
+            let n = s.node.as_ref()?;
+            Some((
+                NodeId {
+                    index: i as u32,
+                    generation: s.generation,
+                },
+                n,
+            ))
+        })
+    }
+
+    pub fn interaction(&self, id: NodeId) -> Interaction {
+        self.get(id).map_or(Interaction::None, |n| n.interaction)
+    }
+
+    pub fn pressed(&self, id: NodeId) -> bool {
+        self.interaction(id) == Interaction::Pressed
+    }
+
+    /// Whether the node became pressed this frame.
+    pub fn just_pressed(&self, id: NodeId) -> bool {
+        self.get(id).is_some_and(|n| {
+            n.interaction == Interaction::Pressed && n.previous != Interaction::Pressed
+        })
+    }
+
+    /// Whether the node's interaction changed this frame.
+    pub fn changed(&self, id: NodeId) -> bool {
+        self.get(id).is_some_and(|n| n.interaction != n.previous)
+    }
+
+    /// Whether any node is pressed.
+    pub fn any_pressed(&self) -> bool {
+        self.nodes()
+            .any(|(_, n)| n.interaction == Interaction::Pressed)
+    }
+
+    /// Whether the pointer is over (or pressing) any interactive node.
+    pub fn any_active(&self) -> bool {
+        self.nodes()
+            .any(|(_, n)| n.interaction != Interaction::None)
+    }
+
+    pub fn set_visible(&mut self, id: NodeId, shown: bool) {
+        if let Some(n) = self.get_mut(id) {
+            n.set_visible(shown);
+        }
+    }
+
+    pub fn set_image(&mut self, id: NodeId, image: &Handle<Image>) {
+        if let Some(n) = self.get_mut(id) {
+            n.set_image(image);
+        }
+    }
+
+    /// The scale of the canvas, if there is one: screen pixels per canvas
+    /// pixel.
+    fn canvas_scale(&self, screen: Vec2) -> Option<f32> {
+        let size = self.nodes().find_map(|(_, n)| n.canvas)?;
+        Some((screen.x / size.x).min(screen.y / size.y))
+    }
+
+    /// Places the canvas and the nodes given in its pixels, then every node,
+    /// root by root, and stacks them.
+    pub fn layout(&mut self, screen: &Screen, scale: f32) {
+        let (w, h) = (screen.size.x, screen.size.y);
+        if let Some(s) = self.canvas_scale(screen.size) {
+            for slot in &mut self.slots {
+                let Some(n) = &mut slot.node else { continue };
+                if let Some(size) = n.canvas {
+                    n.node.left = px((w - size.x * s) / 2.0);
+                    n.node.top = px((h - size.y * s) / 2.0);
+                    n.node.width = px(size.x * s);
+                    n.node.height = px(size.y * s);
+                } else if let Some(a) = n.at {
+                    n.node.left = px(a.min.x * s);
+                    n.node.top = px(a.min.y * s);
+                    n.node.width = px(a.width() * s);
+                    n.node.height = px(a.height() * s);
+                }
+            }
+        }
+        let mut order: Vec<_> = self
+            .nodes()
+            .filter(|(_, n)| n.parent.is_none())
+            .map(|(id, n)| (n.z, n.order, id))
+            .collect();
+        order.sort_by_key(|&(z, o, _)| (z, o));
+        self.stack.clear();
+        // Depth first. Rounded as taffy (bevy_ui's layout) rounds: a node's
+        // offset from its parent's corner on its own, its size from where its
+        // edges fall unrounded.
+        let mut todo: Vec<_> = order
+            .iter()
+            .rev()
+            .map(|&(_, _, id)| (id, Parent::screen(screen.size * scale)))
+            .collect();
+        while let Some((id, parent)) = todo.pop() {
+            let Some(n) = self.get_mut(id) else { continue };
+            let node = n.node;
+            let offset = parent.border
+                + Vec2::new(
+                    node.left.resolve(parent.inside.x, scale),
+                    node.top.resolve(parent.inside.y, scale),
+                );
+            let size = Vec2::new(
+                node.width.resolve(parent.inside.x, scale),
+                node.height.resolve(parent.inside.y, scale),
+            );
+            let exact = parent.exact + offset;
+            let min = parent.min + round(offset);
+            let pixels = Rect::from_corners(min, min + round(exact + size) - round(exact));
+            let border = node.border.resolve(parent.inside.x, scale);
+            let visible = parent.visible && n.visibility == Visibility::Inherited;
+            n.computed = ComputedUi {
+                rect: Rect::from_corners(exact / scale, (exact + size) / scale),
+                pixels,
+                border,
+                clip: parent.clip,
+                visible,
+            };
+            let clip = if node.clip {
+                let own = Rect::from_corners(pixels.min + border, pixels.max - border);
+                Some(parent.clip.map_or(own, |c| c.intersect(own)))
+            } else {
+                parent.clip
+            };
+            let inside = Parent {
+                min,
+                exact,
+                border: Vec2::splat(border),
+                inside: size - 2.0 * border,
+                clip,
+                visible,
+            };
+            for &child in n.children.iter().rev() {
+                todo.push((child, inside));
+            }
+            self.stack.push(id);
+        }
+    }
+
+    /// Sets [`Interaction`] as bevy_ui's focus system did: press on a click
+    /// or touch, release when let go or when the pointer leaves.
+    pub fn focus(&mut self, input: &Input, window: &Window, screen: &Screen) {
+        for slot in &mut self.slots {
+            if let Some(n) = &mut slot.node {
+                n.previous = n.interaction;
+            }
+        }
+        // A press and release in the same frame shows as pressed for one
+        // frame.
+        for id in std::mem::take(&mut self.reset) {
+            if let Some(n) = self.get_mut(id) {
+                n.interaction = Interaction::None;
+            }
+        }
+        let (mouse, touches) = (&input.mouse, &input.touches);
+        let released = mouse.just_released(MouseButton::Left) || touches.any_just_released();
+        if released {
+            for slot in &mut self.slots {
+                if let Some(n) = &mut slot.node
+                    && n.interaction == Interaction::Pressed
+                {
+                    n.interaction = Interaction::None;
+                }
+            }
+        }
+        let clicked = mouse.just_pressed(MouseButton::Left) || touches.any_just_pressed();
+        let pointer = window
+            .cursor_position()
+            .or_else(|| touches.first_pressed_position())
+            .map(|p| screen.on_screen(p) * window.scale_factor());
+        let mut taken = false;
+        let mut reset = Vec::new();
+        for i in (0..self.stack.len()).rev() {
+            let id = self.stack[i];
+            let Some(n) = self.get_mut(id) else { continue };
+            if !n.interactive {
+                continue;
+            }
+            let c = n.computed;
+            if !c.visible {
+                n.interaction = Interaction::None;
+                continue;
+            }
+            let over = pointer
+                .filter(|&p| c.pixels.contains(p) && c.clip.is_none_or(|clip| clip.contains(p)));
+            if over.is_none() {
+                if n.interaction == Interaction::Hovered || pointer.is_none() {
+                    n.interaction = Interaction::None;
+                }
+                continue;
+            }
+            // Below the button that took the pointer.
+            if taken {
+                if n.interaction != Interaction::Pressed {
+                    n.interaction = Interaction::None;
+                }
+                continue;
+            }
+            if clicked {
+                if n.interaction != Interaction::Pressed {
+                    n.interaction = Interaction::Pressed;
+                    if released {
+                        reset.push(id);
+                    }
+                }
+            } else if n.interaction == Interaction::None {
+                n.interaction = Interaction::Hovered;
+            }
+            taken = n.button;
+        }
+        self.reset = reset;
+    }
+
+    /// The rectangles to draw, back to front: per node its background, its
+    /// picture and its border.
+    fn quads(&self) -> Vec<Quad> {
+        let mut out = Vec::new();
+        for &id in &self.stack {
+            let Some(n) = self.get(id) else { continue };
+            let c = n.computed;
+            if !c.visible {
+                continue;
+            }
+            let mut quad = |rect: Rect, image: Option<&ImageNode>, color: Color| {
+                if rect.is_empty() || color.alpha() <= 0.0 {
+                    return;
+                }
+                out.push(Quad {
+                    rect,
+                    clip: c.clip,
+                    image: image.map(|i| i.image.id()),
+                    flip_x: image.is_some_and(|i| i.flip_x),
+                    color: color.to_linear(),
+                });
+            };
+            let r = c.pixels;
+            if let Some(bg) = n.background {
+                quad(r, None, bg);
+            }
+            if let Some(i) = &n.image {
+                quad(r, Some(i), i.color);
+            }
+            if let Some(b) = n.border_color
+                && c.border > 0.0
+            {
+                let w = c.border.round();
+                let (min, max) = (r.min, r.max);
+                for side in [
+                    Rect::new(min.x, min.y, max.x, min.y + w),
+                    Rect::new(min.x, max.y - w, max.x, max.y),
+                    Rect::new(min.x, min.y + w, min.x + w, max.y - w),
+                    Rect::new(max.x - w, min.y + w, max.x, max.y - w),
+                ] {
+                    quad(side, None, b);
+                }
+            }
+        }
+        out
+    }
+}
 
 /// What a node is placed in, in physical pixels.
 #[derive(Clone, Copy)]
@@ -241,176 +677,9 @@ impl Parent {
     }
 }
 
-/// Places the nodes, root by root, and stacks them.
-#[allow(clippy::type_complexity)] // Bevy system parameters
-fn layout(
-    screen: Res<Screen>,
-    windows: Query<&Window>,
-    roots: Query<(Entity, &SpawnOrder, Option<&GlobalZIndex>), (With<Node>, Without<ChildOf>)>,
-    nodes: Query<(&Node, &Visibility, Option<&Children>)>,
-    mut computed: Query<&mut ComputedUi>,
-    mut stack: ResMut<UiStack>,
-) {
-    let scale = windows.iter().next().map_or(1.0, |w| w.scale_factor());
-    let mut order: Vec<_> = roots
-        .iter()
-        .map(|(e, s, z)| (z.copied().unwrap_or_default(), s.0, e))
-        .collect();
-    order.sort();
-    stack.0.clear();
-    // Depth first. Rounded as taffy (bevy_ui's layout) rounds: a node's
-    // offset from its parent's corner on its own, its size from where its
-    // edges fall unrounded.
-    let mut todo: Vec<_> = order
-        .iter()
-        .rev()
-        .map(|&(_, _, e)| (e, Parent::screen(screen.size * scale)))
-        .collect();
-    while let Some((e, parent)) = todo.pop() {
-        let Ok((node, visibility, children)) = nodes.get(e) else {
-            continue;
-        };
-        let offset = parent.border
-            + Vec2::new(
-                node.left.resolve(parent.inside.x, scale),
-                node.top.resolve(parent.inside.y, scale),
-            );
-        let size = Vec2::new(
-            node.width.resolve(parent.inside.x, scale),
-            node.height.resolve(parent.inside.y, scale),
-        );
-        let exact = parent.exact + offset;
-        let min = parent.min + round(offset);
-        let pixels = Rect::from_corners(min, min + round(exact + size) - round(exact));
-        let border = node.border.resolve(parent.inside.x, scale);
-        let visible = parent.visible && *visibility == Visibility::Inherited;
-        if let Ok(mut c) = computed.get_mut(e) {
-            *c = ComputedUi {
-                rect: Rect::from_corners(exact / scale, (exact + size) / scale),
-                pixels,
-                border,
-                clip: parent.clip,
-                visible,
-            };
-        }
-        stack.0.push(e);
-        let clip = if node.overflow.clip {
-            let own = Rect::from_corners(pixels.min + border, pixels.max - border);
-            Some(parent.clip.map_or(own, |c| c.intersect(own)))
-        } else {
-            parent.clip
-        };
-        if let Some(children) = children {
-            let inside = Parent {
-                min,
-                exact,
-                border: Vec2::splat(border),
-                inside: size - 2.0 * border,
-                clip,
-                visible,
-            };
-            for child in children.iter().rev() {
-                todo.push((child, inside));
-            }
-        }
-    }
-}
-
 /// To the nearest whole pixel, halves up (taffy's rounding).
 fn round(v: Vec2) -> Vec2 {
     (v + 0.5).floor()
-}
-
-/// Sets [`Interaction`] as bevy_ui's focus system did: press on a click or
-/// touch, release when let go or when the pointer leaves.
-fn focus(
-    mouse: Res<ButtonInput<MouseButton>>,
-    touches: Res<Touches>,
-    windows: Query<&Window>,
-    screen: Res<Screen>,
-    stack: Res<UiStack>,
-    mut nodes: Query<(&ComputedUi, Option<&mut Interaction>, Has<Button>)>,
-    mut reset: Local<Vec<Entity>>,
-) {
-    // A press and release in the same frame shows as pressed for one frame.
-    for e in reset.drain(..) {
-        if let Ok((_, Some(mut i), _)) = nodes.get_mut(e) {
-            *i = Interaction::None;
-        }
-    }
-    let released = mouse.just_released(MouseButton::Left) || touches.any_just_released();
-    if released {
-        for (_, i, _) in &mut nodes {
-            if let Some(mut i) = i
-                && *i == Interaction::Pressed
-            {
-                *i = Interaction::None;
-            }
-        }
-    }
-    let clicked = mouse.just_pressed(MouseButton::Left) || touches.any_just_pressed();
-    let pointer = windows.iter().next().and_then(|w| {
-        let p = w
-            .cursor_position()
-            .or_else(|| touches.first_pressed_position())?;
-        Some(screen.on_screen(p) * w.scale_factor())
-    });
-    let mut taken = false;
-    for &e in stack.0.iter().rev() {
-        let Ok((c, interaction, button)) = nodes.get_mut(e) else {
-            continue;
-        };
-        let Some(mut i) = interaction else {
-            continue;
-        };
-        if !c.visible {
-            i.set_if_neq(Interaction::None);
-            continue;
-        }
-        let over =
-            pointer.filter(|&p| c.pixels.contains(p) && c.clip.is_none_or(|clip| clip.contains(p)));
-        if over.is_none() {
-            if *i == Interaction::Hovered || pointer.is_none() {
-                i.set_if_neq(Interaction::None);
-            }
-            continue;
-        }
-        // Below the button that took the pointer.
-        if taken {
-            if *i != Interaction::Pressed {
-                i.set_if_neq(Interaction::None);
-            }
-            continue;
-        }
-        if clicked {
-            if *i != Interaction::Pressed {
-                *i = Interaction::Pressed;
-                if released {
-                    reset.push(e);
-                }
-            }
-        } else if *i == Interaction::None {
-            *i = Interaction::Hovered;
-        }
-        taken = button;
-    }
-}
-
-/// What a node draws: where it is, and its colours and picture.
-type Drawn = (
-    &'static ComputedUi,
-    Option<&'static BackgroundColor>,
-    Option<&'static BorderColor>,
-    Option<&'static ImageNode>,
-);
-
-/// What a frame draws of the UI.
-#[derive(SystemParam)]
-pub struct UiInput<'w, 's> {
-    stack: Res<'w, UiStack>,
-    nodes: Query<'w, 's, Drawn>,
-    images: Res<'w, Assets<Image>>,
-    changes: MessageReader<'w, 's, AssetEvent<Image>>,
 }
 
 /// One rectangle to draw: where (physical pixels from the screen's corner),
@@ -421,56 +690,6 @@ struct Quad {
     image: Option<AssetId<Image>>,
     flip_x: bool,
     color: LinearRgba,
-}
-
-impl UiInput<'_, '_> {
-    /// The rectangles to draw, back to front: per node its background, its
-    /// picture and its border.
-    fn quads(&self) -> Vec<Quad> {
-        let mut out = Vec::new();
-        for &e in &self.stack.0 {
-            let Ok((c, background, border, image)) = self.nodes.get(e) else {
-                continue;
-            };
-            if !c.visible {
-                continue;
-            }
-            let mut quad = |rect: Rect, image: Option<&ImageNode>, color: Color| {
-                if rect.is_empty() || color.alpha() <= 0.0 {
-                    return;
-                }
-                out.push(Quad {
-                    rect,
-                    clip: c.clip,
-                    image: image.map(|i| i.image.id()),
-                    flip_x: image.is_some_and(|i| i.flip_x),
-                    color: color.to_linear(),
-                });
-            };
-            let r = c.pixels;
-            if let Some(bg) = background {
-                quad(r, None, bg.0);
-            }
-            if let Some(i) = image {
-                quad(r, Some(i), i.color);
-            }
-            if let Some(b) = border
-                && c.border > 0.0
-            {
-                let w = c.border.round();
-                let (min, max) = (r.min, r.max);
-                for side in [
-                    Rect::new(min.x, min.y, max.x, min.y + w),
-                    Rect::new(min.x, max.y - w, max.x, max.y),
-                    Rect::new(min.x, min.y + w, min.x + w, max.y - w),
-                    Rect::new(max.x - w, min.y + w, max.x, max.y - w),
-                ] {
-                    quad(side, None, b.0);
-                }
-            }
-        }
-        out
-    }
 }
 
 /// Floats per instance: rectangle, texture coordinates, colour, rectangle in
@@ -617,15 +836,15 @@ impl UiGpu {
 
     /// Forgets pictures that changed or went away; changed ones of the same
     /// size and format are written over instead.
-    fn update_images(&mut self, gpu: &Gpu, input: &mut UiInput) {
-        for change in input.changes.read() {
-            let (AssetEvent::Modified { id } | AssetEvent::Removed { id }) = *change else {
+    fn update_images(&mut self, gpu: &Gpu, images: &mut Assets<Image>) {
+        for change in images.take_events() {
+            let (AssetEvent::Modified { id } | AssetEvent::Removed { id }) = change else {
                 continue;
             };
             let Some(old) = self.images.get(&id) else {
                 continue;
             };
-            match input.images.get(id) {
+            match images.get(id) {
                 Some(image) if image.size() == texture_size(old) => {
                     write(gpu, &old.texture, &image.data);
                 }
@@ -644,22 +863,23 @@ impl UiGpu {
         encoder: &mut wgpu::CommandEncoder,
         target: &wgpu::TextureView,
         viewport: UVec4,
-        input: &mut UiInput,
+        ui: &Ui,
+        images: &mut Assets<Image>,
     ) {
-        self.update_images(gpu, input);
+        self.update_images(gpu, images);
         let (origin, size) = (
             Vec2::new(viewport.x as f32, viewport.y as f32),
             Vec2::new(viewport.z.max(1) as f32, viewport.w.max(1) as f32),
         );
         // The rectangles that can be drawn (their pictures exist), with their
         // scissor rectangles in the target.
-        let quads = input.quads();
+        let quads = ui.quads();
         let mut runs: Vec<(Option<AssetId<Image>>, URect, std::ops::Range<u32>)> = Vec::new();
         let mut data: Vec<f32> = Vec::with_capacity(quads.len() * QUAD_FLOATS);
         for q in &quads {
             let mut rect = q.rect;
             if let Some(id) = q.image {
-                let Some(image) = self.image(gpu, id, &input.images) else {
+                let Some(image) = self.image(gpu, id, images) else {
                     continue;
                 };
                 // As large as fits, keeping its shape, in the middle.

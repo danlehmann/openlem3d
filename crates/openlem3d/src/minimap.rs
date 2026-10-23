@@ -12,23 +12,9 @@ use l3d_formats::blk::FaceDir;
 use l3d_formats::gamedata::Palette;
 use l3d_formats::level::{SIZE_X, SIZE_Y, SIZE_Z};
 
-use crate::menu::AppState;
+use crate::World;
 use crate::texture::rgba_image;
-use crate::ui::ComputedUi;
-use crate::{CurrentLevel, Data, Game, ViewCamera};
-
-pub struct MinimapPlugin;
-
-impl Plugin for MinimapPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            (build_base, draw, click)
-                .chain()
-                .run_if(in_state(AppState::Playing)),
-        );
-    }
-}
+use crate::ui::NodeId;
 
 /// Map pixels per grid cell.
 const PX: usize = 2;
@@ -46,7 +32,6 @@ const FLAG_NO_MINIMAP_CLICK: u16 = 0x0008;
 
 /// The map without moving dots, the image it is drawn into, and whether
 /// clicks may move the camera.
-#[derive(Resource)]
 pub struct Minimap {
     level: u32,
     base: Vec<[u8; 3]>,
@@ -103,14 +88,10 @@ fn average(pixels: &[u8], pal: &Palette) -> [u8; 3] {
 }
 
 /// Builds the static map when a level has loaded.
-fn build_base(
-    mut commands: Commands,
-    current: Res<CurrentLevel>,
-    game: Res<Game>,
-    mut data: ResMut<Data>,
-    mut images: ResMut<Assets<Image>>,
-    existing: Option<Res<Minimap>>,
-) {
+pub(crate) fn build_base(w: &mut World) {
+    let (current, game, data) = (&w.current, &w.game, &mut w.data);
+    let images = &mut w.e.images;
+    let existing = &w.minimap;
     let Some(n) = current.loaded else { return };
     if existing.as_ref().is_some_and(|m| m.level == n) {
         return;
@@ -199,7 +180,7 @@ fn build_base(
         }
         None => images.add(image),
     };
-    commands.insert_resource(Minimap {
+    w.minimap = Some(Minimap {
         level: n,
         base,
         image: handle,
@@ -209,16 +190,11 @@ fn build_base(
 }
 
 /// Redraws the map with the lemmings and the camera.
-fn draw(
-    map: Option<Res<Minimap>>,
-    game: Res<Game>,
-    views: Query<&ViewCamera>,
-    mut images: ResMut<Assets<Image>>,
-) {
-    let (Some(map), Some(sim)) = (map, &game.sim) else {
+pub(crate) fn draw(w: &mut World) {
+    let (Some(map), Some(sim)) = (&w.minimap, &w.game.sim) else {
         return;
     };
-    let Some(image) = images.get_mut(&map.image) else {
+    let Some(image) = w.e.images.get_mut(&map.image) else {
         return;
     };
     let px = &mut image.data;
@@ -235,29 +211,20 @@ fn draw(
     for l in sim.lemmings.iter().filter(|l| !l.gone) {
         dot(crate::units(l.pos[0]), crate::units(l.pos[2]), LEMMING);
     }
-    if let Ok(v) = views.single() {
-        dot(v.pos.x, v.pos.z, CAMERA);
-    }
+    dot(w.view.pos.x, w.view.pos.z, CAMERA);
 }
 
-/// The minimap's on-screen node.
-#[derive(Component)]
-pub struct MinimapView;
+/// The minimap's on-screen node (the panel's).
+#[derive(Default)]
+pub struct MinimapView(pub Option<NodeId>);
 
 /// A click on the map puts the camera over that spot.
-fn click(
-    map: Option<Res<Minimap>>,
-    mouse: Res<ButtonInput<MouseButton>>,
-    touches: Res<Touches>,
-    windows: Query<&Window>,
-    screen: Res<crate::screen::Screen>,
-    nodes: Query<&ComputedUi, With<MinimapView>>,
-    mut views: Query<&mut ViewCamera>,
-) {
-    if !map.is_some_and(|m| m.clickable && m.shown) {
+pub(crate) fn click(w: &mut World) {
+    if !w.minimap.as_ref().is_some_and(|m| m.clickable && m.shown) {
         return;
     }
-    let Ok(window) = windows.single() else { return };
+    let (mouse, touches) = (&w.e.input.mouse, &w.e.input.touches);
+    let (window, screen) = (&w.e.window, &w.screen);
     let point = if mouse.just_pressed(MouseButton::Left) {
         screen.cursor(window)
     } else {
@@ -266,10 +233,13 @@ fn click(
             .map(|t| screen.on_screen(t.position()))
             .next()
     };
-    let (Some(point), Ok(node), Ok(mut view)) = (point, nodes.single(), views.single_mut()) else {
+    let node = w.minimap_view.0.and_then(|id| w.ui.get(id));
+    let (Some(point), Some(node)) = (point, node) else {
         return;
     };
-    let rel = (point - node.rect.min) / node.rect.size();
+    let rect = node.computed.rect;
+    let rel = (point - rect.min) / rect.size();
+    let view = &mut w.view;
     if !(0.0..1.0).contains(&rel.x) || !(0.0..1.0).contains(&rel.y) {
         return;
     }

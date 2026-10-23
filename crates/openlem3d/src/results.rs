@@ -7,31 +7,11 @@
 
 use l3d_engine::prelude::*;
 
+use crate::World;
 use crate::menu::AppState;
-use crate::title::{Art, Canvas, at, image_at};
-use crate::ui::{BackgroundColor, Button, ImageNode, Interaction, Node, percent};
-use crate::{CurrentLevel, Data, Game};
+use crate::ui::{Interaction, Node, NodeId, UiNode, percent};
 
-pub struct ResultsPlugin;
-
-impl Plugin for ResultsPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_systems(Update, level_over.run_if(in_state(AppState::Playing)))
-            .add_systems(
-                Update,
-                (spawn_results, results_input)
-                    .chain()
-                    .run_if(in_state(AppState::Results)),
-            )
-            .add_systems(
-                OnExit(AppState::Results),
-                crate::title::despawn::<ResultsRoot>,
-            );
-    }
-}
-
-/// How the last level went.
-#[derive(Resource, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub struct Outcome {
     level: u32,
     saved: u32,
@@ -51,23 +31,29 @@ const TEXT_SCALE: f32 = 1.5;
 const LEVELS: u32 = 100;
 
 /// Moves to the results once the level is over.
-fn level_over(
-    mut commands: Commands,
-    game: Res<Game>,
-    mut current: ResMut<CurrentLevel>,
-    mut next: ResMut<NextState<AppState>>,
-    mut sfx: MessageWriter<crate::sfx::Sfx>,
-    mut settings: ResMut<crate::settings::Settings>,
-) {
+/// The outcome being shown, and the screen showing it.
+#[derive(Default)]
+pub(crate) struct Results {
+    outcome: Option<Outcome>,
+    root: Option<NodeId>,
+    choices: Vec<(NodeId, Choice)>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Choice {
+    Next,
+    Menu,
+}
+
+pub(crate) fn level_over(w: &mut World) {
+    let (game, current) = (&w.game, &mut w.current);
     let Some(sim) = &game.sim else { return };
-    // Until the chosen level has loaded, the simulation is the last one's.
     if current.loaded != Some(current.number) || !sim.finished() || game.terrain.is_none() {
         return;
     }
-    // A demo ends back on the briefing, unrecorded.
     if let Some(back_to) = game.replay.as_ref().and_then(|r| r.demo) {
         current.loaded = None;
-        next.set(back_to);
+        w.next_state = Some(back_to);
         return;
     }
     let outcome = Outcome {
@@ -76,85 +62,68 @@ fn level_over(
         total: sim.to_release.max(1),
         needed: game.save_requirement,
     };
-    sfx.write(crate::sfx::Sfx(if outcome.passed() {
+    w.sfx.play(if outcome.passed() {
         "VOXFX/CHEERS1"
     } else {
         "VOXFX/BOOS"
-    }));
+    });
     let seconds_left = sim.time_left / l3d_sim::TICKS_PER_SECOND;
+    let settings = &mut w.settings;
     if settings.record(outcome.level, outcome.saved, seconds_left, outcome.passed()) {
         settings.save();
     }
-    commands.insert_resource(outcome);
-    next.set(AppState::Results);
+    w.results.outcome = Some(outcome);
+    w.next_state = Some(AppState::Results);
 }
 
-#[derive(Component)]
-struct ResultsRoot;
-
-#[derive(Component, Clone, Copy, PartialEq, Eq)]
-enum Choice {
-    Next,
-    Menu,
+/// Leaving the results takes their screen away.
+pub(crate) fn exit(w: &mut World) {
+    w.ui.remove_opt(&mut w.results.root);
+    w.results.choices.clear();
 }
 
-fn spawn_results(
-    mut commands: Commands,
-    art: Option<Res<Art>>,
-    outcome: Option<Res<Outcome>>,
-    mut data: ResMut<Data>,
-    mut images: ResMut<Assets<Image>>,
-    roots: Query<(), With<ResultsRoot>>,
-) {
-    let Some(o) = outcome.map(|o| *o) else { return };
-    if !roots.is_empty() {
+pub(crate) fn spawn_results(w: &mut World) {
+    let Some(o) = w.results.outcome else { return };
+    if w.results.root.is_some() {
         return;
     }
-    let Ok(level) = data.0.level(o.level) else {
+    let Ok(level) = w.data.0.level(o.level) else {
         return;
     };
-    let pics = crate::briefing::load_scene(&mut data, level.theme, &mut images);
-    let root = commands
-        .spawn((
-            ResultsRoot,
-            Node {
+    let pics = crate::briefing::load_scene(&mut w.data, level.theme, &mut w.e.images);
+    let ui = &mut w.ui;
+    let root = ui.root(
+        UiNode::new()
+            .layout(Node {
                 width: percent(100),
                 height: percent(100),
                 ..default()
-            },
-            BackgroundColor(Color::BLACK),
-        ))
-        .id();
-    let canvas = commands.spawn((Canvas(SCREEN), Node::default())).id();
-    commands.entity(root).add_child(canvas);
-    let add = |commands: &mut Commands, bundle: (ImageNode, crate::title::At, Node)| {
-        let e = commands.spawn(bundle).id();
-        commands.entity(canvas).add_child(e);
-    };
+            })
+            .background(Color::BLACK),
+    );
+    w.results.root = Some(root);
+    let canvas = ui.child(root, UiNode::new().canvas(SCREEN));
     if let Some(p) = &pics {
-        add(
-            &mut commands,
-            image_at(p.picture.clone(), at(0.0, 0.0, SCREEN.x, SCREEN.y)),
+        ui.child(
+            canvas,
+            UiNode::image(p.picture.clone()).at(0.0, 0.0, SCREEN.x, SCREEN.y),
         );
-        // A dark panel behind the result lines.
-        let panel = commands
-            .spawn((
-                at(120.0, 120.0, 400.0, 200.0),
-                Node::default(),
-                BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.7)),
-            ))
-            .id();
-        commands.entity(canvas).add_child(panel);
+        ui.child(
+            canvas,
+            UiNode::new()
+                .at(120.0, 120.0, 400.0, 200.0)
+                .background(Color::srgba(0.0, 0.0, 0.0, 0.7)),
+        );
         for (i, x) in [(0, 25.0), (1, 522.0)] {
             if let Some(h) = p.prompts.get(i).cloned() {
-                add(&mut commands, image_at(h, at(x, 438.0, 32.0, 32.0)));
+                ui.child(canvas, UiNode::image(h).at(x, 438.0, 32.0, 32.0));
             }
         }
     }
-    let Some(font) = art.as_ref().and_then(|a| a.large.as_ref()) else {
+    let Some(font) = w.art.as_ref().and_then(|a| a.large.as_ref()) else {
         return;
     };
-    let text = |commands: &mut Commands, s: &str, x: f32, y: f32, centred: bool| {
+    let mut text = |s: &str, x: f32, y: f32, centred: bool| {
         let (glyphs, width) = font.layout(s);
         let left = if centred {
             x - width * TEXT_SCALE / 2.0
@@ -162,23 +131,19 @@ fn spawn_results(
             x
         };
         for (gx, image) in glyphs {
-            add(
-                commands,
-                image_at(
-                    image,
-                    at(
-                        left + gx * TEXT_SCALE,
-                        y,
-                        font.size.x * TEXT_SCALE,
-                        font.size.y * TEXT_SCALE,
-                    ),
+            ui.child(
+                canvas,
+                UiNode::image(image).at(
+                    left + gx * TEXT_SCALE,
+                    y,
+                    font.size.x * TEXT_SCALE,
+                    font.size.y * TEXT_SCALE,
                 ),
             );
         }
     };
     let pct = |n: u32| n * 100 / o.total;
     text(
-        &mut commands,
         &format!("Level {}  {}", o.level + 1, level.title.trim()),
         21.0,
         6.0,
@@ -189,16 +154,14 @@ fn spawn_results(
         (true, false) => "Well done!",
         (false, _) => "Not enough lemmings saved",
     };
-    text(&mut commands, verdict, 320.0, 140.0, true);
+    text(verdict, 320.0, 140.0, true);
     text(
-        &mut commands,
         &format!("You rescued {}%", pct(o.saved)),
         320.0,
         180.0,
         true,
     );
     text(
-        &mut commands,
         &format!("You needed {}%", pct(o.needed)),
         320.0,
         210.0,
@@ -212,64 +175,53 @@ fn spawn_results(
     if o.passed()
         && let Some(code) = crate::codes::code_for_level(next_level)
     {
-        text(
-            &mut commands,
-            &format!("Password :- {code}"),
-            320.0,
-            260.0,
-            true,
-        );
+        text(&format!("Password :- {code}"), 320.0, 260.0, true);
     }
     text(
-        &mut commands,
         if o.passed() { "Next Level" } else { "Retry" },
         61.0,
         445.0,
         false,
     );
-    text(&mut commands, "Menu", 561.0, 445.0, false);
-    for (choice, x, w) in [(Choice::Next, 25.0, 200.0), (Choice::Menu, 522.0, 110.0)] {
-        let e = commands
-            .spawn((choice, Button, at(x, 438.0, w, 32.0), Node::default()))
-            .id();
-        commands.entity(canvas).add_child(e);
+    text("Menu", 561.0, 445.0, false);
+    for (choice, x, width) in [(Choice::Next, 25.0, 200.0), (Choice::Menu, 522.0, 110.0)] {
+        let id =
+            w.ui.child(canvas, UiNode::new().button().at(x, 438.0, width, 32.0));
+        w.results.choices.push((id, choice));
     }
 }
 
 /// Left click, Space or Enter: the next level (or a retry); right click or
 /// Esc: the level list.
-fn results_input(
-    choices: Query<(&Interaction, &Choice)>,
-    keys: Res<ButtonInput<KeyCode>>,
-    mouse: Res<ButtonInput<MouseButton>>,
-    lifted: crate::touch::Lifted,
-    outcome: Option<Res<Outcome>>,
-    mut current: ResMut<CurrentLevel>,
-    mut next: ResMut<NextState<AppState>>,
-) {
-    let Some(o) = outcome else { return };
+pub(crate) fn results_input(w: &mut World) {
+    let Some(o) = w.results.outcome else { return };
+    let lifted = crate::touch::lifted(w);
+    let (ui, choices) = (&w.ui, &w.results.choices);
     let on = |c: Choice| {
         choices
             .iter()
-            .any(|(i, k)| *i == Interaction::Pressed && *k == c)
+            .any(|&(id, k)| ui.interaction(id) == Interaction::Pressed && k == c)
     };
-    let on_prompt = choices.iter().any(|(i, _)| *i != Interaction::None);
+    let on_prompt = choices
+        .iter()
+        .any(|&(id, _)| ui.interaction(id) != Interaction::None);
+    let (keys, mouse) = (&w.e.input.keys, &w.e.input.mouse);
     let menu = mouse.just_pressed(MouseButton::Right)
         || keys.just_pressed(KeyCode::Escape)
         || on(Choice::Menu);
     let go = on(Choice::Next)
         || (mouse.just_pressed(MouseButton::Left) && !on_prompt)
-        || (lifted.any() && !on_prompt)
+        || (lifted && !on_prompt)
         || keys.any_just_pressed([KeyCode::Space, KeyCode::Enter, KeyCode::NumpadEnter]);
     if menu {
-        next.set(crate::menu::level_menu(o.level));
+        w.next_state = Some(crate::menu::level_menu(o.level));
     } else if go {
-        current.number = if o.passed() {
+        w.current.number = if o.passed() {
             (o.level + 1) % LEVELS
         } else {
             o.level
         };
-        current.loaded = None;
-        next.set(AppState::Briefing);
+        w.current.loaded = None;
+        w.next_state = Some(AppState::Briefing);
     }
 }

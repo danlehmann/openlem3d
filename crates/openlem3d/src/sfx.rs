@@ -5,39 +5,16 @@
 
 use std::collections::HashMap;
 
-use l3d_engine::audio::{Audio, Sound};
+use l3d_engine::audio::Sound;
 use l3d_engine::prelude::*;
 use l3d_formats::sound::Sample;
 use l3d_sim::{Event, Skill};
 
-use crate::menu::AppState;
-use crate::{Data, Game};
-
-pub struct SfxPlugin;
-
-impl Plugin for SfxPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_message::<Sfx>()
-            .init_resource::<Sounds>()
-            .add_systems(
-                Update,
-                (sim_events, watch_play).run_if(in_state(AppState::Playing)),
-            )
-            .add_systems(Update, watch_rating.run_if(in_state(AppState::Title)))
-            .add_systems(
-                OnEnter(AppState::Playing),
-                (|mut out: MessageWriter<Sfx>| {
-                    out.write(Sfx("VOXFX/LETSGO1"));
-                })
-                .run_if(crate::fresh_level),
-            )
-            .add_systems(PostUpdate, play);
-    }
-}
+use crate::World;
 
 /// A request to play a sample, named by its path under `SOUND/` without
 /// the extension.
-#[derive(Message, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub struct Sfx(pub &'static str);
 
 /// The voice naming each skill, in [`Skill::ALL`] order.
@@ -72,29 +49,39 @@ pub const CAMERA_VOICES: [&str; 4] = [
     "VOXFX/CAMRA4",
 ];
 
-/// Samples, loaded on first use (`None` when missing or empty).
-#[derive(Resource, Default)]
-struct Sounds(HashMap<&'static str, Option<Sound>>);
+/// The frame's requests, the samples loaded so far (`None` when missing or
+/// empty), and what the voices last named.
+#[derive(Default)]
+pub(crate) struct Sounds {
+    pub(crate) queue: Vec<Sfx>,
+    loaded: HashMap<&'static str, Option<Sound>>,
+    /// The writes to the selected skill and the preset camera seen.
+    skill: Option<u64>,
+    preset: Option<u64>,
+    rating: Option<usize>,
+    fanfare_played: bool,
+}
+
+impl Sounds {
+    pub(crate) fn play(&mut self, name: &'static str) {
+        self.queue.push(Sfx(name));
+    }
+}
 
 /// Effect volume relative to full scale.
 const VOLUME: f32 = 0.8;
 
-fn play(
-    audio: Res<Audio>,
-    mut requests: MessageReader<Sfx>,
-    mut sounds: ResMut<Sounds>,
-    mut data: ResMut<Data>,
-    muted: Res<crate::music::MusicMuted>,
-    settings: Res<crate::settings::Settings>,
-) {
+pub(crate) fn play(w: &mut World) {
+    let sounds = &mut w.sfx;
     // The same sample asked for twice in a frame plays once.
     let mut played: Vec<&'static str> = Vec::new();
-    for Sfx(name) in requests.read() {
-        if muted.0 || settings.effects == 0 || played.contains(name) {
+    for Sfx(name) in std::mem::take(&mut sounds.queue) {
+        if w.muted.0 || w.settings.effects == 0 || played.contains(&name) {
             continue;
         }
         played.push(name);
-        let sound = sounds.0.entry(name).or_insert_with(|| {
+        let data = &mut w.data;
+        let sound = sounds.loaded.entry(name).or_insert_with(|| {
             let sample = data
                 .0
                 .read(&format!("SOUND/{name}.U8"))
@@ -107,49 +94,54 @@ fn play(
             })
         });
         if let Some(sound) = sound {
-            audio.play(sound, VOLUME * settings.effects_volume());
+            w.e.audio.play(sound, VOLUME * w.settings.effects_volume());
         }
+    }
+}
+
+/// "Let's go!" as a level starts afresh.
+pub(crate) fn lets_go(w: &mut World) {
+    if crate::fresh_level(w) {
+        w.sfx.play("VOXFX/LETSGO1");
     }
 }
 
 /// The skill's name when one is selected, and the camera's number when
 /// another preset is chosen (not when a level sets them up).
-fn watch_play(
-    selected: Res<crate::hud::SelectedSkill>,
-    preset: Res<crate::PresetIndex>,
-    game: Res<Game>,
-    mut out: MessageWriter<Sfx>,
-) {
-    if game.sim.as_ref().is_none_or(|s| s.tick == 0) {
+pub(crate) fn watch_play(w: &mut World) {
+    let skill = w.selected.0;
+    let preset = w.preset.0;
+    let sounds = &mut w.sfx;
+    let skill_changed = sounds.skill.replace(w.selected.1) != Some(w.selected.1);
+    let preset_changed = sounds.preset.replace(w.preset.1) != Some(w.preset.1);
+    if w.game.sim.as_ref().is_none_or(|s| s.tick == 0) {
         return;
     }
-    if selected.is_changed()
-        && let Some(s) = selected.0
-    {
-        out.write(Sfx(skill_voice(s)));
+    if skill_changed && let Some(s) = skill {
+        sounds.play(skill_voice(s));
     }
-    if preset.is_changed() {
-        out.write(Sfx(CAMERA_VOICES[preset.0 % 4]));
+    if preset_changed {
+        sounds.play(CAMERA_VOICES[preset % 4]);
     }
 }
 
 /// The rating's name when it changes on the title screen.
-fn watch_rating(rating: Res<crate::menu::MenuRating>, mut out: MessageWriter<Sfx>) {
-    if rating.is_changed() && !rating.is_added() {
-        out.write(Sfx(RATING_VOICES[rating.0 % 5]));
+pub(crate) fn watch_rating(w: &mut World) {
+    let rating = w.rating.0;
+    if let Some(was) = w.sfx.rating.replace(rating)
+        && was != rating
+    {
+        w.sfx.play(RATING_VOICES[rating % 5]);
     }
 }
 
 /// Sounds for what the lemmings did this frame.
-fn sim_events(
-    mut game: ResMut<Game>,
-    mut out: MessageWriter<Sfx>,
-    mut fanfare_played: Local<bool>,
-) {
-    let needed = game.save_requirement;
-    let Some(sim) = &mut game.sim else { return };
+pub(crate) fn sim_events(w: &mut World) {
+    let needed = w.game.save_requirement;
+    let Some(sim) = &mut w.game.sim else { return };
+    let sounds = &mut w.sfx;
     if sim.tick <= 1 {
-        *fanfare_played = false;
+        sounds.fanfare_played = false;
     }
     for e in sim.take_events() {
         let name = match e {
@@ -174,11 +166,11 @@ fn sim_events(
             Event::Bashed => "SPOTFX/HAMMER1",
             Event::Mined => "SPOTFX/PICKAXE4",
         };
-        out.write(Sfx(name));
+        sounds.play(name);
     }
     // A fanfare once enough lemmings are home.
-    if sim.counts.saved >= needed && needed > 0 && !*fanfare_played {
-        *fanfare_played = true;
-        out.write(Sfx("SPOTFX/FANFARE"));
+    if sim.counts.saved >= needed && needed > 0 && !sounds.fanfare_played {
+        sounds.fanfare_played = true;
+        sounds.play("SPOTFX/FANFARE");
     }
 }

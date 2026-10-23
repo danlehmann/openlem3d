@@ -1,6 +1,7 @@
 //! Shared things (pictures) kept by id in [`Assets`], held through
 //! [`Handle`]s. A thing goes when its last handle does; [`AssetEvent`]s
 //! tell when one changed or went, so copies of it (on the GPU) can follow.
+//! They are for one reader, which takes them.
 
 use std::collections::HashMap;
 use std::fmt;
@@ -8,9 +9,6 @@ use std::hash::{Hash, Hasher};
 use std::marker::PhantomData;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-
-use bevy_ecs::message::Message;
-use bevy_ecs::prelude::*;
 
 /// What can be kept in [`Assets`].
 pub trait Asset: Send + Sync + 'static {}
@@ -136,7 +134,6 @@ impl<T> From<Handle<T>> for AssetId<T> {
 }
 
 /// A thing changing or going.
-#[derive(Message)]
 pub enum AssetEvent<T: Asset> {
     Added { id: AssetId<T> },
     Modified { id: AssetId<T> },
@@ -146,7 +143,6 @@ pub enum AssetEvent<T: Asset> {
 /// Ids start at 1; 0 is [`Handle::default`]'s.
 static NEXT: AtomicU64 = AtomicU64::new(1);
 
-#[derive(Resource)]
 pub struct Assets<T: Asset> {
     things: HashMap<AssetId<T>, T>,
     dropped: Arc<Mutex<Vec<u64>>>,
@@ -214,38 +210,24 @@ impl<T: Asset> Assets<T> {
         self.things.is_empty()
     }
 
-    /// Lets go of the things whose handles are all gone, and sends the
-    /// frame's events.
-    pub fn update(mut assets: ResMut<Self>, mut out: MessageWriter<AssetEvent<T>>) {
-        let dropped: Vec<u64> = assets
+    /// Lets go of the things whose handles are all gone (the runner does
+    /// so before each frame).
+    pub(crate) fn update(&mut self) {
+        let dropped: Vec<u64> = self
             .dropped
             .lock()
             .map(|mut d| std::mem::take(&mut *d))
             .unwrap_or_default();
         for index in dropped {
             let id = AssetId::new(index);
-            if assets.things.remove(&id).is_some() {
-                assets.events.push(AssetEvent::Removed { id });
+            if self.things.remove(&id).is_some() {
+                self.events.push(AssetEvent::Removed { id });
             }
         }
-        if !assets.events.is_empty() {
-            out.write_batch(std::mem::take(&mut assets.events));
-        }
     }
-}
 
-/// Where [`Last`] tells of the frame's changes to things: drawing that
-/// follows them goes after it.
-///
-/// [`Last`]: crate::app::Last
-#[derive(bevy_ecs::schedule::SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct AssetSystems;
-
-impl crate::app::App {
-    /// Keeps things of type `T`.
-    pub fn init_asset<T: Asset>(&mut self) -> &mut Self {
-        self.init_resource::<Assets<T>>()
-            .add_message::<AssetEvent<T>>()
-            .add_systems(crate::app::Last, Assets::<T>::update.in_set(AssetSystems))
+    /// What was added, changed and let go of since the last call.
+    pub fn take_events(&mut self) -> Vec<AssetEvent<T>> {
+        std::mem::take(&mut self.events)
     }
 }

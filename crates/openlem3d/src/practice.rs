@@ -11,32 +11,11 @@ use l3d_formats::icons::{Icons, panel as icon};
 use l3d_formats::image::IndexedImage;
 use l3d_formats::sheets;
 
+use crate::World;
 use crate::menu::AppState;
-use crate::settings::Settings;
 use crate::texture::indexed_image;
-use crate::title::{Art, ScreenRoot, at, image_at, spawn_screen};
-use crate::ui::{Button, ImageNode, Interaction, Node};
-use crate::{CurrentLevel, Data};
+use crate::ui::{Interaction, NodeId, UiNode};
 
-pub struct PracticePlugin;
-
-impl Plugin for PracticePlugin {
-    fn build(&self, app: &mut App) {
-        app.add_systems(Startup, load)
-            .add_systems(
-                Update,
-                (spawn_grid, hover, pick)
-                    .chain()
-                    .run_if(in_state(AppState::Practice)),
-            )
-            .add_systems(
-                OnExit(AppState::Practice),
-                crate::title::despawn::<ScreenRoot>,
-            );
-    }
-}
-
-/// Where an icon's frames come from.
 #[derive(Clone, Copy)]
 enum Source {
     /// A skill: its panel button's animation (index into `panel::SKILL_BUTTONS`).
@@ -99,16 +78,25 @@ const TICK: usize = 39;
 const FPS: f32 = 12.0;
 
 /// Uploaded frames per item, the tick and the umbrella.
-#[derive(Resource)]
+/// The icons' pictures, the grid's icons and name line, and the item last
+/// hovered.
+#[derive(Default)]
+pub(crate) struct Practice {
+    pics: Option<Pics>,
+    items: Vec<(NodeId, usize)>,
+    line: Option<NodeId>,
+    last: Option<usize>,
+}
+
 struct Pics {
     items: Vec<Vec<Handle<Image>>>,
     tick: Handle<Image>,
-    /// The floater's umbrella, drawn over its icon as on the skill panel.
     umbrella: Option<Handle<Image>>,
 }
 
-fn load(mut commands: Commands, mut data: ResMut<Data>, mut images: ResMut<Assets<Image>>) {
-    let d = &mut data.0;
+pub(crate) fn load(w: &mut World) {
+    let d = &mut w.data.0;
+    let images = &mut w.e.images;
     let Ok(pal) = d.palette("GFX/LM3D.PAL") else {
         return;
     };
@@ -155,48 +143,35 @@ fn load(mut commands: Commands, mut data: ResMut<Data>, mut images: ResMut<Asset
         .collect();
     let tick = up(&prac[TICK..=TICK]).remove(0);
     let umbrella = umbrella.map(|u| images.add(indexed_image(&u, &pal, true)));
-    commands.insert_resource(Pics {
+    w.practice.pics = Some(Pics {
         items,
         tick,
         umbrella,
     });
 }
 
-/// An icon: its index in [`ITEMS`].
-#[derive(Component, Clone, Copy)]
-struct Item(usize);
-
-/// The hovered item's name.
-#[derive(Component)]
-struct NameLine;
-
-fn spawn_grid(
-    mut commands: Commands,
-    art: Option<Res<Art>>,
-    pics: Option<Res<Pics>>,
-    settings: Res<Settings>,
-    roots: Query<(), With<ScreenRoot>>,
-) {
-    let (Some(art), Some(pics)) = (art, pics) else {
+pub(crate) fn spawn_grid(w: &mut World) {
+    let (Some(art), Some(pics)) = (&w.art, &w.practice.pics) else {
         return;
     };
-    if !roots.is_empty() {
+    if w.screen_ui.is_some() {
         return;
     }
-    let canvas = spawn_screen(&mut commands, &art, 0.0, Color::srgb(0.75, 0.75, 0.75));
+    let ui = &mut w.ui;
+    let screen = crate::title::spawn_screen(ui, art, 0.0, Color::srgb(0.75, 0.75, 0.75));
+    let canvas = screen.canvas;
+    w.screen_ui = Some(screen);
     if let Some(font) = &art.large {
         let (glyphs, w) = font.layout("Select Item to Practice");
         let left = (160.0 - w / 2.0).round();
         for (x, image) in glyphs {
-            let e = commands
-                .spawn(image_at(
-                    image,
-                    at(left + x, 12.0, font.size.x, font.size.y),
-                ))
-                .id();
-            commands.entity(canvas).add_child(e);
+            ui.child(
+                canvas,
+                UiNode::image(image).at(left + x, 12.0, font.size.x, font.size.y),
+            );
         }
     }
+    w.practice.items.clear();
     for (i, frames) in pics.items.iter().enumerate() {
         let (row, col) = (i / 7, i % 7);
         let (cx, cy) = (COLUMNS[row][col], ROW_Y[row] + 16.0);
@@ -205,129 +180,104 @@ fn spawn_grid(
         } else {
             32.0
         };
-        let e = commands
-            .spawn((
-                Item(i),
-                Button,
-                image_at(
-                    frames[0].clone(),
-                    at(cx - size / 2.0, cy - size / 2.0, size, size),
-                ),
-            ))
-            .id();
-        commands.entity(canvas).add_child(e);
+        let e = ui.child(
+            canvas,
+            UiNode::image(frames[0].clone()).button().at(
+                cx - size / 2.0,
+                cy - size / 2.0,
+                size,
+                size,
+            ),
+        );
+        w.practice.items.push((e, i));
         // The floater holds its umbrella, a tile of its own above the icon,
         // placed as on the skill panel (owner's observation).
         if matches!(ITEMS[i].0, Source::Skill(8))
             && let Some(umbrella) = &pics.umbrella
         {
-            let u = commands
-                .spawn((image_at(
-                    umbrella.clone(),
-                    at(cx - size / 2.0 - 2.0, cy - size / 2.0 - 25.0, 32.0, 32.0),
-                ),))
-                .id();
-            commands.entity(canvas).add_child(u);
+            ui.child(
+                canvas,
+                UiNode::image(umbrella.clone()).at(
+                    cx - size / 2.0 - 2.0,
+                    cy - size / 2.0 - 25.0,
+                    32.0,
+                    32.0,
+                ),
+            );
         }
-        if i < 20 && settings.completed.contains(&level_of(i)) {
-            let t = commands
-                .spawn((image_at(
-                    pics.tick.clone(),
-                    at(cx - 4.0, cy - 16.0, 32.0, 32.0),
-                ),))
-                .id();
-            commands.entity(canvas).add_child(t);
+        if i < 20 && w.settings.completed.contains(&level_of(i)) {
+            ui.child(
+                canvas,
+                UiNode::image(pics.tick.clone()).at(cx - 4.0, cy - 16.0, 32.0, 32.0),
+            );
         }
     }
-    let line = commands
-        .spawn((NameLine, Node::default(), at(0.0, 0.0, 320.0, 200.0)))
-        .id();
-    commands.entity(canvas).add_child(line);
+    w.practice.line = Some(ui.child(canvas, UiNode::new().at(0.0, 0.0, 320.0, 200.0)));
 }
 
-/// Animates the hovered icon, names it and says it.
-#[allow(clippy::too_many_arguments)]
-fn hover(
-    mut commands: Commands,
-    time: Res<Time>,
-    art: Option<Res<Art>>,
-    pics: Option<Res<Pics>>,
-    titles: Option<Res<crate::menu::Titles>>,
-    mut items: Query<(&Item, &Interaction, &mut ImageNode)>,
-    lines: Query<(Entity, Option<&Children>), With<NameLine>>,
-    mut last: Local<Option<usize>>,
-    mut sfx: MessageWriter<crate::sfx::Sfx>,
-) {
-    let (Some(pics), Some(art)) = (pics, art) else {
+pub(crate) fn hover(w: &mut World) {
+    let (Some(pics), Some(art)) = (&w.practice.pics, &w.art) else {
         return;
     };
+    let now = w.e.time.game.elapsed_secs();
     let mut hovered = None;
-    for (item, interaction, mut node) in &mut items {
-        let frames = &pics.items[item.0];
-        let frame = if *interaction != Interaction::None {
-            hovered = Some(item.0);
-            (time.elapsed_secs() * FPS) as usize % frames.len()
+    for &(id, item) in &w.practice.items {
+        let frames = &pics.items[item];
+        let frame = if w.ui.interaction(id) != Interaction::None {
+            hovered = Some(item);
+            (now * FPS) as usize % frames.len()
         } else {
             0
         };
-        if node.image != frames[frame] {
-            node.image = frames[frame].clone();
-        }
+        w.ui.set_image(id, &frames[frame]);
     }
-    if hovered == *last {
+    if hovered == w.practice.last {
         return;
     }
-    *last = hovered;
-    let Ok((line, children)) = lines.single() else {
+    w.practice.last = hovered;
+    let Some(line) = w.practice.line.filter(|&l| w.ui.contains(l)) else {
         return;
     };
-    for c in children.into_iter().flatten() {
-        commands.entity(*c).despawn();
+    for c in w.ui.children(line).to_vec() {
+        w.ui.remove(c);
     }
     let Some(i) = hovered else { return };
-    sfx.write(crate::sfx::Sfx(ITEMS[i].1));
+    w.sfx.play(ITEMS[i].1);
     let name = if i < 20 {
-        titles
+        w.titles
+            .as_ref()
             .map(|t| crate::menu::title_case(&t.0[level_of(i) as usize]))
             .unwrap_or_default()
     } else {
         "Exit".into()
     };
     if let Some(font) = &art.large {
-        let (glyphs, w) = font.layout(&name);
-        let left = (160.0 - w / 2.0).round();
+        let (glyphs, width) = font.layout(&name);
+        let left = (160.0 - width / 2.0).round();
         for (x, image) in glyphs {
-            let e = commands
-                .spawn(image_at(
-                    image,
-                    at(left + x, 178.0, font.size.x, font.size.y),
-                ))
-                .id();
-            commands.entity(line).add_child(e);
+            w.ui.child(
+                line,
+                UiNode::image(image).at(left + x, 178.0, font.size.x, font.size.y),
+            );
         }
     }
 }
 
-fn pick(
-    items: Query<(&Item, &Interaction), Changed<Interaction>>,
-    keys: Res<ButtonInput<KeyCode>>,
-    mut current: ResMut<CurrentLevel>,
-    mut next: ResMut<NextState<AppState>>,
-) {
-    if keys.just_pressed(KeyCode::Escape) {
-        next.set(AppState::Title);
+pub(crate) fn pick(w: &mut World) {
+    if w.e.input.keys.just_pressed(KeyCode::Escape) {
+        w.next_state = Some(AppState::Title);
         return;
     }
-    for (item, interaction) in &items {
-        if *interaction != Interaction::Pressed {
+    for &(id, item) in &w.practice.items {
+        if !w.ui.just_pressed(id) {
             continue;
         }
-        if item.0 == 20 {
-            next.set(AppState::Title);
+        if item == 20 {
+            w.next_state = Some(AppState::Title);
         } else {
-            current.number = level_of(item.0);
-            current.loaded = None;
-            next.set(AppState::Briefing);
+            w.current.number = level_of(item);
+            w.current.loaded = None;
+            w.next_state = Some(AppState::Briefing);
         }
     }
 }

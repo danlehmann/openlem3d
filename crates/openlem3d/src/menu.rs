@@ -4,10 +4,9 @@
 use l3d_engine::input::MouseScrollUnit;
 use l3d_engine::prelude::*;
 
-use crate::ui::{Button, ImageNode, Interaction, Node, Overflow};
-use crate::{CurrentLevel, Data};
+use crate::World;
+use crate::ui::{Interaction, Node, NodeId, Ui, UiNode};
 
-/// Whether the player is choosing a level or playing one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub enum AppState {
     /// The title screen (main menu).
@@ -35,38 +34,13 @@ pub const LEVELS_PER_RATING: u32 = 20;
 /// The Practice rating's index in [`RATINGS`].
 pub const PRACTICE: usize = 4;
 
-pub struct MenuPlugin;
-
-impl Plugin for MenuPlugin {
-    fn build(&self, app: &mut App) {
-        app.init_state::<AppState>()
-            .init_resource::<MenuRating>()
-            .add_systems(Startup, read_titles)
-            .init_resource::<Scroll>()
-            .add_systems(Startup, load_labels)
-            .add_systems(
-                Update,
-                (ensure_menu, menu_input, menu_to_title)
-                    .chain()
-                    .run_if(in_state(AppState::Menu)),
-            )
-            .add_systems(
-                OnExit(AppState::Menu),
-                crate::title::despawn::<crate::title::ScreenRoot>,
-            )
-            .add_systems(Update, back_to_menu.run_if(in_state(AppState::Playing)));
-    }
-}
-
-/// Level titles by file number.
-#[derive(Resource)]
 pub(crate) struct Titles(pub(crate) Vec<String>);
 
-/// The rating whose levels the menu lists.
-#[derive(Resource, Default)]
+#[derive(Default)]
 pub struct MenuRating(pub usize);
 
-fn read_titles(mut commands: Commands, mut data: ResMut<Data>) {
+pub(crate) fn read_titles(w: &mut World) {
+    let data = &mut w.data;
     let titles = (0..RATINGS.len() as u32 * LEVELS_PER_RATING)
         .map(|n| {
             data.0
@@ -75,10 +49,9 @@ fn read_titles(mut commands: Commands, mut data: ResMut<Data>) {
                 .unwrap_or_else(|_| format!("LEVEL.{n:03}"))
         })
         .collect();
-    commands.insert_resource(Titles(titles));
+    w.titles = Some(Titles(titles));
 }
 
-/// Formats an all-caps title in title case ("THAT'S RIGHT" → "That's Right").
 pub(crate) fn title_case(s: &str) -> String {
     s.split(' ')
         .map(|w| {
@@ -101,14 +74,6 @@ pub(crate) fn title_case(s: &str) -> String {
 /// IN and clock icons on the right. The original lists only unlocked
 /// levels; all twenty are open here, so the list scrolls (wheel, arrow
 /// keys or Page Up/Down). Left and Right change the rating.
-#[derive(Component)]
-struct ListRow(u32);
-
-/// The scrolling part of the list.
-#[derive(Component)]
-struct ListBody;
-
-/// List geometry: first row, row spacing, rows visible.
 const ROW_TOP: f32 = 38.0;
 const ROW_STEP: f32 = 15.0;
 const ROWS_SHOWN: usize = 10;
@@ -117,15 +82,21 @@ const HOVER: Color = Color::srgb(1.0, 0.9, 0.2);
 
 /// How far the list is scrolled, in rows (a wheel, trackpad or finger
 /// scrolls it smoothly, the keys by whole rows).
-#[derive(Resource, Default)]
-struct Scroll(f32);
+/// The level list: its labels' pictures, the scroll, the rows' buttons and
+/// glyphs (by level), the scrolled body, and the row a finger landed on.
+#[derive(Default)]
+pub(crate) struct LevelList {
+    labels: Option<(Handle<Image>, Handle<Image>)>,
+    scroll: f32,
+    rows: Vec<(NodeId, u32)>,
+    glyphs: Vec<(NodeId, u32)>,
+    body: Option<NodeId>,
+    tapped: Option<u32>,
+}
 
-/// The IN and clock labels.
-#[derive(Resource)]
-struct ListLabels(Handle<Image>, Handle<Image>);
-
-fn load_labels(mut commands: Commands, mut data: ResMut<Data>, mut images: ResMut<Assets<Image>>) {
-    let d = &mut data.0;
+pub(crate) fn load_labels(w: &mut World) {
+    let d = &mut w.data.0;
+    let images = &mut w.e.images;
     let (Ok(pal), Some(icons)) = (
         d.palette("GFX/LM3D.PAL"),
         d.read("GFX/ICONS.RNC")
@@ -136,35 +107,33 @@ fn load_labels(mut commands: Commands, mut data: ResMut<Data>, mut images: ResMu
     };
     let mut up = |img| images.add(crate::texture::indexed_image(img, &pal, true));
     if let (Some(inl), Some(clock)) = (icons.labels.first(), icons.labels.get(2)) {
-        commands.insert_resource(ListLabels(up(inl), up(clock)));
+        w.list.labels = Some((up(inl), up(clock)));
     }
 }
 
-/// Builds the list when it is shown and doesn't exist yet.
-#[allow(clippy::too_many_arguments)]
-fn ensure_menu(
-    mut commands: Commands,
-    art: Option<Res<crate::title::Art>>,
-    labels: Option<Res<ListLabels>>,
-    titles: Option<Res<Titles>>,
-    rating: Res<MenuRating>,
-    settings: Res<crate::settings::Settings>,
-    scroll: Res<Scroll>,
-    roots: Query<(), With<crate::title::ScreenRoot>>,
-) {
-    use crate::title::{at, image_at, spawn_screen};
-    let (Some(art), Some(labels), Some(titles)) = (art, labels, titles) else {
+pub(crate) fn ensure_menu(w: &mut World) {
+    let (Some(art), Some(titles)) = (&w.art, &w.titles) else {
         return;
     };
-    if !roots.is_empty() {
+    let Some(labels) = w.list.labels.clone() else {
+        return;
+    };
+    if w.screen_ui.is_some() {
         return;
     }
     let Some(font) = art.large.as_ref() else {
         return;
     };
-    let canvas = spawn_screen(&mut commands, &art, 0.0, Color::srgb(0.75, 0.75, 0.75));
-    let text = |commands: &mut Commands,
-                parent: Entity,
+    let ui = &mut w.ui;
+    let screen = crate::title::spawn_screen(ui, art, 0.0, Color::srgb(0.75, 0.75, 0.75));
+    let canvas = screen.canvas;
+    w.screen_ui = Some(screen);
+    let mut list = std::mem::take(&mut w.list);
+    list.rows.clear();
+    list.glyphs.clear();
+    let text = |ui: &mut Ui,
+                list: &mut LevelList,
+                parent: NodeId,
                 s: &str,
                 x: f32,
                 y: f32,
@@ -174,22 +143,26 @@ fn ensure_menu(
         let (glyphs, w) = font.layout(s);
         let left = if right { x - w } else { x };
         for (gx, image) in glyphs {
-            let (_, a, node) = image_at(image.clone(), at(left + gx, y, font.size.x, font.size.y));
-            let mut e = commands.spawn((ImageNode::new(image).with_color(colour), a, node));
+            let g = ui.child(
+                parent,
+                UiNode::image(image)
+                    .tint(colour)
+                    .at(left + gx, y, font.size.x, font.size.y),
+            );
             if let Some(n) = row {
-                e.insert(ListRow(n));
+                list.glyphs.push((g, n));
             }
-            let id = e.id();
-            commands.entity(parent).add_child(id);
         }
     };
-    let heading = format!("Select {} Level To Play", RATINGS[rating.0]);
-    let (_, w) = font.layout(&heading);
+    let rating = w.rating.0;
+    let heading = format!("Select {} Level To Play", RATINGS[rating]);
+    let (_, hw) = font.layout(&heading);
     text(
-        &mut commands,
+        ui,
+        &mut list,
         canvas,
         &heading,
-        (160.0 - w / 2.0).round(),
+        (160.0 - hw / 2.0).round(),
         4.0,
         false,
         Color::WHITE,
@@ -197,7 +170,8 @@ fn ensure_menu(
     );
     // Back to the title screen (Esc), for players without a keyboard.
     crate::key_buttons::spawn_text_button(
-        &mut commands,
+        ui,
+        &mut w.key_buttons,
         canvas,
         font,
         "Back",
@@ -207,50 +181,39 @@ fn ensure_menu(
         KeyCode::Escape,
     );
     for (img, x) in [(&labels.0, 246.0), (&labels.1, 287.0)] {
-        let e = commands
-            .spawn(image_at(img.clone(), at(x, 18.0, 32.0, 16.0)))
-            .id();
-        commands.entity(canvas).add_child(e);
+        ui.child(canvas, UiNode::image(img.clone()).at(x, 18.0, 32.0, 16.0));
     }
     // Rows clipped to the list area.
-    let window = commands
-        .spawn((
-            at(0.0, ROW_TOP, 320.0, ROW_STEP * ROWS_SHOWN as f32),
-            Node {
-                overflow: Overflow::clip(),
+    let window = ui.child(
+        canvas,
+        UiNode::new()
+            .at(0.0, ROW_TOP, 320.0, ROW_STEP * ROWS_SHOWN as f32)
+            .layout(Node {
+                clip: true,
                 ..default()
-            },
-        ))
-        .id();
-    commands.entity(canvas).add_child(window);
-    let body = commands
-        .spawn((
-            ListBody,
-            at(
-                0.0,
-                -scroll.0 * ROW_STEP,
-                320.0,
-                ROW_STEP * LEVELS_PER_RATING as f32,
-            ),
-            Node::default(),
-        ))
-        .id();
-    commands.entity(window).add_child(body);
+            }),
+    );
+    let body = ui.child(
+        window,
+        UiNode::new().at(
+            0.0,
+            -list.scroll * ROW_STEP,
+            320.0,
+            ROW_STEP * LEVELS_PER_RATING as f32,
+        ),
+    );
+    list.body = Some(body);
+    let rating = rating as u32;
+    let titles = &titles.0;
     for i in 0..LEVELS_PER_RATING {
-        let n = rating.0 as u32 * LEVELS_PER_RATING + i;
+        let n = rating * LEVELS_PER_RATING + i;
         let y = i as f32 * ROW_STEP;
         // An invisible button spanning the row.
-        let hit = commands
-            .spawn((
-                Button,
-                ListRow(n),
-                at(0.0, y, 320.0, ROW_STEP),
-                Node::default(),
-            ))
-            .id();
-        commands.entity(body).add_child(hit);
+        let hit = ui.child(body, UiNode::new().button().at(0.0, y, 320.0, ROW_STEP));
+        list.rows.push((hit, n));
         text(
-            &mut commands,
+            ui,
+            &mut list,
             body,
             &(i + 1).to_string(),
             22.0,
@@ -260,18 +223,20 @@ fn ensure_menu(
             Some(n),
         );
         text(
-            &mut commands,
+            ui,
+            &mut list,
             body,
-            &title_case(&titles.0[n as usize]),
+            &title_case(&titles[n as usize]),
             32.0,
             y,
             false,
             RED,
             Some(n),
         );
-        let (saved, secs) = settings.best.get(&n).copied().unwrap_or((0, 0));
+        let (saved, secs) = w.settings.best.get(&n).copied().unwrap_or((0, 0));
         text(
-            &mut commands,
+            ui,
+            &mut list,
             body,
             &saved.to_string(),
             270.0,
@@ -281,7 +246,8 @@ fn ensure_menu(
             Some(n),
         );
         text(
-            &mut commands,
+            ui,
+            &mut list,
             body,
             &format!("{}:{:02}", secs / 60, secs % 60),
             316.0,
@@ -291,39 +257,28 @@ fn ensure_menu(
             Some(n),
         );
     }
+    w.list = list;
 }
 
 /// Clicks, hover colour, scrolling and rating changes.
-#[allow(clippy::too_many_arguments)]
-fn menu_input(
-    mut commands: Commands,
-    rows: Query<(&Interaction, &ListRow), With<Button>>,
-    mut glyphs: Query<(&ListRow, &mut ImageNode)>,
-    mut bodies: Query<&mut crate::title::At, With<ListBody>>,
-    keys: Res<ButtonInput<KeyCode>>,
-    mut wheel: MessageReader<l3d_engine::input::MouseWheel>,
-    touches: Res<Touches>,
-    screen: Res<crate::screen::Screen>,
-    windows: Query<&Window>,
-    mut scroll: ResMut<Scroll>,
-    mut rating: ResMut<MenuRating>,
-    roots: Query<Entity, With<crate::title::ScreenRoot>>,
-    mut current: ResMut<CurrentLevel>,
-    mut next: ResMut<NextState<AppState>>,
-    mut tapped: Local<Option<u32>>,
-) {
+pub(crate) fn menu_input(w: &mut World) {
     let max = (LEVELS_PER_RATING as usize - ROWS_SHOWN) as f32;
+    let (keys, touches) = (&w.e.input.keys, &w.e.input.touches);
+    let screen = &w.screen;
+    let list = &mut w.list;
     // Scrolling and dragging move the rows as far as the wheel or fingers
     // go (a wheel notch a row).
     let row_px = ROW_STEP * (screen.size.x / 320.0).min(screen.size.y / 200.0);
-    let scale = windows.iter().next().map_or(1.0, |w| w.scale_factor());
-    let mut delta: f32 = wheel
-        .read()
-        .map(|w| match w.unit {
-            MouseScrollUnit::Line => -w.y,
-            MouseScrollUnit::Pixel => -w.y / scale / row_px,
-        })
-        .sum();
+    let scale = w.e.window.scale_factor();
+    let mut delta: f32 =
+        w.e.input
+            .wheel
+            .iter()
+            .map(|w| match w.unit {
+                MouseScrollUnit::Line => -w.y,
+                MouseScrollUnit::Pixel => -w.y / scale / row_px,
+            })
+            .sum();
     delta -= touches.iter().map(|t| t.delta().y).sum::<f32>() / row_px;
     // The keys step to whole rows.
     let steps = keys.just_pressed(KeyCode::ArrowDown) as i32
@@ -331,47 +286,49 @@ fn menu_input(
         + (keys.just_pressed(KeyCode::PageDown) as i32 - keys.just_pressed(KeyCode::PageUp) as i32)
             * ROWS_SHOWN as i32;
     if steps != 0 {
-        delta += (scroll.0 + steps as f32).round() - scroll.0;
+        delta += (list.scroll + steps as f32).round() - list.scroll;
     }
     if delta != 0.0 {
-        scroll.0 = (scroll.0 + delta).clamp(0.0, max);
-        for mut a in &mut bodies {
-            *a = crate::title::at(
+        list.scroll = (list.scroll + delta).clamp(0.0, max);
+        if let Some(body) = list.body.and_then(|b| w.ui.get_mut(b)) {
+            body.at = Some(Rect::new(
                 0.0,
-                -scroll.0 * ROW_STEP,
+                -list.scroll * ROW_STEP,
                 320.0,
-                ROW_STEP * LEVELS_PER_RATING as f32,
-            );
+                -list.scroll * ROW_STEP + ROW_STEP * LEVELS_PER_RATING as f32,
+            ));
         }
     }
     // Left and Right step through the ratings (Practice has its own menu).
     let step = keys.just_pressed(KeyCode::ArrowRight) as i32
         - keys.just_pressed(KeyCode::ArrowLeft) as i32;
     if step != 0 {
-        rating.0 = (rating.0 as i32 + step).rem_euclid(PRACTICE as i32) as usize;
-        scroll.0 = 0.0;
-        for e in &roots {
-            commands.entity(e).despawn();
-        }
+        w.rating.0 = (w.rating.0 as i32 + step).rem_euclid(PRACTICE as i32) as usize;
+        list.scroll = 0.0;
+        crate::title::close_screen(&mut w.ui, &mut w.screen_ui);
         return;
     }
-    let hovered = rows
+    let ui = &mut w.ui;
+    let hovered = list
+        .rows
         .iter()
-        .find(|(i, _)| **i != Interaction::None)
-        .map(|(_, r)| r.0);
-    for (row, mut node) in &mut glyphs {
-        let colour = if Some(row.0) == hovered { HOVER } else { RED };
-        if node.color != colour && node.image != Handle::default() {
-            node.color = colour;
+        .find(|&&(id, _)| ui.interaction(id) != Interaction::None)
+        .map(|&(_, r)| r);
+    for &(id, row) in &list.glyphs {
+        let colour = if Some(row) == hovered { HOVER } else { RED };
+        if let Some(n) = ui.get_mut(id) {
+            n.set_tint(colour);
         }
     }
     // A finger chooses a row by tapping it (lifting without having dragged)
     // rather than by landing on it, so that it can drag the list; the mouse
     // chooses on the click.
-    let pressed = rows
+    let pressed = list
+        .rows
         .iter()
-        .find(|(i, _)| **i == Interaction::Pressed)
-        .map(|(_, r)| r.0);
+        .find(|&&(id, _)| ui.pressed(id))
+        .map(|&(_, r)| r);
+    let tapped = &mut list.tapped;
     let chosen = if touches.iter().next().is_some() || touches.any_just_released() {
         if touches.any_just_pressed() {
             *tapped = pressed;
@@ -392,34 +349,27 @@ fn menu_input(
         pressed
     };
     if let Some(row) = chosen {
-        current.number = row;
-        current.loaded = None;
-        next.set(AppState::Briefing);
+        w.current.number = row;
+        w.current.loaded = None;
+        w.next_state = Some(AppState::Briefing);
     }
 }
-/// Esc restarts the level as a replay of the player's actions, as in the
-/// original (in Enhanced mode once the player confirms it); Esc during a
-/// replay leaves for the menu.
-pub(crate) fn back_to_menu(
-    keys: Res<ButtonInput<KeyCode>>,
-    settings: Res<crate::settings::Settings>,
-    mut confirm: ResMut<crate::confirm::RestartConfirm>,
-    mut current: ResMut<crate::CurrentLevel>,
-    mut game: ResMut<crate::Game>,
-    mut next: ResMut<NextState<AppState>>,
-) {
+
+pub(crate) fn back_to_menu(w: &mut World) {
+    let keys = &w.e.input.keys;
+    let (confirm, current, game) = (&mut w.confirm, &mut w.current, &mut w.game);
     let restart = |game: &mut crate::Game, current: &mut crate::CurrentLevel| {
         if let Some(sim) = &game.sim {
             game.replay = Some(crate::Replay::new(sim.log.clone()));
             current.loaded = None;
         }
     };
-    if let Some(was_paused) = confirm.0 {
+    if let Some(was_paused) = confirm.question {
         if keys.any_just_pressed([KeyCode::KeyY, KeyCode::Enter, KeyCode::NumpadEnter]) {
-            confirm.0 = None;
-            restart(&mut game, &mut current);
+            confirm.question = None;
+            restart(game, current);
         } else if keys.any_just_pressed([KeyCode::KeyN, KeyCode::Escape]) {
-            confirm.0 = None;
+            confirm.question = None;
             game.paused = was_paused;
         } else {
             game.paused = true;
@@ -430,16 +380,15 @@ pub(crate) fn back_to_menu(
         return;
     }
     if game.replay.is_some() {
-        next.set(level_menu(current.number));
-    } else if settings.enhanced && game.sim.is_some() {
-        confirm.0 = Some(game.paused);
+        w.next_state = Some(level_menu(current.number));
+    } else if w.settings.enhanced && game.sim.is_some() {
+        confirm.question = Some(game.paused);
         game.paused = true;
     } else {
-        restart(&mut game, &mut current);
+        restart(game, current);
     }
 }
 
-/// The menu a level belongs to: Practice levels have their own.
 pub fn level_menu(level: u32) -> AppState {
     if level >= PRACTICE as u32 * LEVELS_PER_RATING {
         AppState::Practice
@@ -449,8 +398,8 @@ pub fn level_menu(level: u32) -> AppState {
 }
 
 /// Esc on the level-select screen returns to the title screen.
-fn menu_to_title(keys: Res<ButtonInput<KeyCode>>, mut next: ResMut<NextState<AppState>>) {
-    if keys.just_pressed(KeyCode::Escape) {
-        next.set(AppState::Title);
+pub(crate) fn menu_to_title(w: &mut World) {
+    if w.e.input.keys.just_pressed(KeyCode::Escape) {
+        w.next_state = Some(AppState::Title);
     }
 }

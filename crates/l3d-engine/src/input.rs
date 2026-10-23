@@ -1,29 +1,35 @@
-//! Keyboard, mouse, touch and gesture input, as resources and messages in
-//! the shapes Bevy gave them. Everything that happened since the last frame
-//! is taken in before it starts, so systems see it from [`First`] on.
-//!
-//! [`First`]: crate::app::First
+//! Keyboard, mouse, touch and gesture input, in the shapes Bevy gave it:
+//! what is held, what went down or up since the last frame, and the
+//! frame's events. Everything that happened since the last frame is taken
+//! in before it starts.
 
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
 
-use bevy_ecs::message::Message;
-use bevy_ecs::prelude::*;
-use bevy_ecs::schedule::SystemSet;
 use glam::Vec2;
 pub use winit::event::{ElementState as ButtonState, MouseButton, TouchPhase};
 pub use winit::keyboard::{Key, KeyCode, NamedKey, NativeKey, SmolStr};
 
-use crate::app::App;
-
-/// Where the frame's input is taken in: before every schedule, so ordering
-/// after it changes nothing (kept for the systems that say so).
-#[derive(SystemSet, Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct InputSystems;
+/// The frame's input.
+#[derive(Debug, Clone, Default)]
+pub struct Input {
+    pub keys: ButtonInput<KeyCode>,
+    pub mouse: ButtonInput<MouseButton>,
+    pub touches: Touches,
+    pub motion: AccumulatedMouseMotion,
+    pub scroll: AccumulatedMouseScroll,
+    /// Keys going down and up this frame, in order.
+    pub keyboard: Vec<KeyboardInput>,
+    pub wheel: Vec<MouseWheel>,
+    pub pans: Vec<PanGesture>,
+    pub pinches: Vec<PinchGesture>,
+    /// The window gaining (true) or losing the keyboard this frame.
+    pub focus: Vec<bool>,
+}
 
 /// Which of some buttons are held, and which went down or up since the
 /// last frame.
-#[derive(Resource, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct ButtonInput<T: Copy + Eq + Hash + Send + Sync + 'static> {
     pressed: HashSet<T>,
     just_pressed: HashSet<T>,
@@ -113,19 +119,18 @@ impl<T: Copy + Eq + Hash + Send + Sync + 'static> ButtonInput<T> {
 
 /// A key going down or up. `key_code` is the key's place on the keyboard,
 /// when the system says; `logical_key` what it means in the layout.
-#[derive(Message, Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct KeyboardInput {
     pub key_code: Option<KeyCode>,
     pub logical_key: Key,
     pub state: ButtonState,
     pub text: Option<SmolStr>,
     pub repeat: bool,
-    pub window: Entity,
 }
 
 /// How far the mouse moved since the last frame (its own units, not the
 /// pointer's).
-#[derive(Resource, Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct AccumulatedMouseMotion {
     pub delta: Vec2,
 }
@@ -140,14 +145,14 @@ pub enum MouseScrollUnit {
 }
 
 /// How far the wheel scrolled since the last frame.
-#[derive(Resource, Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct AccumulatedMouseScroll {
     pub unit: MouseScrollUnit,
     pub delta: Vec2,
 }
 
 /// One turn of the wheel.
-#[derive(Message, Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MouseWheel {
     pub unit: MouseScrollUnit,
     pub x: f32,
@@ -155,12 +160,12 @@ pub struct MouseWheel {
 }
 
 /// Two fingers on a trackpad moving together (physical pixels).
-#[derive(Message, Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PanGesture(pub Vec2);
 
 /// Two fingers on a trackpad spreading (positive) or pinching, as a change
 /// in scale.
-#[derive(Message, Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PinchGesture(pub f32);
 
 /// A finger on the screen. Positions are in logical pixels in the window.
@@ -203,7 +208,7 @@ impl Touch {
 
 /// The fingers on the screen, and those that landed, lifted or were taken
 /// away by the system since the last frame.
-#[derive(Resource, Debug, Clone, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct Touches {
     pressed: HashMap<u64, Touch>,
     just_pressed: HashMap<u64, Touch>,
@@ -308,81 +313,66 @@ pub(crate) enum Raw {
     Touch(u64, TouchPhase, Vec2),
     Pan(Vec2),
     Pinch(f32),
-    /// The window lost the keyboard: keys held are let go.
-    FocusLost,
-}
-
-pub(crate) fn setup(app: &mut App) {
-    app.init_resource::<ButtonInput<KeyCode>>()
-        .init_resource::<ButtonInput<MouseButton>>()
-        .init_resource::<AccumulatedMouseMotion>()
-        .init_resource::<AccumulatedMouseScroll>()
-        .init_resource::<Touches>()
-        .add_message::<KeyboardInput>()
-        .add_message::<MouseWheel>()
-        .add_message::<PanGesture>()
-        .add_message::<PinchGesture>();
+    /// The window gained or lost the keyboard (losing it lets go of the
+    /// keys held).
+    Focus(bool),
 }
 
 /// Takes in the input since the last frame, after forgetting what went down
-/// and up in it.
-pub(crate) fn take_in(world: &mut World, events: Vec<Raw>) {
-    world.resource_mut::<ButtonInput<KeyCode>>().clear();
-    world.resource_mut::<ButtonInput<MouseButton>>().clear();
-    *world.resource_mut::<AccumulatedMouseMotion>() = default();
-    *world.resource_mut::<AccumulatedMouseScroll>() = default();
-    {
-        let mut touches = world.resource_mut::<Touches>();
-        touches.just_pressed.clear();
-        touches.just_released.clear();
-        touches.just_canceled.clear();
-        if events.iter().any(|e| matches!(e, Raw::Touch(..))) {
-            for t in touches.pressed.values_mut() {
-                t.previous_position = t.position;
-            }
+/// and up in the last.
+pub(crate) fn take_in(input: &mut Input, events: Vec<Raw>) {
+    input.keys.clear();
+    input.mouse.clear();
+    input.motion = AccumulatedMouseMotion::default();
+    input.scroll = AccumulatedMouseScroll::default();
+    input.keyboard.clear();
+    input.wheel.clear();
+    input.pans.clear();
+    input.pinches.clear();
+    input.focus.clear();
+    let touches = &mut input.touches;
+    touches.just_pressed.clear();
+    touches.just_released.clear();
+    touches.just_canceled.clear();
+    if events.iter().any(|e| matches!(e, Raw::Touch(..))) {
+        for t in touches.pressed.values_mut() {
+            t.previous_position = t.position;
         }
     }
     for e in events {
         match e {
             Raw::Key(k) => {
                 if let Some(code) = k.key_code {
-                    let mut keys = world.resource_mut::<ButtonInput<KeyCode>>();
                     match k.state {
-                        ButtonState::Pressed => keys.press(code),
-                        ButtonState::Released => keys.release(code),
+                        ButtonState::Pressed => input.keys.press(code),
+                        ButtonState::Released => input.keys.release(code),
                     }
                 }
-                world.write_message(k);
+                input.keyboard.push(k);
             }
-            Raw::MouseButton(b, state) => {
-                let mut buttons = world.resource_mut::<ButtonInput<MouseButton>>();
-                match state {
-                    ButtonState::Pressed => buttons.press(b),
-                    ButtonState::Released => buttons.release(b),
-                }
-            }
-            Raw::MouseMotion(d) => world.resource_mut::<AccumulatedMouseMotion>().delta += d,
+            Raw::MouseButton(b, state) => match state {
+                ButtonState::Pressed => input.mouse.press(b),
+                ButtonState::Released => input.mouse.release(b),
+            },
+            Raw::MouseMotion(d) => input.motion.delta += d,
             Raw::Wheel(w) => {
-                let mut scroll = world.resource_mut::<AccumulatedMouseScroll>();
+                let scroll = &mut input.scroll;
                 if scroll.unit != w.unit {
                     scroll.delta = Vec2::ZERO;
                 }
                 scroll.unit = w.unit;
                 scroll.delta += Vec2::new(w.x, w.y);
-                world.write_message(w);
+                input.wheel.push(w);
             }
-            Raw::Touch(id, phase, p) => world.resource_mut::<Touches>().event(id, phase, p),
-            Raw::Pan(d) => {
-                world.write_message(PanGesture(d));
+            Raw::Touch(id, phase, p) => input.touches.event(id, phase, p),
+            Raw::Pan(d) => input.pans.push(PanGesture(d)),
+            Raw::Pinch(d) => input.pinches.push(PinchGesture(d)),
+            Raw::Focus(focused) => {
+                input.focus.push(focused);
+                if !focused {
+                    input.keys.release_all();
+                }
             }
-            Raw::Pinch(d) => {
-                world.write_message(PinchGesture(d));
-            }
-            Raw::FocusLost => world.resource_mut::<ButtonInput<KeyCode>>().release_all(),
         }
     }
-}
-
-fn default<T: Default>() -> T {
-    T::default()
 }

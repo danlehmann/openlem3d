@@ -6,6 +6,7 @@
 //! Nothing here makes the player wait: every screen takes input from its
 //! first frame, and the animations never block (`docs/GROUNDRULES.md`).
 
+use l3d_engine::input::KeyboardInput;
 use l3d_engine::prelude::*;
 use l3d_formats::font::{Font, title_font};
 use l3d_formats::gamedata::Palette;
@@ -13,12 +14,10 @@ use l3d_formats::icons::Icons;
 use l3d_formats::image::IndexedImage;
 use l3d_formats::{sheets, title};
 
-use crate::menu::{AppState, MenuRating};
+use crate::World;
+use crate::menu::AppState;
 use crate::texture::indexed_image;
-use crate::ui::{
-    BackgroundColor, Button, ImageNode, Interaction, Node, Overflow, Visibility, percent, px,
-};
-use crate::{CurrentLevel, Data};
+use crate::ui::{Node, NodeId, Ui, UiNode, percent};
 
 /// The original's screen, in which all positions are given.
 const SCREEN: Vec2 = Vec2::new(320.0, 200.0);
@@ -52,56 +51,6 @@ const LETTER_FPS: f32 = 70.0 / 6.0;
 /// How long "Password Correct" shows before the level (any key skips it).
 const CORRECT_SHOWN: f32 = 0.6;
 
-pub struct TitlePlugin;
-
-impl Plugin for TitlePlugin {
-    fn build(&self, app: &mut App) {
-        app.add_systems(Startup, load_art)
-            .init_resource::<CodeText>()
-            .add_systems(OnExit(AppState::Title), despawn::<ScreenRoot>)
-            .add_systems(Update, attract.run_if(in_state(AppState::Title)))
-            .add_systems(
-                Update,
-                (
-                    spawn_title,
-                    title_input,
-                    animate_logo,
-                    animate_winders,
-                    animate_banner,
-                    animate_faces,
-                    show_rating,
-                )
-                    .chain()
-                    .run_if(in_state(AppState::Title)),
-            )
-            .add_systems(OnEnter(AppState::Code), |w: Query<&mut Window>| {
-                keyboard(w, true)
-            })
-            .add_systems(OnExit(AppState::Code), |w: Query<&mut Window>| {
-                keyboard(w, false)
-            })
-            .add_systems(OnExit(AppState::Code), despawn::<ScreenRoot>)
-            .add_systems(
-                Update,
-                (spawn_code, code_input, animate_slots, keyboard_again)
-                    .chain()
-                    .run_if(in_state(AppState::Code)),
-            )
-            .add_systems(
-                Update,
-                scroll_backdrop.run_if(
-                    in_state(AppState::Title)
-                        .or_else(in_state(AppState::Code))
-                        .or_else(in_state(AppState::Options))
-                        .or_else(in_state(AppState::Practice))
-                        .or_else(in_state(AppState::Menu)),
-                ),
-            )
-            .add_systems(OnExit(AppState::Options), despawn::<ScreenRoot>)
-            .add_systems(PostUpdate, layout.before(crate::ui::UiSystems::Layout));
-    }
-}
-
 /// A font as uploaded images plus each glyph's advance.
 pub(crate) struct Glyphs {
     first: u8,
@@ -134,7 +83,7 @@ impl Glyphs {
 }
 
 /// Menu graphics, uploaded once.
-#[derive(Resource)]
+/// The menus' graphics.
 pub(crate) struct Art {
     backdrop: Option<Handle<Image>>,
     logo: Vec<Handle<Image>>,
@@ -152,6 +101,8 @@ pub(crate) struct Art {
     letters: Vec<Handle<Image>>,
 }
 
+/// Advance of a proportional glyph: one less than its last opaque column,
+/// counted from 1 (measured for the large font on the code screen).
 /// Advance of a proportional glyph: one less than its last opaque column,
 /// counted from 1 (measured for the large font on the code screen).
 fn advance(g: &IndexedImage) -> f32 {
@@ -220,8 +171,9 @@ fn widened_backdrop(raw: &[u8]) -> Option<IndexedImage> {
     IndexedImage::new(width, h * BACKDROP_ROWS, pixels).ok()
 }
 
-fn load_art(mut commands: Commands, mut data: ResMut<Data>, mut images: ResMut<Assets<Image>>) {
-    let d = &mut data.0;
+pub(crate) fn load_art(w: &mut World) {
+    let d = &mut w.data.0;
+    let images = &mut w.e.images;
     let Ok(pal) = d.palette("GFX/LM3D.PAL") else {
         return;
     };
@@ -277,13 +229,13 @@ fn load_art(mut commands: Commands, mut data: ResMut<Data>, mut images: ResMut<A
         .read("GFX/TITLE.FNT")
         .ok()
         .and_then(|raw| title_font(&raw).ok())
-        .map(|f| glyphs(&f, &pal, 5.0, 0.0, &mut images));
+        .map(|f| glyphs(&f, &pal, 5.0, 0.0, images));
     let large = d
         .read("GFX/ICONS.RNC")
         .ok()
         .and_then(|raw| Icons::parse(&raw).ok())
-        .map(|i| glyphs(&i.large_font, &pal, 5.0, 0.0, &mut images));
-    commands.insert_resource(Art {
+        .map(|i| glyphs(&i.large_font, &pal, 5.0, 0.0, images));
+    w.art = Some(Art {
         backdrop,
         logo,
         buttons,
@@ -371,52 +323,71 @@ fn rating_label(name: &str, white: u8) -> IndexedImage {
     IndexedImage::new(w, h, pixels).expect("label size")
 }
 
-/// Root of the title and code screens.
-#[derive(Component)]
-pub(crate) struct ScreenRoot;
-
-/// A canvas of the given size in the original's pixels (320×200 for the
-/// title and code screens), scaled to fit the window and centred. One
-/// exists at a time.
-#[derive(Component)]
-pub(crate) struct Canvas(pub(crate) Vec2);
-
-/// The backdrop picture, and the scroll speed of the current screen.
-#[derive(Component)]
-struct Backdrop(f32);
-
-/// An element's rectangle in canvas pixels, relative to its parent.
-#[derive(Component, Clone, Copy)]
-pub(crate) struct At(pub(crate) Rect);
-
-pub(crate) fn at(x: f32, y: f32, w: f32, h: f32) -> At {
-    At(Rect::new(x, y, x + w, y + h))
+/// A canvas screen (the title, code, options, practice and level-list
+/// screens; one at a time): its root, its canvas and its scrolling backdrop
+/// with the backdrop's speed.
+pub(crate) struct ScreenUi {
+    pub(crate) root: NodeId,
+    pub(crate) canvas: NodeId,
+    backdrop: Option<(NodeId, f32)>,
 }
 
-#[derive(Component)]
-struct Logo;
-
-#[derive(Component)]
-struct Winder {
-    mirrored: bool,
+/// Takes the canvas screen away, if there is one.
+pub(crate) fn close_screen(ui: &mut Ui, screen: &mut Option<ScreenUi>) {
+    if let Some(s) = screen.take() {
+        ui.remove(s.root);
+    }
 }
 
-/// The strip of banner pages that slides across the paper.
-#[derive(Component)]
-struct BannerStrip {
-    pages: usize,
+/// Builds the root, the backdrop (tinted by `tint`) and the canvas.
+pub(crate) fn spawn_screen(ui: &mut Ui, art: &Art, scroll: f32, tint: Color) -> ScreenUi {
+    let root = ui.root(
+        UiNode::new()
+            .layout(Node {
+                width: percent(100),
+                height: percent(100),
+                clip: true,
+                ..default()
+            })
+            .background(Color::BLACK),
+    );
+    let backdrop = art
+        .backdrop
+        .as_ref()
+        .map(|bg| (ui.child(root, UiNode::image(bg.clone()).tint(tint)), scroll));
+    let canvas = ui.child(root, UiNode::new().canvas(SCREEN));
+    ScreenUi {
+        root,
+        canvas,
+        backdrop,
+    }
 }
 
-#[derive(Component)]
-struct Face(usize);
+/// The title screen's and the code screen's moving parts, and what their
+/// animations keep between frames.
+#[derive(Default)]
+pub(crate) struct Title {
+    /// The title's canvas, while it is up.
+    pub(crate) canvas: Option<NodeId>,
+    logo: Option<NodeId>,
+    /// The banner's strip of pages, how many, and when it started.
+    strip: Option<(NodeId, usize, f32)>,
+    winders: Vec<(NodeId, bool)>,
+    faces: Vec<(NodeId, usize)>,
+    buttons: Vec<(NodeId, TitleButton)>,
+    sign: Option<NodeId>,
+    label: Option<NodeId>,
+    winder: (f32, usize),
+    blink: (f32, usize, u32),
+    idle: f32,
+    turn: usize,
+    code: CodeText,
+    slots: Vec<NodeId>,
+    correct: Vec<NodeId>,
+    area: Option<NodeId>,
+}
 
-#[derive(Component)]
-struct RatingSign;
-
-#[derive(Component)]
-struct RatingLabel;
-
-#[derive(Component, Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 enum TitleButton {
     Play,
     Code,
@@ -443,44 +414,10 @@ const FACE_OFFSETS: [Vec2; 5] = [
 ];
 const BUTTON_Y: f32 = 135.0;
 
-pub(crate) fn despawn<T: Component>(mut commands: Commands, roots: Query<Entity, With<T>>) {
-    for e in &roots {
-        commands.entity(e).despawn();
-    }
-}
-
-pub(crate) fn image_at(image: Handle<Image>, rect: At) -> (ImageNode, At, Node) {
-    (ImageNode::new(image), rect, Node::default())
-}
-
-/// Spawns the root, the backdrop (tinted by `tint`) and the canvas; returns
-/// the canvas.
-pub(crate) fn spawn_screen(commands: &mut Commands, art: &Art, scroll: f32, tint: Color) -> Entity {
-    let root = commands
-        .spawn((
-            ScreenRoot,
-            Node {
-                width: percent(100),
-                height: percent(100),
-                overflow: Overflow::clip(),
-                ..default()
-            },
-            BackgroundColor(Color::BLACK),
-        ))
-        .id();
-    if let Some(bg) = &art.backdrop {
-        let backdrop = commands
-            .spawn((
-                Backdrop(scroll),
-                ImageNode::new(bg.clone()).with_color(tint),
-                Node::default(),
-            ))
-            .id();
-        commands.entity(root).add_child(backdrop);
-    }
-    let canvas = commands.spawn((Canvas(SCREEN), Node::default())).id();
-    commands.entity(root).add_child(canvas);
-    canvas
+/// Leaving a canvas screen takes it away.
+pub(crate) fn exit_screen(w: &mut World) {
+    close_screen(&mut w.ui, &mut w.screen_ui);
+    w.title.canvas = None;
 }
 
 /// The banner's pages: lines of `TITLE.FNT` text. Codes 123–148 are the two
@@ -501,48 +438,48 @@ fn banner_pages() -> Vec<[String; 2]> {
 
 /// Builds the title screen when it is shown and doesn't exist yet (the art is
 /// loaded at startup, which may finish after the first state is entered).
-fn spawn_title(mut commands: Commands, art: Option<Res<Art>>, roots: Query<(), With<ScreenRoot>>) {
-    let Some(art) = art else { return };
-    if !roots.is_empty() {
+fn spawn_title(w: &mut World) {
+    let Some(art) = &w.art else { return };
+    if w.screen_ui.is_some() {
         return;
     }
-    let canvas = spawn_screen(&mut commands, &art, TITLE_SCROLL, Color::WHITE);
-    let child = |commands: &mut Commands, b: &mut dyn FnMut(&mut Commands) -> Entity| {
-        let e = b(commands);
-        commands.entity(canvas).add_child(e);
-    };
-    if let Some(first) = art.logo.first() {
-        child(&mut commands, &mut |c| {
-            c.spawn((Logo, image_at(first.clone(), at(32.0, 10.0, 256.0, 64.0))))
-                .id()
-        });
-    }
-    // The banner: paper, then a clipped strip of pages, then the winders.
-    let paper = at(PAPER.min.x, PAPER.min.y, PAPER.width(), PAPER.height());
-    child(&mut commands, &mut |c| {
-        c.spawn((paper, Node::default(), BackgroundColor(Color::WHITE)))
-            .id()
+    let now = w.e.time.game.elapsed_secs();
+    let ui = &mut w.ui;
+    let screen = spawn_screen(ui, art, TITLE_SCROLL, Color::WHITE);
+    let canvas = screen.canvas;
+    w.screen_ui = Some(screen);
+    let t = &mut w.title;
+    t.canvas = Some(canvas);
+    t.winders.clear();
+    t.faces.clear();
+    t.buttons.clear();
+    t.logo = art.logo.first().map(|first| {
+        ui.child(
+            canvas,
+            UiNode::image(first.clone()).at(32.0, 10.0, 256.0, 64.0),
+        )
     });
+    // The banner: paper, then a clipped strip of pages, then the winders.
+    ui.child(
+        canvas,
+        UiNode::new()
+            .at(PAPER.min.x, PAPER.min.y, PAPER.width(), PAPER.height())
+            .background(Color::WHITE),
+    );
+    t.strip = None;
     if let Some(font) = &art.banner {
         let pages = banner_pages();
-        let window = commands
-            .spawn((
-                at(PAPER.min.x, 0.0, PAPER.width(), SCREEN.y),
-                Node {
-                    overflow: Overflow::clip(),
+        let window = ui.child(
+            canvas,
+            UiNode::new()
+                .at(PAPER.min.x, 0.0, PAPER.width(), SCREEN.y)
+                .layout(Node {
+                    clip: true,
                     ..default()
-                },
-            ))
-            .id();
-        commands.entity(canvas).add_child(window);
-        let strip = commands
-            .spawn((
-                BannerStrip { pages: pages.len() },
-                at(0.0, 0.0, 1.0, 1.0),
-                Node::default(),
-            ))
-            .id();
-        commands.entity(window).add_child(strip);
+                }),
+        );
+        let strip = ui.child(window, UiNode::new().at(0.0, 0.0, 1.0, 1.0));
+        t.strip = Some((strip, pages.len(), now));
         let page_w = PAPER.width();
         for (p, lines) in pages.iter().enumerate() {
             for (line, y) in lines.iter().zip(BANNER_LINES) {
@@ -550,109 +487,78 @@ fn spawn_title(mut commands: Commands, art: Option<Res<Art>>, roots: Query<(), W
                 // Page p is centred at strip x (p + 1.5)·page width.
                 let left = (p as f32 + 1.5) * page_w - width / 2.0;
                 for (x, image) in glyphs {
-                    let g = commands
-                        .spawn(image_at(image, at(left + x, y, font.size.x, font.size.y)))
-                        .id();
-                    commands.entity(strip).add_child(g);
+                    ui.child(
+                        strip,
+                        UiNode::image(image).at(left + x, y, font.size.x, font.size.y),
+                    );
                 }
             }
         }
     }
     if let Some(cell) = art.winder.first() {
-        child(&mut commands, &mut |c| {
-            c.spawn((
-                Winder { mirrored: false },
-                image_at(cell.clone(), at(0.0, 70.0, 64.0, 64.0)),
-            ))
-            .id()
-        });
-        child(&mut commands, &mut |c| {
-            let mut img = ImageNode::new(cell.clone());
-            img.flip_x = true;
-            c.spawn((
-                Winder { mirrored: true },
-                img,
-                at(256.0, 70.0, 64.0, 64.0),
-                Node::default(),
-            ))
-            .id()
-        });
+        let left = ui.child(
+            canvas,
+            UiNode::image(cell.clone()).at(0.0, 70.0, 64.0, 64.0),
+        );
+        let right = ui.child(
+            canvas,
+            UiNode::image(cell.clone())
+                .flip_x(true)
+                .at(256.0, 70.0, 64.0, 64.0),
+        );
+        t.winders = vec![(left, false), (right, true)];
     }
     // Faces under the buttons, then the buttons, the sign and its label.
     for (k, offset) in FACE_OFFSETS.iter().enumerate() {
         if let Some(face) = art.faces.get(3 * k) {
-            let r = at(64.0 * k as f32 + offset.x, BUTTON_Y + offset.y, 16.0, 16.0);
-            child(&mut commands, &mut |c| {
-                c.spawn((Face(k), image_at(face.clone(), r))).id()
-            });
+            let id = ui.child(
+                canvas,
+                UiNode::image(face.clone()).at(
+                    64.0 * k as f32 + offset.x,
+                    BUTTON_Y + offset.y,
+                    16.0,
+                    16.0,
+                ),
+            );
+            t.faces.push((id, k));
         }
     }
     for (k, kind) in TITLE_BUTTONS.iter().enumerate() {
         if let Some(img) = art.buttons.get(k) {
-            let r = at(64.0 * k as f32, BUTTON_Y, 64.0, 64.0);
-            child(&mut commands, &mut |c| {
-                c.spawn((Button, *kind, image_at(img.clone(), r))).id()
-            });
+            let id = ui.child(
+                canvas,
+                UiNode::image(img.clone())
+                    .button()
+                    .at(64.0 * k as f32, BUTTON_Y, 64.0, 64.0),
+            );
+            t.buttons.push((id, *kind));
         }
     }
-    child(&mut commands, &mut |c| {
-        c.spawn((
-            RatingSign,
-            image_at(Handle::default(), at(207.0, 153.0, 32.0, 32.0)),
-        ))
-        .id()
-    });
-    child(&mut commands, &mut |c| {
-        c.spawn((
-            RatingLabel,
-            image_at(Handle::default(), at(0.0, 0.0, 0.0, 0.0)),
-        ))
-        .id()
-    });
-}
-
-/// Fits the canvas into the window and places every element on it; tiles
-/// the backdrop across the whole window.
-fn layout(
-    screen: Res<crate::screen::Screen>,
-    mut canvases: Query<(&Canvas, &mut Node), Without<At>>,
-    mut items: Query<(&At, &mut Node), Without<Canvas>>,
-) {
-    let Some((size, _)) = canvases.iter().next().map(|(c, _)| (c.0, ())) else {
-        return;
-    };
-    let (w, h) = (screen.size.x, screen.size.y);
-    let s = (w / size.x).min(h / size.y);
-    for (_, mut node) in &mut canvases {
-        node.left = px((w - size.x * s) / 2.0);
-        node.top = px((h - size.y * s) / 2.0);
-        node.width = px(size.x * s);
-        node.height = px(size.y * s);
-    }
-    for (a, mut node) in &mut items {
-        node.left = px(a.0.min.x * s);
-        node.top = px(a.0.min.y * s);
-        node.width = px(a.0.width() * s);
-        node.height = px(a.0.height() * s);
-    }
+    t.sign = Some(ui.child(
+        canvas,
+        UiNode::image(Handle::default()).at(207.0, 153.0, 32.0, 32.0),
+    ));
+    t.label = Some(ui.child(
+        canvas,
+        UiNode::image(Handle::default()).at(0.0, 0.0, 0.0, 0.0),
+    ));
 }
 
 /// The backdrop scrolls upwards and wraps every 48 rows, its columns lined up
 /// with the canvas.
-fn scroll_backdrop(
-    time: Res<Time>,
-    screen: Res<crate::screen::Screen>,
-    mut backdrops: Query<(&Backdrop, &mut Node)>,
-) {
-    let (w, h) = (screen.size.x, screen.size.y);
-    let s = (w / SCREEN.x).min(h / SCREEN.y);
-    let origin = Vec2::new((w - SCREEN.x * s) / 2.0, (h - SCREEN.y * s) / 2.0);
-    for (b, mut node) in &mut backdrops {
-        let phase = (time.elapsed_secs() * b.0).rem_euclid(TILE.y) * s;
-        node.left = px(origin.x - BACKDROP_SIDE as f32 * s);
-        node.top = px((origin.y - phase).rem_euclid(TILE.y * s) - TILE.y * s);
-        node.width = px((TILE.x + 2.0 * BACKDROP_SIDE as f32) * s);
-        node.height = px(TILE.y * BACKDROP_ROWS as f32 * s);
+pub(crate) fn scroll_backdrop(w: &mut World) {
+    let Some((node, speed)) = w.screen_ui.as_ref().and_then(|s| s.backdrop) else {
+        return;
+    };
+    let (width, height) = (w.screen.size.x, w.screen.size.y);
+    let s = (width / SCREEN.x).min(height / SCREEN.y);
+    let origin = Vec2::new((width - SCREEN.x * s) / 2.0, (height - SCREEN.y * s) / 2.0);
+    let phase = (w.e.time.game.elapsed_secs() * speed).rem_euclid(TILE.y) * s;
+    if let Some(n) = w.ui.get_mut(node) {
+        n.node.left = crate::ui::px(origin.x - BACKDROP_SIDE as f32 * s);
+        n.node.top = crate::ui::px((origin.y - phase).rem_euclid(TILE.y * s) - TILE.y * s);
+        n.node.width = crate::ui::px((TILE.x + 2.0 * BACKDROP_SIDE as f32) * s);
+        n.node.height = crate::ui::px(TILE.y * BACKDROP_ROWS as f32 * s);
     }
 }
 
@@ -662,54 +568,37 @@ fn sign_index(rating: usize) -> usize {
     (rating + 1) % 5
 }
 
-fn show_rating(
-    art: Option<Res<Art>>,
-    rating: Res<MenuRating>,
-    mut signs: Query<&mut ImageNode, (With<RatingSign>, Without<RatingLabel>)>,
-    mut labels: Query<(&mut ImageNode, &mut At), With<RatingLabel>>,
-) {
-    let Some(art) = art else { return };
-    let i = sign_index(rating.0);
-    for mut node in &mut signs {
-        if let Some(h) = art.ratings.get(i)
-            && node.image != *h
-        {
-            node.image = h.clone();
-        }
+fn show_rating(w: &mut World) {
+    let Some(art) = &w.art else { return };
+    let i = sign_index(w.rating.0);
+    let t = &w.title;
+    if let (Some(h), Some(sign)) = (art.ratings.get(i), t.sign) {
+        w.ui.set_image(sign, h);
     }
-    for (mut node, mut a) in &mut labels {
-        if let Some((h, size)) = art.rating_labels.get(i) {
-            if node.image != *h {
-                node.image = h.clone();
-            }
-            // Text rows y 179–183; "PRACTICE" spans x 208–238 (measured).
-            let left = 223.0 - (size.x / 2.0).floor();
-            *a = at(left, 178.0, size.x, size.y);
-        }
+    if let (Some((h, size)), Some(label)) = (art.rating_labels.get(i), t.label)
+        && let Some(n) = w.ui.get_mut(label)
+    {
+        n.set_image(h);
+        // Text rows y 179–183; "PRACTICE" spans x 208–238 (measured).
+        let left = 223.0 - (size.x / 2.0).floor();
+        n.at = Some(Rect::new(left, 178.0, left + size.x, 178.0 + size.y));
     }
 }
 
-/// Frames 0–48 at 35 frames/s, then frame 0 held for 1.4 s.
-fn animate_logo(
-    art: Option<Res<Art>>,
-    time: Res<Time>,
-    mut logos: Query<&mut ImageNode, With<Logo>>,
-) {
-    let Some(art) = art else { return };
+fn animate_logo(w: &mut World) {
+    let Some(art) = &w.art else { return };
     if art.logo.is_empty() {
         return;
     }
     let turn = art.logo.len() as f32 / LOGO_FPS;
-    let t = time.elapsed_secs() % (turn + LOGO_HOLD);
+    let t = w.e.time.game.elapsed_secs() % (turn + LOGO_HOLD);
     let frame = if t < turn {
         (t * LOGO_FPS) as usize % art.logo.len()
     } else {
         0
     };
-    for mut node in &mut logos {
-        if node.image != art.logo[frame] {
-            node.image = art.logo[frame].clone();
-        }
+    if let Some(logo) = w.title.logo {
+        w.ui.set_image(logo, &art.logo[frame]);
     }
 }
 
@@ -727,45 +616,30 @@ fn banner_offset(t: f32) -> (f32, bool) {
 }
 
 /// The time since the title screen was entered (the banner restarts then).
-#[derive(Component)]
-struct Since(f32);
-
-fn animate_banner(
-    mut commands: Commands,
-    time: Res<Time>,
-    mut strips: Query<(Entity, &BannerStrip, &mut At, Option<&Since>)>,
-) {
-    for (e, strip, mut a, since) in &mut strips {
-        let Some(since) = since else {
-            commands.entity(e).insert(Since(time.elapsed_secs()));
-            continue;
-        };
-        let t = time.elapsed_secs() - since.0;
-        // The pages repeat once all have passed.
-        let total = strip.pages as f32 * (PAPER.width() / BANNER_SPEED + BANNER_HOLD);
-        let (offset, _) = banner_offset(t % total);
-        *a = at(-offset, 0.0, 1.0, 1.0);
+fn animate_banner(w: &mut World) {
+    let Some((strip, pages, since)) = w.title.strip else {
+        return;
+    };
+    let t = w.e.time.game.elapsed_secs() - since;
+    // The pages repeat once all have passed.
+    let total = pages as f32 * (PAPER.width() / BANNER_SPEED + BANNER_HOLD);
+    let (offset, _) = banner_offset(t % total);
+    if let Some(n) = w.ui.get_mut(strip) {
+        n.at = Some(Rect::new(-offset, 0.0, -offset + 1.0, 1.0));
     }
 }
 
-/// The winders turn their rollers while the banner moves and rest while it
-/// holds a page: the left one plays cells 7…0, the right one (mirrored)
-/// 0…7.
-fn animate_winders(
-    art: Option<Res<Art>>,
-    time: Res<Time>,
-    strips: Query<&Since, With<BannerStrip>>,
-    mut winders: Query<(&Winder, &mut ImageNode)>,
-    mut last: Local<(f32, usize)>,
-) {
-    let Some(art) = art else { return };
+fn animate_winders(w: &mut World) {
+    let Some(art) = &w.art else { return };
     if art.winder.is_empty() {
         return;
     }
-    let held = strips
-        .iter()
-        .next()
-        .is_some_and(|s| banner_offset(time.elapsed_secs() - s.0).1);
+    let time = w.e.time.game;
+    let t = &mut w.title;
+    let held = t
+        .strip
+        .is_some_and(|(_, _, since)| banner_offset(time.elapsed_secs() - since).1);
+    let last = &mut t.winder;
     if !held {
         last.0 += time.delta_secs() * WINDER_FPS;
         while last.0 >= 1.0 {
@@ -774,26 +648,17 @@ fn animate_winders(
         }
     }
     let n = art.winder.len();
-    for (w, mut node) in &mut winders {
-        let cell = if w.mirrored { last.1 } else { (n - 1) - last.1 };
-        if node.image != art.winder[cell] {
-            node.image = art.winder[cell].clone();
-        }
+    for &(id, mirrored) in &t.winders {
+        let cell = if mirrored { last.1 } else { (n - 1) - last.1 };
+        w.ui.set_image(id, &art.winder[cell]);
     }
 }
 
-/// One face at a time blinks: open, half, closed, half, open; blinks start
-/// 0.6–1.1 s apart, the face chosen at random (estimated).
-fn animate_faces(
-    art: Option<Res<Art>>,
-    time: Res<Time>,
-    mut faces: Query<(&Face, &mut ImageNode)>,
-    mut blink: Local<(f32, usize, u32)>,
-) {
-    /// (cell offset, duration) after the blink starts.
+fn animate_faces(w: &mut World) {
     const STEPS: [(usize, f32); 3] = [(1, 0.07), (2, 0.05), (1, 0.04)];
-    let Some(art) = art else { return };
-    let t = time.elapsed_secs();
+    let Some(art) = &w.art else { return };
+    let t = w.e.time.game.elapsed_secs();
+    let blink = &mut w.title.blink;
     let length: f32 = STEPS.iter().map(|s| s.1).sum();
     if t >= blink.0 + length {
         // A small linear congruential generator picks the next face and gap.
@@ -816,27 +681,23 @@ fn animate_faces(
             elapsed -= d;
         }
     }
-    for (f, mut node) in &mut faces {
-        let c = if f.0 == blink.1 { cell } else { 0 };
-        if let Some(h) = art.faces.get(3 * f.0 + c)
-            && node.image != *h
-        {
-            node.image = h.clone();
+    let blinking = blink.1;
+    for &(id, k) in &w.title.faces {
+        let c = if k == blinking { cell } else { 0 };
+        if let Some(h) = art.faces.get(3 * k + c) {
+            w.ui.set_image(id, h);
         }
     }
 }
-fn title_input(
-    keys: Res<ButtonInput<KeyCode>>,
-    buttons: Query<(&Interaction, &TitleButton), Changed<Interaction>>,
-    mut rating: ResMut<MenuRating>,
-    mut next: ResMut<NextState<AppState>>,
-    mut exit: MessageWriter<AppExit>,
-    mut sfx: MessageWriter<crate::sfx::Sfx>,
-) {
-    let mut pressed: Vec<TitleButton> = buttons
+
+fn title_input(w: &mut World) {
+    let keys = &w.e.input.keys;
+    let mut pressed: Vec<TitleButton> = w
+        .title
+        .buttons
         .iter()
-        .filter(|(i, _)| **i == Interaction::Pressed)
-        .map(|(_, b)| *b)
+        .filter(|&&(id, _)| w.ui.just_pressed(id))
+        .map(|&(_, b)| b)
         .collect();
     let keymap = [
         (KeyCode::F1, TitleButton::Play),
@@ -851,6 +712,7 @@ fn title_input(
             .filter(|(k, _)| keys.just_pressed(*k))
             .map(|(_, b)| *b),
     );
+    let rating = &mut w.rating;
     if keys.just_pressed(KeyCode::ArrowUp) {
         rating.0 = (rating.0 + 1) % 5;
     }
@@ -866,48 +728,53 @@ fn title_input(
             TitleButton::Rating => None,
         };
         if let Some(v) = voice {
-            sfx.write(crate::sfx::Sfx(v));
+            w.sfx.play(v);
         }
         match b {
             // Practice has its own menu.
-            TitleButton::Play => next.set(if rating.0 == crate::menu::PRACTICE {
-                AppState::Practice
-            } else {
-                AppState::Menu
-            }),
-            TitleButton::Code => next.set(AppState::Code),
-            TitleButton::Options => next.set(AppState::Options),
-            TitleButton::Rating => rating.0 = (rating.0 + 1) % 5,
-            TitleButton::Exit => {
-                exit.write(AppExit::Success);
+            TitleButton::Play => {
+                w.next_state = Some(if rating.0 == crate::menu::PRACTICE {
+                    AppState::Practice
+                } else {
+                    AppState::Menu
+                })
             }
+            TitleButton::Code => w.next_state = Some(AppState::Code),
+            TitleButton::Options => w.next_state = Some(AppState::Options),
+            TitleButton::Rating => rating.0 = (rating.0 + 1) % 5,
+            TitleButton::Exit => w.e.exit(),
         }
     }
+}
+
+/// The title screen's systems, in order.
+pub(crate) fn update_title(w: &mut World) {
+    spawn_title(w);
+    title_input(w);
+    animate_logo(w);
+    animate_winders(w);
+    animate_banner(w);
+    animate_faces(w);
+    show_rating(w);
 }
 
 /// Brings up or puts away the on-screen keyboard for typing a code, where
 /// the platform has one (`platform::ON_SCREEN_KEYBOARD`).
-fn keyboard(mut windows: Query<&mut Window>, shown: bool) {
-    if !crate::platform::ON_SCREEN_KEYBOARD {
-        return;
-    }
-    for mut w in &mut windows {
-        w.ime_enabled = shown;
+pub(crate) fn keyboard(w: &mut World, shown: bool) {
+    if crate::platform::ON_SCREEN_KEYBOARD {
+        w.e.window.ime_enabled = shown;
     }
 }
 
-/// The code's letters, as a button.
-#[derive(Component)]
-struct CodeArea;
-
-fn keyboard_again(areas: Query<&Interaction, (With<CodeArea>, Changed<Interaction>)>) {
-    if crate::platform::ON_SCREEN_KEYBOARD && areas.iter().any(|i| *i == Interaction::Pressed) {
+/// Tapping the code area brings the on-screen keyboard back.
+fn keyboard_again(w: &mut World) {
+    if crate::platform::ON_SCREEN_KEYBOARD && w.title.area.is_some_and(|a| w.ui.just_pressed(a)) {
         crate::platform::show_keyboard();
     }
 }
 
 /// The code screen's state.
-#[derive(Resource, Default)]
+#[derive(Default)]
 struct CodeText {
     /// Typed letters with the time each was typed.
     letters: Vec<(u8, f32)>,
@@ -917,68 +784,56 @@ struct CodeText {
     accepted: Option<(f32, u32)>,
 }
 
-#[derive(Component)]
-struct Slot(usize);
-
-#[derive(Component, Clone)]
-struct CorrectText;
-
 const MAX_CODE_LEN: usize = 8;
 
 /// A line of large-font text centred on x = 160 at height `y`.
+/// A line of text centred on the canvas; returns its glyphs.
 fn centred_line(
-    commands: &mut Commands,
-    parent: Entity,
+    ui: &mut Ui,
+    parent: NodeId,
     font: &Glyphs,
     text: &str,
     y: f32,
-    marker: impl Bundle + Clone,
-) {
+    shown: bool,
+) -> Vec<NodeId> {
     let (glyphs, width) = font.layout(text);
     let left = (160.0 - width / 2.0).round();
-    for (x, image) in glyphs {
-        let g = commands
-            .spawn((
-                image_at(image, at(left + x, y, font.size.x, font.size.y)),
-                marker.clone(),
-            ))
-            .id();
-        commands.entity(parent).add_child(g);
-    }
+    glyphs
+        .into_iter()
+        .map(|(x, image)| {
+            ui.child(
+                parent,
+                UiNode::image(image)
+                    .at(left + x, y, font.size.x, font.size.y)
+                    .visible_if(shown),
+            )
+        })
+        .collect()
 }
 
-#[derive(Component, Clone)]
-struct Plain;
-
 /// Builds the code screen when it is shown and doesn't exist yet.
-fn spawn_code(
-    mut commands: Commands,
-    art: Option<Res<Art>>,
-    roots: Query<(), With<ScreenRoot>>,
-    mut code: ResMut<CodeText>,
-) {
-    let Some(art) = art else { return };
-    if !roots.is_empty() {
+fn spawn_code(w: &mut World) {
+    let Some(art) = &w.art else { return };
+    if w.screen_ui.is_some() {
         return;
     }
-    *code = CodeText::default();
-    let canvas = spawn_screen(&mut commands, &art, CODE_SCROLL, Color::WHITE);
+    let t = &mut w.title;
+    t.code = CodeText::default();
+    let ui = &mut w.ui;
+    let screen = spawn_screen(ui, art, CODE_SCROLL, Color::WHITE);
+    let canvas = screen.canvas;
+    w.screen_ui = Some(screen);
+    t.correct.clear();
     if let Some(font) = &art.large {
-        centred_line(&mut commands, canvas, font, "Enter Password", 60.0, Plain);
-        centred_line(
-            &mut commands,
-            canvas,
-            font,
-            "Password Correct",
-            140.0,
-            (CorrectText, Visibility::Hidden),
-        );
+        centred_line(ui, canvas, font, "Enter Password", 60.0, true);
+        t.correct = centred_line(ui, canvas, font, "Password Correct", 140.0, false);
         // Tapping the prompt is Return, for players without a keyboard, as
         // "Back" is Esc.
         let prompt = "Press Return when finished";
         let (_, width) = font.layout(prompt);
         crate::key_buttons::spawn_text_button(
-            &mut commands,
+            ui,
+            &mut w.key_buttons,
             canvas,
             font,
             prompt,
@@ -988,7 +843,8 @@ fn spawn_code(
             KeyCode::Enter,
         );
         crate::key_buttons::spawn_text_button(
-            &mut commands,
+            ui,
+            &mut w.key_buttons,
             canvas,
             font,
             "Back",
@@ -999,42 +855,34 @@ fn spawn_code(
         );
     }
     // Tapping the code brings the on-screen keyboard back, if put away.
-    let area = commands
-        .spawn((
-            CodeArea,
-            Button,
-            at(32.0, 90.0, 34.0 * MAX_CODE_LEN as f32, 32.0),
-            Node::default(),
-        ))
-        .id();
-    commands.entity(canvas).add_child(area);
-    for k in 0..MAX_CODE_LEN {
-        let s = commands
-            .spawn((
-                Slot(k),
-                image_at(
-                    Handle::default(),
-                    at(32.0 + 34.0 * k as f32, 90.0, 32.0, 32.0),
-                ),
-            ))
-            .id();
-        commands.entity(canvas).add_child(s);
-    }
+    t.area = Some(
+        ui.child(
+            canvas,
+            UiNode::new()
+                .button()
+                .at(32.0, 90.0, 34.0 * MAX_CODE_LEN as f32, 32.0),
+        ),
+    );
+    t.slots = (0..MAX_CODE_LEN)
+        .map(|k| {
+            ui.child(
+                canvas,
+                UiNode::image(Handle::default()).at(32.0 + 34.0 * k as f32, 90.0, 32.0, 32.0),
+            )
+        })
+        .collect();
 }
 
-fn code_input(
-    mut events: MessageReader<l3d_engine::input::KeyboardInput>,
-    mouse: Res<ButtonInput<MouseButton>>,
-    time: Res<Time>,
-    mut code: ResMut<CodeText>,
-    mut current: ResMut<CurrentLevel>,
-    mut next: ResMut<NextState<AppState>>,
-    mut sfx: MessageWriter<crate::sfx::Sfx>,
-) {
+fn code_input(w: &mut World) {
+    let events: Vec<KeyboardInput> = w.e.input.keyboard.clone();
+    let mouse = &w.e.input.mouse;
+    let time = w.e.time.game;
+    let code = &mut w.title.code;
+    let (current, next, sfx) = (&mut w.current, &mut w.next_state, &mut w.sfx);
     use l3d_engine::input::{Key, NamedKey};
     let now = time.elapsed_secs();
     let mut any = mouse.get_just_pressed().next().is_some();
-    for k in events.read() {
+    for k in &events {
         if !k.state.is_pressed() {
             continue;
         }
@@ -1055,7 +903,7 @@ fn code_input(
                 for c in s.chars().filter(|c| c.is_ascii_alphabetic()) {
                     if code.letters.len() < MAX_CODE_LEN {
                         code.letters.push((c.to_ascii_uppercase() as u8, now));
-                        sfx.write(crate::sfx::Sfx("VOXFX/HUP3"));
+                        sfx.play("VOXFX/HUP3");
                     }
                 }
             }
@@ -1066,18 +914,18 @@ fn code_input(
                     code.erasing.push((slot, c, now));
                 }
             }
-            Key::Named(NamedKey::Escape) => next.set(AppState::Title),
+            Key::Named(NamedKey::Escape) => *next = Some(AppState::Title),
             Key::Named(NamedKey::Enter) => {
                 let text: String = code.letters.iter().map(|(c, _)| *c as char).collect();
                 match crate::codes::level_for_code(&text) {
                     Some(n) => {
                         code.accepted = Some((now, n));
-                        sfx.write(crate::sfx::Sfx("SPOTFX/POSITIVE"));
+                        sfx.play("SPOTFX/POSITIVE");
                     }
                     None => {
                         // An unknown code: the letters drop back into rows
                         // (the original returns to the title instead).
-                        sfx.write(crate::sfx::Sfx("SPOTFX/NEGATIVE"));
+                        sfx.play("SPOTFX/NEGATIVE");
                         let letters = std::mem::take(&mut code.letters);
                         for (slot, (c, _)) in letters.into_iter().enumerate() {
                             code.erasing.push((slot, c, now));
@@ -1093,7 +941,7 @@ fn code_input(
     {
         current.number = n;
         current.loaded = None;
-        next.set(AppState::Briefing);
+        *next = Some(AppState::Briefing);
     }
 }
 
@@ -1101,13 +949,8 @@ fn code_input(
 /// slot one image ahead of the one to its left (the last two in step); typed
 /// letters play frames 0–15 then loop 12–15; rubbed-out letters play
 /// 16–19.
-fn animate_slots(
-    art: Option<Res<Art>>,
-    time: Res<Time>,
-    code: Res<CodeText>,
-    mut slots: Query<(&Slot, &mut ImageNode)>,
-    mut correct: Query<&mut Visibility, With<CorrectText>>,
-) {
+fn animate_slots(w: &mut World) {
+    let (art, time, code) = (w.art.as_ref(), w.e.time.game, &w.title.code);
     let Some(art) = art else { return };
     if art.letters.is_empty() {
         return;
@@ -1117,8 +960,8 @@ fn animate_slots(
     let letter = |c: u8, f: usize| {
         title::LETTER_IDLE_FRAMES + (c - b'A') as usize * title::LETTER_FRAMES + f
     };
-    for (slot, mut node) in &mut slots {
-        let k = slot.0;
+    let mut images = Vec::new();
+    for (k, &id) in w.title.slots.iter().enumerate() {
         let index = if let Some(&(c, typed)) = code.letters.get(k) {
             let f = ((now - typed) * LETTER_FPS) as usize;
             letter(c, if f < 16 { f } else { 12 + (f - 16) % 4 })
@@ -1131,18 +974,16 @@ fn animate_slots(
         } else {
             (step + k.min(MAX_CODE_LEN - 2)) % (title::LETTER_IDLE_FRAMES + 1)
         };
-        if let Some(h) = art.letters.get(index)
-            && node.image != *h
-        {
-            node.image = h.clone();
+        if let Some(h) = art.letters.get(index) {
+            images.push((id, h.clone()));
         }
     }
-    for mut v in &mut correct {
-        *v = if code.accepted.is_some() {
-            Visibility::Inherited
-        } else {
-            Visibility::Hidden
-        };
+    let accepted = code.accepted.is_some();
+    for (id, h) in images {
+        w.ui.set_image(id, &h);
+    }
+    for &id in &w.title.correct {
+        w.ui.set_visible(id, accepted);
     }
 }
 
@@ -1153,40 +994,36 @@ const ATTRACT_AFTER: f32 = 120.0;
 
 /// Attract mode: after a while without input, the next Practice demo plays;
 /// any input, or its end, returns to the title.
-#[allow(clippy::too_many_arguments)]
-fn attract(
-    time: Res<Time>,
-    keys: Res<ButtonInput<KeyCode>>,
-    mouse: Res<ButtonInput<MouseButton>>,
-    motion: Res<l3d_engine::input::AccumulatedMouseMotion>,
-    touches: Res<Touches>,
-    mut data: ResMut<Data>,
-    mut game: ResMut<crate::Game>,
-    mut current: ResMut<CurrentLevel>,
-    mut next: ResMut<NextState<AppState>>,
-    mut idle: Local<f32>,
-    mut turn: Local<usize>,
-) {
+pub(crate) fn attract(w: &mut World) {
+    let (keys, mouse, motion, touches) = (
+        &w.e.input.keys,
+        &w.e.input.mouse,
+        &w.e.input.motion,
+        &w.e.input.touches,
+    );
+    let time = w.e.time.game;
+    let (data, game, current, next) = (&mut w.data, &mut w.game, &mut w.current, &mut w.next_state);
+    let title = &mut w.title;
     let input = keys.get_pressed().next().is_some()
         || mouse.get_pressed().next().is_some()
         || motion.delta != Vec2::ZERO
         || touches.iter().next().is_some();
-    *idle = if input {
+    title.idle = if input {
         0.0
     } else {
-        *idle + time.delta_secs()
+        title.idle + time.delta_secs()
     };
-    if *idle < ATTRACT_AFTER {
+    if title.idle < ATTRACT_AFTER {
         return;
     }
-    *idle = 0.0;
+    title.idle = 0.0;
     let demos: Vec<u32> = l3d_sim::demos::SOLUTIONS
         .iter()
         .map(|s| s.level)
         .filter(|&n| n >= crate::menu::PRACTICE as u32 * crate::menu::LEVELS_PER_RATING)
         .collect();
-    let n = demos[*turn % demos.len()];
-    *turn += 1;
+    let n = demos[title.turn % demos.len()];
+    title.turn += 1;
     let Some(log) = data
         .0
         .level(n)
@@ -1199,5 +1036,13 @@ fn attract(
     current.number = n;
     current.loaded = None;
     game.replay = Some(crate::Replay::demo(log, AppState::Title));
-    next.set(AppState::Playing);
+    *next = Some(AppState::Playing);
+}
+
+/// The code screen's systems, in order.
+pub(crate) fn update_code(w: &mut World) {
+    spawn_code(w);
+    code_input(w);
+    animate_slots(w);
+    keyboard_again(w);
 }

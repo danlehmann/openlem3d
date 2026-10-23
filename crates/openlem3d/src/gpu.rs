@@ -11,37 +11,28 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use l3d_engine::ecs::system::NonSendMarker;
 use l3d_engine::prelude::*;
-use l3d_engine::window::{PresentMode, PrimaryWindow, WindowHandle};
+use l3d_engine::window::{PresentMode, WindowHandle};
 
+use crate::World;
 use crate::scene_render::{SceneGpu, SceneInput};
-use crate::screen::Screen;
-use crate::ui::{UiGpu, UiInput};
-
-pub struct GpuPlugin;
-
-impl Plugin for GpuPlugin {
-    fn build(&self, app: &mut App) {
-        app.init_resource::<Renderer>()
-            .init_resource::<Screenshots>()
-            .add_systems(Last, render.after(l3d_engine::asset::AssetSystems));
-    }
-}
+use crate::ui::UiGpu;
 
 /// The colour behind everything, where nothing else is drawn.
-#[derive(Resource, Clone, Copy)]
+#[derive(Clone, Copy)]
 pub struct ClearColor(pub Color);
 
 /// Files to save the next frame to, as PNG.
-#[derive(Resource, Default)]
+#[derive(Default)]
 pub struct Screenshots(pub Vec<PathBuf>);
 
 /// The format everything is drawn in before it is copied to the window.
 pub const TARGET_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 
-#[derive(Resource, Default)]
-struct Renderer {
+#[derive(Default)]
+pub(crate) struct Renderer {
+    /// The window handle the surface was made for.
+    generation: u64,
     gpu: Option<Gpu>,
     surface: Option<Surface>,
     target: Option<Target>,
@@ -348,42 +339,33 @@ impl Copy {
 
 /// Draws a frame: the clear colour, the scene in the screen's part of the
 /// window, the UI, then onto the window.
-#[allow(clippy::too_many_arguments)] // Bevy system parameters
-fn render(
-    // Surfaces want the main thread on macOS.
-    _main_thread: NonSendMarker,
-    mut renderer: ResMut<Renderer>,
-    windows: Query<(&Window, Option<Ref<WindowHandle>>), With<PrimaryWindow>>,
-    screen: Res<Screen>,
-    clear: Res<ClearColor>,
-    scene_input: SceneInput,
-    mut ui_input: UiInput,
-    mut screenshots: ResMut<Screenshots>,
-) {
+pub(crate) fn render(w: &mut World) {
     let Renderer {
+        generation,
         gpu,
         surface,
         target,
         copy,
         scene,
         ui,
-    } = &mut *renderer;
-    let Ok((window, handle)) = windows.single() else {
-        return;
-    };
-    let Some(handle) = handle else {
+    } = &mut w.renderer;
+    let (window, screen, clear, screenshots) =
+        (&w.e.window, &w.screen, &w.clear, &mut w.screenshots);
+    let Some(handle) = &w.e.handle else {
         // The app is suspended (Android): the window is gone.
         *surface = None;
         return;
     };
+    let new_handle = *generation != w.e.handle_generation;
+    *generation = w.e.handle_generation;
     match gpu {
         None => {
-            let (g, s) = Gpu::new(&handle);
+            let (g, s) = Gpu::new(handle);
             *surface = Some(Surface::new(&g, s));
             *gpu = Some(g);
         }
-        Some(g) if handle.is_added() || surface.is_none() => {
-            *surface = Some(Surface::new(g, create_surface(&g.instance, &handle)));
+        Some(g) if new_handle || surface.is_none() => {
+            *surface = Some(Surface::new(g, create_surface(&g.instance, handle)));
         }
         Some(_) => {}
     }
@@ -447,14 +429,19 @@ fn render(
         &target.view,
         size,
         viewport,
-        &scene_input,
+        &SceneInput {
+            content: &w.scene,
+            sprites: &w.sprites,
+            camera: &w.camera,
+        },
     );
     ui.get_or_insert_with(|| UiGpu::new(gpu)).draw(
         gpu,
         &mut encoder,
         &target.view,
         viewport,
-        &mut ui_input,
+        &w.ui,
+        &mut w.e.images,
     );
     let s = surface.as_ref().expect("checked above");
     if let Some(frame) = &frame {

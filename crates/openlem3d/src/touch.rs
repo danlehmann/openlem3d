@@ -5,12 +5,10 @@
 
 use std::collections::HashMap;
 
-use l3d_engine::ecs::system::SystemParam;
 use l3d_engine::prelude::*;
 
-use crate::ViewCamera;
 use crate::menu::AppState;
-use crate::ui::Interaction;
+use crate::{ViewCamera, World};
 
 /// Finger travel (logical pixels) below which a touch counts as a tap.
 pub const TAP_SLOP: f32 = 12.0;
@@ -24,49 +22,22 @@ pub const MOVE_PER_PX: f32 = 0.02;
 /// that dragging and pinching don't turn it by the way (ours).
 const TWIST_START: f32 = 0.2;
 
-pub struct TouchPlugin;
-
-impl Plugin for TouchPlugin {
-    fn build(&self, app: &mut App) {
-        app.init_resource::<TouchStarts>()
-            .add_systems(
-                PreUpdate,
-                record_touch_starts.after(crate::ui::UiSystems::Focus),
-            )
-            .add_systems(
-                Update,
-                touch_camera
-                    .before(crate::camera_controls)
-                    .run_if(in_state(AppState::Playing)),
-            )
-            .add_systems(
-                PreUpdate,
-                touch_over_mouse
-                    .after(l3d_engine::input::InputSystems)
-                    .before(crate::ui::UiSystems::Focus),
-            );
-    }
-}
-
 /// While a finger is down, the window forgets the mouse pointer's last
 /// position, so that buttons are pressed where the finger is: Bevy's UI
 /// uses the pointer's position when it has one, and the touch's only
 /// otherwise (taps on skills did nothing while the pointer had last been
 /// over the window). The real pointer does not move.
-fn touch_over_mouse(touches: Res<Touches>, mut windows: Query<&mut Window>) {
+pub(crate) fn touch_over_mouse(w: &mut World) {
+    let touches = &w.e.input.touches;
     if touches.iter().next().is_none() && !touches.any_just_released() {
         return;
     }
-    for mut window in &mut windows {
-        if window.physical_cursor_position().is_some() {
-            window.set_physical_cursor_position(None);
-        }
-    }
+    w.e.window.set_physical_cursor_position(None);
 }
 
 /// The screen each finger now down (or just lifted) landed on, and whether
 /// it landed on a button.
-#[derive(Resource, Default)]
+#[derive(Default)]
 pub struct TouchStarts(HashMap<u64, (AppState, bool)>);
 
 impl TouchStarts {
@@ -77,58 +48,38 @@ impl TouchStarts {
     }
 }
 
-fn record_touch_starts(
-    touches: Res<Touches>,
-    state: Res<State<AppState>>,
-    ui: Query<&Interaction>,
-    mut starts: ResMut<TouchStarts>,
-) {
+pub(crate) fn record_touch_starts(w: &mut World) {
+    let touches = &w.e.input.touches;
+    let starts = &mut w.touch_starts;
     starts
         .0
         .retain(|&id, _| touches.get_pressed(id).is_some() || touches.just_released(id));
-    let button = ui.iter().any(|i| *i == Interaction::Pressed);
+    let button = w.ui.any_pressed();
     for t in touches.iter_just_pressed() {
-        starts.0.insert(t.id(), (*state.get(), button));
+        starts.0.insert(t.id(), (w.state, button));
     }
 }
 
-/// Fingers lifting on the screen they landed on. A finger that chose
+/// Whether a finger that landed on this screen lifted. A finger that chose
 /// something on one screen (landing on a level in the practice grid, say)
 /// is then not also a tap on the next, which would skip it.
-#[derive(SystemParam)]
-pub struct Lifted<'w> {
-    touches: Res<'w, Touches>,
-    starts: Res<'w, TouchStarts>,
-    state: Res<'w, State<AppState>>,
-}
-
-impl Lifted<'_> {
-    /// Whether a finger that landed on this screen lifted.
-    pub fn any(&self) -> bool {
-        self.touches
-            .iter_just_released()
-            .any(|t| self.starts.0.get(&t.id()).map(|s| &s.0) == Some(self.state.get()))
-    }
+pub fn lifted(w: &World) -> bool {
+    w.e.input
+        .touches
+        .iter_just_released()
+        .any(|t| w.touch_starts.0.get(&t.id()).map(|s| s.0) == Some(w.state))
 }
 
 /// One finger: horizontal drag turns, vertical drag moves forward/back.
 /// Two fingers: as [`two_fingers`].
-fn touch_camera(
-    touches: Res<Touches>,
-    ui: Query<&Interaction>,
-    (screen, camera, game): (
-        Res<crate::screen::Screen>,
-        Res<crate::scene_render::SceneCamera>,
-        Res<crate::Game>,
-    ),
-    mut twist: Local<Twist>,
-    mut cams: Query<&mut ViewCamera>,
-) {
-    let active: Vec<_> = touches.iter().collect();
+pub(crate) fn touch_camera(w: &mut World) {
+    let (screen, camera, game) = (&w.screen, &w.camera, &w.game);
+    let twist = &mut w.touch_twist;
+    let active: Vec<_> = w.e.input.touches.iter().collect();
     if active.len() < 2 {
         *twist = Twist::default();
     }
-    if ui.iter().any(|i| *i == Interaction::Pressed) {
+    if w.ui.any_pressed() {
         return;
     }
     let Some(first) = active.first() else { return };
@@ -147,18 +98,15 @@ fn touch_camera(
             spread: now.0.distance(now.1) - before.0.distance(before.1),
             twist: twist.turn((before.1 - before.0).angle_to(now.1 - now.0)),
             turning: false,
-            toward: crate::screen_ray(&screen, &camera, screen.on_screen((now.0 + now.1) / 2.0)),
+            toward: crate::screen_ray(screen, camera, screen.on_screen((now.0 + now.1) / 2.0)),
         };
-        for mut cam in &mut cams {
-            two_fingers(&mut cam, &fingers, &game);
-        }
+        two_fingers(&mut w.view, &fingers, game);
         return;
     }
-    for mut cam in &mut cams {
-        let fwd = cam.forward();
-        cam.yaw += delta.x * TURN_PER_PX;
-        cam.pos += fwd * delta.y * MOVE_PER_PX;
-    }
+    let cam = &mut w.view;
+    let fwd = cam.forward();
+    cam.yaw += delta.x * TURN_PER_PX;
+    cam.pos += fwd * delta.y * MOVE_PER_PX;
 }
 
 /// Two fingers' move since the last frame, on a touchscreen or trackpad

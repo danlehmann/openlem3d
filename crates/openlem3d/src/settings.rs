@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use l3d_engine::prelude::*;
 
 /// What the options screen changes.
-#[derive(Resource, Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Settings {
     /// Draw the land, sea and sky (off: plain colour), as the original's
     /// configuration offers.

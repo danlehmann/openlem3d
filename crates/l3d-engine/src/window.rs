@@ -1,25 +1,14 @@
-//! The game's one window, as an entity with a [`Window`] (and
-//! [`PrimaryWindow`]). Systems read its size and the pointer from it and
-//! change its title, mode, cursor and on-screen keyboard through it; the
-//! runner keeps it and the system's window in step. While the system's
-//! window can be drawn into, the entity also has a [`WindowHandle`]
-//! (Android takes it away while the app is in the background).
+//! The game's one window: the game reads its size and the pointer from
+//! [`Window`] and changes its title, mode and on-screen keyboard through
+//! it; the runner keeps it and the system's window in step.
 
 use std::sync::Arc;
 
-use bevy_ecs::message::Message;
-use bevy_ecs::prelude::*;
 use glam::{UVec2, Vec2};
 pub use winit::window::CursorIcon as SystemCursorIcon;
 
-use crate::app::App;
-
-/// Marks the window the game draws in.
-#[derive(Component, Debug, Clone, Copy, Default)]
-pub struct PrimaryWindow;
-
 /// The system's window, for drawing into.
-#[derive(Component, Clone)]
+#[derive(Clone)]
 pub struct WindowHandle(pub Arc<winit::window::Window>);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -106,7 +95,7 @@ impl WindowResolution {
     }
 }
 
-#[derive(Component, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct Window {
     pub title: String,
     pub present_mode: PresentMode,
@@ -190,7 +179,7 @@ impl PartialEq for CustomCursor {
 }
 
 /// The pointer's look over the window.
-#[derive(Component, Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum CursorIcon {
     System(SystemCursorIcon),
     Custom(CustomCursor),
@@ -199,24 +188,5 @@ pub enum CursorIcon {
 impl Default for CursorIcon {
     fn default() -> Self {
         CursorIcon::System(SystemCursorIcon::Default)
-    }
-}
-
-/// The window gaining or losing the keyboard.
-#[derive(Message, Debug, Clone, Copy, PartialEq, Eq)]
-pub struct WindowFocused {
-    pub window: Entity,
-    pub focused: bool,
-}
-
-pub(crate) fn setup(app: &mut App) {
-    app.add_message::<WindowFocused>();
-}
-
-impl App {
-    /// Opens the game's window with these settings when the app runs.
-    pub fn with_window(&mut self, window: Window) -> &mut Self {
-        self.world_mut().spawn((window, PrimaryWindow));
-        self
     }
 }

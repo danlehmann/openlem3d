@@ -14,18 +14,8 @@ use l3d_engine::prelude::*;
 use l3d_engine::window::{CursorIcon, CustomCursor, SystemCursorIcon};
 use l3d_formats::sheets;
 
+use crate::World;
 use crate::menu::AppState;
-use crate::scene_render::SceneCamera;
-use crate::ui::Interaction;
-use crate::{Data, Game};
-
-pub struct PointerPlugin;
-
-impl Plugin for PointerPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_systems(Startup, load).add_systems(Update, update);
-    }
-}
 
 /// `MOUSE.RNC` cells.
 const CROSS_HAIR: usize = 9;
@@ -36,14 +26,13 @@ const CELL: f32 = 16.0;
 
 /// The pointer cells as RGBA, with each cell's size, and the cursor images
 /// made from them so far, by cell and drawn size.
-#[derive(Resource)]
-struct Cells {
+pub(crate) struct Cells {
     rgba: Vec<(Vec<u8>, UVec2)>,
     scaled: HashMap<(usize, u32), Arc<[u8]>>,
 }
 
-fn load(mut commands: Commands, mut data: ResMut<Data>) {
-    let d = &mut data.0;
+pub(crate) fn load(w: &mut World) {
+    let d = &mut w.data.0;
     let (Ok(pal), Ok(raw)) = (d.palette("GFX/LM3D.PAL"), d.read(sheets::MOUSE.path)) else {
         return;
     };
@@ -59,7 +48,7 @@ fn load(mut commands: Commands, mut data: ResMut<Data>) {
             )
         })
         .collect();
-    commands.insert_resource(Cells {
+    w.cells = Some(Cells {
         rgba,
         scaled: HashMap::new(),
     });
@@ -93,36 +82,24 @@ fn scaled(cells: &mut Cells, cell: usize, size: u32) -> Option<CustomCursor> {
     Some(cursor(&rgba))
 }
 
-#[allow(clippy::too_many_arguments)]
-fn update(
-    mut commands: Commands,
-    cells: Option<ResMut<Cells>>,
-    state: Res<State<AppState>>,
-    game: Res<Game>,
-    camera: Res<SceneCamera>,
-    touches: Res<Touches>,
-    ui: Query<&Interaction>,
-    lemming_cam: Res<crate::lemming_cam::LemmingCam>,
-    settings: Res<crate::settings::Settings>,
-    windows: Query<(Entity, &Window, Option<&CursorIcon>)>,
-    screen: Res<crate::screen::Screen>,
-) {
-    let (Some(mut cells), Ok((entity, window, icon))) = (cells, windows.single()) else {
+pub(crate) fn update(w: &mut World) {
+    let Some(cells) = &mut w.cells else {
         return;
     };
+    let (window, screen, game, lemming_cam) = (&w.e.window, &w.screen, &w.game, &w.lemming_cam);
     let position = screen
         .cursor(window)
-        .filter(|_| touches.iter().next().is_none());
+        .filter(|_| w.e.input.touches.iter().next().is_none());
     let size = screen.size;
-    let cell = match (state.get(), position) {
+    let cell = match (w.state, position) {
         (AppState::Code, _) | (_, None) => None,
-        (AppState::Playing, Some(p)) => Some(if ui.iter().any(|i| *i != Interaction::None) {
+        (AppState::Playing, Some(p)) => Some(if w.ui.any_active() {
             CROSS_HAIR
         } else if game
             .sim
             .as_ref()
             .and_then(|sim| {
-                crate::hud::lemming_near(sim, &camera, size, p, lemming_cam.following())
+                crate::hud::lemming_near(sim, &w.camera, size, p, lemming_cam.following())
             })
             .is_some()
         {
@@ -130,7 +107,7 @@ fn update(
             BRACKET
         } else if lemming_cam.following().is_some() {
             CROSS_HAIR
-        } else if settings.enhanced {
+        } else if w.settings.enhanced {
             // Enhanced mode has no moves by holding still, so no arrows.
             CROSS_HAIR
         } else {
@@ -141,11 +118,8 @@ fn update(
     };
     // Physical pixels: the cursor image is not scaled by the system.
     let pixels = (CELL * (window.physical_height() as f32 / 200.0).max(1.0)).round() as u32;
-    let wanted = match cell.and_then(|c| scaled(&mut cells, c, pixels)) {
+    w.e.cursor = match cell.and_then(|c| scaled(cells, c, pixels)) {
         Some(cursor) => CursorIcon::Custom(cursor),
         None => CursorIcon::System(SystemCursorIcon::Default),
     };
-    if icon != Some(&wanted) {
-        commands.entity(entity).insert(wanted);
-    }
 }

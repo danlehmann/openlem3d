@@ -42,13 +42,13 @@ mod ui;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use l3d_engine::input::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseScrollUnit};
+use l3d_engine::input::MouseScrollUnit;
 use l3d_engine::prelude::*;
 use l3d_formats::blk::BlockSet;
 use l3d_formats::gamedata::{GameData, locate_data_dir};
 use l3d_formats::level::{CameraPreset, Level};
-use scene_render::{SceneCamera, SceneContent, SceneRenderPlugin};
-use ui::{Interaction, Node, Visibility};
+use scene_render::{SceneCamera, SceneContent, SceneSprites};
+use ui::Ui;
 
 /// A simulation length or coordinate in sub-units ([`l3d_sim::SUB`] to the
 /// unit), in units.
@@ -57,7 +57,7 @@ pub(crate) fn units(sub: i32) -> f32 {
 }
 
 /// Command-line options.
-#[derive(Resource, Clone)]
+#[derive(Clone)]
 pub struct Options {
     data: Option<PathBuf>,
     /// Level to start in directly; the level-select screen otherwise.
@@ -216,113 +216,373 @@ pub fn main() {
         eprintln!("{}", platform::DATA_HINT);
         std::process::exit(1);
     });
-    App::new()
-        .with_window(Window {
-            title: "openlem3d".into(),
-            present_mode: if opts.turbo {
-                l3d_engine::window::PresentMode::AutoNoVsync
-            } else {
-                default()
-            },
-            resolution: match opts.size {
-                Some((w, h)) => {
-                    l3d_engine::window::WindowResolution::new(w, h).with_scale_factor_override(1.0)
-                }
-                None => default(),
-            },
-            ..default()
-        })
-        .add_plugins((
-            SceneRenderPlugin,
-            hud::HudPlugin,
-            menu::MenuPlugin,
-            music::MusicPlugin,
-            touch::TouchPlugin,
-            title::TitlePlugin,
-            lemming_cam::LemmingCamPlugin,
-            panel::PanelPlugin,
-            briefing::BriefingPlugin,
-            minimap::MinimapPlugin,
-            results::ResultsPlugin,
-            pointer::PointerPlugin,
-            sfx::SfxPlugin,
-            options::OptionsPlugin,
-            practice::PracticePlugin,
-        ))
-        .add_plugins((
-            fade::FadePlugin,
-            trackpad::TrackpadPlugin,
-            style::StylePlugin,
-            confirm::ConfirmPlugin,
-            pixels::PixelsPlugin,
-            screen::ScreenPlugin,
-            key_buttons::KeyButtonsPlugin,
-            ui::UiPlugin,
-            gpu::GpuPlugin,
-        ))
-        .insert_resource(gpu::ClearColor(Color::srgb(0.35, 0.55, 0.85)))
-        .insert_resource(opts.clone())
-        .insert_resource(Data(data))
-        .insert_resource(CurrentLevel {
-            number: opts.level.unwrap_or(0),
-            loaded: None,
-        })
-        .insert_state(match opts.level {
-            Some(_) if opts.briefing => menu::AppState::Briefing,
-            Some(_) => menu::AppState::Playing,
-            None => opts.screen,
-        })
-        .add_systems(Update, (screenshot_when_ready, hide_ui))
-        .add_systems(
-            PreUpdate,
-            scripted_presses.after(l3d_engine::input::InputSystems),
-        )
-        .insert_resource(Game::default())
-        .insert_resource(Time::<Fixed>::from_hz(l3d_sim::TICKS_PER_SECOND as f64))
-        .init_resource::<PresetIndex>()
-        .add_systems(
-            FixedUpdate,
-            step_simulation.run_if(in_state(menu::AppState::Playing)),
-        )
-        .add_systems(
-            OnEnter(menu::AppState::Briefing),
-            |mut game: ResMut<Game>| game.replay = None,
-        )
-        .add_systems(PostUpdate, update_lemming_sprites)
-        .add_systems(Startup, (spawn_camera, turbo))
-        .add_systems(
-            Update,
-            (pause_keys, load_level, refresh_scenery, camera_controls)
-                .chain()
-                .run_if(in_state(menu::AppState::Playing)),
-        )
-        .run();
+    let window = Window {
+        title: "openlem3d".into(),
+        present_mode: if opts.turbo {
+            l3d_engine::window::PresentMode::AutoNoVsync
+        } else {
+            default()
+        },
+        resolution: match opts.size {
+            Some((w, h)) => {
+                l3d_engine::window::WindowResolution::new(w, h).with_scale_factor_override(1.0)
+            }
+            None => default(),
+        },
+        ..default()
+    };
+    let state = match opts.level {
+        Some(_) if opts.briefing => menu::AppState::Briefing,
+        Some(_) => menu::AppState::Playing,
+        None => opts.screen,
+    };
+    l3d_engine::run(World::new(Engine::new(window), opts, Data(data), state));
 }
 
-#[derive(Resource)]
+/// Everything the game keeps: the engine's side (window, input, clocks,
+/// pictures, sound) and each part's own state.
+pub struct World {
+    e: Engine,
+    opts: Options,
+    data: Data,
+    /// The screen being shown, and the one asked for (taken up between the
+    /// input and the fixed steps of the next frame).
+    state: menu::AppState,
+    next_state: Option<menu::AppState>,
+    started: bool,
+    settings: settings::Settings,
+    current: CurrentLevel,
+    game: Game,
+    preset: PresetIndex,
+    info: Option<LevelInfo>,
+    view: ViewCamera,
+    camera_controls: CameraControls,
+    scene: SceneContent,
+    camera: SceneCamera,
+    sprites: SceneSprites,
+    scenery_shown: Option<(u32, scene_build::Show)>,
+    clear: gpu::ClearColor,
+    screenshots: gpu::Screenshots,
+    renderer: gpu::Renderer,
+    shot: ShotTimer,
+    scripted: Scripted,
+    screen: screen::Screen,
+    insets: Option<(f32, [u32; 4])>,
+    pixelation: pixels::Pixelation,
+    ui: Ui,
+    art: Option<title::Art>,
+    title: title::Title,
+    screen_ui: Option<title::ScreenUi>,
+    rating: menu::MenuRating,
+    titles: Option<menu::Titles>,
+    list: menu::LevelList,
+    briefing: briefing::Briefing,
+    preview: briefing::Preview,
+    results: results::Results,
+    options: options::OptionsScreen,
+    options_from: options::OptionsFrom,
+    practice: practice::Practice,
+    panel: panel::Panel,
+    minimap: Option<minimap::Minimap>,
+    minimap_view: minimap::MinimapView,
+    selected: hud::SelectedSkill,
+    pending: hud::PendingTurner,
+    highlight: hud::Highlight,
+    arrows: hud::TurnerArrows,
+    lemming_cam: lemming_cam::LemmingCam,
+    follow: lemming_cam::Follow,
+    confirm: confirm::Confirm,
+    fade: fade::Fade,
+    style: style::Style,
+    key_buttons: key_buttons::KeyButtons,
+    muted: music::MusicMuted,
+    music: music::LevelMusic,
+    sfx: sfx::Sounds,
+    cells: Option<pointer::Cells>,
+    touch_starts: touch::TouchStarts,
+    touch_twist: touch::Twist,
+    trackpad: trackpad::Trackpad,
+}
+
+impl World {
+    fn new(mut e: Engine, opts: Options, data: Data, state: menu::AppState) -> Self {
+        e.time.fixed.set_hz(l3d_sim::TICKS_PER_SECOND as f64);
+        World {
+            e,
+            current: CurrentLevel {
+                number: opts.level.unwrap_or(0),
+                loaded: None,
+            },
+            opts,
+            data,
+            state,
+            next_state: None,
+            started: false,
+            settings: settings::Settings::load(),
+            game: Game::default(),
+            preset: PresetIndex::default(),
+            info: None,
+            view: ViewCamera::default(),
+            camera_controls: CameraControls::default(),
+            scene: SceneContent::default(),
+            camera: SceneCamera::default(),
+            sprites: SceneSprites::default(),
+            scenery_shown: None,
+            clear: gpu::ClearColor(Color::srgb(0.35, 0.55, 0.85)),
+            screenshots: gpu::Screenshots::default(),
+            renderer: gpu::Renderer::default(),
+            shot: ShotTimer::default(),
+            scripted: Scripted::default(),
+            screen: screen::Screen::default(),
+            insets: None,
+            pixelation: pixels::Pixelation::default(),
+            ui: Ui::default(),
+            art: None,
+            title: title::Title::default(),
+            screen_ui: None,
+            rating: menu::MenuRating::default(),
+            titles: None,
+            list: menu::LevelList::default(),
+            briefing: briefing::Briefing::default(),
+            preview: briefing::Preview::default(),
+            results: results::Results::default(),
+            options: options::OptionsScreen::default(),
+            options_from: options::OptionsFrom::default(),
+            practice: practice::Practice::default(),
+            panel: panel::Panel::default(),
+            minimap: None,
+            minimap_view: minimap::MinimapView::default(),
+            selected: hud::SelectedSkill::default(),
+            pending: hud::PendingTurner::default(),
+            highlight: hud::Highlight::default(),
+            arrows: hud::TurnerArrows::default(),
+            lemming_cam: lemming_cam::LemmingCam::default(),
+            follow: lemming_cam::Follow::default(),
+            confirm: confirm::Confirm::default(),
+            fade: fade::Fade::default(),
+            style: style::Style::default(),
+            key_buttons: key_buttons::KeyButtons::default(),
+            muted: music::MusicMuted::default(),
+            music: music::LevelMusic::default(),
+            sfx: sfx::Sounds::default(),
+            cells: None,
+            touch_starts: touch::TouchStarts::default(),
+            touch_twist: touch::Twist::default(),
+            trackpad: trackpad::Trackpad::default(),
+        }
+    }
+
+    /// Once, before the first frame.
+    fn startup(&mut self) {
+        title::load_art(self);
+        menu::read_titles(self);
+        menu::load_labels(self);
+        options::load_lights(self);
+        options::apply_window(self);
+        panel::load_art(self);
+        panel::spawn_panel(self);
+        hud::spawn_turner_marker(self);
+        pointer::load(self);
+        practice::load(self);
+        fade::spawn(self);
+        trackpad::start();
+        turbo(self);
+    }
+
+    /// Leaving screen `s`.
+    fn exit(&mut self, s: menu::AppState) {
+        use menu::AppState::*;
+        match s {
+            Title | Options | Practice | Menu => title::exit_screen(self),
+            Code => {
+                title::keyboard(self, false);
+                title::exit_screen(self);
+            }
+            Briefing => briefing::exit(self),
+            Results => results::exit(self),
+            Playing => {
+                confirm::close(self);
+                lemming_cam::exit_level(self);
+                style::close_notice(self);
+            }
+        }
+    }
+
+    /// Entering screen `s`.
+    fn enter(&mut self, s: menu::AppState) {
+        use menu::AppState::*;
+        music::enter(self, s);
+        match s {
+            Code => title::keyboard(self, true),
+            Briefing => {
+                self.game.replay = None;
+                hud::enter_briefing(self);
+            }
+            Playing => sfx::lets_go(self),
+            _ => {}
+        }
+    }
+
+    /// Changes screen if one was asked for (even to the same one, which is
+    /// left and entered again).
+    fn change_state(&mut self) {
+        let Some(entered) = self.next_state.take() else {
+            return;
+        };
+        let exited = std::mem::replace(&mut self.state, entered);
+        self.exit(exited);
+        fade::transition(self, exited, entered);
+        self.enter(entered);
+    }
+
+    /// The systems run each frame for the screen shown, in order.
+    fn update(&mut self) {
+        use menu::AppState::*;
+        screenshot_when_ready(self);
+        hide_ui(self);
+        trackpad::watch(self);
+        match self.state {
+            Title => {
+                title::attract(self);
+                title::update_title(self);
+                style::toggle_on_title(self);
+                style::title_label(self);
+                sfx::watch_rating(self);
+            }
+            Code => title::update_code(self),
+            Options => {
+                options::spawn_options(self);
+                options::options_input(self);
+                options::show_lights(self);
+            }
+            Practice => {
+                practice::spawn_grid(self);
+                practice::hover(self);
+                practice::pick(self);
+            }
+            Menu => {
+                menu::ensure_menu(self);
+                menu::menu_input(self);
+                menu::menu_to_title(self);
+            }
+            Briefing => {
+                briefing::spawn_briefing(self);
+                briefing::briefing_input(self);
+            }
+            Results => {
+                results::spawn_results(self);
+                results::results_input(self);
+            }
+            Playing => {
+                briefing::end_demo(self);
+                hud::skill_keys(self);
+                hud::nuke_key(self);
+                hud::assign_on_pointer(self);
+                hud::take_over(self);
+                lemming_cam::toggle_keys(self);
+                menu::back_to_menu(self);
+                confirm::show(self);
+                style::toggle_in_level(self);
+                options::open_in_level(self);
+                results::level_over(self);
+                sfx::sim_events(self);
+                sfx::watch_play(self);
+                pause_keys(self);
+                load_level(self);
+                refresh_scenery(self);
+                briefing::preview(self);
+                lemming_cam::follow(self);
+                panel::before_camera(self);
+                touch::touch_camera(self);
+                trackpad::trackpad_camera(self);
+                trackpad::gesture_camera(self);
+                camera_controls(self);
+                minimap::build_base(self);
+                minimap::draw(self);
+                minimap::click(self);
+                panel::update(self);
+            }
+        }
+        if matches!(self.state, Title | Code | Options | Practice | Menu) {
+            title::scroll_backdrop(self);
+        }
+        briefing::preview_overlay(self);
+        fade::fade(self);
+        music::toggle_mute(self);
+        options::apply_window(self);
+        pixels::update(self);
+        pointer::update(self);
+        key_buttons::hover(self);
+        key_buttons::level_button(self);
+        hud::place_turner_marker(self);
+        hud::clear_highlight(self);
+        panel::show_in_play(self);
+        panel::show_minimap(self);
+    }
+}
+
+impl l3d_engine::Game for World {
+    fn engine(&mut self) -> &mut Engine {
+        &mut self.e
+    }
+
+    fn frame(&mut self) {
+        if !self.started {
+            self.started = true;
+            self.enter(self.state);
+            self.startup();
+        }
+        // The screen's measurements, then the input.
+        screen::update(self);
+        screen::full_screen(self);
+        touch::touch_over_mouse(self);
+        scripted_presses(self);
+        self.ui.focus(&self.e.input, &self.e.window, &self.screen);
+        touch::record_touch_starts(self);
+        key_buttons::press(self);
+        self.change_state();
+        while self.e.time.fixed_step() {
+            if self.state == menu::AppState::Playing {
+                step_simulation(self);
+            }
+        }
+        self.update();
+        update_lemming_sprites(self);
+        sfx::play(self);
+        let scale = self.e.window.scale_factor();
+        self.ui.layout(&self.screen, scale);
+        gpu::render(self);
+    }
+}
+
 pub struct Data(pub GameData);
 
 /// The level being shown; `loaded` lags `number` until the level is built.
-#[derive(Resource)]
 pub struct CurrentLevel {
     number: u32,
     loaded: Option<u32>,
 }
 
-/// The preset camera last chosen (0–3).
-#[derive(Resource, Default)]
-pub struct PresetIndex(pub usize);
+/// The preset camera last chosen (0–3), and how many times it has been
+/// chosen (each time says its number).
+#[derive(Default)]
+pub struct PresetIndex(pub usize, pub u64);
+
+impl PresetIndex {
+    pub fn set(&mut self, i: usize) {
+        self.0 = i;
+        self.1 += 1;
+    }
+}
 
 /// Where each of the current level's four cameras is now, starting at its
 /// preset: a camera keeps its own position and facing when the player
 /// switches away, and comes back to them (verified).
-#[derive(Resource)]
 struct LevelInfo {
     slots: [(Vec3, f32); 4],
 }
 
 /// The player camera: free horizontal position and yaw; never pitches.
-#[derive(Component)]
 struct ViewCamera {
     pos: Vec3,
     /// Facing in radians; 0 faces −X, π/2 faces −Z (the original's rotation
@@ -481,11 +741,11 @@ fn solid_cell(level: &Level, p: Vec3) -> Option<l3d_formats::level::BlockCell> {
 /// The direction from the camera through the pointer (as last drawn), if
 /// it is over the window.
 pub(crate) fn pointer_ray(
-    windows: &Query<&Window>,
+    window: &Window,
     screen: &screen::Screen,
     camera: &SceneCamera,
 ) -> Option<Vec3> {
-    screen_ray(screen, camera, screen.cursor(windows.iter().next()?)?)
+    screen_ray(screen, camera, screen.cursor(window)?)
 }
 
 /// The direction from the camera (as last drawn) through `p` on the screen.
@@ -577,26 +837,28 @@ fn sky_left_column(yaw: f32) -> f32 {
     (centre - 160.0).rem_euclid(1024.0)
 }
 
-fn spawn_camera(mut commands: Commands) {
-    commands.spawn(ViewCamera {
-        pos: Vec3::new(16.0, 8.0, 16.0),
-        yaw: 0.0,
-        roll: 0.0,
-        head: 0.0,
-        nod: 0.0,
-        glide: None,
-        smooth: true,
-    });
+impl Default for ViewCamera {
+    fn default() -> Self {
+        ViewCamera {
+            pos: Vec3::new(16.0, 8.0, 16.0),
+            yaw: 0.0,
+            roll: 0.0,
+            head: 0.0,
+            nod: 0.0,
+            glide: None,
+            smooth: true,
+        }
+    }
 }
 
 /// Whether the level about to be played is starting afresh, rather than
 /// resuming after the options screen.
-pub fn fresh_level(current: Res<CurrentLevel>) -> bool {
-    current.loaded.is_none()
+pub fn fresh_level(w: &World) -> bool {
+    w.current.loaded.is_none()
 }
 
 /// The level being played.
-#[derive(Resource, Default)]
+#[derive(Default)]
 pub struct Game {
     pub sim: Option<l3d_sim::Simulation>,
     pub paused: bool,
@@ -665,13 +927,9 @@ const FAST_FORWARD_TICKS: u32 = 3;
 /// P or Space pauses and resumes the level, and Enter turns fast-forward on
 /// and off (not during the preview, which keeps it waiting itself, nor while
 /// the restart question is open).
-fn pause_keys(
-    keys: Res<ButtonInput<KeyCode>>,
-    preview: Res<briefing::Preview>,
-    confirm: Res<confirm::RestartConfirm>,
-    mut game: ResMut<Game>,
-) {
-    if preview.active || confirm.0.is_some() {
+fn pause_keys(w: &mut World) {
+    let (keys, game) = (&w.e.input.keys, &mut w.game);
+    if w.preview.active || w.confirm.question.is_some() {
         return;
     }
     if keys.any_just_pressed([KeyCode::KeyP, KeyCode::Space]) {
@@ -682,16 +940,11 @@ fn pause_keys(
     }
 }
 
-fn step_simulation(
-    options: Res<Options>,
-    mut game: ResMut<Game>,
-    mut scene: ResMut<SceneContent>,
-    views: Query<&ViewCamera>,
-    pixelation: Res<pixels::Pixelation>,
-) {
+fn step_simulation(w: &mut World) {
+    let (options, scene) = (&w.opts, &mut w.scene);
     // The level waits while the camera glides to a preset view, or the
     // picture changes resolution, so neither costs the player time.
-    if pixelation.changing() || views.iter().any(|v| v.glide.is_some()) {
+    if w.pixelation.changing() || w.view.glide.is_some() {
         return;
     }
     let Game {
@@ -702,7 +955,7 @@ fn step_simulation(
         replay,
         doors,
         ..
-    } = &mut *game
+    } = &mut w.game
     else {
         return;
     };
@@ -736,20 +989,16 @@ fn step_simulation(
     scene.data = Some(Arc::new(rebuilt));
 }
 
-fn update_lemming_sprites(
-    game: Res<Game>,
-    cams: Query<&ViewCamera>,
-    lemming_cam: Res<lemming_cam::LemmingCam>,
-    highlight: Res<hud::Highlight>,
-    (info, preset): (Option<Res<LevelInfo>>, Res<PresetIndex>),
-    mut sprites: ResMut<scene_render::SceneSprites>,
-) {
+fn update_lemming_sprites(w: &mut World) {
+    let (game, lemming_cam, highlight) = (&w.game, &w.lemming_cam, &w.highlight);
+    let (info, preset, sprites) = (&w.info, &w.preset, &mut w.sprites);
     let Some(sim) = &game.sim else { return };
-    let yaw = cams.iter().next().map_or(0.0, |c| c.yaw);
+    let cams = std::iter::once(&w.view);
+    let yaw = w.view.yaw;
     // The other three cameras where they are now (verified); the current
     // one is the view. One right at the view would fill it, so is left out
     // (ours).
-    let eye = cams.iter().next().map(|c| c.pos);
+    let eye = Some(w.view.pos);
     let cameras: Vec<_> = info
         .iter()
         .flat_map(|info| info.slots.iter().enumerate())
@@ -766,7 +1015,7 @@ fn update_lemming_sprites(
     // has glided into them.
     let eyes = lemming_cam
         .following()
-        .filter(|_| cams.iter().all(|c| c.glide.is_none()));
+        .filter(|_| cams.clone().all(|c| c.glide.is_none()));
     let blocks = game.terrain.as_ref().map(|(_, blocks, _)| blocks);
     *sprites = lemming_render::build(
         sim,
@@ -780,23 +1029,15 @@ fn update_lemming_sprites(
     );
 }
 
-#[allow(clippy::too_many_arguments)] // Bevy system parameters
-pub(crate) fn load_level(
-    mut commands: Commands,
-    mut current: ResMut<CurrentLevel>,
-    mut data: ResMut<Data>,
-    opts: Res<Options>,
-    mut scene: ResMut<SceneContent>,
-    mut game: ResMut<Game>,
-    (audio, mut music, muted, settings): (
-        Res<l3d_engine::audio::Audio>,
-        ResMut<music::LevelMusic>,
-        Res<music::MusicMuted>,
-        Res<settings::Settings>,
-    ),
-    mut cams: Query<&mut ViewCamera>,
-    mut windows: Query<&mut Window>,
-) {
+pub(crate) fn load_level(w: &mut World) {
+    let (current, data, opts, scene, game) = (
+        &mut w.current,
+        &mut w.data,
+        &w.opts,
+        &mut w.scene,
+        &mut w.game,
+    );
+    let (audio, music, muted, settings) = (&w.e.audio, &mut w.music, &w.muted, &w.settings);
     if current.loaded == Some(current.number) {
         return;
     }
@@ -828,26 +1069,23 @@ pub(crate) fn load_level(
         mesh.opaque.indices.len() / 3,
         mesh.cutout.indices.len() / 3
     );
-    for mut w in &mut windows {
-        w.title = format!("openlem3d - LEVEL.{n:03} {}", level.title);
-    }
+    w.e.window.title = format!("openlem3d - LEVEL.{n:03} {}", level.title);
     scene.version += 1;
     scene.data = Some(Arc::new(content));
     let preset = opts.camera.filter(|c| (1..=4).contains(c)).unwrap_or(1) - 1;
-    commands.insert_resource(PresetIndex(preset));
+    w.preset.set(preset);
     game.fast_forward = false;
     game.paused = false;
     // A restart starts afresh: not riding along, nothing highlighted.
-    commands.insert_resource(lemming_cam::LemmingCam::Off);
-    commands.insert_resource(hud::PendingTurner(None));
-    commands.insert_resource(hud::Highlight::default());
-    for mut cam in &mut cams {
-        cam.set_preset(&level.cameras[preset]);
-        if let Some((pos, yaw)) = opts.look {
-            (cam.pos, cam.yaw) = (pos, yaw);
-        }
+    w.lemming_cam = lemming_cam::LemmingCam::Off;
+    w.pending = hud::PendingTurner(None);
+    w.highlight = hud::Highlight::default();
+    let cam = &mut w.view;
+    cam.set_preset(&level.cameras[preset]);
+    if let Some((pos, yaw)) = opts.look {
+        (cam.pos, cam.yaw) = (pos, yaw);
     }
-    commands.insert_resource(LevelInfo {
+    w.info = Some(LevelInfo {
         slots: level.cameras.each_ref().map(preset_view),
     });
     game.sim = Some(l3d_sim::Simulation::new(&level, &blocks));
@@ -860,45 +1098,51 @@ pub(crate) fn load_level(
     game.save_requirement = level.save_requirement as u32;
     let track = music::track_for(level.theme, level.music);
     music::play_track(
-        &mut music,
-        &audio,
+        music,
+        audio,
         &data.0.disc,
         track,
-        music::volume(&muted, &settings),
+        music::volume(muted, settings),
     );
     game.terrain = Some((level, blocks, block_layer));
+    panel::select_first_skill(w);
 }
 
-#[allow(clippy::too_many_arguments, clippy::type_complexity)] // Bevy system parameters
-pub(crate) fn camera_controls(
-    opts: Res<Options>,
-    keys: Res<ButtonInput<KeyCode>>,
-    mouse: Res<ButtonInput<MouseButton>>,
-    motion: Res<AccumulatedMouseMotion>,
-    time: Res<Time>,
-    mut info: Option<ResMut<LevelInfo>>,
-    (windows, screen): (Query<&Window>, Res<screen::Screen>),
-    mut scene_cam: ResMut<SceneCamera>,
-    (lemming_cam, preview): (Res<lemming_cam::LemmingCam>, Res<briefing::Preview>),
-    mut preset: ResMut<PresetIndex>,
-    settings: Res<settings::Settings>,
-    game: Res<Game>,
-    mut last_free: Local<Option<Vec3>>,
-    mut q: Query<&mut ViewCamera>,
-    (scroll, ui, mut held, trackpad, mut eased, mut pivot): (
-        Res<AccumulatedMouseScroll>,
-        Query<&Interaction>,
-        Local<[Option<f32>; 2]>,
-        Res<trackpad::Trackpad>,
-        Local<Vec4>,
-        Local<Option<[f32; 2]>>,
-    ),
-) {
+/// What the camera controls keep between frames: where the camera last
+/// stood clear of blocks, the pointer travel of the two buttons held, the
+/// keys' eased moves and the spot a middle-button drag turns about.
+#[derive(Default)]
+struct CameraControls {
+    last_free: Option<Vec3>,
+    held: [Option<f32>; 2],
+    eased: Vec4,
+    pivot: Option<[f32; 2]>,
+}
+
+pub(crate) fn camera_controls(w: &mut World) {
+    let opts = &w.opts;
+    let input = &w.e.input;
+    let (keys, mouse, motion, scroll) = (&input.keys, &input.mouse, &input.motion, &input.scroll);
+    let time = w.e.time.game;
+    let info = &mut w.info;
+    let (window, screen) = (&w.e.window, &w.screen);
+    let scene_cam = &mut w.camera;
+    let (lemming_cam, preview) = (&w.lemming_cam, &w.preview);
+    let (preset, settings, game) = (&mut w.preset, &w.settings, &w.game);
+    let cc = &mut w.camera_controls;
+    let (last_free, held, eased, pivot) = (
+        &mut cc.last_free,
+        &mut cc.held,
+        &mut cc.eased,
+        &mut cc.pivot,
+    );
+    let trackpad = &w.trackpad;
+    let ui_active = w.ui.any_active();
     // Pointer travel since a button went down over the view (not the
     // panel), while it is held.
     let track = |held: &mut Option<f32>, button: MouseButton| {
         if mouse.just_pressed(button) {
-            *held = (!ui.iter().any(|i| *i != Interaction::None)).then_some(0.0);
+            *held = (!ui_active).then_some(0.0);
         }
         if !mouse.pressed(button) {
             *held = None;
@@ -908,7 +1152,7 @@ pub(crate) fn camera_controls(
         }
         held.is_some_and(|d| d > DRAG_SLOP)
     };
-    let [held_drag, action_drag] = &mut *held;
+    let [held_drag, action_drag] = held;
     let enhanced = settings.enhanced;
     let dragging = track(held_drag, settings.turn_button()) && enhanced;
     let action_dragging = track(action_drag, settings.action_button()) && enhanced;
@@ -922,22 +1166,17 @@ pub(crate) fn camera_controls(
     let region = held_drag
         .as_ref()
         .filter(|_| !enhanced)
-        .and(
-            windows
-                .iter()
-                .next()
-                .and_then(|w| Some((screen.cursor(w)?, screen.size))),
-        )
+        .and(screen.cursor(window).map(|p| (p, screen.size)))
         .map(|(p, size)| pointer_region(p, size));
     // The way through the pointer, for the wheel (Enhanced).
-    let toward = pointer_ray(&windows, &screen, &scene_cam);
+    let toward = pointer_ray(window, screen, scene_cam);
     // Riding along with a lemming: no manual movement.
     let dt = if lemming_cam.following().is_some() {
         0.0
     } else {
         time.delta_secs()
     };
-    for mut cam in &mut q {
+    for cam in std::iter::once(&mut w.view) {
         cam.smooth = settings.enhanced;
         if !cam.smooth {
             cam.finish_glide();
@@ -948,12 +1187,12 @@ pub(crate) fn camera_controls(
             KeyCode::Digit3,
             KeyCode::Digit4,
         ];
-        if let Some(info) = &info {
+        if let Some(info) = info.as_ref() {
             for (i, k) in presets.iter().enumerate() {
                 if keys.just_pressed(*k) {
                     let (pos, yaw) = info.slots[i];
                     cam.glide_to(pos, yaw);
-                    preset.0 = i;
+                    preset.set(i);
                 }
             }
         }
@@ -1007,10 +1246,8 @@ pub(crate) fn camera_controls(
         // up and down as a camera-button drag does.
         if !mouse.pressed(MouseButton::Middle) || !enhanced || dt == 0.0 {
             *pivot = None;
-        } else if mouse.just_pressed(MouseButton::Middle)
-            && !ui.iter().any(|i| *i != Interaction::None)
-        {
-            *pivot = spot_under(&game, cam.pos, toward);
+        } else if mouse.just_pressed(MouseButton::Middle) && !ui_active {
+            *pivot = spot_under(game, cam.pos, toward);
         }
         let orbiting = pivot.is_some() && motion.delta != Vec2::ZERO;
         if let Some(p) = *pivot {
@@ -1139,22 +1376,27 @@ pub(crate) fn camera_controls(
 
 /// With `--screenshot`, saves one frame `--wait` seconds after the level has
 /// loaded, then exits.
-#[allow(clippy::too_many_arguments)] // Bevy system parameters
-fn screenshot_when_ready(
-    mut screenshots: ResMut<gpu::Screenshots>,
-    opts: Res<Options>,
-    current: Res<CurrentLevel>,
-    state: Res<State<menu::AppState>>,
-    time: Res<Time>,
-    mut elapsed: Local<Option<f32>>,
-    mut frames_since_shot: Local<Option<u32>>,
-    mut exit: MessageWriter<AppExit>,
-    (game, mut last_recorded): (Res<Game>, Local<Option<u64>>),
-) {
+/// What `--screenshot` keeps between frames: the game time counted, the
+/// frames since the shot, and the tick last recorded.
+#[derive(Default)]
+struct ShotTimer {
+    elapsed: Option<f32>,
+    frames_since_shot: Option<u32>,
+    last_recorded: Option<u64>,
+}
+
+fn screenshot_when_ready(w: &mut World) {
+    let (screenshots, opts, current) = (&mut w.screenshots, &w.opts, &w.current);
+    let (time, game) = (w.e.time.game, &w.game);
+    let ShotTimer {
+        elapsed,
+        frames_since_shot,
+        last_recorded,
+    } = &mut w.shot;
     let Some(path) = &opts.screenshot else { return };
     if current.loaded.is_none()
         && !matches!(
-            state.get(),
+            w.state,
             menu::AppState::Menu
                 | menu::AppState::Title
                 | menu::AppState::Code
@@ -1187,31 +1429,26 @@ fn screenshot_when_ready(
     if let Some(f) = frames_since_shot.as_mut() {
         *f += 1;
         if *f > 30 {
-            exit.write(AppExit::Success);
+            w.e.exit();
         }
     }
 }
 
 /// With `--no-hud`, hides every top-level UI node.
-fn hide_ui(opts: Res<Options>, mut roots: Query<&mut Visibility, (With<Node>, Without<ChildOf>)>) {
-    if !opts.no_hud {
+fn hide_ui(w: &mut World) {
+    if !w.opts.no_hud {
         return;
     }
-    for mut v in &mut roots {
-        *v = Visibility::Hidden;
+    for root in w.ui.roots().collect::<Vec<_>>() {
+        w.ui.set_visible(root, false);
     }
 }
 
 /// Rebuilds the scenery when the land, sea or sky setting changes during a
 /// level (on the options screen), keeping the terrain as the lemmings left it.
-fn refresh_scenery(
-    settings: Res<settings::Settings>,
-    current: Res<CurrentLevel>,
-    mut data: ResMut<Data>,
-    mut scene: ResMut<SceneContent>,
-    mut game: ResMut<Game>,
-    mut shown: Local<Option<(u32, scene_build::Show)>>,
-) {
+fn refresh_scenery(w: &mut World) {
+    let (settings, current, data) = (&w.settings, &w.current, &mut w.data);
+    let (scene, game, shown) = (&mut w.scene, &mut w.game, &mut w.scenery_shown);
     let Some(n) = current.loaded else { return };
     let show = settings.show();
     let was = shown.replace((n, show));
@@ -1225,7 +1462,7 @@ fn refresh_scenery(
             return;
         }
     };
-    let Game { sim, terrain, .. } = &mut *game;
+    let Game { sim, terrain, .. } = game;
     let content = match (terrain.as_mut(), sim) {
         (Some((level, blocks, layer)), Some(sim)) => {
             *layer = built.block_layer;
@@ -1240,14 +1477,18 @@ fn refresh_scenery(
 /// Presses the keys given with `--press SECONDS:KEY[:HOLD]` at their times,
 /// for HOLD seconds or one frame: key names as in Bevy's `KeyCode`
 /// (`Escape`, `F12`, `KeyW`, `Digit1`, …), or `Click` for the left mouse button.
-fn scripted_presses(
-    opts: Res<Options>,
-    time: Res<Time<Virtual>>,
-    mut keys: ResMut<ButtonInput<KeyCode>>,
-    mut mouse: ResMut<ButtonInput<MouseButton>>,
-    mut done: Local<usize>,
-    mut held: Local<Vec<(String, f32)>>,
-) {
+/// The scripted presses made so far, and the keys they hold with until
+/// when.
+#[derive(Default)]
+struct Scripted {
+    done: usize,
+    held: Vec<(String, f32)>,
+}
+
+fn scripted_presses(w: &mut World) {
+    let (opts, time) = (&w.opts, w.e.time.game);
+    let (keys, mouse) = (&mut w.e.input.keys, &mut w.e.input.mouse);
+    let Scripted { done, held } = &mut w.scripted;
     let now = time.elapsed_secs();
     held.retain(|(k, until)| {
         if *until > now {
@@ -1330,8 +1571,9 @@ pub fn pointer_region(p: Vec2, size: Vec2) -> [usize; 2] {
 /// allows (rendering only now and then). The limit is on the frame's real
 /// time (10 ms, a thousand times over); `--wait` and `--press` land within
 /// a frame of their time.
-fn turbo(opts: Res<Options>, mut time: ResMut<Time<Virtual>>) {
-    if opts.turbo {
+fn turbo(w: &mut World) {
+    let time = &mut w.e.time.game;
+    if w.opts.turbo {
         time.set_max_delta(std::time::Duration::from_millis(10));
         time.set_relative_speed(1000.0);
     }

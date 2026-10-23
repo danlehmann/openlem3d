@@ -6,7 +6,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use bevy_ecs::prelude::*;
 use glam::{UVec2, Vec2};
 use winit::application::ApplicationHandler;
 use winit::dpi::{LogicalSize, PhysicalSize};
@@ -15,9 +14,9 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::PhysicalKey;
 use winit::window::{Fullscreen, WindowId};
 
-use crate::app::App;
+use crate::engine::{Engine, Game};
 use crate::input::{self, KeyboardInput, MouseScrollUnit, MouseWheel, Raw};
-use crate::window::{CursorIcon, PrimaryWindow, Window, WindowFocused, WindowHandle, WindowMode};
+use crate::window::{CursorIcon, WindowHandle, WindowMode};
 
 /// What the system's window was last told, to tell it only of changes.
 #[derive(Default, PartialEq)]
@@ -28,9 +27,8 @@ struct Applied {
     cursor: Option<CursorIcon>,
 }
 
-struct Runner {
-    app: App,
-    entity: Entity,
+struct Runner<G: Game> {
+    game: G,
     window: Option<Arc<winit::window::Window>>,
     /// Whether the window can be drawn into.
     active: bool,
@@ -40,15 +38,7 @@ struct Runner {
     cursors: HashMap<(u64, u16, u16), winit::window::CustomCursor>,
 }
 
-pub(crate) fn run(mut app: App) {
-    let entity = {
-        let world = app.world_mut();
-        let mut q = world.query_filtered::<Entity, With<PrimaryWindow>>();
-        match q.iter(world).next() {
-            Some(e) => e,
-            None => world.spawn((Window::default(), PrimaryWindow)).id(),
-        }
-    };
+pub(crate) fn run<G: Game>(game: G) {
     #[allow(unused_mut)]
     let mut builder = EventLoop::builder();
     #[cfg(target_os = "android")]
@@ -59,8 +49,7 @@ pub(crate) fn run(mut app: App) {
     let event_loop = builder.build().expect("cannot start the event loop");
     event_loop.set_control_flow(ControlFlow::Poll);
     let mut runner = Runner {
-        app,
-        entity,
+        game,
         window: None,
         active: false,
         events: Vec::new(),
@@ -72,16 +61,13 @@ pub(crate) fn run(mut app: App) {
     }
 }
 
-impl Runner {
-    fn window_mut(&mut self) -> Mut<'_, Window> {
-        self.app
-            .world_mut()
-            .get_mut::<Window>(self.entity)
-            .expect("the window entity has a Window")
+impl<G: Game> Runner<G> {
+    fn engine(&mut self) -> &mut Engine {
+        self.game.engine()
     }
 
     fn open(&mut self, event_loop: &ActiveEventLoop) {
-        let settings = self.window_mut().clone();
+        let settings = self.engine().window.clone();
         let mut attributes =
             winit::window::Window::default_attributes().with_title(&settings.title);
         attributes = match settings.resolution.requested() {
@@ -103,7 +89,7 @@ impl Runner {
         self.applied.mode = settings.mode;
         let size = window.inner_size();
         let scale = window.scale_factor() as f32;
-        let mut w = self.window_mut();
+        let w = &mut self.engine().window;
         w.resolution
             .set_physical(UVec2::new(size.width, size.height));
         w.resolution.set_scale_factor(scale);
@@ -113,10 +99,13 @@ impl Runner {
     /// Runs a frame, then tells the system's window of what it changed.
     fn frame(&mut self, event_loop: &ActiveEventLoop) {
         let events = std::mem::take(&mut self.events);
-        input::take_in(self.app.world_mut(), events);
-        self.app.update();
+        let engine = self.engine();
+        input::take_in(&mut engine.input, events);
+        engine.time.advance();
+        engine.images.update();
+        self.game.frame();
         self.apply(event_loop);
-        if self.app.should_exit() {
+        if self.engine().should_exit() {
             event_loop.exit();
         }
     }
@@ -125,7 +114,9 @@ impl Runner {
         let Some(window) = self.window.clone() else {
             return;
         };
-        let w = self.window_mut().clone();
+        let engine = self.game.engine();
+        let w = engine.window.clone();
+        let icon = Some(engine.cursor.clone());
         if w.title != self.applied.title {
             window.set_title(&w.title);
             self.applied.title = w.title.clone();
@@ -141,7 +132,6 @@ impl Runner {
             window.set_ime_allowed(w.ime_enabled);
             self.applied.ime = w.ime_enabled;
         }
-        let icon = self.app.world().get::<CursorIcon>(self.entity).cloned();
         if icon != self.applied.cursor {
             match &icon {
                 None => window.set_cursor(winit::window::CursorIcon::Default),
@@ -175,7 +165,7 @@ impl Runner {
     }
 }
 
-impl ApplicationHandler for Runner {
+impl<G: Game> ApplicationHandler for Runner<G> {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_none() {
             self.open(event_loop);
@@ -184,50 +174,43 @@ impl ApplicationHandler for Runner {
             return;
         };
         self.active = true;
-        let entity = self.entity;
-        self.app
-            .world_mut()
-            .entity_mut(entity)
-            .insert(WindowHandle(window));
+        let engine = self.engine();
+        engine.handle = Some(WindowHandle(window));
+        engine.handle_generation += 1;
     }
 
     fn suspended(&mut self, _: &ActiveEventLoop) {
         self.active = false;
-        let entity = self.entity;
-        self.app
-            .world_mut()
-            .entity_mut(entity)
-            .remove::<WindowHandle>();
+        self.engine().handle = None;
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _: WindowId, event: WindowEvent) {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => self
-                .window_mut()
+                .engine()
+                .window
                 .resolution
                 .set_physical(UVec2::new(size.width, size.height)),
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => self
-                .window_mut()
+                .engine()
+                .window
                 .resolution
                 .set_scale_factor(scale_factor as f32),
             WindowEvent::Focused(focused) => {
-                self.window_mut().focused = focused;
-                let window = self.entity;
-                self.app
-                    .world_mut()
-                    .write_message(WindowFocused { window, focused });
-                if !focused {
-                    self.events.push(Raw::FocusLost);
-                }
+                self.engine().window.focused = focused;
+                self.events.push(Raw::Focus(focused));
             }
             WindowEvent::CursorMoved { position, .. } => self
-                .window_mut()
+                .engine()
+                .window
                 .set_physical_cursor_position(Some(Vec2::new(
                     position.x as f32,
                     position.y as f32,
                 ))),
-            WindowEvent::CursorLeft { .. } => self.window_mut().set_physical_cursor_position(None),
+            WindowEvent::CursorLeft { .. } => {
+                self.engine().window.set_physical_cursor_position(None)
+            }
             WindowEvent::MouseInput { state, button, .. } => {
                 self.events.push(Raw::MouseButton(button, state));
             }
@@ -250,11 +233,10 @@ impl ApplicationHandler for Runner {
                     state: event.state,
                     text: event.text,
                     repeat: event.repeat,
-                    window: self.entity,
                 }));
             }
             WindowEvent::Touch(t) => {
-                let scale = self.window_mut().scale_factor();
+                let scale = self.engine().window.scale_factor();
                 let p = Vec2::new(t.location.x as f32, t.location.y as f32) / scale;
                 self.events.push(Raw::Touch(t.id, t.phase, p));
             }
@@ -281,9 +263,6 @@ impl ApplicationHandler for Runner {
 
     fn exiting(&mut self, _: &ActiveEventLoop) {
         // Let go of the window's surface before the window.
-        let entity = self.entity;
-        if let Ok(mut e) = self.app.world_mut().get_entity_mut(entity) {
-            e.remove::<WindowHandle>();
-        }
+        self.engine().handle = None;
     }
 }

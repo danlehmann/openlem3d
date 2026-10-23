@@ -1,22 +1,21 @@
-//! What openlem3d needs around its ECS (Bevy's): an app with schedules and
-//! plugins, states, clocks, a window with its input (winit), shared
-//! pictures, sound (rodio), colours, maths and logging. The shapes follow
-//! Bevy's, which the game was written against; only what it uses is here.
+//! What openlem3d needs from an engine: a window with its input (winit),
+//! clocks, shared pictures, sound (rodio), colours, maths and logging, and
+//! a loop that runs the game's frames. The shapes follow Bevy's, which the
+//! game was first written against; only what it uses is here.
 
-pub mod app;
 pub mod asset;
 pub mod audio;
 pub mod color;
+mod engine;
 pub mod image;
 pub mod input;
 mod logging;
 pub mod math;
 mod runner;
-pub mod state;
 pub mod time;
 pub mod window;
 
-pub use bevy_ecs as ecs;
+pub use engine::{Engine, Game, run};
 pub use log;
 
 /// The Android app the system started, kept by the entry point.
@@ -37,20 +36,16 @@ pub mod android {
 }
 
 pub mod prelude {
-    pub use bevy_ecs::prelude::*;
     pub use log::{debug, error, info, trace, warn};
 
-    pub use crate::app::{
-        App, AppExit, First, FixedUpdate, Last, Plugin, PostUpdate, PreUpdate, Startup, Update,
-    };
     pub use crate::asset::{AssetEvent, AssetId, Assets, Handle};
     pub use crate::color::{Color, LinearRgba, Srgba};
+    pub use crate::engine::{Engine, Game};
     pub use crate::image::Image;
-    pub use crate::input::{ButtonInput, KeyCode, MouseButton, Touch, Touches};
+    pub use crate::input::{ButtonInput, Input, KeyCode, MouseButton, Touch, Touches};
     pub use crate::math::*;
-    pub use crate::state::{NextState, OnEnter, OnExit, OnTransition, State, States, in_state};
-    pub use crate::time::{Fixed, Real, Time, Virtual};
-    pub use crate::window::{PrimaryWindow, Window};
+    pub use crate::time::{Clocks, Fixed, Real, Time, Virtual};
+    pub use crate::window::Window;
 
     /// The default of whatever type is wanted.
     pub fn default<T: Default>() -> T {

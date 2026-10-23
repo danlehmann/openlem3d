@@ -7,17 +7,7 @@
 
 use l3d_engine::prelude::*;
 
-use crate::scene_render::SceneCamera;
-use crate::settings::Settings;
-
-pub struct PixelsPlugin;
-
-impl Plugin for PixelsPlugin {
-    fn build(&self, app: &mut App) {
-        app.init_resource::<Pixelation>()
-            .add_systems(Update, update);
-    }
-}
+use crate::World;
 
 /// The original's picture: 320×200 pixels filling a 4:3 screen.
 const ORIGINAL: Vec2 = Vec2::new(320.0, 200.0);
@@ -28,7 +18,6 @@ const CHANGE_STEPS: f32 = 10.0;
 
 /// Where the view is between the original's resolution (0) and the
 /// screen's (1), and the change under way, if any.
-#[derive(Resource)]
 pub struct Pixelation {
     detail: f32,
     change: Option<Change>,
@@ -61,26 +50,16 @@ struct Change {
     start: f32,
 }
 
-fn update(
-    time: Res<Time<Real>>,
-    settings: Res<Settings>,
-    state: Res<State<crate::menu::AppState>>,
-    (clear, windows, view): (
-        Res<crate::gpu::ClearColor>,
-        Query<&Window>,
-        Res<crate::screen::Screen>,
-    ),
-    options: Res<crate::Options>,
-    mut pixelation: ResMut<Pixelation>,
-    mut camera: ResMut<SceneCamera>,
-) {
-    let now = time.elapsed_secs();
+pub(crate) fn update(w: &mut World) {
+    let now = w.e.time.real.elapsed_secs();
+    let settings = &w.settings;
     let target = if settings.enhanced { 1.0 } else { 0.0 };
-    let p = &mut *pixelation;
+    let p = &mut w.pixelation;
+    let camera = &mut w.camera;
     if p.enhanced != Some(settings.enhanced) {
         // A switch during a level is shown; elsewhere (and at start) the
         // new resolution applies at once.
-        if p.enhanced.is_some() && *state.get() == crate::menu::AppState::Playing {
+        if p.enhanced.is_some() && w.state == crate::menu::AppState::Playing {
             p.change = Some(Change {
                 from: p.detail,
                 to: target,
@@ -92,7 +71,7 @@ fn update(
         }
         p.enhanced = Some(settings.enhanced);
     }
-    if *state.get() != crate::menu::AppState::Playing {
+    if w.state != crate::menu::AppState::Playing {
         // Leaving the level finishes a change at once.
         if let Some(c) = p.change.take() {
             p.detail = c.to;
@@ -108,12 +87,9 @@ fn update(
             p.change = None;
         }
     }
-    camera.clear = clear.0.to_linear().to_vec4();
-    camera.glow = settings.enhanced && !options.no_glow;
-    let Some(window) = windows.iter().next() else {
-        return;
-    };
-    let screen = (view.size * window.scale_factor()).round();
+    camera.clear = w.clear.0.to_linear().to_vec4();
+    camera.glow = settings.enhanced && !w.opts.no_glow;
+    let screen = (w.screen.size * w.e.window.scale_factor()).round();
     camera.pixels = if p.detail >= 1.0 || screen.min_element() < 1.0 {
         UVec2::ZERO
     } else {

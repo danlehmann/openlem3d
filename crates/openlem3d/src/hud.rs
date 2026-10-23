@@ -5,39 +5,31 @@
 use l3d_engine::prelude::*;
 use l3d_sim::Skill;
 
-use crate::Game;
-use crate::lemming_cam::LemmingCam;
+use crate::World;
 use crate::menu::AppState;
 use crate::scene_render::SceneCamera;
-use crate::ui::{ImageNode, Interaction, Node, Visibility, px};
+use crate::ui::{Node, NodeId, UiNode, px};
 
-pub struct HudPlugin;
+/// The skill selected, and how many times it has been set (each time says
+/// its name, even the same skill again).
+#[derive(Default)]
+pub struct SelectedSkill(pub Option<Skill>, pub u64);
 
-impl Plugin for HudPlugin {
-    fn build(&self, app: &mut App) {
-        app.init_resource::<SelectedSkill>()
-            .init_resource::<PendingTurner>()
-            .init_resource::<Highlight>()
-            .add_systems(Startup, spawn_turner_marker)
-            .add_systems(
-                Update,
-                (skill_keys, nuke_key, assign_on_pointer, take_over)
-                    .chain()
-                    .run_if(in_state(AppState::Playing)),
-            )
-            .add_systems(Update, (place_turner_marker, clear_highlight))
-            .add_systems(OnEnter(AppState::Briefing), |mut h: ResMut<Highlight>| {
-                *h = Highlight::default()
-            });
+impl SelectedSkill {
+    pub fn set(&mut self, skill: Option<Skill>) {
+        self.0 = skill;
+        self.1 += 1;
     }
 }
 
-/// The skill the next click or tap assigns.
-#[derive(Resource, Default)]
-pub struct SelectedSkill(pub Option<Skill>);
+/// Leaving for a briefing ends highlighting.
+pub(crate) fn enter_briefing(w: &mut World) {
+    w.highlight = Highlight::default();
+}
 
 /// Alt+Q nukes, as in the original.
-fn nuke_key(keys: Res<ButtonInput<KeyCode>>, mut game: ResMut<Game>) {
+pub(crate) fn nuke_key(w: &mut World) {
+    let (keys, game) = (&w.e.input.keys, &mut w.game);
     if (keys.pressed(KeyCode::AltLeft) || keys.pressed(KeyCode::AltRight))
         && keys.just_pressed(KeyCode::KeyQ)
         && let Some(sim) = &mut game.sim
@@ -48,7 +40,8 @@ fn nuke_key(keys: Res<ButtonInput<KeyCode>>, mut game: ResMut<Game>) {
 
 /// F1–F9 select skills in panel order (keyboard mapping of the original
 /// unverified).
-fn skill_keys(keys: Res<ButtonInput<KeyCode>>, mut selected: ResMut<SelectedSkill>) {
+pub(crate) fn skill_keys(w: &mut World) {
+    let (keys, selected) = (&w.e.input.keys, &mut w.selected);
     const KEYS: [KeyCode; 9] = [
         KeyCode::F1,
         KeyCode::F2,
@@ -62,7 +55,7 @@ fn skill_keys(keys: Res<ButtonInput<KeyCode>>, mut selected: ResMut<SelectedSkil
     ];
     for (k, skill) in KEYS.iter().zip(Skill::ALL) {
         if keys.just_pressed(*k) {
-            selected.0 = Some(skill);
+            selected.set(Some(skill));
         }
     }
 }
@@ -70,19 +63,15 @@ fn skill_keys(keys: Res<ButtonInput<KeyCode>>, mut selected: ResMut<SelectedSkil
 /// During a replay, a click or tap on the view hands control back to the
 /// player ("Click to Play"); the click itself does nothing else (skills are
 /// only given from the next one).
-pub(crate) fn take_over(
-    mut mouse: ResMut<ButtonInput<MouseButton>>,
-    touches: Res<Touches>,
-    ui: Query<&Interaction>,
-    settings: Res<crate::settings::Settings>,
-    mut game: ResMut<Game>,
-) {
+pub(crate) fn take_over(w: &mut World) {
+    let (mouse, touches) = (&mut w.e.input.mouse, &w.e.input.touches);
+    let (settings, game) = (&w.settings, &mut w.game);
     let button = settings.action_button();
     let clicked = mouse.just_pressed(button)
         || touches
             .iter_just_released()
             .any(|t| t.distance().length() < crate::touch::TAP_SLOP);
-    if game.replay.is_none() || !clicked || ui.iter().any(|i| *i != Interaction::None) {
+    if game.replay.is_none() || !clicked || w.ui.any_active() {
         return;
     }
     game.replay = None;
@@ -154,7 +143,7 @@ pub fn lemming_near(
 /// lemming moves the highlight to it. The highlighted lemming carries an
 /// arrow, a skill clicked is given to it without being selected, and the
 /// face rides along with it.
-#[derive(Resource, Default)]
+#[derive(Default)]
 pub struct Highlight {
     pub on: bool,
     pub lemming: Option<usize>,
@@ -165,29 +154,18 @@ pub struct Highlight {
 
 /// The lemming a first turner click picked; the next click picks the side it
 /// points to, as in the original.
-#[derive(Resource, Default)]
+#[derive(Default)]
 pub struct PendingTurner(pub Option<usize>);
 
 /// Assigns the selected skill to the lemming nearest a click or tap. A
 /// turner takes two: one on the lemming, then one to the side it should
 /// point to.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn assign_on_pointer(
-    mouse: Res<ButtonInput<MouseButton>>,
-    (touches, starts): (Res<Touches>, Res<crate::touch::TouchStarts>),
-    windows: Query<&Window>,
-    screen: Res<crate::screen::Screen>,
-    ui: Query<&Interaction>,
-    camera: Res<SceneCamera>,
-    mut selected: ResMut<SelectedSkill>,
-    mut pending: ResMut<PendingTurner>,
-    mut lemming_cam: ResMut<LemmingCam>,
-    mut game: ResMut<Game>,
-    mut sfx: MessageWriter<crate::sfx::Sfx>,
-    settings: Res<crate::settings::Settings>,
-    mut highlight: ResMut<Highlight>,
-    views: Query<&crate::ViewCamera>,
-) {
+pub(crate) fn assign_on_pointer(w: &mut World) {
+    let (mouse, touches, starts) = (&w.e.input.mouse, &w.e.input.touches, &w.touch_starts);
+    let (window, screen, camera) = (&w.e.window, &w.screen, &w.camera);
+    let (selected, pending, lemming_cam) = (&mut w.selected, &mut w.pending, &mut w.lemming_cam);
+    let (game, sfx, settings) = (&mut w.game, &mut w.sfx, &w.settings);
+    let (highlight, view) = (&mut w.highlight, &w.view);
     // During a replay a click only takes over (`take_over`, next).
     if game.replay.is_some() {
         return;
@@ -209,9 +187,8 @@ pub(crate) fn assign_on_pointer(
     if pending.0.is_some_and(|i| !sim.can_assign(i, Skill::Turner)) {
         pending.0 = None;
     }
-    let Ok(window) = windows.single() else { return };
     // Clicks on HUD buttons are not world clicks.
-    if ui.iter().any(|i| *i != Interaction::None) {
+    if w.ui.any_active() {
         return;
     }
     let point = if mouse.just_pressed(settings.action_button()) {
@@ -237,21 +214,15 @@ pub(crate) fn assign_on_pointer(
                 return;
             }
             pending.0 = None;
-            let head = views.single().map_or(0.0, |v| v.head);
+            let head = view.head;
             let sides = lemming_sides(&sim.lemmings[f]);
             let ok = sim.assign_turner(f, sides[riding_right_half(head, size, point) as usize]);
-            sfx.write(crate::sfx::Sfx(if ok {
-                "VOXFX/OK2"
-            } else {
-                "VOXFX/UH_UH1"
-            }));
+            sfx.play(if ok { "VOXFX/OK2" } else { "VOXFX/UH_UH1" });
             return;
         }
-        if let Some(i) = lemming_near(sim, &camera, size, point, Some(f))
-            && let Ok(view) = views.single()
-        {
-            lemming_cam.ride(i, &mut highlight, &mut selected, view);
-            sfx.write(crate::sfx::Sfx("SPOTFX/SCALE"));
+        if let Some(i) = lemming_near(sim, camera, size, point, Some(f)) {
+            lemming_cam.ride(i, highlight, selected, view);
+            sfx.play("SPOTFX/SCALE");
         }
         return;
     }
@@ -259,25 +230,19 @@ pub(crate) fn assign_on_pointer(
         return;
     }
     if let Some(i) = pending.0.take().filter(|_| !picking) {
-        let Some(to) = turner_choice(&camera, size, &sim.lemmings[i], point) else {
+        let Some(to) = turner_choice(camera, size, &sim.lemmings[i], point) else {
             return;
         };
         let ok = sim.assign_turner(i, to);
-        sfx.write(crate::sfx::Sfx(if ok {
-            "VOXFX/OK2"
-        } else {
-            "VOXFX/UH_UH1"
-        }));
+        sfx.play(if ok { "VOXFX/OK2" } else { "VOXFX/UH_UH1" });
         return;
     }
-    let best = lemming_at(sim, &camera, size, point);
+    let best = lemming_at(sim, camera, size, point);
     // Armed, the face rides along with the lemming clicked, even with a
     // skill selected (verified).
     if picking {
-        if let Some(i) = best
-            && let Ok(view) = views.single()
-        {
-            lemming_cam.ride(i, &mut highlight, &mut selected, view);
+        if let Some(i) = best {
+            lemming_cam.ride(i, highlight, selected, view);
         }
         return;
     }
@@ -285,7 +250,7 @@ pub(crate) fn assign_on_pointer(
         // A click on a lemming moves the highlight to it.
         if let Some(i) = best {
             highlight.lemming = Some(i);
-            sfx.write(crate::sfx::Sfx("SPOTFX/SCALE"));
+            sfx.play("SPOTFX/SCALE");
         }
         return;
     }
@@ -297,15 +262,11 @@ pub(crate) fn assign_on_pointer(
             if sim.can_assign(i, skill) {
                 pending.0 = Some(i);
             } else {
-                sfx.write(crate::sfx::Sfx("VOXFX/UH_UH1"));
+                sfx.play("VOXFX/UH_UH1");
             }
         } else {
             let ok = sim.assign(i, skill);
-            sfx.write(crate::sfx::Sfx(if ok {
-                "VOXFX/OK2"
-            } else {
-                "VOXFX/UH_UH1"
-            }));
+            sfx.play(if ok { "VOXFX/OK2" } else { "VOXFX/UH_UH1" });
         }
     }
 }
@@ -352,15 +313,14 @@ fn turner_choice(
     })
 }
 
-/// One of the two arrows beside a lemming waiting for its turner direction
-/// (0: anticlockwise side, 1: clockwise), from `MOUSE.RNC`'s white arrows.
-#[derive(Component)]
-struct TurnerArrow(usize);
-
-/// `MOUSE.RNC` cells 11–42: a white arrow in 32 directions, clockwise from
-/// straight up.
-#[derive(Resource)]
-struct ArrowCells(Vec<Handle<Image>>);
+/// The two arrows beside a lemming waiting for its turner direction (0:
+/// anticlockwise side, 1: clockwise), and `MOUSE.RNC` cells 11–42 for them:
+/// a white arrow in 32 directions, clockwise from straight up.
+#[derive(Default)]
+pub(crate) struct TurnerArrows {
+    nodes: [Option<NodeId>; 2],
+    cells: Vec<Handle<Image>>,
+}
 const ARROW_FIRST: usize = 11;
 const ARROW_DIRECTIONS: usize = 32;
 /// The arrows' size, and their distance from the lemming's centre, in
@@ -381,12 +341,9 @@ const ARROW_SWAP: f32 = 0.12;
 const ARROW_CLEAR_MARGIN: f32 = 0.5;
 const ARROW_CLEAR_DISTANCE: f32 = 4.0;
 
-fn spawn_turner_marker(
-    mut commands: Commands,
-    mut data: ResMut<crate::Data>,
-    mut images: ResMut<Assets<Image>>,
-) {
-    let d = &mut data.0;
+pub(crate) fn spawn_turner_marker(w: &mut World) {
+    let d = &mut w.data.0;
+    let images = &mut w.e.images;
     let sheet = &l3d_formats::sheets::MOUSE;
     let (Ok(pal), Ok(raw)) = (d.palette("GFX/LM3D.PAL"), d.read(sheet.path)) else {
         return;
@@ -398,36 +355,20 @@ fn spawn_turner_marker(
         .take(ARROW_DIRECTIONS)
         .map(|c| images.add(crate::texture::indexed_image(c, &pal, true)))
         .collect();
-    commands.insert_resource(ArrowCells(handles));
+    w.arrows.cells = handles;
     for side in 0..2 {
-        commands.spawn((
-            TurnerArrow(side),
-            ImageNode::default(),
-            Node::default(),
-            Visibility::Hidden,
-        ));
+        w.arrows.nodes[side] = Some(w.ui.root(UiNode::image(Handle::default()).hidden()));
     }
 }
 
 /// Shows the arrows beside a lemming waiting for its turner direction: they
 /// take turns until the pointer is clearly on one side, then only that side's
 /// arrow shows, previewing where the next click points the turner.
-#[allow(clippy::too_many_arguments)]
-fn place_turner_marker(
-    state: Res<State<AppState>>,
-    pending: Res<PendingTurner>,
-    game: Res<Game>,
-    camera: Res<SceneCamera>,
-    cells: Option<Res<ArrowCells>>,
-    time: Res<Time>,
-    windows: Query<&Window>,
-    screen: Res<crate::screen::Screen>,
-    mut arrows: Query<(&TurnerArrow, &mut ImageNode, &mut Node, &mut Visibility)>,
-    lemming_cam: Res<LemmingCam>,
-    views: Query<&crate::ViewCamera>,
-) {
+pub(crate) fn place_turner_marker(w: &mut World) {
+    let (pending, game, camera, time) = (&w.pending, &w.game, &w.camera, w.e.time.game);
+    let (window, screen, lemming_cam) = (&w.e.window, &w.screen, &w.lemming_cam);
     let shown = (|| {
-        if *state.get() != AppState::Playing {
+        if w.state != AppState::Playing {
             return None;
         }
         // Riding along with a turner waiting for its side: one arrow near
@@ -441,8 +382,7 @@ fn place_turner_marker(
             // turn with the lemming's sides as seen from its eyes (owner's
             // observation: looking a quarter turn right, the arrows point up
             // and down, picked by the top and bottom halves).
-            let head = views.single().map_or(0.0, |v| v.head);
-            let window = windows.single().ok()?;
+            let head = w.view.head;
             let size = screen.size;
             let scale = size.y / 200.0;
             let left = screen
@@ -458,10 +398,9 @@ fn place_turner_marker(
             return Some((at, [-right, right], [left, !left], scale));
         }
         let l = game.sim.as_ref()?.lemmings.get(pending.0?)?;
-        let window = windows.single().ok()?;
         let size = screen.size;
         let pointer = screen.cursor(window);
-        let (at, dirs, fit) = turner_sides(&camera, size, l, pointer)?;
+        let (at, dirs, fit) = turner_sides(camera, size, l, pointer)?;
         let scale = size.y / 200.0;
         let clear = pointer.is_some_and(|p| p.distance(at) > ARROW_CLEAR_DISTANCE * scale)
             && (fit[0] - fit[1]).abs() > ARROW_CLEAR_MARGIN;
@@ -473,38 +412,39 @@ fn place_turner_marker(
         };
         Some((at, dirs, visible, scale))
     })();
-    for (arrow, mut image, mut node, mut vis) in &mut arrows {
-        let Some((at, dirs, _, scale)) = shown.filter(|s| s.2[arrow.0]) else {
-            vis.set_if_neq(Visibility::Hidden);
+    for side in 0..2 {
+        let Some(n) = w.arrows.nodes[side].and_then(|id| w.ui.get_mut(id)) else {
             continue;
         };
-        let d = dirs[arrow.0];
+        let Some((at, dirs, _, scale)) = shown.filter(|s| s.2[side]) else {
+            n.set_visible(false);
+            continue;
+        };
+        let d = dirs[side];
         // Clockwise from straight up, in the 32 steps of the arrow cells.
         let angle = d.x.atan2(-d.y).rem_euclid(std::f32::consts::TAU);
         let k = (angle / std::f32::consts::TAU * ARROW_DIRECTIONS as f32).round() as usize
             % ARROW_DIRECTIONS;
-        if let Some(h) = cells.as_ref().and_then(|c| c.0.get(k))
-            && image.image != *h
-        {
-            image.image = h.clone();
+        if let Some(h) = w.arrows.cells.get(k) {
+            n.set_image(h);
         }
         let half = ARROW_SIZE * scale / 2.0;
         let centre = at + d * ARROW_DISTANCE * scale;
-        node.left = px(centre.x - half);
-        node.top = px(centre.y - half);
-        node.width = px(half * 2.0);
-        node.height = px(half * 2.0);
-        vis.set_if_neq(Visibility::Inherited);
+        n.node = Node {
+            left: px(centre.x - half),
+            top: px(centre.y - half),
+            width: px(half * 2.0),
+            height: px(half * 2.0),
+            ..n.node
+        };
+        n.set_visible(true);
     }
 }
 
 /// Drops the highlight when its lemming leaves play or a new level starts.
-fn clear_highlight(
-    game: Res<Game>,
-    current: Res<crate::CurrentLevel>,
-    lemming_cam: Res<LemmingCam>,
-    mut highlight: ResMut<Highlight>,
-) {
+pub(crate) fn clear_highlight(w: &mut World) {
+    let (game, current, lemming_cam) = (&w.game, &w.current, &w.lemming_cam);
+    let highlight = &mut w.highlight;
     if current.loaded.is_none() {
         *highlight = Highlight::default();
         return;

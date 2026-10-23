@@ -6,28 +6,9 @@
 
 use l3d_engine::prelude::*;
 
-use crate::menu::AppState;
+use crate::World;
 use crate::settings::Settings;
-use crate::title::{Art, At, Canvas, ScreenRoot, at, image_at};
-use crate::ui::{Button, ImageNode, Interaction, Node, percent};
-
-pub struct StylePlugin;
-
-impl Plugin for StylePlugin {
-    fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            (toggle_on_title, title_label)
-                .chain()
-                .run_if(in_state(AppState::Title)),
-        )
-        .add_systems(Update, toggle_in_level.run_if(in_state(AppState::Playing)))
-        .add_systems(
-            OnExit(AppState::Playing),
-            crate::title::despawn::<NoticeRoot>,
-        );
-    }
-}
+use crate::ui::{Node, NodeId, UiNode, percent};
 
 /// The title canvas, in the original's pixels.
 const TITLE_SCREEN: Vec2 = Vec2::new(320.0, 200.0);
@@ -47,121 +28,100 @@ fn switch(settings: &mut Settings) {
     settings.save();
 }
 
-/// The title's mode label: a button whose children are the glyphs.
-#[derive(Component)]
-struct ModeLabel;
+/// The title's mode label (a button whose children are the glyphs) with
+/// the mode it shows, and the notice in a level with when it was switched.
+#[derive(Default)]
+pub(crate) struct Style {
+    label: Option<(NodeId, bool)>,
+    notice: Option<(NodeId, f32)>,
+}
 
-fn toggle_on_title(
-    keys: Res<ButtonInput<KeyCode>>,
-    labels: Query<&Interaction, (With<ModeLabel>, Changed<Interaction>)>,
-    mut settings: ResMut<Settings>,
-) {
-    if keys.just_pressed(KeyCode::Tab) || labels.iter().any(|i| *i == Interaction::Pressed) {
-        switch(&mut settings);
+pub(crate) fn toggle_on_title(w: &mut World) {
+    let clicked = w.style.label.is_some_and(|(id, _)| w.ui.just_pressed(id));
+    if w.e.input.keys.just_pressed(KeyCode::Tab) || clicked {
+        switch(&mut w.settings);
     }
 }
 
 /// Builds the label once the title exists, and again when the mode changes.
-fn title_label(
-    mut commands: Commands,
-    art: Option<Res<Art>>,
-    settings: Res<Settings>,
-    canvases: Query<(Entity, &Canvas), With<ChildOf>>,
-    roots: Query<(), With<ScreenRoot>>,
-    labels: Query<Entity, With<ModeLabel>>,
-) {
-    let Some(font) = art.as_ref().and_then(|a| a.large.as_ref()) else {
+pub(crate) fn title_label(w: &mut World) {
+    let Some(font) = w.art.as_ref().and_then(|a| a.large.as_ref()) else {
         return;
     };
-    if roots.is_empty() || (!labels.is_empty() && !settings.is_changed()) {
-        return;
-    }
-    let Some((canvas, _)) = canvases.iter().find(|(_, c)| c.0 == TITLE_SCREEN) else {
+    let Some(canvas) = w.title.canvas.filter(|&c| w.ui.contains(c)) else {
         return;
     };
-    for e in &labels {
-        commands.entity(e).despawn();
+    let enhanced = w.settings.enhanced;
+    if let Some((id, shown)) = w.style.label {
+        if w.ui.contains(id) && shown == enhanced {
+            return;
+        }
+        w.ui.remove(id);
     }
-    let (glyphs, width) = font.layout(&format!("Mode: {}", name(settings.enhanced)));
+    let (glyphs, width) = font.layout(&format!("Mode: {}", name(enhanced)));
     let left = TITLE_SCREEN.x - 2.0 - width;
-    let label = commands
-        .spawn((
-            ModeLabel,
-            Button,
-            at(left, 0.0, width, font.size.y),
-            Node::default(),
-        ))
-        .id();
-    commands.entity(canvas).add_child(label);
+    let ui = &mut w.ui;
+    let label = ui.child(
+        canvas,
+        UiNode::new().button().at(left, 0.0, width, font.size.y),
+    );
     for (x, image) in glyphs {
-        let g = commands
-            .spawn((image_at(image, at(x, 0.0, font.size.x, font.size.y)),))
-            .id();
-        commands.entity(label).add_child(g);
+        ui.child(
+            label,
+            UiNode::image(image).at(x, 0.0, font.size.x, font.size.y),
+        );
+    }
+    w.style.label = Some((label, enhanced));
+}
+
+/// Leaving the level takes the notice away.
+pub(crate) fn close_notice(w: &mut World) {
+    if let Some((id, _)) = w.style.notice.take() {
+        w.ui.remove(id);
     }
 }
 
-/// The notice naming the mode after Tab, and when it was switched.
-#[derive(Component)]
-struct NoticeRoot(f32);
-
-fn toggle_in_level(
-    mut commands: Commands,
-    keys: Res<ButtonInput<KeyCode>>,
-    time: Res<Time<Real>>,
-    art: Option<Res<Art>>,
-    mut settings: ResMut<Settings>,
-    roots: Query<(Entity, &NoticeRoot)>,
-) {
-    let now = time.elapsed_secs();
-    let changed = keys.just_pressed(KeyCode::Tab);
+pub(crate) fn toggle_in_level(w: &mut World) {
+    let now = w.e.time.real.elapsed_secs();
+    let changed = w.e.input.keys.just_pressed(KeyCode::Tab);
     if changed {
-        switch(&mut settings);
+        switch(&mut w.settings);
     }
-    for (e, r) in &roots {
-        if changed || now - r.0 > NOTICE_SECONDS {
-            commands.entity(e).despawn();
-        }
+    if let Some((id, since)) = w.style.notice
+        && (changed || now - since > NOTICE_SECONDS)
+    {
+        w.ui.remove(id);
+        w.style.notice = None;
     }
     if !changed {
         return;
     }
-    let Some(font) = art.as_ref().and_then(|a| a.large.as_ref()) else {
+    let Some(font) = w.art.as_ref().and_then(|a| a.large.as_ref()) else {
         return;
     };
-    let root = commands
-        .spawn((
-            NoticeRoot(now),
-            Node {
-                width: percent(100),
-                height: percent(100),
-                ..default()
-            },
-        ))
-        .id();
-    let canvas = commands
-        .spawn((Canvas(NOTICE_SCREEN), Node::default()))
-        .id();
-    commands.entity(root).add_child(canvas);
-    let (glyphs, width) = font.layout(name(settings.enhanced));
+    let ui = &mut w.ui;
+    let root = ui.root(UiNode::new().layout(Node {
+        width: percent(100),
+        height: percent(100),
+        ..default()
+    }));
+    w.style.notice = Some((root, now));
+    let canvas = ui.child(root, UiNode::new().canvas(NOTICE_SCREEN));
+    let (glyphs, width) = font.layout(name(w.settings.enhanced));
     let left = (NOTICE_SCREEN.x - width * NOTICE_SCALE) / 2.0;
     // A dark shadow, then the text.
     for (shade, d) in [(Some(Color::srgba(0.0, 0.0, 0.0, 0.7)), 2.0), (None, 0.0)] {
         for (x, image) in &glyphs {
-            let mut bundle: (ImageNode, At, Node) = image_at(
-                image.clone(),
-                at(
-                    left + x * NOTICE_SCALE + d,
-                    NOTICE_Y + d,
-                    font.size.x * NOTICE_SCALE,
-                    font.size.y * NOTICE_SCALE,
-                ),
+            let mut glyph = UiNode::image(image.clone()).at(
+                left + x * NOTICE_SCALE + d,
+                NOTICE_Y + d,
+                font.size.x * NOTICE_SCALE,
+                font.size.y * NOTICE_SCALE,
             );
             if let Some(c) = shade {
-                bundle.0.color = c;
+                glyph = glyph.tint(c);
             }
-            let g = commands.spawn(bundle).id();
-            commands.entity(canvas).add_child(g);
+            ui.child(canvas, glyph);
         }
     }
 }
