@@ -35,6 +35,16 @@ other user's storage. Copy into internal storage through `run-as` instead
 The game's output (including why it couldn't open the data) goes to
 `adb logcat`, tagged `RustStdoutStderr`. Settings are kept in internal storage.
 
+## Command-line options
+
+Android starts the app without arguments, so for testing the game reads them
+from `args.txt` in its internal storage instead (the same options as on a
+desktop, separated by spaces or newlines):
+
+    echo '--level 21 --camera 3' | adb shell run-as org.openlem3d --user 10 \
+        sh -c "'cat > files/args.txt'"
+    adb shell run-as org.openlem3d --user 10 rm files/args.txt
+
 ## Building
 
     ANDROID_NDK_HOME=... ANDROID_JAR=.../android.jar android/build-apk.sh

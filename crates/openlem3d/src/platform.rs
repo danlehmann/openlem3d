@@ -8,6 +8,21 @@ use std::path::PathBuf;
 #[cfg(target_os = "android")]
 mod android;
 
+/// The command-line arguments, without the program's name. Android starts
+/// apps without any, so there they are the words of `args.txt` in the app's
+/// internal storage, if it is there (put there with adb's `run-as`, for
+/// testing).
+pub fn args() -> Vec<String> {
+    #[cfg(target_os = "android")]
+    return android::app()
+        .internal_data_path()
+        .and_then(|d| std::fs::read_to_string(d.join("args.txt")).ok())
+        .map(|s| s.split_whitespace().map(String::from).collect())
+        .unwrap_or_default();
+    #[cfg(not(target_os = "android"))]
+    std::env::args().skip(1).collect()
+}
+
 /// Where the CD image lives when no `--data` was given, if the platform
 /// dictates it (see `docs/GROUNDRULES.md`).
 pub fn data_dir() -> Option<PathBuf> {

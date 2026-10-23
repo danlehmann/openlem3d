@@ -123,7 +123,7 @@ fn parse_args() -> Options {
         record: None,
         no_glow: false,
     };
-    let mut args = std::env::args().skip(1);
+    let mut args = platform::args().into_iter();
     while let Some(a) = args.next() {
         let mut val = || args.next().unwrap_or_else(|| panic!("{a} needs a value"));
         match a.as_str() {
