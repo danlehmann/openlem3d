@@ -206,6 +206,9 @@ const ICE_SPEED: i32 = WALK_SPEED * 3;
 /// The 22.5° ramp's shape (`docs/spec/level.md`).
 const SHALLOW_RAMP: u8 = 8;
 
+/// The 45° deflector wall's shape (`docs/spec/level.md`).
+const DEFLECTOR: u8 = 7;
+
 /// Block ids with hard-coded meaning (`docs/spec/blk.md`).
 const ENTRANCE_ID: u8 = 0;
 const EXIT_ID: u8 = 1;
@@ -1882,6 +1885,34 @@ impl Simulation {
             .is_some_and(|(b, _)| b.shape == SHALLOW_RAMP)
     }
 
+    /// Whether the block a basher works on is a 45° deflector wall turning
+    /// its diagonal face towards the basher (open just inside the cell's
+    /// near side, where a square back would be solid).
+    fn bash_cell_deflector_facing(&self, l: &Lemming) -> bool {
+        let (cell, _) = Self::bash_cell(l);
+        if !self
+            .world
+            .block(cell)
+            .is_some_and(|(b, _)| b.shape == DEFLECTOR)
+        {
+            return false;
+        }
+        let d = l.dir.delta();
+        let mut near = l.pos;
+        near[1] += SUB / 8;
+        for a in [0, 2] {
+            if d[a] != 0 {
+                let edge = if d[a] > 0 {
+                    cell[a] * SUB
+                } else {
+                    (cell[a] + 1) * SUB - 1
+                };
+                near[a] = edge + d[a] * (SUB / 16);
+            }
+        }
+        !self.world.solid(near)
+    }
+
     /// Whether solid terrain is within a walker's reach ahead of a basher, at
     /// the height of the segments it bashes. A cube's side is as soon as the
     /// basher reaches its cell; a deflector's diagonal face lies further in.
@@ -1925,6 +1956,16 @@ impl Simulation {
             return;
         }
         let shallow = self.bash_cell_shallow_ramp(l);
+        if full && self.bash_cell_deflector_facing(l) && !self.bash_reaches_solid(l) {
+            // A deflector's diagonal face out of reach: the basher walks to
+            // it as a walker and is turned there (verified on a changed "Team
+            // Work", 2026-10-22: taking the skill up at the edge of the
+            // deflector's cell, or meeting the face half a unit after a
+            // bashed cube, the basher left the deflector whole). A square
+            // back is a wall like any other.
+            l.set_state(State::Walking);
+            return;
+        }
         if (!full && self.bash_more_ahead(l)) || (full && !shallow && !self.bash_reaches_solid(l)) {
             // On through the gap; the next stroke starts at the wall.
             l.pos[0] += d[0] * WALK_SPEED;
@@ -2288,6 +2329,21 @@ impl Simulation {
                     && self.world.solid([ahead[0], l.pos[1] + SUB / 8, ahead[1]])
                 {
                     l.set_state(State::Climbing);
+                } else if l.pending == Some(State::Bashing) {
+                    // A basher given inside the deflector's cell takes the
+                    // skill up at the face, as at a wall, and bashes it
+                    // (inferred: Practice "Deflector" asks for its corner to
+                    // be bashed, and bashers that reach the cell's edge first
+                    // are turned by the face instead). It stands an eighth
+                    // of a unit before the face, which crosses the middle of
+                    // the cell.
+                    for a in [0, 2] {
+                        if d[a] != 0 {
+                            l.pos[a] = mid(l.pos[a]) - d[a] * (SUB / 8);
+                        }
+                    }
+                    l.pending = None;
+                    l.set_state(State::Bashing);
                 } else {
                     l.dir = l.dir.deflected(n);
                 }

@@ -75,7 +75,7 @@ pub const SOLUTIONS: &[Solution] = &[
     },
     at(89, &[(41, 1, 4, None)]),
     at(90, &[(406, 0, 1, Some(true))]),
-    at(91, &[(538, 0, 4, None)]),
+    at(91, &[(576, 0, 4, None)]),
     at(92, &[(100, 0, 3, None), (265, 0, 3, None)]),
     at(93, &[(122, 0, 4, None)]),
     at(94, &[(182, 0, 1, Some(false))]),
@@ -669,10 +669,10 @@ pub const SOLUTIONS: &[Solution] = &[
         54,
         &[
             (110, 1, 7, None),
-            (460, 0, 4, None),
-            (770, 1, 3, None),
-            (947, 0, 5, None),
-            (980, 2, 6, None),
+            (502, 0, 4, None),
+            (775, 1, 3, None),
+            (952, 0, 5, None),
+            (985, 2, 6, None),
         ],
     ),
     at(
@@ -687,9 +687,10 @@ pub const SOLUTIONS: &[Solution] = &[
             (2770, 6, 3, None),
         ],
     ),
+    // Taxing 17 by the published walkthrough.
     Solution {
         level: 56,
-        plan: Plan::Rated(&[(0, 16), (20, 99)], &[(382, 0, 4, None)]),
+        plan: Plan::Rated(&[(0, 49)], &[(359, 0, 2, None)]),
         saves: 0,
     },
     Solution {
@@ -891,10 +892,10 @@ pub const SOLUTIONS: &[Solution] = &[
         plan: Plan::Rated(
             &[(280, 49)],
             &[
-                (70, 0, 6, None),
-                (115, 0, 4, None),
+                (69, 0, 6, None),
+                (127, 0, 4, None),
                 (274, 1, 2, None),
-                (1230, 2, 4, None),
+                (1256, 2, 4, None),
             ],
         ),
         saves: 0,
