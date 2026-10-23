@@ -272,7 +272,7 @@ five codes that are not tied to a level (`SPACEAAA`, `EGYPTAAA`, `ARMYAAAA`,
 
 The codes below were **verified by entry**: on the code screen of the real,
 unpatched image, each opened the briefing showing the expected level number
-and title, and the level then started. The other 43 codes of the list are
+and title, and the level then started. The other 42 codes of the list are
 **unverified** and are not recorded here. openlem3d does not use this list;
 `crates/openlem3d/src/codes.rs` holds only the codes shown by the game itself.
 
@@ -310,6 +310,7 @@ and title, and the level then started. The other 43 codes of the list are
 | `OBTEMPER` | 65 | 65 (Mayhem 5, "THE PRISONER", `LEVEL.064`) |
 | `TASTEVIN` | 66 | 66 (Mayhem 6, "FAMILY TREE", `LEVEL.065`) |
 | `JACKAROO` | 69 | 69 (Mayhem 9, "OVER THE TOP", `LEVEL.068`) |
+| `BANAUSIC` | 71 | 71 (Mayhem 11, "ACROSS THE NETWORK", `LEVEL.070`; entered by the owner) |
 | `FABURDEN` | 72 | 72 (Mayhem 12, "RAIDERS OF THE LOST LEMMING", `LEVEL.071`) |
 | `MIRLITON` | 74 | 74 (Mayhem 14, "JELLY BELLY ISLANDS", `LEVEL.073`) |
 | `OPAPANAX` | 75 | 75 (Mayhem 15, "HOLE IN ONE, TWO, THREE!", `LEVEL.074`) |
