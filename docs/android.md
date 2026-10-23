@@ -4,15 +4,21 @@ The game builds as a code-free APK: Android's `NativeActivity` loads the game
 library (`libopenlem3d.so`) directly, so there is no Java and no Gradle. Only
 arm64 devices are supported.
 
+The system's back gesture (or button) is Esc, and the code screen brings up
+the on-screen keyboard. A touchpad works as a mouse; its two-finger gestures
+move the camera as two fingers on the screen do, but Android reports a swipe
+or a pinch per gesture, never both, so the two can't be combined.
+
 ## Installing the game data
 
 The game looks for the `.cue` and `.bin` in the app's external files directory,
-`Android/data/org.openlem3d/files/`, or failing that in its internal storage,
-`files/gamedata/`. Install and start the app once first, so the directories
-exist.
+`Android/data/org.openlem3d/files/`, its external media directory,
+`Android/media/org.openlem3d/`, or its internal storage, `files/gamedata/`.
+Install and start the app once first, so the directories exist.
 
-Android 11 and later hide the external directory from most file managers, so
-the simplest way is adb:
+On the device itself, copy them into `Android/media/org.openlem3d/` with a file
+manager (e.g. after downloading them): Android 11 and later keep file managers
+out of `Android/data`. From a computer, the simplest way is adb:
 
     adb push lemmings3d.cue lemmings3d.bin /sdcard/Android/data/org.openlem3d/files/
 

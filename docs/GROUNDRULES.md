@@ -38,8 +38,9 @@ The directory must contain one `.cue` file. The file names can be anything.
 
 On Android, which has no command line, environment or working directory, the
 game instead looks in the app's own external files directory,
-`Android/data/org.openlem3d/files/`, then in its internal storage's
-`files/gamedata/` (see `docs/android.md`).
+`Android/data/org.openlem3d/files/`, its external media directory,
+`Android/media/org.openlem3d/`, then its internal storage's `files/gamedata/`
+(see `docs/android.md`).
 
 ## Technical direction
 

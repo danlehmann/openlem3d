@@ -71,6 +71,12 @@ impl Plugin for TitlePlugin {
                     .chain()
                     .run_if(in_state(AppState::Title)),
             )
+            .add_systems(OnEnter(AppState::Code), |w: Query<&mut Window>| {
+                keyboard(w, true)
+            })
+            .add_systems(OnExit(AppState::Code), |w: Query<&mut Window>| {
+                keyboard(w, false)
+            })
             .add_systems(OnExit(AppState::Code), despawn::<ScreenRoot>)
             .add_systems(
                 Update,
@@ -911,6 +917,17 @@ fn title_input(
     }
 }
 
+/// Brings up or puts away the on-screen keyboard for typing a code, where
+/// the platform has one (`platform::ON_SCREEN_KEYBOARD`).
+fn keyboard(mut windows: Query<&mut Window>, shown: bool) {
+    if !crate::platform::ON_SCREEN_KEYBOARD {
+        return;
+    }
+    for mut w in &mut windows {
+        w.ime_enabled = shown;
+    }
+}
+
 /// The code screen's state.
 #[derive(Resource, Default)]
 struct CodeText {
@@ -978,13 +995,29 @@ fn spawn_code(
             140.0,
             (CorrectText, Visibility::Hidden),
         );
-        centred_line(
+        // Tapping the prompt is Return, for players without a keyboard, as
+        // "Back" is Esc.
+        let prompt = "Press Return when finished";
+        let (_, width) = font.layout(prompt);
+        crate::key_buttons::spawn_text_button(
             &mut commands,
             canvas,
             font,
-            "Press Return when finished",
+            prompt,
+            (160.0 - width / 2.0).round(),
             160.0,
-            Plain,
+            Color::WHITE,
+            KeyCode::Enter,
+        );
+        crate::key_buttons::spawn_text_button(
+            &mut commands,
+            canvas,
+            font,
+            "Back",
+            4.0,
+            4.0,
+            Color::WHITE,
+            KeyCode::Escape,
         );
     }
     for k in 0..MAX_CODE_LEN {

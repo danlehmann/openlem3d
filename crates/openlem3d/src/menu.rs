@@ -194,6 +194,17 @@ fn ensure_menu(
         Color::WHITE,
         None,
     );
+    // Back to the title screen (Esc), for players without a keyboard.
+    crate::key_buttons::spawn_text_button(
+        &mut commands,
+        canvas,
+        font,
+        "Back",
+        4.0,
+        4.0,
+        RED,
+        KeyCode::Escape,
+    );
     for (img, x) in [(&labels.0, 246.0), (&labels.1, 287.0)] {
         let e = commands
             .spawn(image_at(img.clone(), at(x, 18.0, 32.0, 16.0)))

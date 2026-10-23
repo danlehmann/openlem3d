@@ -84,6 +84,8 @@ pub fn to_physical_key(keycode: Keycode) -> PhysicalKey {
 
         Keycode::Space => KeyCode::Space,
         Keycode::Escape => KeyCode::Escape,
+        // openlem3d patch: the system's back gesture or button is Esc.
+        Keycode::Back => KeyCode::Escape,
         Keycode::Enter => KeyCode::Enter, // not on the Numpad
         Keycode::Tab => KeyCode::Tab,
 
@@ -233,7 +235,8 @@ pub fn to_logical(key_char: Option<KeyMapChar>, keycode: Keycode) -> Key {
             // Using `BrowserHome` instead of `GoHome` according to
             // https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/key/Key_Values
             Home => Key::Named(NamedKey::BrowserHome),
-            Back => Key::Named(NamedKey::BrowserBack),
+            // openlem3d patch: the system's back gesture or button is Esc.
+            Back => Key::Named(NamedKey::Escape),
             Call => Key::Named(NamedKey::Call),
             Endcall => Key::Named(NamedKey::EndCall),
 

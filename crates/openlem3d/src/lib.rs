@@ -11,6 +11,7 @@ mod confirm;
 mod fade;
 mod glow;
 mod hud;
+mod key_buttons;
 mod lemming_cam;
 mod lemming_render;
 mod level_mesh;
@@ -264,6 +265,7 @@ pub fn main() {
             confirm::ConfirmPlugin,
             pixels::PixelsPlugin,
             screen::ScreenPlugin,
+            key_buttons::KeyButtonsPlugin,
         ))
         .insert_resource(ClearColor(Color::srgb(0.35, 0.55, 0.85)))
         .insert_resource(opts.clone())

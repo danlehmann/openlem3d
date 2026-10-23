@@ -4,11 +4,13 @@ A copy of [winit](https://github.com/rust-windowing/winit) 0.30.13 as
 published on crates.io (Apache-2.0, see `LICENSE`), without its examples and
 tests, used through `[patch.crates-io]` in the workspace `Cargo.toml`.
 
-The only change is in `src/platform_impl/android/mod.rs` (marked "openlem3d
-patch"): winit 0.30 reports every Android pointer event as a touch, so a mouse
+The changes are all in `src/platform_impl/android/` (marked "openlem3d
+patch"). winit 0.30 reports every Android pointer event as a touch, so a mouse
 loses its buttons, hovering and wheel. The patch reports mouse pointers (a
 mouse, or a touchpad moving the pointer) as `CursorMoved`, `MouseInput`,
 `MouseWheel`, `CursorEntered` and `CursorLeft` instead, and their movement as
-`DeviceEvent::MouseMotion`.
+`DeviceEvent::MouseMotion`. A touchpad's two-finger gestures are reported as
+`PanGesture` and `PinchGesture` (and a swipe as `MouseWheel` too), and the
+system's back gesture or button as the Escape key (in `keycodes.rs`).
 
-Remove this copy once Bevy uses a winit that handles Android mice.
+Remove this copy once Bevy uses a winit that handles all of this.

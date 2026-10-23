@@ -15,7 +15,11 @@
         android:label="openlem3d"
         android:hasCode="false"
         android:appCategory="game"
-        android:isGame="true">
+        android:isGame="true"
+        android:enableOnBackInvokedCallback="false">
+        <!-- The back gesture as the Back key, which the game takes as Esc
+             (apps targeting API 36+ otherwise get predictive back instead,
+             which a NativeActivity can't receive). -->
         <activity
             android:name="android.app.NativeActivity"
             android:exported="true"

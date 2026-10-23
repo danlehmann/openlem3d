@@ -1,9 +1,11 @@
 //! The Enhanced mode's question before Esc restarts a level as a replay
 //! (ours; the original restarts at once): "Restart level? Y/N" over the
-//! paused level. Y or Return restarts; N or Esc carries on.
+//! paused level. Y or Return restarts; N or Esc carries on. The answers can
+//! be tapped or clicked too (see `key_buttons`).
 
 use bevy::prelude::*;
 
+use crate::key_buttons::KeyButton;
 use crate::menu::AppState;
 use crate::title::{Art, At, Canvas, at, image_at};
 
@@ -108,5 +110,35 @@ fn show(
                 commands.entity(canvas).add_child(g);
             }
         }
+    }
+    // The answers as buttons, each reaching to the slash between them.
+    let (glyphs, width) = font.layout(LINES[1]);
+    let Some(&(slash, _)) = glyphs.get(1) else {
+        return;
+    };
+    let left = (SCREEN.x - width * SCALE) / 2.0;
+    let y = TOP + (font.size.y + 4.0) * SCALE;
+    let mid = left + (slash + font.size.x / 2.0) * SCALE;
+    let pad = font.size.y * SCALE;
+    let right = left + width * SCALE + pad;
+    for (x0, x1, key) in [
+        (left - pad, mid, KeyCode::KeyY),
+        (mid, right, KeyCode::KeyN),
+    ] {
+        let b = commands
+            .spawn((
+                Button,
+                KeyButton {
+                    key,
+                    colour: Color::WHITE,
+                },
+                at(x0, y - pad / 2.0, x1 - x0, font.size.y * SCALE + pad),
+                Node {
+                    position_type: PositionType::Absolute,
+                    ..default()
+                },
+            ))
+            .id();
+        commands.entity(canvas).add_child(b);
     }
 }
