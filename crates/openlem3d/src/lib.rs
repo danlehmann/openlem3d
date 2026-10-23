@@ -755,8 +755,9 @@ pub(crate) fn screen_ray(screen: &screen::Screen, camera: &SceneCamera, p: Vec2)
         1.0 - p.y / screen.size.y * 2.0,
     );
     let inverse = camera.view_proj.inverse();
-    let near = inverse.project_point3(ndc.extend(0.0));
-    let far = inverse.project_point3(ndc.extend(0.9));
+    // Reversed depth: 1 is the near plane.
+    let near = inverse.project_point3(ndc.extend(1.0));
+    let far = inverse.project_point3(ndc.extend(0.1));
     (far - near).try_normalize()
 }
 
@@ -805,7 +806,10 @@ fn projection(fov_y_deg: f32, aspect: f32, horizon: f32) -> Mat4 {
     // NDC y by `shift`; the horizon (y_view = 0, z_view → −∞) lands at `shift`.
     let shift = 1.0 - 2.0 * horizon;
     // The far plane reaches the edge of the sea plane (see scene_build).
-    let mut p = Mat4::perspective_rh(fov_y_deg.to_radians(), aspect, 0.05, 8000.0);
+    // Reversed depth: the near plane at 1, the far one at 0, which keeps
+    // depth precise far off, so surfaces a thousandth of a unit apart (the
+    // stacked land polygons) stay apart across the level.
+    let mut p = Mat4::perspective_rh(fov_y_deg.to_radians(), aspect, 8000.0, 0.05);
     p.z_axis.y -= shift;
     p
 }
@@ -1576,5 +1580,30 @@ fn turbo(w: &mut World) {
     if w.opts.turbo {
         time.set_max_delta(std::time::Duration::from_millis(10));
         time.set_relative_speed(1000.0);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// With reversed depth, nearer is deeper, and a ray through the screen
+    /// still points away from the camera.
+    #[test]
+    fn reversed_depth() {
+        let pos = Vec3::new(3.0, 4.0, 5.0);
+        let forward = Vec3::new(1.0, -0.5, -1.0).normalize();
+        let camera = SceneCamera {
+            view_proj: projection(60.0, 16.0 / 9.0, 0.5) * Mat4::look_to_rh(pos, forward, Vec3::Y),
+            ..default()
+        };
+        let depth = |d: f32| camera.view_proj.project_point3(pos + forward * d).z;
+        assert!(depth(1.0) > depth(10.0) && depth(10.0) > depth(1000.0));
+        let screen = screen::Screen {
+            size: Vec2::new(1600.0, 900.0),
+            ..default()
+        };
+        let ray = screen_ray(&screen, &camera, Vec2::new(800.0, 450.0)).unwrap();
+        assert!(ray.dot(forward) > 0.999, "{ray}");
     }
 }

@@ -329,20 +329,26 @@ fn land_texture(poly: &[LandVertex]) -> usize {
     poly.first().map_or(0, |v| (v.options & 7) as usize)
 }
 
-/// Land polygons at ground height.
-fn land_layer(polygons: &[&Vec<LandVertex>], texture: RgbaImage, tile: f32) -> SceneLayer {
+/// Land polygons at ground height, given with their places in the level's
+/// list of `count`. Later ones lie over earlier ones (inferred: the nested
+/// diamonds of Tricky 2 "Which Exit?" brighten towards the middle), so each
+/// is drawn a little higher, all between the sea and ground height.
+fn land_layer(
+    polygons: &[(usize, &Vec<LandVertex>)],
+    count: usize,
+    texture: RgbaImage,
+    tile: f32,
+) -> SceneLayer {
     let mut b = LayerBuilder::default();
-    for poly in polygons {
+    for &(i, poly) in polygons {
         if poly.len() < 3 {
             continue;
         }
         let base = b.base();
         // The top 3 bits of the options byte darken the texture (unverified).
         let brightness = 1.0 - (poly[0].options >> 5) as f32 * 0.07;
-        let pts: Vec<[f32; 3]> = poly
-            .iter()
-            .map(|v| [v.x as f32, GROUND_Y - 0.004, v.z as f32])
-            .collect();
+        let y = GROUND_Y - 0.008 + 0.006 * i as f32 / (count - 1).max(1) as f32;
+        let pts: Vec<[f32; 3]> = poly.iter().map(|v| [v.x as f32, y, v.z as f32]).collect();
         for p in &pts {
             Vertex::fixed(*p, [p[0] / tile, p[2] / tile], brightness, false).push(&mut b.vertices);
         }
@@ -1142,7 +1148,8 @@ pub fn build(data: &mut GameData, n: u32, show: Show) -> Result<BuiltLevel, l3d_
             let polys: Vec<_> = level
                 .land_polygons
                 .iter()
-                .filter(|p| land_texture(p) % count == index)
+                .enumerate()
+                .filter(|(_, p)| land_texture(p) % count == index)
                 .collect();
             if polys.is_empty() {
                 continue;
@@ -1150,6 +1157,7 @@ pub fn build(data: &mut GameData, n: u32, show: Show) -> Result<BuiltLevel, l3d_
             let pixels = &land[index * size * size..((index + 1) * size * size).min(land.len())];
             scene.layers.push(land_layer(
                 &polys,
+                level.land_polygons.len(),
                 indexed_to_rgba(pixels, size as u32, &pal),
                 tile,
             ));
