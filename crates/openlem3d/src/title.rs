@@ -80,7 +80,7 @@ impl Plugin for TitlePlugin {
             .add_systems(OnExit(AppState::Code), despawn::<ScreenRoot>)
             .add_systems(
                 Update,
-                (spawn_code, code_input, animate_slots)
+                (spawn_code, code_input, animate_slots, keyboard_again)
                     .chain()
                     .run_if(in_state(AppState::Code)),
             )
@@ -928,6 +928,16 @@ fn keyboard(mut windows: Query<&mut Window>, shown: bool) {
     }
 }
 
+/// The code's letters, as a button.
+#[derive(Component)]
+struct CodeArea;
+
+fn keyboard_again(areas: Query<&Interaction, (With<CodeArea>, Changed<Interaction>)>) {
+    if crate::platform::ON_SCREEN_KEYBOARD && areas.iter().any(|i| *i == Interaction::Pressed) {
+        crate::platform::show_keyboard();
+    }
+}
+
 /// The code screen's state.
 #[derive(Resource, Default)]
 struct CodeText {
@@ -1020,6 +1030,19 @@ fn spawn_code(
             KeyCode::Escape,
         );
     }
+    // Tapping the code brings the on-screen keyboard back, if put away.
+    let area = commands
+        .spawn((
+            CodeArea,
+            Button,
+            at(32.0, 90.0, 34.0 * MAX_CODE_LEN as f32, 32.0),
+            Node {
+                position_type: PositionType::Absolute,
+                ..default()
+            },
+        ))
+        .id();
+    commands.entity(canvas).add_child(area);
     for k in 0..MAX_CODE_LEN {
         let s = commands
             .spawn((
@@ -1054,7 +1077,15 @@ fn code_input(
         if code.accepted.is_some() {
             continue;
         }
-        match &k.logical_key {
+        // Return, Backspace and Esc by the key too: Android reports Return
+        // (from its on-screen keyboard at least) as the character "\n".
+        let key = match k.key_code {
+            KeyCode::Enter | KeyCode::NumpadEnter => Key::Enter,
+            KeyCode::Backspace => Key::Backspace,
+            KeyCode::Escape => Key::Escape,
+            _ => k.logical_key.clone(),
+        };
+        match &key {
             Key::Character(s) => {
                 for c in s.chars().filter(|c| c.is_ascii_alphabetic()) {
                     if code.letters.len() < MAX_CODE_LEN {

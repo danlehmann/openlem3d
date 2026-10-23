@@ -285,7 +285,11 @@ fn show_lights(
     }
 }
 
-fn apply_window(settings: Res<Settings>, mut windows: Query<&mut Window>) {
+fn apply_window(
+    settings: Res<Settings>,
+    mut windows: Query<&mut Window>,
+    mut applied: Local<Option<bool>>,
+) {
     use bevy::window::{MonitorSelection, WindowMode};
     for mut w in &mut windows {
         let mode = if settings.fullscreen {
@@ -296,6 +300,11 @@ fn apply_window(settings: Res<Settings>, mut windows: Query<&mut Window>) {
         if w.mode != mode {
             w.mode = mode;
         }
+    }
+    // Where Bevy's window mode does nothing (an Android desktop's window).
+    if *applied != Some(settings.fullscreen) {
+        *applied = Some(settings.fullscreen);
+        crate::platform::window_fullscreen(settings.fullscreen);
     }
 }
 

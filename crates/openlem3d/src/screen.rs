@@ -11,7 +11,8 @@ pub struct ScreenPlugin;
 
 impl Plugin for ScreenPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<Screen>().add_systems(First, update);
+        app.init_resource::<Screen>()
+            .add_systems(First, (update, full_screen));
     }
 }
 
@@ -41,6 +42,14 @@ impl Screen {
     /// The cursor's position on the screen, if it is in the window.
     pub fn cursor(&self, window: &Window) -> Option<Vec2> {
         window.cursor_position().map(|p| self.on_screen(p))
+    }
+}
+
+/// Fills the screen where the game has it to itself (see
+/// `platform::full_screen`) whenever the window gains focus.
+fn full_screen(mut focus: MessageReader<bevy::window::WindowFocused>) {
+    if focus.read().any(|f| f.focused) {
+        crate::platform::full_screen();
     }
 }
 
