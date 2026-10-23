@@ -10,6 +10,7 @@ mod codes;
 mod confirm;
 mod fade;
 mod glow;
+mod gpu;
 mod hud;
 mod key_buttons;
 mod lemming_cam;
@@ -41,17 +42,13 @@ mod ui;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseScrollUnit};
 use bevy::prelude::*;
-use bevy::render::RenderPlugin;
-use bevy::render::settings::{Backends, RenderCreation, WgpuSettings};
-use bevy::render::view::screenshot::{Screenshot, save_to_disk};
 use l3d_formats::blk::BlockSet;
 use l3d_formats::gamedata::{GameData, locate_data_dir};
 use l3d_formats::level::{CameraPreset, Level};
 use scene_render::{SceneCamera, SceneContent, SceneRenderPlugin};
-use ui::{Interaction, Node};
+use ui::{Interaction, Node, Visibility};
 
 /// A simulation length or coordinate in sub-units ([`l3d_sim::SUB`] to the
 /// unit), in units.
@@ -196,16 +193,6 @@ fn parse_args() -> Options {
     o
 }
 
-/// GPU backend selection. Vulkan on Windows-on-ARM (Adreno) loses the device
-/// after a few seconds, so Windows defaults to DX12. `WGPU_BACKEND` overrides.
-fn wgpu_settings() -> WgpuSettings {
-    let mut s = WgpuSettings::default();
-    if cfg!(windows) && std::env::var_os("WGPU_BACKEND").is_none() {
-        s.backends = Some(Backends::DX12);
-    }
-    s
-}
-
 #[bevy_main]
 pub fn main() {
     let opts = parse_args();
@@ -222,30 +209,24 @@ pub fn main() {
         std::process::exit(1);
     });
     App::new()
-        .add_plugins(
-            DefaultPlugins
-                .set(WindowPlugin {
-                    primary_window: Some(Window {
-                        title: "openlem3d".into(),
-                        present_mode: if opts.turbo {
-                            bevy::window::PresentMode::AutoNoVsync
-                        } else {
-                            default()
-                        },
-                        resolution: match opts.size {
-                            Some((w, h)) => bevy::window::WindowResolution::new(w, h)
-                                .with_scale_factor_override(1.0),
-                            None => default(),
-                        },
-                        ..default()
-                    }),
-                    ..default()
-                })
-                .set(RenderPlugin {
-                    render_creation: RenderCreation::Automatic(Box::new(wgpu_settings())),
-                    ..default()
-                }),
-        )
+        .add_plugins(DefaultPlugins.set(WindowPlugin {
+            primary_window: Some(Window {
+                title: "openlem3d".into(),
+                present_mode: if opts.turbo {
+                    bevy::window::PresentMode::AutoNoVsync
+                } else {
+                    default()
+                },
+                resolution: match opts.size {
+                    Some((w, h)) => {
+                        bevy::window::WindowResolution::new(w, h).with_scale_factor_override(1.0)
+                    }
+                    None => default(),
+                },
+                ..default()
+            }),
+            ..default()
+        }))
         .add_plugins((
             SceneRenderPlugin,
             hud::HudPlugin,
@@ -272,8 +253,9 @@ pub fn main() {
             screen::ScreenPlugin,
             key_buttons::KeyButtonsPlugin,
             ui::UiPlugin,
+            gpu::GpuPlugin,
         ))
-        .insert_resource(ClearColor(Color::srgb(0.35, 0.55, 0.85)))
+        .insert_resource(gpu::ClearColor(Color::srgb(0.35, 0.55, 0.85)))
         .insert_resource(opts.clone())
         .insert_resource(Data(data))
         .insert_resource(CurrentLevel {
@@ -588,22 +570,15 @@ fn sky_left_column(yaw: f32) -> f32 {
 }
 
 fn spawn_camera(mut commands: Commands) {
-    // A 2D camera drives the frame; the scene renderer draws the 3D level
-    // into its target before sprites and UI.
-    commands.spawn((
-        Camera2d,
-        Tonemapping::None,
-        Msaa::Off,
-        ViewCamera {
-            pos: Vec3::new(16.0, 8.0, 16.0),
-            yaw: 0.0,
-            roll: 0.0,
-            head: 0.0,
-            nod: 0.0,
-            glide: None,
-            smooth: true,
-        },
-    ));
+    commands.spawn(ViewCamera {
+        pos: Vec3::new(16.0, 8.0, 16.0),
+        yaw: 0.0,
+        roll: 0.0,
+        head: 0.0,
+        nod: 0.0,
+        glide: None,
+        smooth: true,
+    });
 }
 
 /// Whether the level about to be played is starting afresh, rather than
@@ -1159,7 +1134,7 @@ pub(crate) fn camera_controls(
 /// loaded, then exits.
 #[allow(clippy::too_many_arguments)] // Bevy system parameters
 fn screenshot_when_ready(
-    mut commands: Commands,
+    mut screenshots: ResMut<gpu::Screenshots>,
     opts: Res<Options>,
     current: Res<CurrentLevel>,
     state: Res<State<menu::AppState>>,
@@ -1194,14 +1169,10 @@ fn screenshot_when_ready(
     {
         *last_recorded = Some(sim.tick);
         let _ = std::fs::create_dir_all(dir);
-        commands
-            .spawn(Screenshot::primary_window())
-            .observe(save_to_disk(dir.join(format!("{:05}.png", sim.tick))));
+        screenshots.0.push(dir.join(format!("{:05}.png", sim.tick)));
     }
     if before < shot_at && now >= shot_at {
-        commands
-            .spawn(Screenshot::primary_window())
-            .observe(save_to_disk(path.clone()));
+        screenshots.0.push(path.clone());
         *frames_since_shot = Some(0);
     }
     // Quit a few frames after the shot, once it is saved (counted in frames,

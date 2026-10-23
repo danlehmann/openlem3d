@@ -1,10 +1,9 @@
 //! The part of the window the game uses: all of it, except where the system
 //! draws over it, such as the caption bar of an Android desktop window
-//! (`platform::insets`). The camera's viewport covers just this part, so the
-//! UI lays itself out inside it; code that measures the screen or places
-//! things by the pointer uses [`Screen`] rather than the window.
+//! (`platform::insets`). The scene and the UI are drawn in just this part;
+//! code that measures the screen or places things by the pointer uses
+//! [`Screen`] rather than the window.
 
-use bevy::camera::Viewport;
 use bevy::prelude::*;
 
 pub struct ScreenPlugin;
@@ -22,6 +21,8 @@ pub struct Screen {
     /// Its top-left corner in the window.
     pub min: Vec2,
     pub size: Vec2,
+    /// The same in physical pixels: left, top, width, height.
+    pub pixels: UVec4,
 }
 
 impl Default for Screen {
@@ -29,6 +30,7 @@ impl Default for Screen {
         Screen {
             min: Vec2::ZERO,
             size: Vec2::ONE,
+            pixels: UVec4::new(0, 0, 1, 1),
         }
     }
 }
@@ -60,7 +62,6 @@ const INSETS_POLL: f32 = 0.25;
 fn update(
     time: Res<Time<Real>>,
     windows: Query<&Window>,
-    mut cameras: Query<&mut Camera>,
     mut screen: ResMut<Screen>,
     mut insets: Local<Option<(f32, [u32; 4])>>,
 ) {
@@ -77,29 +78,13 @@ fn update(
     let size = (full - min)
         .saturating_sub(UVec2::new(right, bottom))
         .max(UVec2::ONE);
-    let viewport = (min != UVec2::ZERO || size != full).then(|| Viewport {
-        physical_position: min,
-        physical_size: size,
-        ..default()
-    });
-    for mut camera in &mut cameras {
-        let same = match (&camera.viewport, &viewport) {
-            (None, None) => true,
-            (Some(a), Some(b)) => {
-                a.physical_position == b.physical_position && a.physical_size == b.physical_size
-            }
-            _ => false,
-        };
-        if !same {
-            camera.viewport = viewport.clone();
-        }
-    }
     let scale = window.scale_factor();
     let new = Screen {
         min: min.as_vec2() / scale,
         size: size.as_vec2() / scale,
+        pixels: UVec4::new(min.x, min.y, size.x, size.y),
     };
-    if new.min != screen.min || new.size != screen.size {
+    if new.min != screen.min || new.size != screen.size || new.pixels != screen.pixels {
         *screen = new;
     }
 }

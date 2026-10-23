@@ -9,7 +9,7 @@ use crate::Game;
 use crate::lemming_cam::LemmingCam;
 use crate::menu::AppState;
 use crate::scene_render::SceneCamera;
-use crate::ui::{ImageNode, Interaction, Node, px};
+use crate::ui::{ImageNode, Interaction, Node, Visibility, px};
 
 pub struct HudPlugin;
 

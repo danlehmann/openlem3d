@@ -1,23 +1,18 @@
-//! Our own 3D scene renderer, drawn with a small wgpu pipeline inside the 2D
-//! camera's render schedule. Bevy's built-in 3D pipeline is not used: it
-//! renders nothing on some GPUs (observed on Qualcomm Adreno X1-85, DX12 and
-//! Vulkan, Bevy 0.18 and 0.19), while plain wgpu works there.
+//! Our own 3D scene renderer, a small wgpu pipeline. (Bevy's 3D pipeline
+//! rendered nothing on some GPUs: Qualcomm Adreno X1-85, DX12 and Vulkan,
+//! Bevy 0.18 and 0.19.)
 //!
-//! The main world fills [`SceneContent`] and [`SceneCamera`]; both are
-//! extracted to the render world, uploaded, and drawn before the 2D main pass
-//! so that sprites and UI land on top.
+//! The game fills [`SceneContent`], [`SceneSprites`] and [`SceneCamera`];
+//! each frame (`crate::gpu`) uploads what changed and draws the scene, before
+//! the UI.
 
 use std::sync::Arc;
 
-use bevy::core_pipeline::Core2dSystems;
-use bevy::core_pipeline::schedule::Core2d;
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
-use bevy::render::batching::gpu_preprocessing::{GpuPreprocessingMode, GpuPreprocessingSupport};
-use bevy::render::extract_resource::{ExtractResource, ExtractResourcePlugin};
-use bevy::render::renderer::{RenderContext, RenderDevice, RenderQueue, ViewQuery};
-use bevy::render::view::{ExtractedView, ViewTarget};
-use bevy::render::{Render, RenderApp, RenderStartup, RenderSystems};
 use wgpu::util::DeviceExt;
+
+use crate::gpu::{Gpu, TARGET_FORMAT};
 
 /// Floats per vertex: position (3), uv (2), brightness (1), cutout flag (1),
 /// billboard offset (2), animation frame count and uv stride (2), light (3).
@@ -25,7 +20,7 @@ pub const VERTEX_FLOATS: usize = 14;
 
 /// What the scene shows. `version` changes whenever the content does; the
 /// renderer re-uploads only then.
-#[derive(Resource, Clone, ExtractResource, Default)]
+#[derive(Resource, Clone, Default)]
 pub struct SceneContent {
     pub version: u64,
     pub data: Option<Arc<SceneData>>,
@@ -50,7 +45,7 @@ pub struct SceneData {
 
 /// Geometry rebuilt every frame (moving sprites such as lemmings), textured
 /// with [`SceneData::sprite_atlas`].
-#[derive(Resource, Clone, ExtractResource, Default)]
+#[derive(Resource, Clone, Default)]
 pub struct SceneSprites {
     /// Interleaved vertices, [`VERTEX_FLOATS`] per vertex.
     pub vertices: Vec<f32>,
@@ -75,7 +70,7 @@ pub struct RgbaImage {
 }
 
 /// Per-frame view parameters.
-#[derive(Resource, Clone, Copy, ExtractResource, Default)]
+#[derive(Resource, Clone, Copy, Default)]
 pub struct SceneCamera {
     /// World to clip space, wgpu conventions (depth 0..1).
     pub view_proj: Mat4,
@@ -107,37 +102,16 @@ impl Plugin for SceneRenderPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SceneContent>()
             .init_resource::<SceneCamera>()
-            .init_resource::<SceneSprites>()
-            .add_plugins((
-                ExtractResourcePlugin::<SceneContent>::default(),
-                ExtractResourcePlugin::<SceneCamera>::default(),
-                ExtractResourcePlugin::<SceneSprites>::default(),
-            ));
-        let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
-            return;
-        };
-        render_app
-            .add_systems(
-                Render,
-                idle_before_surfaces
-                    .run_if(bevy::render::view::need_surface_configuration)
-                    .before(bevy::render::view::create_surfaces),
-            )
-            .add_systems(Render, prepare_scene.in_set(RenderSystems::Prepare))
-            .add_systems(Core2d, draw_scene.before(Core2dSystems::MainPass))
-            .add_systems(
-                RenderStartup,
-                no_gpu_preprocessing
-                    .after(bevy::render::init_gpu_resource::<GpuPreprocessingSupport>),
-            );
+            .init_resource::<SceneSprites>();
     }
+}
 
-    fn finish(&self, app: &mut App) {
-        let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
-            return;
-        };
-        render_app.init_resource::<SceneGpu>();
-    }
+/// What a frame draws of the scene.
+#[derive(SystemParam)]
+pub struct SceneInput<'w> {
+    content: Res<'w, SceneContent>,
+    sprites: Res<'w, SceneSprites>,
+    camera: Res<'w, SceneCamera>,
 }
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
@@ -156,8 +130,7 @@ const BLOOM_MIN_SIZE: u32 = 8;
 const SURROUND_SKY_TURN: f32 = 960.0;
 
 /// GPU resources of the scene renderer.
-#[derive(Resource)]
-struct SceneGpu {
+pub struct SceneGpu {
     layout: wgpu::BindGroupLayout,
     shader: wgpu::ShaderModule,
     sampler: wgpu::Sampler,
@@ -227,9 +200,8 @@ struct UploadedLayer {
     bind_group: wgpu::BindGroup,
 }
 
-impl FromWorld for SceneGpu {
-    fn from_world(world: &mut World) -> Self {
-        let device = world.resource::<RenderDevice>().wgpu_device();
+impl SceneGpu {
+    pub fn new(device: &wgpu::Device) -> Self {
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("scene"),
             entries: &[
@@ -305,9 +277,7 @@ impl FromWorld for SceneGpu {
             textures: Vec::new(),
         }
     }
-}
 
-impl SceneGpu {
     /// The pipelines drawing into `format`, made on first use.
     fn pipelines(&mut self, device: &wgpu::Device, format: wgpu::TextureFormat) -> &Pipelines {
         if let Some(i) = self.pipelines.iter().position(|(f, _)| *f == format) {
@@ -605,15 +575,16 @@ impl SceneGpu {
     }
 }
 
-fn prepare_scene(
-    content: Res<SceneContent>,
-    sprites: Res<SceneSprites>,
-    camera: Res<SceneCamera>,
-    device: Res<RenderDevice>,
-    queue: Res<RenderQueue>,
-    mut gpu: ResMut<SceneGpu>,
+/// Uploads the uniforms, this frame's sprites and, when it changed, the
+/// content.
+fn prepare(
+    gpu: &mut SceneGpu,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    content: &SceneContent,
+    sprites: &SceneSprites,
+    camera: &SceneCamera,
 ) {
-    let device = device.wgpu_device();
     let (w, h) = gpu.target_size;
     let scale = h as f32 / 480.0;
     let mut uniforms = camera.view_proj.to_cols_array().to_vec();
@@ -658,7 +629,7 @@ fn prepare_scene(
     uniforms.extend([sky[0], sky[1], x, y]);
     uniforms.extend([if glow { GLOW_GAIN } else { 0.0 }, 0.0, 0.0, 0.0]);
     queue.write_buffer(&gpu.uniforms, 0, &f32_bytes(&uniforms));
-    upload_sprites(device, &queue, &mut gpu, &sprites);
+    upload_sprites(device, queue, gpu, sprites);
     if gpu.version == Some(content.version) {
         return;
     }
@@ -677,14 +648,14 @@ fn prepare_scene(
         }
         let b = match old.iter().find(same) {
             Some((_, b)) => b.clone(),
-            None => gpu.bind_texture(device, &queue, img),
+            None => gpu.bind_texture(device, queue, img),
         };
         gpu.textures.push((img.texels.clone(), b.clone()));
         b
     };
     let mut layers = Vec::new();
     for l in data.layers.iter().filter(|l| !l.indices.is_empty()) {
-        let bind_group = bind(&mut gpu, &l.texture);
+        let bind_group = bind(gpu, &l.texture);
         layers.push(UploadedLayer {
             vertices: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("scene vertices"),
@@ -705,8 +676,8 @@ fn prepare_scene(
         });
     }
     gpu.layers = layers;
-    gpu.sky = data.sky.as_ref().map(|s| bind(&mut gpu, s));
-    gpu.sprite_atlas = data.sprite_atlas.as_ref().map(|s| bind(&mut gpu, s));
+    gpu.sky = data.sky.as_ref().map(|s| bind(gpu, s));
+    gpu.sprite_atlas = data.sprite_atlas.as_ref().map(|s| bind(gpu, s));
 }
 
 /// Copies this frame's sprite geometry into GPU buffers, growing them when
@@ -754,20 +725,46 @@ fn upload_sprites(
     *n = count;
 }
 
-fn draw_scene(
-    view: ViewQuery<(&ViewTarget, &ExtractedView)>,
-    camera: Res<SceneCamera>,
-    mut gpu: ResMut<SceneGpu>,
-    mut ctx: RenderContext,
+impl SceneGpu {
+    /// Draws the scene into `viewport` (x, y, width, height) of `target`, a
+    /// frame of `full` size in [`TARGET_FORMAT`].
+    pub fn draw(
+        &mut self,
+        gpu: &Gpu,
+        encoder: &mut wgpu::CommandEncoder,
+        target: &wgpu::TextureView,
+        full: UVec2,
+        viewport: UVec4,
+        input: &SceneInput,
+    ) {
+        let size = (viewport.z.max(1), viewport.w.max(1));
+        self.target_origin = (viewport.x, viewport.y);
+        self.target_size = size;
+        let device = &gpu.device;
+        prepare(
+            self,
+            device,
+            &gpu.queue,
+            &input.content,
+            &input.sprites,
+            &input.camera,
+        );
+        draw(self, device, encoder, target, full, viewport, &input.camera);
+    }
+}
+
+fn draw(
+    gpu: &mut SceneGpu,
+    device: &wgpu::Device,
+    encoder: &mut wgpu::CommandEncoder,
+    target: &wgpu::TextureView,
+    full: UVec2,
+    viewport: UVec4,
+    camera: &SceneCamera,
 ) {
-    let (target, extracted) = view.into_inner();
-    let device = ctx.render_device().wgpu_device().clone();
-    let full = target.main_texture().size();
-    let viewport = extracted.viewport;
-    let size = (viewport.z.max(1), viewport.w.max(1));
-    gpu.target_origin = (viewport.x, viewport.y);
-    gpu.target_size = size;
-    let format = target.main_texture_format();
+    let size = gpu.target_size;
+    let format = TARGET_FORMAT;
+    let device = device.clone();
     // Rendered small and stretched over the screen, or at the screen's size:
     // offscreen in floating point while glowing, else straight onto it.
     let low = renders_small(camera.pixels, size).then(|| {
@@ -784,7 +781,7 @@ fn draw_scene(
         match (&low, &hdr) {
             (Some(l), _) => l.0,
             (_, Some(h)) => h.size,
-            _ => (full.width, full.height),
+            _ => (full.x, full.y),
         },
     );
     let gpu = &*gpu;
@@ -808,12 +805,21 @@ fn draw_scene(
             store: wgpu::StoreOp::Store,
         },
     };
+    // The frame is already cleared to the clear colour.
+    let onto_target = || wgpu::RenderPassColorAttachment {
+        view: target,
+        depth_slice: None,
+        resolve_target: None,
+        ops: wgpu::Operations {
+            load: wgpu::LoadOp::Load,
+            store: wgpu::StoreOp::Store,
+        },
+    };
     let color = match (&low, &hdr) {
         (Some((_, (view, _))), _) => offscreen(view),
         (_, Some(h)) => offscreen(&h.view),
-        _ => target.get_color_attachment(),
+        _ => onto_target(),
     };
-    let encoder = ctx.command_encoder();
     let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
         label: Some("scene"),
         color_attachments: &[Some(color)],
@@ -897,10 +903,9 @@ fn draw_scene(
         _ => None,
     };
     if let Some((bind, pipeline)) = shown {
-        let color = target.get_color_attachment();
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("scene stretch"),
-            color_attachments: &[Some(color)],
+            color_attachments: &[Some(onto_target())],
             ..Default::default()
         });
         set_viewport(&mut pass, viewport);
@@ -926,35 +931,6 @@ fn set_viewport(pass: &mut wgpu::RenderPass, viewport: UVec4) {
         0.0,
         1.0,
     );
-}
-
-/// Waits for the GPU to finish its work before Bevy configures a window's
-/// surface. wgpu waits once, but the Pixel 11 Pro's PowerVR driver sometimes
-/// ends a wait early (well before its timeout), so wgpu finds work still
-/// running and fails to configure the surface; the next frame then panics.
-/// Waiting again until the work is done avoids that.
-fn idle_before_surfaces(device: Res<RenderDevice>) {
-    const LIMIT: std::time::Duration = std::time::Duration::from_secs(1);
-    let start = std::time::Instant::now();
-    let wait = wgpu::PollType::Wait {
-        submission_index: None,
-        timeout: Some(LIMIT),
-    };
-    while let Err(e) = device.poll(wait.clone()) {
-        if !matches!(e, wgpu::PollError::Timeout) || start.elapsed() >= LIMIT {
-            warn!("GPU not idle before configuring the surface: {e}");
-            return;
-        }
-    }
-}
-
-/// Turns off Bevy's GPU mesh preprocessing and culling, which the game, drawing
-/// no meshes, doesn't use. Where Bevy thinks the GPU supports culling it builds
-/// compute shaders for it at startup anyway, and the Pixel 11 Pro's PowerVR
-/// driver crashes compiling them (Bevy holds the Pixel 10 back, but doesn't
-/// know the 11).
-fn no_gpu_preprocessing(mut support: ResMut<GpuPreprocessingSupport>) {
-    support.max_supported_mode = GpuPreprocessingMode::None;
 }
 
 fn f32_bytes(v: &[f32]) -> Vec<u8> {

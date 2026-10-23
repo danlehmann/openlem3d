@@ -16,7 +16,7 @@ use crate::lemming_cam::LemmingCam;
 use crate::menu::AppState;
 use crate::screen::Screen;
 use crate::texture::indexed_image;
-use crate::ui::{Button, ImageNode, Interaction, Node, percent, px};
+use crate::ui::{Button, ImageNode, Interaction, Node, Visibility, percent, px};
 use crate::{Data, Game, LevelInfo, PresetIndex, ViewCamera};
 
 pub struct PanelPlugin;

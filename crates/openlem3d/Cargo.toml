@@ -7,9 +7,9 @@ license.workspace = true
 
 [dependencies]
 l3d-formats.workspace = true
-# Only what the game uses: it draws the scene with its own wgpu renderer
-# and its UI with its own (no 3D/PBR, bevy_ui, sprites, glTF or scenes),
-# shows no text, and plays WAV sounds.
+# Only what the game uses: it draws everything with its own wgpu renderer
+# (no bevy_render, bevy_ui, sprites, glTF or scenes), shows no text, and
+# plays WAV sounds.
 bevy = { version = "0.19.1", default-features = false, features = [
     "default_app",
     "std",
@@ -18,8 +18,6 @@ bevy = { version = "0.19.1", default-features = false, features = [
     "x11",
     "wayland",
     "custom_cursor",
-    "bevy_render",
-    "bevy_core_pipeline",
     "bevy_audio",
     "wav",
     # Saves --screenshot images.

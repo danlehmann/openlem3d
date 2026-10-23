@@ -15,7 +15,9 @@ use l3d_formats::{sheets, title};
 
 use crate::menu::{AppState, MenuRating};
 use crate::texture::indexed_image;
-use crate::ui::{BackgroundColor, Button, ImageNode, Interaction, Node, Overflow, percent, px};
+use crate::ui::{
+    BackgroundColor, Button, ImageNode, Interaction, Node, Overflow, Visibility, percent, px,
+};
 use crate::{CurrentLevel, Data};
 
 /// The original's screen, in which all positions are given.
