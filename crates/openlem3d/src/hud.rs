@@ -174,7 +174,7 @@ pub struct PendingTurner(pub Option<usize>);
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn assign_on_pointer(
     mouse: Res<ButtonInput<MouseButton>>,
-    touches: Res<Touches>,
+    (touches, starts): (Res<Touches>, Res<crate::touch::TouchStarts>),
     windows: Query<&Window>,
     screen: Res<crate::screen::Screen>,
     ui: Query<&Interaction>,
@@ -217,10 +217,12 @@ pub(crate) fn assign_on_pointer(
     let point = if mouse.just_pressed(settings.action_button()) {
         screen.cursor(window)
     } else {
-        // A tap is a touch released without having been dragged.
+        // A tap is a touch released without having been dragged, and not
+        // from a button (a turner given by its button with a lemming
+        // highlighted waits for the next tap, not this one).
         touches
             .iter_just_released()
-            .find(|t| t.distance().length() < crate::touch::TAP_SLOP)
+            .find(|t| t.distance().length() < crate::touch::TAP_SLOP && !starts.on_button(t.id()))
             .map(|t| screen.on_screen(t.position()))
     };
     let Some(point) = point else { return };

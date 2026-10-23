@@ -31,7 +31,7 @@ impl Plugin for TouchPlugin {
         app.init_resource::<TouchStarts>()
             .add_systems(
                 PreUpdate,
-                record_touch_starts.after(bevy::input::InputSystems),
+                record_touch_starts.after(crate::ui::UiSystems::Focus),
             )
             .add_systems(
                 Update,
@@ -64,20 +64,31 @@ fn touch_over_mouse(touches: Res<Touches>, mut windows: Query<&mut Window>) {
     }
 }
 
-/// The screen each finger now down (or just lifted) landed on.
+/// The screen each finger now down (or just lifted) landed on, and whether
+/// it landed on a button.
 #[derive(Resource, Default)]
-pub struct TouchStarts(HashMap<u64, AppState>);
+pub struct TouchStarts(HashMap<u64, (AppState, bool)>);
+
+impl TouchStarts {
+    /// Whether the finger landed on a button. Its button is no longer pressed
+    /// when it lifts, but lifting it is not a tap on what lies under it.
+    pub fn on_button(&self, id: u64) -> bool {
+        self.0.get(&id).is_some_and(|&(_, button)| button)
+    }
+}
 
 fn record_touch_starts(
     touches: Res<Touches>,
     state: Res<State<AppState>>,
+    ui: Query<&Interaction>,
     mut starts: ResMut<TouchStarts>,
 ) {
     starts
         .0
         .retain(|&id, _| touches.get_pressed(id).is_some() || touches.just_released(id));
+    let button = ui.iter().any(|i| *i == Interaction::Pressed);
     for t in touches.iter_just_pressed() {
-        starts.0.insert(t.id(), *state.get());
+        starts.0.insert(t.id(), (*state.get(), button));
     }
 }
 
@@ -96,7 +107,7 @@ impl Lifted<'_> {
     pub fn any(&self) -> bool {
         self.touches
             .iter_just_released()
-            .any(|t| self.starts.0.get(&t.id()) == Some(self.state.get()))
+            .any(|t| self.starts.0.get(&t.id()).map(|s| &s.0) == Some(self.state.get()))
     }
 }
 
