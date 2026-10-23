@@ -190,6 +190,18 @@ impl<T: Asset> Assets<T> {
         Some(thing)
     }
 
+    /// Puts `thing` in place of what `id` holds (which tells its copies).
+    pub fn insert(&mut self, id: impl Into<AssetId<T>>, thing: T) -> Option<T> {
+        let id = id.into();
+        let old = self.things.insert(id, thing);
+        self.events.push(if old.is_some() {
+            AssetEvent::Modified { id }
+        } else {
+            AssetEvent::Added { id }
+        });
+        old
+    }
+
     pub fn contains(&self, id: impl Into<AssetId<T>>) -> bool {
         self.things.contains_key(&id.into())
     }
@@ -204,7 +216,7 @@ impl<T: Asset> Assets<T> {
 
     /// Lets go of the things whose handles are all gone, and sends the
     /// frame's events.
-    fn update(mut assets: ResMut<Self>, mut out: MessageWriter<AssetEvent<T>>) {
+    pub fn update(mut assets: ResMut<Self>, mut out: MessageWriter<AssetEvent<T>>) {
         let dropped: Vec<u64> = assets
             .dropped
             .lock()

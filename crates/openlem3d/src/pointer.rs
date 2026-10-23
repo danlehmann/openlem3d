@@ -16,7 +16,6 @@ use l3d_formats::sheets;
 
 use crate::menu::AppState;
 use crate::scene_render::SceneCamera;
-use crate::texture::rgba_image;
 use crate::ui::Interaction;
 use crate::{Data, Game};
 
@@ -86,7 +85,17 @@ fn scaled(
             px[d..d + 4].copy_from_slice(&src[s..s + 4]);
         }
     }
-    let h = images.add(rgba_image(size, size, px, RenderAssetUsages::all()));
+    let h = images.add(Image::new(
+        wgpu::Extent3d {
+            width: size,
+            height: size,
+            depth_or_array_layers: 1,
+        },
+        wgpu::TextureDimension::D2,
+        px,
+        wgpu::TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::all(),
+    ));
     cells.scaled.insert((cell, size), h.clone());
     Some(h)
 }

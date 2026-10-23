@@ -7,8 +7,9 @@
 //! the original). Clicking it moves the camera over that spot, as the
 //! original allows unless the level forbids it (flag `0x0008`).
 
-use bevy::asset::RenderAssetUsages;
 use bevy::prelude::*;
+use l3d_engine::asset::{Assets, Handle};
+use l3d_engine::image::Image;
 use l3d_formats::blk::FaceDir;
 use l3d_formats::gamedata::Palette;
 use l3d_formats::level::{SIZE_X, SIZE_Y, SIZE_Z};
@@ -84,7 +85,7 @@ pub fn frame_image() -> Image {
             }
         }
     }
-    rgba_image(N as u32, N as u32, px, RenderAssetUsages::all())
+    rgba_image(N as u32, N as u32, px)
 }
 
 /// Average colour of the non-transparent pixels.
@@ -192,12 +193,7 @@ fn build_base(
             }
         }
     }
-    let image = rgba_image(
-        MAP as u32,
-        MAP as u32,
-        vec![255; MAP * MAP * 4],
-        RenderAssetUsages::all(),
-    );
+    let image = rgba_image(MAP as u32, MAP as u32, vec![255; MAP * MAP * 4]);
     let handle = match &existing {
         Some(m) => {
             let _ = images.insert(&m.image, image);
@@ -224,12 +220,10 @@ fn draw(
     let (Some(map), Some(sim)) = (map, &game.sim) else {
         return;
     };
-    let Some(mut image) = images.get_mut(&map.image) else {
+    let Some(image) = images.get_mut(&map.image) else {
         return;
     };
-    let Some(px) = image.data.as_mut() else {
-        return;
-    };
+    let px = &mut image.data;
     for (i, c) in map.base.iter().enumerate() {
         px[i * 4..i * 4 + 3].copy_from_slice(c);
     }

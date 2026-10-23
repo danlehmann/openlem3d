@@ -7,6 +7,8 @@
 //! first frame, and the animations never block (`docs/GROUNDRULES.md`).
 
 use bevy::prelude::*;
+use l3d_engine::asset::{Assets, Handle};
+use l3d_engine::image::Image;
 use l3d_formats::font::{Font, title_font};
 use l3d_formats::gamedata::Palette;
 use l3d_formats::icons::Icons;

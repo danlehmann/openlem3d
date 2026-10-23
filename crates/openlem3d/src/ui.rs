@@ -20,6 +20,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use bevy::ecs::system::SystemParam;
 use bevy::input::InputSystems;
 use bevy::prelude::*;
+use l3d_engine::asset::{AssetEvent, AssetId, Assets, Handle};
+use l3d_engine::image::Image;
 
 use crate::gpu::{Gpu, TARGET_FORMAT};
 use crate::screen::Screen;
@@ -29,6 +31,12 @@ pub struct UiPlugin;
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<UiStack>()
+            .init_resource::<Assets<Image>>()
+            .add_message::<AssetEvent<Image>>()
+            .add_systems(
+                Last,
+                Assets::<Image>::update.in_set(l3d_engine::asset::AssetSystems),
+            )
             .add_systems(
                 PreUpdate,
                 focus.in_set(UiSystems::Focus).after(InputSystems),
@@ -136,7 +144,7 @@ pub struct ImageNode {
 
 impl Default for ImageNode {
     fn default() -> Self {
-        ImageNode::new(bevy::image::TRANSPARENT_IMAGE_HANDLE)
+        ImageNode::new(Handle::default())
     }
 }
 
@@ -596,9 +604,8 @@ impl UiGpu {
     ) -> Option<&Uploaded> {
         if !self.images.contains_key(&id) {
             let image = images.get(id)?;
-            let data = image.data.as_ref()?;
-            let texture = texture(gpu, image.size(), image.texture_descriptor.format);
-            write(gpu, &texture, data);
+            let texture = texture(gpu, image.size(), wgpu::TextureFormat::Rgba8UnormSrgb);
+            write(gpu, &texture, &image.data);
             let bind_group = bind_group(
                 &gpu.device,
                 &self.layout,
@@ -627,12 +634,8 @@ impl UiGpu {
                 continue;
             };
             match input.images.get(id) {
-                Some(image)
-                    if image.size() == texture_size(old)
-                        && image.texture_descriptor.format == old.texture.format()
-                        && image.data.is_some() =>
-                {
-                    write(gpu, &old.texture, image.data.as_deref().unwrap_or_default());
+                Some(image) if image.size() == texture_size(old) => {
+                    write(gpu, &old.texture, &image.data);
                 }
                 _ => {
                     self.images.remove(&id);

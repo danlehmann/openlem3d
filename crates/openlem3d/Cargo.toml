@@ -8,6 +8,8 @@ license.workspace = true
 [dependencies]
 l3d-formats.workspace = true
 l3d-engine.workspace = true
+# Saves --screenshot images.
+png.workspace = true
 # Only what the game uses: it draws everything with its own wgpu renderer
 # (no bevy_render, bevy_ui, sprites, glTF or scenes), shows no text, and
 # plays its sounds with the engine's own audio.
@@ -19,8 +21,6 @@ bevy = { version = "0.19.1", default-features = false, features = [
     "x11",
     "wayland",
     "custom_cursor",
-    # Saves --screenshot images.
-    "png",
     "android-native-activity",
 ] }
 wgpu = "29.0.4"

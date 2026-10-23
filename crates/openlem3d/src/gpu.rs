@@ -25,7 +25,7 @@ impl Plugin for GpuPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Renderer>()
             .init_resource::<Screenshots>()
-            .add_systems(Last, render);
+            .add_systems(Last, render.after(l3d_engine::asset::AssetSystems));
     }
 }
 
@@ -396,16 +396,18 @@ fn render(
     };
     let size = UVec2::new(window.physical_width(), window.physical_height()).max(UVec2::ONE);
     s.update(gpu, size, window.present_mode);
+    // Without a frame to show (the window hidden, say), a screenshot is
+    // still drawn.
     let frame = match s.surface.get_current_texture() {
-        wgpu::CurrentSurfaceTexture::Success(t) => t,
+        wgpu::CurrentSurfaceTexture::Success(t) => Some(t),
         wgpu::CurrentSurfaceTexture::Suboptimal(t) => {
             s.stale = true;
-            t
+            Some(t)
         }
-        wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => return,
+        wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => None,
         wgpu::CurrentSurfaceTexture::Outdated => {
             s.stale = true;
-            return;
+            None
         }
         other => {
             warn!("lost the window's surface ({other:?}); making it again");
@@ -413,6 +415,9 @@ fn render(
             return;
         }
     };
+    if frame.is_none() && screenshots.0.is_empty() {
+        return;
+    }
     let device = &gpu.device;
     let copy = copy.get_or_insert_with(|| Copy::new(device));
     if target.as_ref().is_none_or(|t| t.size != size) {
@@ -456,31 +461,35 @@ fn render(
         &mut ui_input,
     );
     let s = surface.as_ref().expect("checked above");
-    let view = frame.texture.create_view(&wgpu::TextureViewDescriptor {
-        format: Some(s.view_format),
-        ..Default::default()
-    });
-    {
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("copy"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &view,
-                depth_slice: None,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
+    if let Some(frame) = &frame {
+        let view = frame.texture.create_view(&wgpu::TextureViewDescriptor {
+            format: Some(s.view_format),
             ..Default::default()
         });
-        pass.set_pipeline(copy.pipeline(device, s.view_format));
-        pass.set_bind_group(0, &target.bind_group, &[]);
-        pass.draw(0..3, 0..1);
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("copy"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                ..Default::default()
+            });
+            pass.set_pipeline(copy.pipeline(device, s.view_format));
+            pass.set_bind_group(0, &target.bind_group, &[]);
+            pass.draw(0..3, 0..1);
+        }
     }
     let shot = (!screenshots.0.is_empty()).then(|| read_back(device, &mut encoder, target));
     gpu.queue.submit([encoder.finish()]);
-    frame.present();
+    if let Some(frame) = frame {
+        frame.present();
+    }
     if let Some(buffer) = shot {
         save(device, &buffer, size, &std::mem::take(&mut screenshots.0));
     }
@@ -532,28 +541,23 @@ fn save(device: &wgpu::Device, buffer: &wgpu::Buffer, size: UVec2, paths: &[Path
         .chunks(row)
         .flat_map(|r| r[..size.x as usize * 4].iter().copied())
         .collect();
-    let image = Image::new(
-        wgpu::Extent3d {
-            width: size.x,
-            height: size.y,
-            depth_or_array_layers: 1,
-        },
-        wgpu::TextureDimension::D2,
-        texels,
-        TARGET_FORMAT,
-        bevy::asset::RenderAssetUsages::MAIN_WORLD,
-    );
-    let image = match image.try_into_dynamic() {
-        Ok(image) => image.to_rgb8(),
-        Err(e) => {
-            error!("could not convert the screenshot: {e}");
-            return;
-        }
-    };
+    // RGB: the frame is opaque.
+    let rgb: Vec<u8> = texels
+        .chunks(4)
+        .flat_map(|t| t[..3].iter().copied())
+        .collect();
     for path in paths {
-        match image.save(path) {
+        match save_png(path, size, &rgb) {
             Ok(()) => info!("Screenshot saved to {}", path.display()),
             Err(e) => error!("could not save a screenshot to {}: {e}", path.display()),
         }
     }
+}
+
+fn save_png(path: &std::path::Path, size: UVec2, rgb: &[u8]) -> Result<(), png::EncodingError> {
+    let file = std::io::BufWriter::new(std::fs::File::create(path)?);
+    let mut encoder = png::Encoder::new(file, size.x, size.y);
+    encoder.set_color(png::ColorType::Rgb);
+    encoder.set_depth(png::BitDepth::Eight);
+    encoder.write_header()?.write_image_data(rgb)
 }

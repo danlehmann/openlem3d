@@ -6,6 +6,8 @@
 //! the result lines is our own. Input is taken at once.
 
 use bevy::prelude::*;
+use l3d_engine::asset::Assets;
+use l3d_engine::image::Image;
 
 use crate::menu::AppState;
 use crate::title::{Art, Canvas, at, image_at};

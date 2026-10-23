@@ -6,6 +6,8 @@
 //! leaves.
 
 use bevy::prelude::*;
+use l3d_engine::asset::{Assets, Handle};
+use l3d_engine::image::Image;
 use l3d_formats::icons::Icons;
 
 use crate::Data;

@@ -3,6 +3,8 @@
 
 use bevy::input::mouse::MouseScrollUnit;
 use bevy::prelude::*;
+use l3d_engine::asset::{Assets, Handle};
+use l3d_engine::image::Image;
 
 use crate::ui::{Button, ImageNode, Interaction, Node, Overflow};
 use crate::{CurrentLevel, Data};
