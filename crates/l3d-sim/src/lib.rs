@@ -85,20 +85,22 @@ const BRICKS: u8 = 6;
 /// Ticks a builder takes to walk the length of a brick after laying it, at
 /// walking speed.
 pub const BRICK_WALK_TICKS: i32 = (BRICK_RUN + WALK_SPEED - 1) / WALK_SPEED;
-/// How long a builder out of bricks shrugs (cells 474–488, three frames;
-/// two ticks each, unmeasured).
-const SHRUG_TICKS: u32 = 6;
-/// Each brick moves the builder this far forward, 0.55 unit, and ¼ unit up
-/// (measured: 37 px a brick at 67 px a unit in Practice "Builder"; a run of
-/// ½ left the published bridges of Mayhem 1 and Taxing 5 about 0.3 unit
-/// short); bricks reach from [`BRICK_START`] to [`BRICK_END`] ahead of the
-/// feet, about 0.55 unit long (measured), so consecutive bricks overlap.
-const BRICK_RUN: i32 = 141;
+/// How long a builder out of bricks stands on its last brick before walking
+/// off along it (cells 474–488; verified on a changed "Team Work",
+/// 2026-10-22: about 1.1 s at the start of the last brick, then about 17
+/// ticks walking to its end, and the fall).
+const SHRUG_TICKS: u32 = 15;
+/// Each brick moves the builder this far forward, ½ unit, and ¼ unit up;
+/// bricks reach from [`BRICK_START`] to [`BRICK_END`] ahead of the feet, so
+/// consecutive bricks meet end to end (verified on a changed "Team Work",
+/// 2026-10-23: twelve bricks from mid-cell, side-on against a reference
+/// column, gave 0.50 and 0.249 a brick, the eleventh ending at the column).
+const BRICK_RUN: i32 = SUB / 2;
 /// Bricks start at the builder's feet, so one laid at a block's edge leaves
 /// no gap for walkers to drop through (the published routes of Taxing 19
 /// "Lemmtris" and Tricky 14 "Chocolate Drop" have followers cross that way).
 const BRICK_START: i32 = 0;
-const BRICK_END: i32 = SUB / 2 + SUB / 8 + SUB / 16;
+const BRICK_END: i32 = SUB / 2;
 /// Ticks per stroke of a basher (verified: the segments go 32 ticks after the
 /// first crack).
 pub const BASH_TICKS: u32 = 32;
@@ -622,7 +624,6 @@ pub struct Simulation {
     pub log: Vec<(u64, Command)>,
     /// Ticks until the next release.
     release_timer: u32,
-    next_entrance: usize,
     /// Splitter cells, and for each heading in (in [`Dir`] order) whether
     /// the next walker through turns left.
     splitters: Vec<([i32; 3], [bool; 4])>,
@@ -682,7 +683,6 @@ impl Simulation {
             tick: 0,
             log: Vec::new(),
             release_timer: HATCH_OPEN_TICKS,
-            next_entrance: 0,
             events: Vec::new(),
             object_kind: objects::level_objects(level).map(|(k, _)| k),
             objects: objects::level_objects(level)
@@ -763,8 +763,23 @@ impl Simulation {
         }
         self.skills_left[skill as usize] -= 1;
         let l = &mut self.lemmings[i];
-        // Switched from another terrain skill, or given more bricks, a
-        // lemming starts where it stands (provisional).
+        // A builder out of bricks given more walks on to the end of its last
+        // brick and builds on from there (verified on a changed "Team Work",
+        // 2026-10-22: given while it stood on its last brick or walked along
+        // it, the next staircase began at the brick's end).
+        if skill == Skill::Builder
+            && matches!(
+                l.state,
+                State::Shrugging | State::Building { bricks_left: 0 }
+            )
+        {
+            l.pending = Some(State::Building {
+                bricks_left: BRICKS,
+            });
+            return true;
+        }
+        // Switched from another terrain skill, a lemming starts where it
+        // stands (provisional).
         if l.state != State::Walking
             && let Some(s) = match skill {
                 Skill::Basher => Some(State::Bashing),
@@ -846,10 +861,16 @@ impl Simulation {
         self.time_left = self.time_left.saturating_sub(1);
         if self.counts.released < self.to_release && !self.entrances.is_empty() {
             if self.release_timer == 0 {
-                let e = self.entrances[self.next_entrance % self.entrances.len()];
-                self.next_entrance += 1;
-                self.lemmings.push(Lemming::new(e.spawn, e.dir));
-                self.counts.released += 1;
+                // Every hatch drops one at once (owner's observation of the
+                // three hatches of Mayhem 18 "Castle Peralus").
+                for i in 0..self.entrances.len() {
+                    if self.counts.released == self.to_release {
+                        break;
+                    }
+                    let e = self.entrances[i];
+                    self.lemmings.push(Lemming::new(e.spawn, e.dir));
+                    self.counts.released += 1;
+                }
                 // The countdown includes the releasing tick: the next release
                 // comes `release_interval` ticks after this one.
                 self.release_timer = self.release_interval() - 1;
@@ -1053,7 +1074,30 @@ impl Simulation {
             State::Falling { from_y } => self.fall(l, from_y),
             State::Floating => self.float(l),
             State::Walking | State::Sliding => {
-                if !(l.state == State::Walking && Self::take_up_pending(l)) {
+                // A builder on bricks starts its staircase at the end of the
+                // brick it walks on, where its next brick would have gone,
+                // so the staircases join (verified: the original's second
+                // staircase went on from the first with no gap), not at the
+                // middle of the cell.
+                let on_bricks = l.state == State::Walking
+                    && matches!(l.pending, Some(State::Building { .. }))
+                    && self.on_brick(l);
+                let started = if on_bricks {
+                    match self.brick_end_ahead(l) {
+                        Some(d) => {
+                            let step = ahead_of(l.pos, l.dir.delta(), d);
+                            l.pos[0] = step[0];
+                            l.pos[2] = step[2];
+                            let s = l.pending.take().expect("pending builder");
+                            l.set_state(s);
+                            true
+                        }
+                        None => false,
+                    }
+                } else {
+                    l.state == State::Walking && Self::take_up_pending(l)
+                };
+                if !started {
                     let d = l.dir.delta();
                     let to_middle =
                         matches!(l.pending, Some(State::Building { .. } | State::Digging));
@@ -1141,8 +1185,12 @@ impl Simulation {
                 }
             }
             State::Blocking | State::Turning { .. } => {
-                // Standing still; fall if the ground disappears.
-                let (ground, _) = self.world.surface_below(l.pos[0], l.pos[1], l.pos[2]);
+                // Standing still; fall if the ground disappears. Looked for
+                // from a step up, as a walker does, so that one standing on
+                // the join of two bricks stands on the higher one.
+                let (ground, _) = self
+                    .world
+                    .surface_below(l.pos[0], l.pos[1] + STEP_UP, l.pos[2]);
                 if ground < l.pos[1] - STEP_DOWN {
                     l.start_falling();
                 }
@@ -1155,6 +1203,27 @@ impl Simulation {
         self.teleport(l);
         self.board_rope_slide(l);
         self.spring(l);
+    }
+
+    /// Whether a lemming stands on a builder's brick rather than on terrain.
+    fn on_brick(&self, l: &Lemming) -> bool {
+        let below = [l.pos[0], l.pos[1] - 1, l.pos[2]];
+        self.world.solid(below) && !self.world.terrain_solid(below)
+    }
+
+    /// How far a walker is from the end of the ground it stands on, when its
+    /// next step would carry it off: just past the last point along its
+    /// heading where the ground is still under it (bricks end there).
+    fn brick_end_ahead(&self, l: &Lemming) -> Option<i32> {
+        let grounded = |d: i32| {
+            let p = ahead_of(l.pos, l.dir.delta(), d);
+            let (ground, _) = self.world.surface_below(p[0], l.pos[1] + STEP_UP, p[2]);
+            ground >= l.pos[1] - STEP_DOWN
+        };
+        if grounded(WALK_SPEED) {
+            return None;
+        }
+        (0..WALK_SPEED).rev().find(|&d| grounded(d)).map(|d| d + 1)
     }
 
     /// Starts a walker's pending skill if it has reached the place to: the
@@ -1750,6 +1819,13 @@ impl Simulation {
         // it at walking speed to where the next is laid (owner: it walks
         // over the brick, it does not jump to its end).
         let phase = ((l.state_ticks - FIRST_BRICK_TICKS) % BUILD_TICKS) as i32;
+        if bricks_left == 0 && phase == 1 {
+            // After the last brick it steps up onto it and stands there
+            // before walking off along it (verified, see SHRUG_TICKS).
+            l.pos[1] += SUB / 4;
+            l.set_state(State::Shrugging);
+            return;
+        }
         if (1..=BRICK_WALK_TICKS).contains(&phase) {
             let d = l.dir.delta();
             let run = |p: i32| BRICK_RUN * p / BRICK_WALK_TICKS;
@@ -2293,11 +2369,16 @@ impl Simulation {
                 // is lost (measured in the original's Practice "Turner" at
                 // release rate 99). One landing past the centre is turned
                 // where it lands (measured on a test level: hatch lemmings
-                // landing about ¼ past the centre of a turner's cell).
+                // landing about ¼ past the centre of a turner's cell). One
+                // just turned at the centre by something else is turned
+                // again (verified on a changed "Team Work", 2026-10-23: with
+                // a turner in a deflector's cell, the deflected walkers were
+                // all turned by it and paced in that cell).
                 Some(to) if to != l.dir && l.dir == o.heading && Self::cell_of(o.pos) == here => {
                     let centre = mid(l.pos[axis]);
                     let past = (centre - l.pos[axis]) * d[axis] <= 0;
-                    if landed && past {
+                    if (landed && past) || l.pos[axis] == centre {
+                        l.pos[axis] = centre;
                         l.dir = to;
                         return;
                     }
@@ -2374,9 +2455,17 @@ impl Simulation {
         } else {
             surface
         };
-        let blocked = surface > l.pos[1] + STEP_UP
-            || wall(&self.world, body + STEP_UP + 2)
-            || wall(&self.world, body + HEAD_HEIGHT - 1);
+        // A ceiling turns the walker only where its head would touch it, on
+        // the next step: under a 45° overhang a walker gets as far as the
+        // middle of the cell, where the underside is half a unit up
+        // (verified on a changed "Team Work", 2026-10-22: a climber that
+        // climbed a cube with an upside-down ramp on top walked in under the
+        // ramp to about the middle before turning).
+        let ceiling = self
+            .world
+            .terrain_solid([next[0], body + HEAD_HEIGHT - 1, next[2]]);
+        let blocked =
+            surface > l.pos[1] + STEP_UP || wall(&self.world, body + STEP_UP + 2) || ceiling;
         if blocked {
             // Climbers climb walls that reach down to their feet; at an
             // overhang they turn like walkers (provisional: lets the

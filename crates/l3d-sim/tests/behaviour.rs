@@ -179,16 +179,17 @@ fn builder_lays_six_bricks() {
     // At the middle of its cell or its edge, whichever came first.
     let on = |v: i32| [0, SUB / 2, SUB - 1].contains(&v.rem_euclid(SUB));
     assert!(on(start[0]) && on(start[2]), "started at {start:?}");
-    run(&mut sim, 6 * 25 + 10);
+    while sim.lemmings[0].state != State::Shrugging {
+        assert!(sim.tick < 30 + SUB as u64 + 6 * 25 + 20, "never finished");
+        sim.step();
+    }
     assert_eq!(sim.world.bricks.len(), 6);
-    // Each brick: ¼ unit up and 0.55 unit forward.
+    // Each brick: ¼ unit up and ½ unit forward; the builder stands at the
+    // start of its last brick.
     let end = sim.lemmings[0].pos;
     assert_eq!(end[1] - start[1], 6 * SUB / 4);
     let run_len = (end[0] - start[0]).abs() + (end[2] - start[2]).abs();
-    assert!(
-        (6 * 141..6 * 141 + SUB / 4).contains(&run_len),
-        "ran {run_len}"
-    );
+    assert_eq!(run_len, 5 * SUB / 2);
 }
 
 #[test]
