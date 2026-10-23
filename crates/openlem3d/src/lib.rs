@@ -207,6 +207,9 @@ fn wgpu_settings() -> WgpuSettings {
 #[bevy_main]
 pub fn main() {
     let opts = parse_args();
+    // Before the window shows, so the game doesn't lay itself out around
+    // the system bars first and then again without them.
+    platform::full_screen();
     let dir = locate_data_dir(opts.data.as_deref().or(platform::data_dir().as_deref()));
     let data = GameData::open(&dir).unwrap_or_else(|e| {
         eprintln!(

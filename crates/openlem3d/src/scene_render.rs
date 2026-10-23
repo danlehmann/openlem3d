@@ -117,6 +117,12 @@ impl Plugin for SceneRenderPlugin {
             return;
         };
         render_app
+            .add_systems(
+                Render,
+                idle_before_surfaces
+                    .run_if(bevy::render::view::need_surface_configuration)
+                    .before(bevy::render::view::create_surfaces),
+            )
             .add_systems(Render, prepare_scene.in_set(RenderSystems::Prepare))
             .add_systems(Core2d, draw_scene.before(Core2dSystems::MainPass))
             .add_systems(
@@ -920,6 +926,26 @@ fn set_viewport(pass: &mut wgpu::RenderPass, viewport: UVec4) {
         0.0,
         1.0,
     );
+}
+
+/// Waits for the GPU to finish its work before Bevy configures a window's
+/// surface. wgpu waits once, but the Pixel 11 Pro's PowerVR driver sometimes
+/// ends a wait early (well before its timeout), so wgpu finds work still
+/// running and fails to configure the surface; the next frame then panics.
+/// Waiting again until the work is done avoids that.
+fn idle_before_surfaces(device: Res<RenderDevice>) {
+    const LIMIT: std::time::Duration = std::time::Duration::from_secs(1);
+    let start = std::time::Instant::now();
+    let wait = wgpu::PollType::Wait {
+        submission_index: None,
+        timeout: Some(LIMIT),
+    };
+    while let Err(e) = device.poll(wait.clone()) {
+        if !matches!(e, wgpu::PollError::Timeout) || start.elapsed() >= LIMIT {
+            warn!("GPU not idle before configuring the surface: {e}");
+            return;
+        }
+    }
 }
 
 /// Turns off Bevy's GPU mesh preprocessing and culling, which the game, drawing

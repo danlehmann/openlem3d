@@ -6,6 +6,12 @@
 API=26
 P=$(echo "$ANDROID_NDK_HOME"/toolchains/llvm/prebuilt/*)
 case "$0" in *++.sh) PP=++ ;; esac
+# cc-rs passes an unversioned --target, which newer NDK headers reject.
+for a in "$@"; do
+    shift
+    case "$a" in --target=aarch64-linux-android) a=--target=aarch64-linux-android$API ;; esac
+    set -- "$@" "$a"
+done
 if "$P/bin/clang" --version >/dev/null 2>&1; then
     exec "$P/bin/aarch64-linux-android$API-clang$PP" "$@"
 fi
