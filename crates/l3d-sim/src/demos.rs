@@ -841,15 +841,17 @@ pub const SOLUTIONS: &[Solution] = &[
             (2465, 11, 6, None),
         ],
     ),
-    // Mayhem 8 "Five Towers": the best known in ours, 2 short of the 30
+    // Mayhem 8 "Five Towers": the best known in ours, 1 short of the 30
     // needed; with both hatches dropping at once, the lemmings right behind
-    // each builder walk off its unfinished staircase.
+    // each builder walk off its unfinished staircase (one is held back by
+    // a digger with nothing to dig).
     Solution {
         level: 67,
         plan: Plan::At(&[
             (294, 1, 1, Some(true)),
             (415, 3, 3, None),
             (580, 3, 1, Some(true)),
+            (590, 21, 6, None),
             (608, 7, 3, None),
             (763, 7, 3, None),
             (928, 7, 3, None),
@@ -859,7 +861,7 @@ pub const SOLUTIONS: &[Solution] = &[
             (1430, 0, 2, None),
             (1535, 2, 1, Some(false)),
         ]),
-        saves: 28,
+        saves: 29,
     },
     // Mayhem 9 "Over the Top", by the published walkthrough.
     at(
@@ -1221,7 +1223,7 @@ pub const SOLUTIONS: &[Solution] = &[
                 (544, 1, 4, None),
                 (1210, 1, 4, None),
                 (1510, 4, 4, None),
-                (1660, 0, 2, None),
+                (1675, 0, 2, None),
             ],
         ),
         saves: 0,
@@ -1278,14 +1280,14 @@ pub const SOLUTIONS: &[Solution] = &[
             (129, 0, 4, None),
             (516, 0, 3, None),
             (860, 0, 6, None),
-            (1360, 5, 2, None),
-            (1565, 6, 4, None),
+            (1350, 5, 2, None),
+            (1550, 6, 4, None),
             (1750, 6, 5, None),
-            (2200, 38, 1, Some(true)),
-            (2370, 39, 1, Some(true)),
-            (2482, 40, 1, Some(false)),
-            (2652, 41, 1, Some(false)),
-            (2760, 42, 1, Some(true)),
+            (2185, 6, 1, Some(true)),
+            (2352, 36, 1, Some(true)),
+            (2470, 37, 1, Some(false)),
+            (2638, 38, 1, Some(false)),
+            (2745, 39, 1, Some(true)),
         ],
     ),
     // Mayhem 14 "Jelly Belly Islands" by a route of our own, after the
@@ -1303,6 +1305,29 @@ pub const SOLUTIONS: &[Solution] = &[
             (802, 5, 1, Some(true)),
         ],
     ),
+    // Mayhem 18 "Castle Peralus", after the published strategy with a route
+    // of our own for the middle lane.
+    at(
+        77,
+        &[
+            (100, 1, 7, None),
+            (306, 7, 3, None),
+            (420, 7, 4, None),
+            (446, 1, 5, None),
+            (466, 0, 3, None),
+            (466, 2, 3, None),
+            (476, 7, 3, None),
+            (552, 1, 6, None),
+            (606, 0, 3, None),
+            (606, 2, 3, None),
+            (771, 0, 3, None),
+            (771, 2, 3, None),
+            (801, 0, 4, None),
+            (801, 2, 4, None),
+            (854, 7, 3, None),
+            (1070, 7, 2, None),
+        ],
+    ),
     // Mayhem 20 "Final Maze" by a route of our own.
     at(
         79,
@@ -1313,8 +1338,10 @@ pub const SOLUTIONS: &[Solution] = &[
             (1000, 4, 3, None),
             (1102, 4, 1, Some(true)),
             (1166, 6, 0, None),
-            (1290, 8, 1, Some(false)),
-            (1350, 9, 1, Some(true)),
+            (1206, 7, 0, None),
+            (2290, 7, 2, None),
+            (2401, 8, 1, Some(false)),
+            (2480, 9, 1, Some(true)),
         ],
     ),
 ];

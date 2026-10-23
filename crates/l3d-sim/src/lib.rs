@@ -33,6 +33,10 @@ const FLOAT_OPEN: i32 = 3 * SUB / 2;
 const CLIMB_SPEED: i32 = SUB / 25;
 /// Highest step a walker climbs without turning (provisional: one segment).
 const STEP_UP: i32 = SUB / 4;
+/// How much more than [`STEP_UP`] a walker still steps up: the thin edge
+/// a sloped cell keeps at its low side, so that a slope ending a sliver
+/// below a step does not turn walkers round (Mayhem 16 "Fun Fair"'s spokes).
+const STEP_SLACK: i32 = SUB / 32;
 /// Lowest drop a walker steps down without falling (provisional).
 const STEP_DOWN: i32 = SUB / 4;
 /// Falls of this height or more splat (owner's observations: 3¾ units
@@ -1795,6 +1799,15 @@ impl Simulation {
         p.map(|v| v.div_euclid(SUB))
     }
 
+    /// Whether two positions are in the same column of cells and within
+    /// half a unit of each other's height: a turner standing on the high
+    /// edge of a slope, at a whole-unit height, is in the cell above the
+    /// walkers it turns.
+    fn same_column(a: [i32; 3], b: [i32; 3]) -> bool {
+        let (ca, cb) = (Self::cell_of(a), Self::cell_of(b));
+        ca[0] == cb[0] && ca[2] == cb[2] && (a[1] - b[1]).abs() < SUB / 2
+    }
+
     /// Falls or stands depending on the ground now under the feet.
     fn settle(&mut self, l: &mut Lemming) -> bool {
         let (ground, _) = self
@@ -2375,7 +2388,9 @@ impl Simulation {
                 // again (verified on a changed "Team Work", 2026-10-23: with
                 // a turner in a deflector's cell, the deflected walkers were
                 // all turned by it and paced in that cell).
-                Some(to) if to != l.dir && l.dir == o.heading && Self::cell_of(o.pos) == here => {
+                Some(to)
+                    if to != l.dir && l.dir == o.heading && Self::same_column(o.pos, l.pos) =>
+                {
                     let centre = mid(l.pos[axis]);
                     let past = (centre - l.pos[axis]) * d[axis] <= 0;
                     if (landed && past) || l.pos[axis] == centre {
@@ -2438,9 +2453,9 @@ impl Simulation {
         // The surface where the feet will be after this step: a step up of
         // more than STEP_UP there is a wall. (Probing further ahead would
         // read a 45° ramp as a wall.)
-        let (surface, _) = self
-            .world
-            .surface_below(next[0], l.pos[1] + STEP_UP + 1, next[2]);
+        let (surface, _) =
+            self.world
+                .surface_below(next[0], l.pos[1] + STEP_UP + STEP_SLACK + 1, next[2]);
         // Body clearance ahead: solid at step height above that surface is a
         // wall (a ramp rises at most REACH over the probe distance, which stays
         // below this), and a ceiling lower than the walker's head blocks too.
@@ -2465,8 +2480,14 @@ impl Simulation {
         let ceiling = self
             .world
             .terrain_solid([next[0], body + HEAD_HEIGHT - 1, next[2]]);
-        let blocked =
-            surface > l.pos[1] + STEP_UP || wall(&self.world, body + STEP_UP + 2) || ceiling;
+        // A walker going up a slope looks only at its next step: it steps
+        // onto a ledge a step above the slope's top (verified on a changed
+        // "Team Work", 2026-10-23: walkers came up a 22.5° slope from the
+        // floor to half a unit and stepped onto a slab a quarter above it).
+        let rising = surface > l.pos[1] && surface - l.pos[1] <= WALK_SPEED;
+        let blocked = surface > l.pos[1] + STEP_UP + STEP_SLACK
+            || (!rising && wall(&self.world, body + STEP_UP + 2))
+            || ceiling;
         if blocked {
             // Climbers climb walls that reach down to their feet; at an
             // overhang they turn like walkers (provisional: lets the
