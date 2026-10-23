@@ -620,8 +620,9 @@ pub struct Simulation {
     /// Ticks until the next release.
     release_timer: u32,
     next_entrance: usize,
-    /// Splitter cells, and whether the next walker through goes left.
-    splitters: Vec<([i32; 3], bool)>,
+    /// Splitter cells, and for each heading in (in [`Dir`] order) whether
+    /// the next walker through turns left.
+    splitters: Vec<([i32; 3], [bool; 4])>,
     /// Events since the last [`Simulation::take_events`].
     events: Vec<Event>,
     /// The level's interactive objects and what they all are.
@@ -687,7 +688,7 @@ impl Simulation {
             splitters: level
                 .cells()
                 .filter(|(_, _, _, b, _)| b.id == SPLITTER_ID && !b.is_empty())
-                .map(|(x, y, z, _, _)| ([x as i32, y as i32, z as i32], false))
+                .map(|(x, y, z, _, _)| ([x as i32, y as i32, z as i32], [true, true, false, false]))
                 .collect(),
             // Stored Z first: [min z, min x, max z, max x] (docs/spec/level.md).
             border: [b[1] as i32, b[0] as i32, b[3] as i32, b[2] as i32],
@@ -2207,22 +2208,23 @@ impl Simulation {
         let next = ahead_of(l.pos, d, speed);
         let axis = if d[0] != 0 { 0 } else { 2 };
         // Blockers and turners: walking into one redirects the walker.
-        // Splitters send walkers alternately left and right as they cross
-        // the cell centre ([L3DEdit]: block 2 where non-solid). The first goes
-        // right: in the original's demo of Practice "Splitter" the first
-        // lemming seen went to its right and the next to its left (weak:
-        // maybe not the very first).
+        // Splitters turn walkers aside as they cross the cell centre
+        // ([L3DEdit]: block 2 where non-solid), left and right in turn, each
+        // heading in keeping its own turn: walkers along X start left, walkers
+        // along Z start right, whatever the block's rotation
+        // (docs/spec/behaviour.md, "Splitter").
         let here = Self::cell_of(l.pos);
         if let Some(s) = self.splitters.iter_mut().find(|(c, _)| *c == here) {
             let centre = mid(l.pos[axis]);
             if crosses(l.pos[axis], next[axis], centre, d[axis]) {
                 l.pos[axis] = centre;
-                l.dir = if s.1 {
+                let left = &mut s.1[l.dir as usize];
+                l.dir = if *left {
                     l.dir.anticlockwise()
                 } else {
                     l.dir.clockwise()
                 };
-                s.1 = !s.1;
+                *left = !*left;
                 return;
             }
         }
