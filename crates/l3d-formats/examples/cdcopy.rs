@@ -9,7 +9,8 @@
 //!   (`docs/spec/level.md`), to the end of the copy and points the file's
 //!   directory record at it. Each run starts again from the original level;
 //!   `LEVEL=OTHER` starts from level OTHER's file instead, so `98=68` puts
-//!   Mayhem 9 in the Practice "Trampoline" slot.
+//!   Mayhem 9 in the Practice "Trampoline" slot. The slot also gets the
+//!   block file `BLK.nnn` of the level written, which defines its blocks.
 //!   An edit `@OFFSET=B,B,...` writes raw bytes (hex) at a hex offset of the
 //!   unpacked level, e.g. a preset camera (`docs/spec/level.md`).
 //!
@@ -64,6 +65,17 @@ fn level(dir: &Path, n: u32, from: u32, edits: &[String]) {
         );
         level[i..i + 2].copy_from_slice(&raw.to_le_bytes());
     }
+    put(dir, &mut data, &format!("LEVEL.{n:03}"), &level);
+    // The level's own blocks go with it: a slot's BLK may lack blocks the
+    // level uses (one-way blocks, splitters). Rerunning `N` puts its own
+    // back.
+    let blk = data.read(&format!("LEVELS/BLK.{from:03}")).unwrap();
+    put(dir, &mut data, &format!("BLK.{n:03}"), &blk);
+}
+
+/// Writes `bytes` as file `LEVELS/name`, unpacked, to the end of the copy and
+/// points its directory record there.
+fn put(dir: &Path, data: &mut GameData, name: &str, bytes: &[u8]) {
     // The directory record of the file, in the LEVELS directory's extent.
     let levels = data.fs.lookup("LEVELS").unwrap();
     let mut iso = File::options()
@@ -75,16 +87,16 @@ fn level(dir: &Path, n: u32, from: u32, edits: &[String]) {
     let dir_at = levels.lba as u64 * SECTOR_SIZE as u64;
     iso.seek(SeekFrom::Start(dir_at)).unwrap();
     iso.read_exact(&mut extent).unwrap();
-    let name = format!("LEVEL.{n:03};1");
+    let name = format!("{name};1");
     let pos = extent
         .windows(name.len())
         .position(|w| w == name.as_bytes())
         .expect("directory record");
     let rec = pos - 33;
-    // Append the level, sector-aligned.
+    // Append the bytes, sector-aligned.
     let end = iso.seek(SeekFrom::End(0)).unwrap();
     let lba = end.div_ceil(SECTOR_SIZE as u64) as u32;
-    let mut padded = level.clone();
+    let mut padded = bytes.to_vec();
     padded.resize(padded.len().div_ceil(SECTOR_SIZE) * SECTOR_SIZE, 0);
     iso.seek(SeekFrom::Start(lba as u64 * SECTOR_SIZE as u64))
         .unwrap();
@@ -98,7 +110,7 @@ fn level(dir: &Path, n: u32, from: u32, edits: &[String]) {
         b
     };
     extent[rec + 2..rec + 10].copy_from_slice(&both(lba));
-    extent[rec + 10..rec + 18].copy_from_slice(&both(level.len() as u32));
+    extent[rec + 10..rec + 18].copy_from_slice(&both(bytes.len() as u32));
     iso.seek(SeekFrom::Start(dir_at)).unwrap();
     iso.write_all(&extent).unwrap();
     // The volume's size in the primary volume descriptor.
@@ -106,8 +118,9 @@ fn level(dir: &Path, n: u32, from: u32, edits: &[String]) {
         .unwrap();
     iso.write_all(&both(sectors)).unwrap();
     println!(
-        "LEVEL.{n:03}: {} bytes unpacked at sector {lba}",
-        level.len()
+        "{}: {} bytes unpacked at sector {lba}",
+        &name[..name.len() - 2],
+        bytes.len()
     );
 }
 

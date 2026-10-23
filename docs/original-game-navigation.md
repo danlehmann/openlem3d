@@ -468,6 +468,14 @@ files (Practice "Miner" and Fun 2 loaded changed). Point DOSBox-X at it with
 `LM3D.SAV`, so back it up first and restore it afterwards. Windows refuses to
 run programs whose name contains "patch" without elevation, hence the name.
 
+`N=OTHER` puts level OTHER into slot N, for example a Mayhem level into a
+Practice slot that the serial mouse can reach. The slot also gets OTHER's
+block file `BLK.nnn`. **Verified:** a slot's block file decides which blocks
+exist. With the slot's own file, Mayhem 11 in the Trampoline slot lost its
+diverter (lemmings piled up at it) and one-way block 8 was neither drawn nor
+solid in Practice "One Way". With the level's own file both worked. Rerunning
+`cdcopy level temp/patched N` puts the slot's level and block file back.
+
 An edit `@OFFSET=B,B,...` writes raw bytes (hex) into the unpacked level
 instead, for header fields (`docs/spec/level.md`). **Verified** on Practice
 "Trampoline":
