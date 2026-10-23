@@ -15,6 +15,7 @@ use l3d_formats::{sheets, title};
 
 use crate::menu::{AppState, MenuRating};
 use crate::texture::indexed_image;
+use crate::ui::{BackgroundColor, Button, ImageNode, Interaction, Node, Overflow, percent, px};
 use crate::{CurrentLevel, Data};
 
 /// The original's screen, in which all positions are given.
@@ -95,7 +96,7 @@ impl Plugin for TitlePlugin {
                 ),
             )
             .add_systems(OnExit(AppState::Options), despawn::<ScreenRoot>)
-            .add_systems(PostUpdate, layout.before(bevy::ui::UiSystems::Layout));
+            .add_systems(PostUpdate, layout.before(crate::ui::UiSystems::Layout));
     }
 }
 
@@ -447,14 +448,7 @@ pub(crate) fn despawn<T: Component>(mut commands: Commands, roots: Query<Entity,
 }
 
 pub(crate) fn image_at(image: Handle<Image>, rect: At) -> (ImageNode, At, Node) {
-    (
-        ImageNode::new(image),
-        rect,
-        Node {
-            position_type: PositionType::Absolute,
-            ..default()
-        },
-    )
+    (ImageNode::new(image), rect, Node::default())
 }
 
 /// Spawns the root, the backdrop (tinted by `tint`) and the canvas; returns
@@ -464,7 +458,6 @@ pub(crate) fn spawn_screen(commands: &mut Commands, art: &Art, scroll: f32, tint
         .spawn((
             ScreenRoot,
             Node {
-                position_type: PositionType::Absolute,
                 width: percent(100),
                 height: percent(100),
                 overflow: Overflow::clip(),
@@ -478,23 +471,12 @@ pub(crate) fn spawn_screen(commands: &mut Commands, art: &Art, scroll: f32, tint
             .spawn((
                 Backdrop(scroll),
                 ImageNode::new(bg.clone()).with_color(tint),
-                Node {
-                    position_type: PositionType::Absolute,
-                    ..default()
-                },
+                Node::default(),
             ))
             .id();
         commands.entity(root).add_child(backdrop);
     }
-    let canvas = commands
-        .spawn((
-            Canvas(SCREEN),
-            Node {
-                position_type: PositionType::Absolute,
-                ..default()
-            },
-        ))
-        .id();
+    let canvas = commands.spawn((Canvas(SCREEN), Node::default())).id();
     commands.entity(root).add_child(canvas);
     canvas
 }
@@ -536,15 +518,8 @@ fn spawn_title(mut commands: Commands, art: Option<Res<Art>>, roots: Query<(), W
     // The banner: paper, then a clipped strip of pages, then the winders.
     let paper = at(PAPER.min.x, PAPER.min.y, PAPER.width(), PAPER.height());
     child(&mut commands, &mut |c| {
-        c.spawn((
-            paper,
-            Node {
-                position_type: PositionType::Absolute,
-                ..default()
-            },
-            BackgroundColor(Color::WHITE),
-        ))
-        .id()
+        c.spawn((paper, Node::default(), BackgroundColor(Color::WHITE)))
+            .id()
     });
     if let Some(font) = &art.banner {
         let pages = banner_pages();
@@ -552,7 +527,6 @@ fn spawn_title(mut commands: Commands, art: Option<Res<Art>>, roots: Query<(), W
             .spawn((
                 at(PAPER.min.x, 0.0, PAPER.width(), SCREEN.y),
                 Node {
-                    position_type: PositionType::Absolute,
                     overflow: Overflow::clip(),
                     ..default()
                 },
@@ -563,10 +537,7 @@ fn spawn_title(mut commands: Commands, art: Option<Res<Art>>, roots: Query<(), W
             .spawn((
                 BannerStrip { pages: pages.len() },
                 at(0.0, 0.0, 1.0, 1.0),
-                Node {
-                    position_type: PositionType::Absolute,
-                    ..default()
-                },
+                Node::default(),
             ))
             .id();
         commands.entity(window).add_child(strip);
@@ -600,10 +571,7 @@ fn spawn_title(mut commands: Commands, art: Option<Res<Art>>, roots: Query<(), W
                 Winder { mirrored: true },
                 img,
                 at(256.0, 70.0, 64.0, 64.0),
-                Node {
-                    position_type: PositionType::Absolute,
-                    ..default()
-                },
+                Node::default(),
             ))
             .id()
         });
@@ -629,7 +597,6 @@ fn spawn_title(mut commands: Commands, art: Option<Res<Art>>, roots: Query<(), W
         c.spawn((
             RatingSign,
             image_at(Handle::default(), at(207.0, 153.0, 32.0, 32.0)),
-            Pickable::IGNORE,
         ))
         .id()
     });
@@ -637,7 +604,6 @@ fn spawn_title(mut commands: Commands, art: Option<Res<Art>>, roots: Query<(), W
         c.spawn((
             RatingLabel,
             image_at(Handle::default(), at(0.0, 0.0, 0.0, 0.0)),
-            Pickable::IGNORE,
         ))
         .id()
     });
@@ -1036,10 +1002,7 @@ fn spawn_code(
             CodeArea,
             Button,
             at(32.0, 90.0, 34.0 * MAX_CODE_LEN as f32, 32.0),
-            Node {
-                position_type: PositionType::Absolute,
-                ..default()
-            },
+            Node::default(),
         ))
         .id();
     commands.entity(canvas).add_child(area);

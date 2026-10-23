@@ -9,6 +9,7 @@ use crate::Game;
 use crate::lemming_cam::LemmingCam;
 use crate::menu::AppState;
 use crate::scene_render::SceneCamera;
+use crate::ui::{ImageNode, Interaction, Node, px};
 
 pub struct HudPlugin;
 
@@ -400,11 +401,7 @@ fn spawn_turner_marker(
         commands.spawn((
             TurnerArrow(side),
             ImageNode::default(),
-            Node {
-                position_type: PositionType::Absolute,
-                ..default()
-            },
-            Pickable::IGNORE,
+            Node::default(),
             Visibility::Hidden,
         ));
     }

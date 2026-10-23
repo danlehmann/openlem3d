@@ -36,6 +36,7 @@ mod texture;
 mod title;
 mod touch;
 mod trackpad;
+mod ui;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -50,6 +51,7 @@ use l3d_formats::blk::BlockSet;
 use l3d_formats::gamedata::{GameData, locate_data_dir};
 use l3d_formats::level::{CameraPreset, Level};
 use scene_render::{SceneCamera, SceneContent, SceneRenderPlugin};
+use ui::{Interaction, Node};
 
 /// A simulation length or coordinate in sub-units ([`l3d_sim::SUB`] to the
 /// unit), in units.
@@ -269,6 +271,7 @@ pub fn main() {
             pixels::PixelsPlugin,
             screen::ScreenPlugin,
             key_buttons::KeyButtonsPlugin,
+            ui::UiPlugin,
         ))
         .insert_resource(ClearColor(Color::srgb(0.35, 0.55, 0.85)))
         .insert_resource(opts.clone())

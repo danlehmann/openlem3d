@@ -15,6 +15,7 @@ use crate::menu::AppState;
 use crate::settings::Settings;
 use crate::texture::indexed_image;
 use crate::title::{Art, ScreenRoot, at, image_at, spawn_screen};
+use crate::ui::{Button, ImageNode, Interaction, Node};
 use crate::{CurrentLevel, Data};
 
 pub struct PracticePlugin;
@@ -221,36 +222,25 @@ fn spawn_grid(
             && let Some(umbrella) = &pics.umbrella
         {
             let u = commands
-                .spawn((
-                    image_at(
-                        umbrella.clone(),
-                        at(cx - size / 2.0 - 2.0, cy - size / 2.0 - 25.0, 32.0, 32.0),
-                    ),
-                    Pickable::IGNORE,
-                ))
+                .spawn((image_at(
+                    umbrella.clone(),
+                    at(cx - size / 2.0 - 2.0, cy - size / 2.0 - 25.0, 32.0, 32.0),
+                ),))
                 .id();
             commands.entity(canvas).add_child(u);
         }
         if i < 20 && settings.completed.contains(&level_of(i)) {
             let t = commands
-                .spawn((
-                    image_at(pics.tick.clone(), at(cx - 4.0, cy - 16.0, 32.0, 32.0)),
-                    Pickable::IGNORE,
-                ))
+                .spawn((image_at(
+                    pics.tick.clone(),
+                    at(cx - 4.0, cy - 16.0, 32.0, 32.0),
+                ),))
                 .id();
             commands.entity(canvas).add_child(t);
         }
     }
     let line = commands
-        .spawn((
-            NameLine,
-            Node {
-                position_type: PositionType::Absolute,
-                ..default()
-            },
-            at(0.0, 0.0, 320.0, 200.0),
-            Pickable::IGNORE,
-        ))
+        .spawn((NameLine, Node::default(), at(0.0, 0.0, 320.0, 200.0)))
         .id();
     commands.entity(canvas).add_child(line);
 }

@@ -15,6 +15,7 @@ use l3d_formats::level::{SIZE_X, SIZE_Y, SIZE_Z};
 
 use crate::menu::AppState;
 use crate::texture::rgba_image;
+use crate::ui::ComputedUi;
 use crate::{CurrentLevel, Data, Game, ViewCamera};
 
 pub struct MinimapPlugin;
@@ -258,7 +259,7 @@ fn click(
     touches: Res<Touches>,
     windows: Query<&Window>,
     screen: Res<crate::screen::Screen>,
-    nodes: Query<(&ComputedNode, &UiGlobalTransform), With<MinimapView>>,
+    nodes: Query<&ComputedUi, With<MinimapView>>,
     mut views: Query<&mut ViewCamera>,
 ) {
     if !map.is_some_and(|m| m.clickable && m.shown) {
@@ -273,15 +274,10 @@ fn click(
             .map(|t| screen.on_screen(t.position()))
             .next()
     };
-    let (Some(point), Ok((node, transform)), Ok(mut view)) =
-        (point, nodes.single(), views.single_mut())
-    else {
+    let (Some(point), Ok(node), Ok(mut view)) = (point, nodes.single(), views.single_mut()) else {
         return;
     };
-    let scale = node.inverse_scale_factor();
-    let size = node.size() * scale;
-    let centre = transform.translation * scale;
-    let rel = (point - (centre - size / 2.0)) / size;
+    let rel = (point - node.rect.min) / node.rect.size();
     if !(0.0..1.0).contains(&rel.x) || !(0.0..1.0).contains(&rel.y) {
         return;
     }

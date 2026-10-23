@@ -14,6 +14,7 @@ use crate::lemming_cam::LemmingCam;
 use crate::menu::AppState;
 use crate::screen::Screen;
 use crate::title::{Art, Glyphs, at, image_at};
+use crate::ui::{Button, ImageNode, Interaction, Node, px};
 
 /// The colour of a button's text under the pointer (as the level list's).
 const HOVER: Color = Color::srgb(1.0, 0.9, 0.2);
@@ -24,7 +25,7 @@ pub struct KeyButtonsPlugin;
 
 impl Plugin for KeyButtonsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(PreUpdate, press.after(bevy::ui::UiSystems::Focus))
+        app.add_systems(PreUpdate, press.after(crate::ui::UiSystems::Focus))
             .add_systems(Update, (hover, level_button));
     }
 }
@@ -123,10 +124,7 @@ pub(crate) fn spawn_text_button(
             Button,
             KeyButton { key, colour },
             at(x, y, width, font.size.y),
-            Node {
-                position_type: PositionType::Absolute,
-                ..default()
-            },
+            Node::default(),
         ))
         .id();
     for (gx, image) in glyphs {
@@ -193,7 +191,6 @@ fn level_button(
                 colour,
             },
             Node {
-                position_type: PositionType::Absolute,
                 left: px(((size.x - width * s) / 2.0).round()),
                 top: px(LEVEL_BUTTON_TOP * s),
                 width: px(width * s),
@@ -207,7 +204,6 @@ fn level_button(
             .spawn((
                 ImageNode::new(image).with_color(colour),
                 Node {
-                    position_type: PositionType::Absolute,
                     left: px(gx * s),
                     width: px(font.size.x * s),
                     height: px(font.size.y * s),

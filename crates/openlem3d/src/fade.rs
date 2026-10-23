@@ -5,6 +5,7 @@
 use bevy::prelude::*;
 
 use crate::menu::AppState;
+use crate::ui::{BackgroundColor, GlobalZIndex, Node, percent};
 
 pub struct FadePlugin;
 
@@ -65,14 +66,12 @@ fn spawn(mut commands: Commands) {
     commands.spawn((
         Fade::default(),
         Node {
-            position_type: PositionType::Absolute,
             width: percent(100),
             height: percent(100),
             ..default()
         },
         BackgroundColor(Color::NONE),
         GlobalZIndex(i32::MAX - 1),
-        Pickable::IGNORE,
     ));
 }
 

@@ -8,6 +8,7 @@ use bevy::prelude::*;
 use crate::key_buttons::KeyButton;
 use crate::menu::AppState;
 use crate::title::{Art, At, Canvas, at, image_at};
+use crate::ui::{BackgroundColor, Button, ImageNode, Node, percent};
 
 pub struct ConfirmPlugin;
 
@@ -67,25 +68,14 @@ fn show(
         .spawn((
             ConfirmRoot,
             Node {
-                position_type: PositionType::Absolute,
                 width: percent(100),
                 height: percent(100),
                 ..default()
             },
             BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.4)),
-            Pickable::IGNORE,
         ))
         .id();
-    let canvas = commands
-        .spawn((
-            Canvas(SCREEN),
-            Node {
-                position_type: PositionType::Absolute,
-                ..default()
-            },
-            Pickable::IGNORE,
-        ))
-        .id();
+    let canvas = commands.spawn((Canvas(SCREEN), Node::default())).id();
     commands.entity(root).add_child(canvas);
     for (row, line) in LINES.iter().enumerate() {
         let (glyphs, width) = font.layout(line);
@@ -106,7 +96,7 @@ fn show(
                 if let Some(c) = shade {
                     bundle.0.color = c;
                 }
-                let g = commands.spawn((bundle, Pickable::IGNORE)).id();
+                let g = commands.spawn(bundle).id();
                 commands.entity(canvas).add_child(g);
             }
         }
@@ -133,10 +123,7 @@ fn show(
                     colour: Color::WHITE,
                 },
                 at(x0, y - pad / 2.0, x1 - x0, font.size.y * SCALE + pad),
-                Node {
-                    position_type: PositionType::Absolute,
-                    ..default()
-                },
+                Node::default(),
             ))
             .id();
         commands.entity(canvas).add_child(b);

@@ -17,6 +17,7 @@ use l3d_formats::screen;
 use crate::menu::AppState;
 use crate::texture::indexed_image;
 use crate::title::{Art, At, Canvas, at, image_at};
+use crate::ui::{BackgroundColor, Button, ImageNode, Interaction, Node, percent};
 use crate::{CurrentLevel, Data, Game, ViewCamera};
 
 pub struct BriefingPlugin;
@@ -133,7 +134,6 @@ fn spawn_briefing(
         .spawn((
             BriefingRoot,
             Node {
-                position_type: PositionType::Absolute,
                 width: percent(100),
                 height: percent(100),
                 ..default()
@@ -141,15 +141,7 @@ fn spawn_briefing(
             BackgroundColor(Color::BLACK),
         ))
         .id();
-    let canvas = commands
-        .spawn((
-            Canvas(SCREEN),
-            Node {
-                position_type: PositionType::Absolute,
-                ..default()
-            },
-        ))
-        .id();
+    let canvas = commands.spawn((Canvas(SCREEN), Node::default())).id();
     commands.entity(root).add_child(canvas);
     let add = |commands: &mut Commands, bundle: (ImageNode, At, Node)| {
         let e = commands.spawn(bundle).id();
@@ -216,15 +208,7 @@ fn spawn_briefing(
         (Choice::Menu, 522.0, 110.0),
     ] {
         let e = commands
-            .spawn((
-                choice,
-                Button,
-                at(x, PROMPT_Y, w, 32.0),
-                Node {
-                    position_type: PositionType::Absolute,
-                    ..default()
-                },
-            ))
+            .spawn((choice, Button, at(x, PROMPT_Y, w, 32.0), Node::default()))
             .id();
         commands.entity(canvas).add_child(e);
     }
@@ -536,30 +520,19 @@ fn preview_overlay(
         .spawn((
             PreviewRoot,
             Node {
-                position_type: PositionType::Absolute,
                 width: percent(100),
                 height: percent(100),
                 ..default()
             },
-            Pickable::IGNORE,
         ))
         .id();
-    let canvas = commands
-        .spawn((
-            Canvas(SCREEN),
-            Node {
-                position_type: PositionType::Absolute,
-                ..default()
-            },
-            Pickable::IGNORE,
-        ))
-        .id();
+    let canvas = commands.spawn((Canvas(SCREEN), Node::default())).id();
     commands.entity(root).add_child(canvas);
     let add = |commands: &mut Commands, mut bundle: (ImageNode, At, Node), shade: Option<Color>| {
         if let Some(c) = shade {
             bundle.0.color = c;
         }
-        let e = commands.spawn((bundle, Pickable::IGNORE)).id();
+        let e = commands.spawn(bundle).id();
         commands.entity(canvas).add_child(e);
     };
     let text = |commands: &mut Commands, s: &str, x: f32, y: f32| {
@@ -618,15 +591,7 @@ fn preview_overlay(
     };
     for &(choice, x, w) in buttons {
         let e = commands
-            .spawn((
-                choice,
-                Button,
-                at(x, PROMPT_Y, w, 32.0),
-                Node {
-                    position_type: PositionType::Absolute,
-                    ..default()
-                },
-            ))
+            .spawn((choice, Button, at(x, PROMPT_Y, w, 32.0), Node::default()))
             .id();
         commands.entity(canvas).add_child(e);
     }

@@ -9,6 +9,7 @@ use bevy::prelude::*;
 
 use crate::menu::AppState;
 use crate::title::{Art, Canvas, at, image_at};
+use crate::ui::{BackgroundColor, Button, ImageNode, Interaction, Node, percent};
 use crate::{CurrentLevel, Data, Game};
 
 pub struct ResultsPlugin;
@@ -117,7 +118,6 @@ fn spawn_results(
         .spawn((
             ResultsRoot,
             Node {
-                position_type: PositionType::Absolute,
                 width: percent(100),
                 height: percent(100),
                 ..default()
@@ -125,15 +125,7 @@ fn spawn_results(
             BackgroundColor(Color::BLACK),
         ))
         .id();
-    let canvas = commands
-        .spawn((
-            Canvas(SCREEN),
-            Node {
-                position_type: PositionType::Absolute,
-                ..default()
-            },
-        ))
-        .id();
+    let canvas = commands.spawn((Canvas(SCREEN), Node::default())).id();
     commands.entity(root).add_child(canvas);
     let add = |commands: &mut Commands, bundle: (ImageNode, crate::title::At, Node)| {
         let e = commands.spawn(bundle).id();
@@ -148,10 +140,7 @@ fn spawn_results(
         let panel = commands
             .spawn((
                 at(120.0, 120.0, 400.0, 200.0),
-                Node {
-                    position_type: PositionType::Absolute,
-                    ..default()
-                },
+                Node::default(),
                 BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.7)),
             ))
             .id();
@@ -241,15 +230,7 @@ fn spawn_results(
     text(&mut commands, "Menu", 561.0, 445.0, false);
     for (choice, x, w) in [(Choice::Next, 25.0, 200.0), (Choice::Menu, 522.0, 110.0)] {
         let e = commands
-            .spawn((
-                choice,
-                Button,
-                at(x, 438.0, w, 32.0),
-                Node {
-                    position_type: PositionType::Absolute,
-                    ..default()
-                },
-            ))
+            .spawn((choice, Button, at(x, 438.0, w, 32.0), Node::default()))
             .id();
         commands.entity(canvas).add_child(e);
     }

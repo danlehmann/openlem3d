@@ -16,6 +16,7 @@ use crate::lemming_cam::LemmingCam;
 use crate::menu::AppState;
 use crate::screen::Screen;
 use crate::texture::indexed_image;
+use crate::ui::{Button, ImageNode, Interaction, Node, percent, px};
 use crate::{Data, Game, LevelInfo, PresetIndex, ViewCamera};
 
 pub struct PanelPlugin;
@@ -247,12 +248,10 @@ fn spawn_panel(mut commands: Commands, art: Option<Res<Art>>, mut images: ResMut
         .spawn((
             PanelRoot,
             Node {
-                position_type: PositionType::Absolute,
                 width: percent(100),
                 height: percent(100),
                 ..default()
             },
-            Pickable::IGNORE,
         ))
         .id();
     let item = |commands: &mut Commands,
@@ -264,10 +263,7 @@ fn spawn_panel(mut commands: Commands, art: Option<Res<Art>>, mut images: ResMut
         let mut e = commands.spawn((
             PanelPos { at, size },
             ImageNode::new(image),
-            Node {
-                position_type: PositionType::Absolute,
-                ..default()
-            },
+            Node::default(),
         ));
         if let Some(a) = action {
             e.insert((Button, a));
@@ -299,10 +295,7 @@ fn spawn_panel(mut commands: Commands, art: Option<Res<Art>>, mut images: ResMut
                 size: Vec2::splat(64.0),
             },
             ImageNode::default(),
-            Node {
-                position_type: PositionType::Absolute,
-                ..default()
-            },
+            Node::default(),
             Button,
             crate::minimap::MinimapView,
             Visibility::Hidden,
@@ -479,10 +472,7 @@ fn spawn_panel(mut commands: Commands, art: Option<Res<Art>>, mut images: ResMut
                             size: glyphs.size,
                         },
                         ImageNode::default(),
-                        Node {
-                            position_type: PositionType::Absolute,
-                            ..default()
-                        },
+                        Node::default(),
                         Visibility::Hidden,
                     ))
                     .id();
@@ -505,15 +495,7 @@ fn spawn_panel(mut commands: Commands, art: Option<Res<Art>>, mut images: ResMut
             2,
         );
     }
-    let c = commands
-        .spawn((
-            Caption::default(),
-            Node {
-                position_type: PositionType::Absolute,
-                ..default()
-            },
-        ))
-        .id();
+    let c = commands.spawn((Caption::default(), Node::default())).id();
     commands.entity(root).add_child(c);
 }
 
@@ -1134,11 +1116,7 @@ fn caption(
                     size: font.size,
                 },
                 ImageNode::new(image),
-                Node {
-                    position_type: PositionType::Absolute,
-                    ..default()
-                },
-                Pickable::IGNORE,
+                Node::default(),
             ))
             .id();
         commands.entity(entity).add_child(g);

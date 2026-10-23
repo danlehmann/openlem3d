@@ -17,6 +17,7 @@ use l3d_formats::sheets;
 use crate::menu::AppState;
 use crate::scene_render::SceneCamera;
 use crate::texture::rgba_image;
+use crate::ui::Interaction;
 use crate::{Data, Game};
 
 pub struct PointerPlugin;

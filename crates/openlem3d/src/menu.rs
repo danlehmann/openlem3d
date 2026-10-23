@@ -4,6 +4,7 @@
 use bevy::input::mouse::MouseScrollUnit;
 use bevy::prelude::*;
 
+use crate::ui::{Button, ImageNode, Interaction, Node, Overflow};
 use crate::{CurrentLevel, Data};
 
 /// Whether the player is choosing a level or playing one.
@@ -216,7 +217,6 @@ fn ensure_menu(
         .spawn((
             at(0.0, ROW_TOP, 320.0, ROW_STEP * ROWS_SHOWN as f32),
             Node {
-                position_type: PositionType::Absolute,
                 overflow: Overflow::clip(),
                 ..default()
             },
@@ -232,10 +232,7 @@ fn ensure_menu(
                 320.0,
                 ROW_STEP * LEVELS_PER_RATING as f32,
             ),
-            Node {
-                position_type: PositionType::Absolute,
-                ..default()
-            },
+            Node::default(),
         ))
         .id();
     commands.entity(window).add_child(body);
@@ -248,10 +245,7 @@ fn ensure_menu(
                 Button,
                 ListRow(n),
                 at(0.0, y, 320.0, ROW_STEP),
-                Node {
-                    position_type: PositionType::Absolute,
-                    ..default()
-                },
+                Node::default(),
             ))
             .id();
         commands.entity(body).add_child(hit);

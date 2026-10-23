@@ -10,6 +10,7 @@ use bevy::prelude::*;
 
 use crate::ViewCamera;
 use crate::menu::AppState;
+use crate::ui::Interaction;
 
 /// Finger travel (logical pixels) below which a touch counts as a tap.
 pub const TAP_SLOP: f32 = 12.0;
@@ -42,7 +43,7 @@ impl Plugin for TouchPlugin {
                 PreUpdate,
                 touch_over_mouse
                     .after(bevy::input::InputSystems)
-                    .before(bevy::ui::UiSystems::Focus),
+                    .before(crate::ui::UiSystems::Focus),
             );
     }
 }

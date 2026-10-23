@@ -13,6 +13,7 @@ use crate::menu::AppState;
 use crate::settings::{SLIDER_STEPS, Settings};
 use crate::texture::indexed_image;
 use crate::title::{Art, ScreenRoot, at, image_at, spawn_screen};
+use crate::ui::{BackgroundColor, BorderColor, Button, ImageNode, Interaction, Node, px};
 
 pub struct OptionsPlugin;
 
@@ -115,12 +116,11 @@ fn panel_box(commands: &mut Commands, parent: Entity, x: f32, y: f32, w: f32, h:
         .spawn((
             at(x, y, w, h),
             Node {
-                position_type: PositionType::Absolute,
-                border: UiRect::all(px(1)),
+                border: px(1),
                 ..default()
             },
             BackgroundColor(Color::srgba(0.0, 0.02, 0.2, 0.7)),
-            BorderColor::all(Color::srgb(0.25, 0.35, 0.8)),
+            BorderColor(Color::srgb(0.25, 0.35, 0.8)),
         ))
         .id();
     commands.entity(parent).add_child(e);
@@ -178,7 +178,6 @@ fn spawn_options(
             .spawn((
                 Light(item, 1),
                 image_at(lights.off.clone(), at(x + 67.0, y + 3.0, 7.0, 8.0)),
-                Pickable::IGNORE,
             ))
             .id();
         commands.entity(canvas).add_child(l);

@@ -9,6 +9,7 @@ use bevy::prelude::*;
 use crate::menu::AppState;
 use crate::settings::Settings;
 use crate::title::{Art, At, Canvas, ScreenRoot, at, image_at};
+use crate::ui::{Button, ImageNode, Interaction, Node, percent};
 
 pub struct StylePlugin;
 
@@ -88,19 +89,13 @@ fn title_label(
             ModeLabel,
             Button,
             at(left, 0.0, width, font.size.y),
-            Node {
-                position_type: PositionType::Absolute,
-                ..default()
-            },
+            Node::default(),
         ))
         .id();
     commands.entity(canvas).add_child(label);
     for (x, image) in glyphs {
         let g = commands
-            .spawn((
-                image_at(image, at(x, 0.0, font.size.x, font.size.y)),
-                Pickable::IGNORE,
-            ))
+            .spawn((image_at(image, at(x, 0.0, font.size.x, font.size.y)),))
             .id();
         commands.entity(label).add_child(g);
     }
@@ -138,23 +133,14 @@ fn toggle_in_level(
         .spawn((
             NoticeRoot(now),
             Node {
-                position_type: PositionType::Absolute,
                 width: percent(100),
                 height: percent(100),
                 ..default()
             },
-            Pickable::IGNORE,
         ))
         .id();
     let canvas = commands
-        .spawn((
-            Canvas(NOTICE_SCREEN),
-            Node {
-                position_type: PositionType::Absolute,
-                ..default()
-            },
-            Pickable::IGNORE,
-        ))
+        .spawn((Canvas(NOTICE_SCREEN), Node::default()))
         .id();
     commands.entity(root).add_child(canvas);
     let (glyphs, width) = font.layout(name(settings.enhanced));
@@ -174,7 +160,7 @@ fn toggle_in_level(
             if let Some(c) = shade {
                 bundle.0.color = c;
             }
-            let g = commands.spawn((bundle, Pickable::IGNORE)).id();
+            let g = commands.spawn(bundle).id();
             commands.entity(canvas).add_child(g);
         }
     }
