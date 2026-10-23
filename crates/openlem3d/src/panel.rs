@@ -210,6 +210,8 @@ pub(crate) struct Panel {
     texts: Vec<(GlyphText, Vec<NodeId>)>,
     bar: Option<NodeId>,
     knob: Option<NodeId>,
+    /// The height bar held, from a press on it until that button is let go.
+    bar_drag: Option<BarDrag>,
     map: Option<NodeId>,
     frame: Option<NodeId>,
     caption: Option<(NodeId, String)>,
@@ -690,29 +692,71 @@ fn height_at(y: f32) -> f32 {
     ((BAR_TOP - y.clamp(*KNOB_RANGE.start(), *KNOB_RANGE.end())) / BAR_SLOPE).powf(2.0 / 3.0)
 }
 
-/// The height bar: the knob shows the camera's height. Holding the camera
-/// button on the bar (in Enhanced mode, either button) moves the camera up
-/// or down, at the camera keys' speed, to the height whose knob would sit
-/// under the pointer (verified: the original's camera climbs and sinks
-/// until the knob reaches the pointer; its left button does nothing there).
+/// A hold on the height bar: by which button, and, when it took the knob,
+/// how far below the knob's centre (original pixels).
+#[derive(Clone, Copy)]
+struct BarDrag {
+    button: MouseButton,
+    knob: Option<f32>,
+}
+
+/// Camera speed while the height bar is held off the knob: the Shift keys'
+/// (ours; the original's is the camera keys').
+const BAR_SPEED: f32 = 16.0;
+/// How fast a dragged knob's camera catches up with the pointer: the part
+/// of the way left it covers per second, as a rate (ours: about 30 ms).
+const KNOB_CATCH_UP: f32 = 30.0;
+
+/// The height bar: the knob shows the camera's height. Pressing the camera
+/// button on the bar (in Enhanced mode, either button) holds it until that
+/// button is let go, wherever the pointer goes. Held off the knob, the
+/// camera climbs or sinks until the knob reaches the pointer (verified: so
+/// does the original's; its left button does nothing there); the knob
+/// itself, taken, follows the pointer at once (ours).
 fn height_bar(w: &mut World) {
     let (window, screen, mouse) = (&w.e.window, &w.screen, &w.e.input.mouse);
     let (settings, time, lemming_cam) = (&w.settings, w.e.time.game, &w.lemming_cam);
     let view = &mut w.view;
-    let held = mouse.pressed(settings.turn_button())
-        || (settings.enhanced && mouse.pressed(settings.action_button()));
-    let on_bar = w
-        .panel
+    let panel = &mut w.panel;
+    let pointer = screen.cursor(window).map(|p| p.y / scale(screen));
+    let on_bar = panel
         .bar
         .is_some_and(|b| w.ui.interaction(b) != Interaction::None);
-    if held
-        && lemming_cam.following().is_none()
+    let buttons = [
+        Some(settings.turn_button()),
+        settings.enhanced.then(|| settings.action_button()),
+    ];
+    if let Some(button) = buttons
+        .into_iter()
+        .flatten()
+        .find(|&b| mouse.just_pressed(b))
         && on_bar
-        && let Some(p) = screen.cursor(window)
+        && let Some(y) = pointer
     {
-        let target = height_at(p.y / scale(screen) - KNOB_CENTRE);
-        let step = crate::CAMERA_SPEED * settings.camera_factor() * time.delta_secs();
-        view.pos.y += (target - view.pos.y).clamp(-step, step);
+        // The knob's yellow square, a row either side to spare.
+        let centre = knob_at(view.pos.y) + KNOB_CENTRE;
+        let knob = (y - centre).abs() <= KNOB_CENTRE + 1.0;
+        panel.bar_drag = Some(BarDrag {
+            button,
+            knob: knob.then_some(y - centre),
+        });
+    }
+    if panel.bar_drag.is_some_and(|d| !mouse.pressed(d.button)) || lemming_cam.following().is_some()
+    {
+        panel.bar_drag = None;
+    }
+    if let Some(drag) = panel.bar_drag
+        && let Some(y) = pointer
+    {
+        let target = height_at(y - drag.knob.unwrap_or(0.0) - KNOB_CENTRE);
+        let dt = time.delta_secs();
+        view.pos.y += match drag.knob {
+            Some(_) => (target - view.pos.y) * (1.0 - (-KNOB_CATCH_UP * dt).exp()),
+            None => {
+                let step = BAR_SPEED * settings.camera_factor() * dt;
+                (target - view.pos.y).clamp(-step, step)
+            }
+        };
         view.glide = None;
     }
     if let Some(knob) = w.panel.knob.and_then(|k| w.panel.pos.get_mut(&k)) {
