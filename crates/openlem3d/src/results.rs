@@ -59,7 +59,13 @@ pub(crate) fn level_over(w: &mut World) {
     let outcome = Outcome {
         level: current.number,
         saved: sim.counts.saved,
-        total: sim.to_release.max(1),
+        // The level's lemmings: a nuke cuts `to_release` down to those
+        // already out, which turned 79 needed of 80 into 7900%.
+        total: game
+            .terrain
+            .as_ref()
+            .map_or(sim.to_release, |(level, ..)| level.lemmings as u32)
+            .max(1),
         needed: game.save_requirement,
     };
     w.sfx.play(if outcome.passed() {
