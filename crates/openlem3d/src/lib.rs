@@ -945,7 +945,7 @@ const FAST_FORWARD_TICKS: u32 = 3;
 
 /// P or Space pauses and resumes the level, and Enter turns fast-forward on
 /// and off (not during the preview, which keeps it waiting itself, nor while
-/// the restart question is open).
+/// the restart question is open). Coming back from the background pauses it.
 fn pause_keys(w: &mut World) {
     let (keys, game) = (&w.e.input.keys, &mut w.game);
     if w.preview.active || w.confirm.question.is_some() {
@@ -953,6 +953,10 @@ fn pause_keys(w: &mut World) {
     }
     if keys.any_just_pressed([KeyCode::KeyP, KeyCode::Space]) {
         game.paused = !game.paused;
+    }
+    // Back from the background (Android), the level waits to be resumed.
+    if w.e.input.resumed {
+        game.paused = true;
     }
     if keys.any_just_pressed([KeyCode::Enter, KeyCode::NumpadEnter]) {
         game.fast_forward = !game.fast_forward;

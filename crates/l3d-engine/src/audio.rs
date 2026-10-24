@@ -1,9 +1,11 @@
 //! Sound: 16-bit PCM played on the system's default output. [`Audio::play`]
 //! plays a sound through once; [`Audio::play_looped`] keeps one going for
-//! as long as the [`Playing`] it returns is kept.
+//! as long as the [`Playing`] it returns is kept. [`Audio::set_paused`]
+//! holds every sound where it is.
 
 use std::num::NonZero;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use rodio::{Player, Source};
@@ -20,6 +22,8 @@ pub struct Sound {
 #[derive(Default)]
 pub struct Audio {
     output: Option<rodio::MixerDeviceSink>,
+    /// While set, every sound plays silence and keeps its place.
+    paused: Arc<AtomicBool>,
 }
 
 /// A sound playing; it stops when this goes.
@@ -42,7 +46,15 @@ impl Audio {
                 s
             })
             .ok();
-        Audio { output }
+        Audio {
+            output,
+            paused: Arc::default(),
+        }
+    }
+
+    /// Holds every sound where it is (silent), or lets them go on.
+    pub fn set_paused(&self, paused: bool) {
+        self.paused.store(paused, Ordering::Relaxed);
     }
 
     fn start(&self, sound: &Sound, looped: bool, volume: f32) -> Option<Player> {
@@ -53,6 +65,7 @@ impl Audio {
             sound: sound.clone(),
             next: 0,
             looped,
+            paused: self.paused.clone(),
         });
         Some(player)
     }
@@ -75,12 +88,16 @@ struct Pcm {
     sound: Sound,
     next: usize,
     looped: bool,
+    paused: Arc<AtomicBool>,
 }
 
 impl Iterator for Pcm {
     type Item = rodio::Sample;
 
     fn next(&mut self) -> Option<rodio::Sample> {
+        if self.paused.load(Ordering::Relaxed) {
+            return Some(0.0);
+        }
         let samples = &self.sound.samples;
         if self.next >= samples.len() {
             if !self.looped || samples.is_empty() {

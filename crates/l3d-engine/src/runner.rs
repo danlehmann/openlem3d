@@ -174,14 +174,22 @@ impl<G: Game> ApplicationHandler for Runner<G> {
             return;
         };
         self.active = true;
+        log::info!("back from the background: the window can be drawn into");
         let engine = self.engine();
+        engine.audio.set_paused(false);
         engine.handle = Some(WindowHandle(window));
         engine.handle_generation += 1;
     }
 
+    /// The app went into the background (Android takes the window away):
+    /// the sound holds until it comes back.
     fn suspended(&mut self, _: &ActiveEventLoop) {
         self.active = false;
-        self.engine().handle = None;
+        log::info!("in the background: the window was taken away");
+        self.events.push(Raw::Suspended);
+        let engine = self.engine();
+        engine.handle = None;
+        engine.audio.set_paused(true);
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _: WindowId, event: WindowEvent) {

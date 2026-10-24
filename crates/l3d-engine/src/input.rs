@@ -25,6 +25,8 @@ pub struct Input {
     pub pinches: Vec<PinchGesture>,
     /// The window gaining (true) or losing the keyboard this frame.
     pub focus: Vec<bool>,
+    /// Whether the app was in the background (Android) since the last frame.
+    pub resumed: bool,
 }
 
 /// Which of some buttons are held, and which went down or up since the
@@ -316,6 +318,8 @@ pub(crate) enum Raw {
     /// The window gained or lost the keyboard (losing it lets go of the
     /// keys held).
     Focus(bool),
+    /// The app went into the background.
+    Suspended,
 }
 
 /// Takes in the input since the last frame, after forgetting what went down
@@ -330,6 +334,7 @@ pub(crate) fn take_in(input: &mut Input, events: Vec<Raw>) {
     input.pans.clear();
     input.pinches.clear();
     input.focus.clear();
+    input.resumed = false;
     let touches = &mut input.touches;
     touches.just_pressed.clear();
     touches.just_released.clear();
@@ -368,6 +373,7 @@ pub(crate) fn take_in(input: &mut Input, events: Vec<Raw>) {
             Raw::Touch(id, phase, p) => input.touches.event(id, phase, p),
             Raw::Pan(d) => input.pans.push(PanGesture(d)),
             Raw::Pinch(d) => input.pinches.push(PinchGesture(d)),
+            Raw::Suspended => input.resumed = true,
             Raw::Focus(focused) => {
                 input.focus.push(focused);
                 if !focused {
