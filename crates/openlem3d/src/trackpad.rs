@@ -81,11 +81,11 @@ pub(crate) fn trackpad_camera(w: &mut World) {
             let fingers = TwoFingers {
                 delta,
                 spread: a1.distance(b1) - a0.distance(b0),
-                twist: pad.twist.turn((b0 - a0).angle_to(b1 - a1)),
+                twist: pad.twist.turn((b0 - a0).angle_to(b1 - a1), delta.length()),
                 turning,
                 toward,
             };
-            two_fingers(&mut w.view, &fingers, &w.game);
+            two_fingers(&mut w.view, &fingers);
         }
     }
     pad.previous = now;
@@ -109,7 +109,7 @@ pub(crate) fn gesture_camera(w: &mut World) {
         turning: turning(&input.keys),
         toward: ray(w),
     };
-    two_fingers(&mut w.view, &fingers, &w.game);
+    two_fingers(&mut w.view, &fingers);
 }
 
 /// The way through the pointer, for pinching towards it.

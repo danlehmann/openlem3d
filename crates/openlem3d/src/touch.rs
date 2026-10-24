@@ -21,6 +21,14 @@ pub const MOVE_PER_PX: f32 = 0.02;
 /// How far two fingers twist (radians) before the world turns with them, so
 /// that dragging and pinching don't turn it by the way (ours).
 const TWIST_START: f32 = 0.2;
+/// How far two fingers move together (pixels) for the twist so far to fall
+/// to a third (`1/e`): a hand turns a little as it drags, and that alone
+/// should not start a twist.
+const TWIST_FORGET_PX: f32 = 100.0;
+/// How far in front of the camera, towards the fingers, a twist turns the
+/// world about (grid units). A fixed distance rather than the spot under the
+/// fingers, which jumps between near blocks and far water as they move.
+const PIVOT_DISTANCE: f32 = 8.0;
 
 /// While a finger is down, the window forgets the mouse pointer's last
 /// position, so that buttons are pressed where the finger is: Bevy's UI
@@ -73,7 +81,7 @@ pub fn lifted(w: &World) -> bool {
 /// One finger: horizontal drag turns, vertical drag moves forward/back.
 /// Two fingers: as [`two_fingers`].
 pub(crate) fn touch_camera(w: &mut World) {
-    let (screen, camera, game) = (&w.screen, &w.camera, &w.game);
+    let (screen, camera) = (&w.screen, &w.camera);
     let twist = &mut w.touch_twist;
     let active: Vec<_> = w.e.input.touches.iter().collect();
     if active.len() < 2 {
@@ -96,11 +104,14 @@ pub(crate) fn touch_camera(w: &mut World) {
         let fingers = TwoFingers {
             delta,
             spread: now.0.distance(now.1) - before.0.distance(before.1),
-            twist: twist.turn((before.1 - before.0).angle_to(now.1 - now.0)),
+            twist: twist.turn(
+                (before.1 - before.0).angle_to(now.1 - now.0),
+                delta.length(),
+            ),
             turning: false,
             toward: crate::screen_ray(screen, camera, screen.on_screen((now.0 + now.1) / 2.0)),
         };
-        two_fingers(&mut w.view, &fingers, game);
+        two_fingers(&mut w.view, &fingers);
         return;
     }
     let cam = &mut w.view;
@@ -128,9 +139,9 @@ pub(crate) struct TwoFingers {
 /// Two fingers: dragging moves the camera sideways and up and down (or,
 /// `turning`, turns it and moves it forward and back, as one finger does);
 /// spreading them apart moves it towards where they are, pinching them
-/// together back; twisting them turns the world about the spot there, as if
-/// turning it with them.
-pub(crate) fn two_fingers(cam: &mut ViewCamera, f: &TwoFingers, game: &crate::Game) {
+/// together back; twisting them turns the world, as if turning it with them,
+/// about a point [`PIVOT_DISTANCE`] ahead towards them.
+pub(crate) fn two_fingers(cam: &mut ViewCamera, f: &TwoFingers) {
     let fwd = cam.forward();
     let right = Vec3::new(-fwd.z, 0.0, fwd.x);
     if f.turning {
@@ -140,10 +151,11 @@ pub(crate) fn two_fingers(cam: &mut ViewCamera, f: &TwoFingers, game: &crate::Ga
         cam.pos += (-right * f.delta.x + Vec3::Y * f.delta.y) * MOVE_PER_PX;
     }
     cam.pos += f.toward.unwrap_or(fwd) * f.spread * MOVE_PER_PX;
-    if f.twist != 0.0
-        && let Some(spot) = crate::spot_under(game, cam.pos, f.toward)
-    {
-        cam.orbit(spot, f.twist);
+    if f.twist != 0.0 {
+        let way = f.toward.unwrap_or(fwd);
+        let flat = Vec2::new(way.x, way.z).normalize_or(Vec2::new(fwd.x, fwd.z));
+        let spot = Vec2::new(cam.pos.x, cam.pos.z) + flat * PIVOT_DISTANCE;
+        cam.orbit(spot.to_array(), f.twist);
     }
     cam.glide = None;
 }
@@ -157,8 +169,12 @@ pub(crate) struct Twist {
 }
 
 impl Twist {
-    /// How far a twist by `angle` turns the world.
-    pub fn turn(&mut self, angle: f32) -> f32 {
+    /// How far a twist by `angle`, as the fingers move `travel` pixels
+    /// together, turns the world.
+    pub fn turn(&mut self, angle: f32, travel: f32) -> f32 {
+        if !self.on {
+            self.total *= (-travel / TWIST_FORGET_PX).exp();
+        }
         self.total += angle;
         self.on |= self.total.abs() > TWIST_START;
         if self.on { angle } else { 0.0 }

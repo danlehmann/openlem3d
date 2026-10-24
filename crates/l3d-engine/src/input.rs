@@ -334,10 +334,11 @@ pub(crate) fn take_in(input: &mut Input, events: Vec<Raw>) {
     touches.just_pressed.clear();
     touches.just_released.clear();
     touches.just_canceled.clear();
-    if events.iter().any(|e| matches!(e, Raw::Touch(..))) {
-        for t in touches.pressed.values_mut() {
-            t.previous_position = t.position;
-        }
+    // Every frame, so that a frame without a touch event (the screen
+    // refreshing faster than the touchscreen reports) moves nothing rather
+    // than repeating the last move.
+    for t in touches.pressed.values_mut() {
+        t.previous_position = t.position;
     }
     for e in events {
         match e {
