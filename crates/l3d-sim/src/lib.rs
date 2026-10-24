@@ -772,6 +772,10 @@ impl Simulation {
             return false;
         }
         self.skills_left[skill as usize] -= 1;
+        if self.lemmings[i].state == State::Digging {
+            let digger = self.lemmings[i].clone();
+            self.leave_dig(&digger);
+        }
         let l = &mut self.lemmings[i];
         // A builder still building given more carries on with the same
         // staircase, its bricks topped up: starting a new one where it
@@ -2393,9 +2397,33 @@ impl Simulation {
         Some((c, b, f))
     }
 
+    /// Leaves the segments digger `l` is part way through dug that far: their
+    /// cracks stay, and a later digger there carries on from them (owner's
+    /// observation: a digger turned builder left its cracks behind; carrying
+    /// on is inferred).
+    fn leave_dig(&mut self, l: &Lemming) {
+        let Some((c, mask, t)) = self.dig_target(l) else {
+            return;
+        };
+        self.world.dig_wear.retain(|w| w.0 != c);
+        if t > 0 && mask != 0 {
+            self.world.dig_wear.push((c, mask, t));
+        }
+    }
+
     fn dig(&mut self, l: &mut Lemming) {
+        // Starting on segments another digger left part dug: as far on.
+        if l.state_ticks == 1
+            && let Some((c, mask, _)) = self.dig_target(l)
+            && let Some(&(_, _, t)) = self.world.dig_wear.iter().find(|w| w.0 == c && w.1 == mask)
+        {
+            l.state_ticks += t;
+        }
         if !l.state_ticks.is_multiple_of(DIG_TICKS) {
             return;
+        }
+        if let Some((c, _, _)) = self.dig_target(l) {
+            self.world.dig_wear.retain(|w| w.0 != c);
         }
         match self.dig_cell(l) {
             Some((c, b, f)) if f & flags::STEEL == 0 => {

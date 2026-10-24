@@ -233,7 +233,7 @@ from there (**verified with a changed level**, 2026-10-24: switched at a
 platform's last cell after a quarter was dug, it walked to the edge and its
 staircase began out over the drop; the owner saw the same on Mayhem 1. An
 earlier run in the middle of a platform, read as "builds where it stands",
-fits this too: there the first brick met the hole's far wall). The published solution of Mayhem 1 "The Five Arches" [XeyeWalk]
+fits this too: there the first brick met the hole's far wall). The cracks of a segment the digger was part way through stay on the block (owner's observation), and a digger later set to work there carries on from them (inferred). The published solution of Mayhem 1 "The Five Arches" [XeyeWalk]
 makes a digger a builder too; with ½-unit bricks our simulation of it no
 longer saves the 78 needed (open). Implemented as such; a basher or miner
 switched to starts where it stands (ours). Blockers and turners are given

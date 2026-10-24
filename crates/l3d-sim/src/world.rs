@@ -51,6 +51,10 @@ pub struct World {
     /// The level's most common ordinary block id (≥ 9), used for terrain
     /// that lemmings create where no block gives a better choice.
     pub common_id: u8,
+    /// Segments a digger left part dug: the cell, the segments it was
+    /// digging out and the ticks it had spent on them. The cracks stay, and
+    /// a digger there later carries on from them.
+    pub dig_wear: Vec<([i32; 3], u8, u32)>,
 }
 
 /// A builder's brick: a box from `min` (inclusive) to `max` (exclusive)
@@ -122,6 +126,7 @@ impl World {
             changes: Vec::new(),
             bricks: Vec::new(),
             bricks_changed: false,
+            dig_wear: Vec::new(),
             common_id,
         }
     }
@@ -152,6 +157,7 @@ impl World {
         if cell.block.segments & mask == 0 || !self.breakable_towards(c, toward) {
             return bricks_removed;
         }
+        self.dig_wear.retain(|w| w.0 != c);
         cell.block.segments &= !mask;
         let i = index(c[0] as usize, c[1] as usize, c[2] as usize);
         self.cells[i] = (cell.block.segments != 0).then_some(cell);

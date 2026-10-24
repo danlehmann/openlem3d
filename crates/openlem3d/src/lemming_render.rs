@@ -693,6 +693,18 @@ const MINE_BURSTS: [u32; 4] = [1, 10, 19, 28];
 /// takes (`docs/spec/behaviour.md`, Digger: removed after a crack
 /// animation).
 fn dig_effects(b: &mut LayerBuilder, sim: &Simulation, blocks: Option<&BlockSet>, tex: [f32; 2]) {
+    // The cracks a digger left when it stopped part way (owner's
+    // observation: they stay).
+    for &(cell, mask, t) in &sim.world.dig_wear {
+        let frame = t * CRACK_FRAMES / l3d_sim::DIG_TICKS;
+        draw_cracks(b, sim, cell, mask, frame, tex);
+        let crack = CRACK_ATLAS_FIRST + frame.min(CRACK_FRAMES - 1);
+        let at = [
+            ((crack % ATLAS_COLUMNS) * LEMMING_CELL) as f32,
+            ((crack / ATLAS_COLUMNS) * LEMMING_CELL) as f32,
+        ];
+        draw_top_cracks(b, sim, cell, mask, at, tex);
+    }
     for (i, l) in sim.lemmings.iter().enumerate().filter(|(_, l)| !l.gone) {
         let Some((cell, mask, t)) = sim.dig_target(l) else {
             continue;
