@@ -540,20 +540,13 @@ fn draw_cracks(
     for s in (0..4).filter(|s| mask & (1 << s) != 0) {
         let rect = [cx as f32, cy as f32 + (3 - s) as f32 * 16.0, 64.0, 16.0];
         let y = c[1] + s as f32 * 0.25;
-        let filled = |x: f32, z: f32| {
-            let at = |v: f32| (v * l3d_sim::SUB as f32) as i32;
-            sim.world.block_at([at(x), at(y + 0.125), at(z)]).is_some()
-        };
         for n in [[1.0, 0.0], [-1.0, 0.0], [0.0, 1.0], [0.0, -1.0]] {
-            if !filled(c[0] + 0.5 + n[0] * 0.45, c[2] + 0.5 + n[1] * 0.45) {
-                continue;
-            }
             let centre = [
                 c[0] + 0.5 + n[0] * (0.5 + CRACK_OFFSET),
                 y,
                 c[2] + 0.5 + n[1] * (0.5 + CRACK_OFFSET),
             ];
-            b.vertical_quad(centre, n, 1.0, 0.25, rect, tex, 1.0);
+            side_cracks(b, sim, centre, n, 1.0, rect, tex);
         }
         if let Some(n) = deflector_face(sim, cell, y + 0.125) {
             let centre = [
@@ -561,7 +554,64 @@ fn draw_cracks(
                 y,
                 c[2] + 0.5 + n[1] * CRACK_OFFSET,
             ];
-            b.vertical_quad(centre, n, std::f32::consts::SQRT_2, 0.25, rect, tex, 1.0);
+            side_cracks(b, sim, centre, n, std::f32::consts::SQRT_2, rect, tex);
+        }
+    }
+}
+
+/// Pieces across and up a segment's side for its cracks.
+const SIDE_CRACK_PIECES: (usize, usize) = (16, 4);
+
+/// The cracks (`rect` of the atlas) over a segment's side facing `normal`, a
+/// quarter unit tall and `width` wide from its bottom middle `centre`: in
+/// pieces, each drawn only where the block is solid just behind it, so that
+/// on a ramp or wedge they keep to its sloped outline instead of hanging in
+/// the air beside it.
+fn side_cracks(
+    b: &mut LayerBuilder,
+    sim: &Simulation,
+    centre: [f32; 3],
+    normal: [f32; 2],
+    width: f32,
+    rect: [f32; 4],
+    tex: [f32; 2],
+) {
+    let (cols, rows) = SIDE_CRACK_PIECES;
+    let (pw, ph) = (width / cols as f32, 0.25 / rows as f32);
+    let (rw, rh) = (rect[2] / cols as f32, rect[3] / rows as f32);
+    // Right as seen from the front, as `vertical_quad` lays it out.
+    let right = [normal[1], -normal[0]];
+    let at = |v: f32| (v * l3d_sim::SUB as f32).floor() as i32;
+    for i in 0..cols {
+        let along = -width / 2.0 + (i as f32 + 0.5) * pw;
+        let x = centre[0] + right[0] * along;
+        let z = centre[2] + right[1] * along;
+        // Just behind the face.
+        let inside = 0.02 + CRACK_OFFSET;
+        let (ix, iz) = (x - normal[0] * inside, z - normal[1] * inside);
+        for j in 0..rows {
+            let y = centre[1] + j as f32 * ph;
+            if sim
+                .world
+                .block_at([at(ix), at(y + ph / 2.0), at(iz)])
+                .is_none()
+            {
+                continue;
+            }
+            b.vertical_quad(
+                [x, y, z],
+                normal,
+                pw,
+                ph,
+                [
+                    rect[0] + i as f32 * rw,
+                    rect[1] + rect[3] - (j + 1) as f32 * rh,
+                    rw,
+                    rh,
+                ],
+                tex,
+                1.0,
+            );
         }
     }
 }
@@ -665,7 +715,8 @@ const TOP_CRACK_PIECES: usize = 8;
 /// The cracks (at `at` in the atlas) over the top of what a digger is
 /// digging out of `cell` (its segments in `mask`): lying on the block's
 /// surface within that band, so that they follow a ramp's slope where the
-/// ramp is cut, and only where there is something to dig.
+/// ramp is cut, and only where there is something to dig under every corner
+/// of a piece.
 fn draw_top_cracks(
     b: &mut LayerBuilder,
     sim: &Simulation,
@@ -694,7 +745,20 @@ fn draw_top_cracks(
         for j in 0..TOP_CRACK_PIECES {
             let (fx0, fx1) = (i as f32 / n, (i + 1) as f32 / n);
             let (fz0, fz1) = (j as f32 / n, (j + 1) as f32 / n);
-            if surface((fx0 + fx1) / 2.0, (fz0 + fz1) / 2.0) <= low {
+            // Every corner on something in the band (a hair inside the
+            // piece): a corner over air would be pulled down to the band's
+            // bottom, hanging the piece into the air at the edge of the
+            // hole or under a wedge.
+            let e = 0.01 / n;
+            let on_material = [
+                (fx0 + e, fz0 + e),
+                (fx1 - e, fz0 + e),
+                (fx0 + e, fz1 - e),
+                (fx1 - e, fz1 - e),
+            ]
+            .iter()
+            .all(|&(fx, fz)| surface(fx, fz) > low);
+            if !on_material {
                 continue;
             }
             let (x0, x1) = (cell[0] as f32 + fx0, cell[0] as f32 + fx1);
