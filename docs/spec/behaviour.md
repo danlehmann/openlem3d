@@ -236,8 +236,8 @@ earlier run in the middle of a platform, read as "builds where it stands",
 fits this too: there the first brick met the hole's far wall). The cracks of a segment the digger was part way through stay on the block (owner's observation), and a digger later set to work there carries on from them (inferred). The published solution of Mayhem 1 "The Five Arches" [XeyeWalk]
 makes a digger a builder too; with ½-unit bricks our simulation of it no
 longer saves the 78 needed (open). Implemented as such; a basher or miner
-switched to starts where it stands (ours). Blockers and turners are given
-only to walkers: a blocker or a turner given a miner, basher or digger
+switched to starts where it stands (ours). Blockers are given only to
+walkers, turners to walkers and builders (below): a blocker or a turner given a miner, basher or digger
 stayed as it was and the count did not drop (**verified with a changed
 level**, 2026-10-23). A builder that has laid its last
 brick, or is shrugging, can be given more bricks (provisional, as in the 2D
@@ -251,6 +251,13 @@ of the lemming, makes it a turner where it then stands. On Fun 1 (camera 3,
 looking +Z), a second click about 50 px to the screen left of the lemming
 made the following walkers turn towards screen left (+X). Which side gives
 which turn in general was not tested further.
+
+**A builder takes a turner (verified with a changed level, 2026-10-24).**
+Given both clicks while building over a drop, it stopped laying bricks and
+stood as a turner at the end of its unfinished staircase; it did not walk on
+or fall, and the turner count dropped by one. A walker that catches up with a
+builder still building walks past it and off the staircase's unfinished end
+(same test, release rate 50); it is not turned back.
 
 Terrain is changed one quarter-height segment at a time. The basher and the
 digger were seen to remove segments across a whole cell at once. Whether

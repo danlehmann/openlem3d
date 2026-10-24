@@ -738,7 +738,10 @@ impl Simulation {
             Skill::Bomber => l.fuse.is_none(),
             // Not to a climber on its wall: there a digger is refused and
             // not paid for (verified by the owner on "Candyland Climber").
-            Skill::Blocker | Skill::Turner => l.state == State::Walking && l.pending.is_none(),
+            Skill::Blocker => l.state == State::Walking && l.pending.is_none(),
+            Skill::Turner => {
+                l.pending.is_none() && matches!(l.state, State::Walking | State::Building { .. })
+            }
             // A builder out of bricks, laid or shrugging, takes more
             // (provisional, as in the 2D games; Fun 10 "Castle Lemmalot"
             // otherwise leaves a few ticks for it).
@@ -818,6 +821,16 @@ impl Simulation {
             l.build_at_edge = true;
             return true;
         }
+        // A builder given a turner stops and turns where it stands, on its
+        // unfinished staircase (verified on a changed "Team Work",
+        // 2026-10-24: given over the drop, it stood at the staircase's end
+        // and did not fall).
+        if skill == Skill::Turner && matches!(l.state, State::Building { .. }) {
+            l.set_state(State::Turning {
+                to: l.dir.anticlockwise(),
+            });
+            return true;
+        }
         // Switched from another terrain skill, a lemming starts where it
         // stands (provisional).
         if l.state != State::Walking
@@ -869,7 +882,12 @@ impl Simulation {
         if to == l.dir || to == l.dir.reverse() || !self.give(i, Skill::Turner) {
             return false;
         }
-        self.lemmings[i].pending = Some(State::Turning { to });
+        let l = &mut self.lemmings[i];
+        if let State::Turning { .. } = l.state {
+            l.state = State::Turning { to };
+        } else {
+            l.pending = Some(State::Turning { to });
+        }
         self.log
             .push((self.tick, Command::Turner { lemming: i, to }));
         true
