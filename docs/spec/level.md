@@ -268,51 +268,96 @@ its *n*-th code is meant to open level *n* (`LEVEL.(n−1)`). Its codes 2 and 3
 are the `BLIMBING` and `FANAGALO` above. Some of its level titles are wrong
 (it calls level 3 "Bounce Bounce", which is level 5). The list also ends with
 five codes that are not tied to a level (`SPACEAAA`, `EGYPTAAA`, `ARMYAAAA`,
-`MAZEAAAA`, `LAMPWICK`); their effect is **unverified**.
+`MAZEAAAA`, `LAMPWICK`).
 
-The codes below were **verified by entry**: on the code screen of the real,
-unpatched image, each opened the briefing showing the expected level number
-and title, and the level then started. The other 42 codes of the list are
-**unverified** and are not recorded here. openlem3d does not use this list;
-`crates/openlem3d/src/codes.rs` holds only the codes shown by the game itself.
+All 80 level codes were **verified by entry**: on the code screen of the
+real, unpatched image, each opened the briefing showing the level number and
+title below. The 38 checked first were also started; the others (2026-10-24,
+typed by AUTOTYPE) were checked up to the briefing. Each opened level *n* for list
+position *n*, so `crates/openlem3d/src/codes.rs` holds the whole list. The
+five extra codes, typed in full, opened no level: the game went back to the
+title screen and its credits (verified, 2026-10-24); what, if anything, they
+do in this edition is unknown.
 
 | Code | List position | Level opened |
 |---|---|---|
+| `LEWISIAN` | 1 | 1 (Fun 1, "TAKE A DIVE", `LEVEL.000`) |
 | `BLIMBING` | 2 | 2 (Fun 2, "THAT'S RIGHT", `LEVEL.001`) |
 | `FANAGALO` | 3 | 3 (Fun 3, "THE BEAN MACHINE", `LEVEL.002`) |
 | `DRICKSIE` | 4 | 4 (Fun 4, "IT'S A RUN AROUND", `LEVEL.003`) |
 | `KURTOSIS` | 5 | 5 (Fun 5, "BOUNCE BOUNCE", `LEVEL.004`) |
+| `GREGATIM` | 6 | 6 (Fun 6, "IT'S A BLAST", `LEVEL.005`) |
+| `WALLAROO` | 7 | 7 (Fun 7, "CANDYLAND CLIMBER", `LEVEL.006`) |
+| `AVENTAIL` | 8 | 8 (Fun 8, "LEMMINGS INSIDE", `LEVEL.007`) |
+| `GAZOGENE` | 9 | 9 (Fun 9, "A SHORT CUT THROUGH THE FOREST", `LEVEL.008`) |
 | `JINGBANG` | 10 | 10 (Fun 10, "CASTLE LEMMALOT", `LEVEL.009`) |
+| `DIALLAGE` | 11 | 11 (Fun 11, "IT'S A CLASSIC", `LEVEL.010`) |
 | `BUNODONT` | 12 | 12 (Fun 12, "ALPINE ASSAULT COURSE", `LEVEL.011`) |
+| `NAINSOOK` | 13 | 13 (Fun 13, "TOWER OF STONE", `LEVEL.012`) |
 | `YAKIMONA` | 14 | 14 (Fun 14, "SLIPPERY MAZE", `LEVEL.013`) |
+| `FUMITORY` | 15 | 15 (Fun 15, "THE M-A-Z-E", `LEVEL.014`) |
+| `CINGULUM` | 16 | 16 (Fun 16, "DOWN THE MIDDLE WE GO!", `LEVEL.015`) |
 | `BESLAVER` | 17 | 17 (Fun 17, "HOLE IN TEN", `LEVEL.016`) |
 | `ANABLEPS` | 18 | 18 (Fun 18, "CORKSCREW DIGGER", `LEVEL.017`) |
+| `QUINCUNX` | 19 | 19 (Fun 19, "ATTACK OF THE FIFTY FT LEMMINGS", `LEVEL.018`) |
 | `TARLATAN` | 20 | 20 (Fun 20, "ALILEMM'S", `LEVEL.019`) |
+| `KAMACITE` | 21 | 21 (Tricky 1, "JELLY CLIMBER", `LEVEL.020`) |
 | `GUMMOSIS` | 22 | 22 (Tricky 2, "WHICH EXIT ?", `LEVEL.021`) |
+| `PRODNOSE` | 23 | 23 (Tricky 3, "THIS IS THE ARMY", `LEVEL.022`) |
 | `NGULTRUM` | 24 | 24 (Tricky 4, "FORE!", `LEVEL.023`) |
 | `COTTABUS` | 25 | 25 (Tricky 5, "BREAKOUT", `LEVEL.024`) |
+| `BEDAGGLE` | 26 | 26 (Tricky 6, "LEMMHANGER", `LEVEL.025`) |
 | `EPICALYX` | 27 | 27 (Tricky 7, "FOLLOW THE YELLOW BRICK ROAD", `LEVEL.026`) |
+| `HOMALOID` | 28 | 28 (Tricky 8, "ALL AROUND THE WATCHTOWER", `LEVEL.027`) |
+| `LALLYGAG` | 29 | 29 (Tricky 9, "LAND AHOY", `LEVEL.028`) |
 | `BILABIAL` | 30 | 30 (Tricky 10, "TOOTEN LEMMING", `LEVEL.029`) |
+| `CACOFOGO` | 31 | 31 (Tricky 11, "A HEAD ABOVE THE REST!", `LEVEL.030`) |
 | `METAVURT` | 32 | 32 (Tricky 12, "DOT TO DOT", `LEVEL.031`) |
+| `SLOWBURN` | 33 | 33 (Tricky 13, "SHADOW MAZE", `LEVEL.032`) |
+| `PELLUCID` | 34 | 34 (Tricky 14, "OH NO! MORE PYRAMIDS!", `LEVEL.033`) |
 | `MAKIMONO` | 35 | 35 (Tricky 15, "CHOCOLATE DROP", `LEVEL.034`) |
+| `KHUSKHUS` | 36 | 36 (Tricky 16, "LEMLAB", `LEVEL.035`) |
 | `DISPLODE` | 37 | 37 (Tricky 17, "GARDEN MAZE", `LEVEL.036`) |
 | `RACAHOUT` | 38 | 38 (Tricky 18, "PLAY TIME", `LEVEL.037`) |
+| `ORGULOUS` | 39 | 39 (Tricky 19, "STILT WALKERS", `LEVEL.038`) |
 | `DUNCEDOM` | 40 | 40 (Tricky 20, "KING CODER'S TOMB", `LEVEL.039`) |
+| `CABOCEER` | 41 | 41 (Taxing 1, "SPAGHETTI JUNCTION", `LEVEL.040`) |
 | `GEROPIGA` | 42 | 42 (Taxing 2, "PICKY PLATFORM", `LEVEL.041`) |
+| `BONTEBOK` | 43 | 43 (Taxing 3, "LET THE RACE BEGIN", `LEVEL.042`) |
+| `EMPYREAL` | 44 | 44 (Taxing 4, "POLES APART", `LEVEL.043`) |
 | `LANGLAUF` | 45 | 45 (Taxing 5, "3D - A LEMMING ODYSSEY", `LEVEL.044`) |
+| `NANNYGAI` | 46 | 46 (Taxing 6, "RICOCHET", `LEVEL.045`) |
 | `SARATOGA` | 47 | 47 (Taxing 7, "IF THE TIMING IS RIGHT!", `LEVEL.046`) |
+| `QUINTAIN` | 48 | 48 (Taxing 8, "RESCUE TEAM", `LEVEL.047`) |
+| `MUSQUASH` | 49 | 49 (Taxing 9, "WHICH TRAMPOLINE ?", `LEVEL.048`) |
+| `ZOMBORUK` | 50 | 50 (Taxing 10, "IT'S THE NAME OF THE GAME", `LEVEL.049`) |
 | `SKILLING` | 51 | 51 (Taxing 11, "CHAOS MAZE", `LEVEL.050`) |
+| `WOBEGONE` | 52 | 52 (Taxing 12, "TEAM WORK", `LEVEL.051`) |
+| `BINDIEYE` | 53 | 53 (Taxing 13, "MOTHERBOARD", `LEVEL.052`) |
 | `FRAXINUS` | 54 | 54 (Taxing 14, "AWAY TEAM", `LEVEL.053`) |
+| `LINDWORM` | 55 | 55 (Taxing 15, "BIRTHDAY CAKE", `LEVEL.054`) |
 | `CURLICUE` | 56 | 56 (Taxing 16, "THE ARENA", `LEVEL.055`) |
+| `HANEPOOR` | 57 | 57 (Taxing 17, "T MINUS FIVE AND COUNTING", `LEVEL.056`) |
+| `IDEMQUOD` | 58 | 58 (Taxing 18, "SNAKE", `LEVEL.057`) |
 | `BLANDISH` | 59 | 59 (Taxing 19, "LEMMTRIS", `LEVEL.058`) |
 | `MALAGASY` | 60 | 60 (Taxing 20, "DEATH SLIDE", `LEVEL.059`) |
+| `CHORIAMB` | 61 | 61 (Mayhem 1, "THE FIVE ARCHES", `LEVEL.060`) |
+| `GARGANEY` | 62 | 62 (Mayhem 2, "BRECHIN'S STAIRCASE", `LEVEL.061`) |
 | `KAOLIANG` | 63 | 63 (Mayhem 3, "TOWER OF LEMLAB", `LEVEL.062`) |
+| `MAROCAIN` | 64 | 64 (Mayhem 4, "SKI JUMP", `LEVEL.063`) |
 | `OBTEMPER` | 65 | 65 (Mayhem 5, "THE PRISONER", `LEVEL.064`) |
 | `TASTEVIN` | 66 | 66 (Mayhem 6, "FAMILY TREE", `LEVEL.065`) |
+| `VELLOZIA` | 67 | 67 (Mayhem 7, "DRIVING RANGE", `LEVEL.066`) |
+| `BORACHIO` | 68 | 68 (Mayhem 8, "FIVE TOWERS", `LEVEL.067`) |
 | `JACKAROO` | 69 | 69 (Mayhem 9, "OVER THE TOP", `LEVEL.068`) |
+| `COOLAMON` | 70 | 70 (Mayhem 10, "THE HANGER", `LEVEL.069`) |
 | `BANAUSIC` | 71 | 71 (Mayhem 11, "ACROSS THE NETWORK", `LEVEL.070`; entered by the owner) |
 | `FABURDEN` | 72 | 72 (Mayhem 12, "RAIDERS OF THE LOST LEMMING", `LEVEL.071`) |
+| `RECKLING` | 73 | 73 (Mayhem 13, "THE CATACOMBS", `LEVEL.072`) |
 | `MIRLITON` | 74 | 74 (Mayhem 14, "JELLY BELLY ISLANDS", `LEVEL.073`) |
 | `OPAPANAX` | 75 | 75 (Mayhem 15, "HOLE IN ONE, TWO, THREE!", `LEVEL.074`) |
+| `BIMBASHI` | 76 | 76 (Mayhem 16, "FUN FAIR", `LEVEL.075`) |
+| `CAATINGA` | 77 | 77 (Mayhem 17, "CRITICAL PATH", `LEVEL.076`) |
 | `PENSTOCK` | 78 | 78 (Mayhem 18, "CASTLE PERALUS", `LEVEL.077`) |
+| `SPRINGAL` | 79 | 79 (Mayhem 19, "TUTHER CIRCUS LEVEL", `LEVEL.078`) |
 | `BABIRUSA` | 80 | 80 (Mayhem 20, "FINAL MAZE", `LEVEL.079`) |
