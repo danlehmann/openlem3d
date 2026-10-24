@@ -45,6 +45,10 @@ desktop, separated by spaces or newlines):
         sh -c "'cat > files/args.txt'"
     adb shell run-as org.openlem3d --user 10 rm files/args.txt
 
+`--profile` logs once a second where each frame's time goes, on the CPU and
+(where the GPU has timestamps) the GPU; read it with `adb logcat | grep
+profile:`.
+
 ## Building
 
     ANDROID_NDK_HOME=... ANDROID_JAR=.../android.jar android/build-apk.sh

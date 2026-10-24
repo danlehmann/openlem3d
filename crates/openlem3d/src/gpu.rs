@@ -15,6 +15,7 @@ use l3d_engine::prelude::*;
 use l3d_engine::window::{PresentMode, WindowHandle};
 
 use crate::World;
+use crate::profile::{self, Cpu, Stamp};
 use crate::scene_render::{SceneGpu, SceneInput};
 use crate::ui::UiGpu;
 
@@ -49,8 +50,9 @@ pub struct Gpu {
 }
 
 impl Gpu {
-    /// The device for the window `handle`, and the window's surface.
-    fn new(handle: &WindowHandle) -> (Gpu, wgpu::Surface<'static>) {
+    /// The device for the window `handle`, and the window's surface; with
+    /// GPU timestamps if `profile` asks for them and the GPU has them.
+    fn new(handle: &WindowHandle, profile: bool) -> (Gpu, wgpu::Surface<'static>) {
         let mut desc = wgpu::InstanceDescriptor::new_without_display_handle_from_env();
         // Vulkan on Windows-on-ARM (Adreno) loses the device after a few
         // seconds, so Windows defaults to DX12. `WGPU_BACKEND` overrides.
@@ -72,6 +74,11 @@ impl Gpu {
         info!("{:?}", adapter.get_info());
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("openlem3d"),
+            required_features: if profile {
+                adapter.features() & profile::FEATURES
+            } else {
+                wgpu::Features::empty()
+            },
             required_limits: adapter.limits(),
             ..Default::default()
         }))
@@ -351,6 +358,7 @@ pub(crate) fn render(w: &mut World) {
     } = &mut w.renderer;
     let (window, screen, clear, screenshots) =
         (&w.e.window, &w.screen, &w.clear, &mut w.screenshots);
+    let profile = &mut w.profile;
     let Some(handle) = &w.e.handle else {
         // The app is suspended (Android): the window is gone.
         *surface = None;
@@ -360,7 +368,8 @@ pub(crate) fn render(w: &mut World) {
     *generation = w.e.handle_generation;
     match gpu {
         None => {
-            let (g, s) = Gpu::new(handle);
+            let (g, s) = Gpu::new(handle, profile.on);
+            profile.start_gpu(&g.device, &g.queue);
             *surface = Some(Surface::new(&g, s));
             *gpu = Some(g);
         }
@@ -393,9 +402,11 @@ pub(crate) fn render(w: &mut World) {
             return;
         }
     };
+    profile.cpu(Cpu::Acquire);
     if frame.is_none() && screenshots.0.is_empty() {
         return;
     }
+    profile.collect(&gpu.device);
     let device = &gpu.device;
     let copy = copy.get_or_insert_with(|| Copy::new(device));
     if target.as_ref().is_none_or(|t| t.size != size) {
@@ -403,6 +414,7 @@ pub(crate) fn render(w: &mut World) {
     }
     let target = target.as_ref().expect("made above");
     let mut encoder = device.create_command_encoder(&Default::default());
+    profile.stamp(&mut encoder, Stamp::Start);
     let c = clear.0.to_linear();
     encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
         label: Some("clear"),
@@ -422,6 +434,7 @@ pub(crate) fn render(w: &mut World) {
         })],
         ..Default::default()
     });
+    profile.stamp(&mut encoder, Stamp::Clear);
     let viewport = screen.pixels;
     scene.get_or_insert_with(|| SceneGpu::new(device)).draw(
         gpu,
@@ -433,8 +446,10 @@ pub(crate) fn render(w: &mut World) {
             content: &w.scene,
             sprites: &w.sprites,
             camera: &w.camera,
+            profile,
         },
     );
+    profile.stamp(&mut encoder, Stamp::Scene);
     ui.get_or_insert_with(|| UiGpu::new(gpu)).draw(
         gpu,
         &mut encoder,
@@ -443,6 +458,7 @@ pub(crate) fn render(w: &mut World) {
         &w.ui,
         &mut w.e.images,
     );
+    profile.stamp(&mut encoder, Stamp::Ui);
     let s = surface.as_ref().expect("checked above");
     if let Some(frame) = &frame {
         let view = frame.texture.create_view(&wgpu::TextureViewDescriptor {
@@ -468,11 +484,16 @@ pub(crate) fn render(w: &mut World) {
             pass.draw(0..3, 0..1);
         }
     }
+    profile.stamp(&mut encoder, Stamp::Copy);
+    profile.resolve(&mut encoder);
     let shot = (!screenshots.0.is_empty()).then(|| read_back(device, &mut encoder, target));
+    profile.cpu(Cpu::Encode);
     gpu.queue.submit([encoder.finish()]);
+    profile.submitted();
     if let Some(frame) = frame {
         frame.present();
     }
+    profile.cpu(Cpu::Present);
     if let Some(buffer) = shot {
         save(device, &buffer, size, &std::mem::take(&mut screenshots.0));
     }

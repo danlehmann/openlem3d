@@ -12,6 +12,7 @@ use l3d_engine::prelude::*;
 use wgpu::util::DeviceExt;
 
 use crate::gpu::{Gpu, TARGET_FORMAT};
+use crate::profile::Stamp;
 
 /// Floats per vertex: position (3), uv (2), brightness (1), cutout flag (1),
 /// billboard offset (2), animation frame count and uv stride (2), light (3).
@@ -100,6 +101,8 @@ pub struct SceneInput<'a> {
     pub content: &'a SceneContent,
     pub sprites: &'a SceneSprites,
     pub camera: &'a SceneCamera,
+    /// Times the scene's parts on the GPU (`--profile`).
+    pub profile: &'a crate::profile::Profile,
 }
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
@@ -112,6 +115,11 @@ const GLOW_GAIN: f32 = 3.0;
 /// The most halvings of the bloom chain, and the smallest size worth one.
 const BLOOM_LEVELS: usize = 6;
 const BLOOM_MIN_SIZE: u32 = 8;
+/// The bloom chain's top level is at most this many rows (ours): on a
+/// taller screen it starts at a quarter of the size or less, as a blur needs
+/// no more detail, which spares slower GPUs the reading and writing of a
+/// big level (a third of the frame's GPU time at 2880×1440 on an Adreno 540).
+const BLOOM_TOP_ROWS: u32 = 540;
 /// Sky texels panned per full turn for the 320-wide all-round skies: three
 /// repeats of the panorama, close to the 1024 of the other skies and a
 /// whole number of repeats, so no turn shows a seam (provisional).
@@ -161,12 +169,14 @@ struct Pipelines {
     /// Copies an offscreen scene onto the screen: stretched, or glowing.
     stretch: wgpu::RenderPipeline,
     present: wgpu::RenderPipeline,
+    /// Presenting with the bloom chain's top level blurred up and added in
+    /// the same pass, which spares the full-size picture a pass of its own.
+    present_glow: wgpu::RenderPipeline,
     /// Bloom: the glow above white, halved; a further halving; and a level
-    /// blurred back up and added to the one above (or to the scene).
+    /// blurred back up and added to the one above.
     bloom_first: wgpu::RenderPipeline,
     bloom_down: wgpu::RenderPipeline,
     bloom_up: wgpu::RenderPipeline,
-    bloom_add: wgpu::RenderPipeline,
 }
 
 /// The scene drawn in [`HDR_FORMAT`], and the bloom chain's levels, each
@@ -276,6 +286,13 @@ impl SceneGpu {
             bind_group_layouts: &[Some(&self.layout)],
             ..Default::default()
         });
+        // Presenting the glowing scene also samples the bloom chain's top
+        // level, bound second.
+        let pl_glow = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("scene present glow"),
+            bind_group_layouts: &[Some(&self.layout), Some(&self.layout)],
+            ..Default::default()
+        });
         let geometry = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("scene geometry"),
             layout: Some(&pl),
@@ -338,7 +355,7 @@ impl SceneGpu {
         });
         // A full-screen triangle with no depth, optionally added onto what
         // is there.
-        let full_screen = |label, vertex, fragment, add: bool| {
+        let full_screen = |label, vertex, fragment, add: bool, layout| {
             let blend = add.then_some(wgpu::BlendState {
                 color: wgpu::BlendComponent {
                     src_factor: wgpu::BlendFactor::One,
@@ -349,7 +366,7 @@ impl SceneGpu {
             });
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some(label),
-                layout: Some(&pl),
+                layout: Some(layout),
                 vertex: wgpu::VertexState {
                     module: &self.shader,
                     entry_point: Some(vertex),
@@ -376,12 +393,18 @@ impl SceneGpu {
         let pipelines = Pipelines {
             geometry,
             sky,
-            stretch: full_screen("scene stretch", "vs_sky", "fs_stretch", false),
-            present: full_screen("scene present", "vs_sky", "fs_present", false),
-            bloom_first: full_screen("bloom first", "vs_post", "fs_bloom_first", false),
-            bloom_down: full_screen("bloom down", "vs_post", "fs_bloom_down", false),
-            bloom_up: full_screen("bloom up", "vs_post", "fs_bloom_up", true),
-            bloom_add: full_screen("bloom add", "vs_post", "fs_bloom_add", true),
+            stretch: full_screen("scene stretch", "vs_sky", "fs_stretch", false, &pl),
+            present: full_screen("scene present", "vs_sky", "fs_present", false, &pl),
+            present_glow: full_screen(
+                "scene present glow",
+                "vs_sky",
+                "fs_present_glow",
+                false,
+                &pl_glow,
+            ),
+            bloom_first: full_screen("bloom first", "vs_post", "fs_bloom_first", false, &pl),
+            bloom_down: full_screen("bloom down", "vs_post", "fs_bloom_down", false, &pl),
+            bloom_up: full_screen("bloom up", "vs_post", "fs_bloom_up", true, &pl),
         };
         self.pipelines.push((format, pipelines));
         &self.pipelines.last().unwrap().1
@@ -439,8 +462,14 @@ impl SceneGpu {
             let view = target("scene hdr", size);
             let mut levels = Vec::new();
             let mut s = size;
-            while levels.len() < BLOOM_LEVELS && s.0.min(s.1) / 2 >= BLOOM_MIN_SIZE {
+            for halving in 1..=BLOOM_LEVELS {
+                if s.0.min(s.1) / 2 < BLOOM_MIN_SIZE {
+                    break;
+                }
                 s = (s.0 / 2, s.1 / 2);
+                if s.1 > BLOOM_TOP_ROWS && halving < BLOOM_LEVELS {
+                    continue;
+                }
                 let v = target("scene bloom", s);
                 let b = self.bind_view(device, &v, &self.linear);
                 levels.push((v, b));
@@ -737,7 +766,7 @@ impl SceneGpu {
             input.sprites,
             input.camera,
         );
-        draw(self, device, encoder, target, full, viewport, input.camera);
+        draw(self, device, encoder, target, full, viewport, input);
     }
 }
 
@@ -748,8 +777,9 @@ fn draw(
     target: &wgpu::TextureView,
     full: UVec2,
     viewport: UVec4,
-    camera: &SceneCamera,
+    input: &SceneInput,
 ) {
+    let (camera, profile) = (input.camera, input.profile);
     let size = gpu.target_size;
     let format = TARGET_FORMAT;
     let device = device.clone();
@@ -774,6 +804,8 @@ fn draw(
     );
     let gpu = &*gpu;
     if gpu.layers.is_empty() && gpu.sky.is_none() && gpu.sprites.is_none() {
+        profile.stamp(encoder, Stamp::Geometry);
+        profile.stamp(encoder, Stamp::Bloom);
         return;
     }
     let find = |f| &gpu.pipelines.iter().find(|(g, _)| *g == f).unwrap().1;
@@ -845,6 +877,7 @@ fn draw(
         pass.draw_indexed(0..*n, 0, 0..1);
     }
     drop(pass);
+    profile.stamp(encoder, Stamp::Geometry);
     // Bloom: halve the glow above white down the chain, then blur each
     // level back up into the one above.
     if let Some(h) = &hdr {
@@ -881,16 +914,17 @@ fn draw(
                 &h.levels[k].1,
             );
         }
-        if let Some((_, first)) = h.levels.first() {
-            step(&h.view, wgpu::LoadOp::Load, &hdr_p.bloom_add, first);
-        }
     }
+    profile.stamp(encoder, Stamp::Bloom);
     let shown = match (&low, &hdr) {
-        (Some((_, (_, bind))), _) => Some((bind, &screen_p.stretch)),
-        (_, Some(h)) => Some((&h.sharp, &screen_p.present)),
+        (Some((_, (_, bind))), _) => Some((bind, &screen_p.stretch, None)),
+        (_, Some(h)) => Some(match h.levels.first() {
+            Some((_, first)) => (&h.sharp, &screen_p.present_glow, Some(first)),
+            None => (&h.sharp, &screen_p.present, None),
+        }),
         _ => None,
     };
-    if let Some((bind, pipeline)) = shown {
+    if let Some((bind, pipeline, bloom)) = shown {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("scene stretch"),
             color_attachments: &[Some(onto_target())],
@@ -899,6 +933,9 @@ fn draw(
         set_viewport(&mut pass, viewport);
         pass.set_pipeline(pipeline);
         pass.set_bind_group(0, bind, &[]);
+        if let Some(bloom) = bloom {
+            pass.set_bind_group(1, bloom, &[]);
+        }
         pass.draw(0..3, 0..1);
     }
 }

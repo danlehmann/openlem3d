@@ -27,6 +27,9 @@ struct Uniforms {
 @group(0) @binding(0) var<uniform> u: Uniforms;
 @group(0) @binding(1) var tex: texture_2d<f32>;
 @group(0) @binding(2) var samp: sampler;
+// The bloom chain's top level, for presenting the glowing scene.
+@group(1) @binding(1) var bloom_tex: texture_2d<f32>;
+@group(1) @binding(2) var bloom_samp: sampler;
 
 struct VIn {
     @location(0) pos: vec3<f32>,
@@ -196,13 +199,33 @@ fn noise(p: vec2<f32>) -> f32 {
     return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
 }
 
+/// `c` onto the screen at `clip`.
+fn present(c: vec3<f32>, clip: vec2<f32>) -> vec4<f32> {
+    // The screen stores sRGB in 8 bits: dither in those steps.
+    let s = to_srgb(clamp(c, vec3(0.0), vec3(1.0))) + (noise(clip) - 0.5) * 0.8 / 255.0;
+    return vec4(from_srgb(clamp(s, vec3(0.0), vec3(1.0))), 1.0);
+}
+
 @fragment
 fn fs_present(v: SkyOut) -> @location(0) vec4<f32> {
     let at = (v.clip.xy - u.origin.zw) / vec2<f32>(textureDimensions(tex));
-    let c = textureSampleLevel(tex, samp, at, 0.0).rgb;
-    // The screen stores sRGB in 8 bits: dither in those steps.
-    let s = to_srgb(clamp(c, vec3(0.0), vec3(1.0))) + (noise(v.clip.xy) - 0.5) * 0.8 / 255.0;
-    return vec4(from_srgb(clamp(s, vec3(0.0), vec3(1.0))), 1.0);
+    return present(textureSampleLevel(tex, samp, at, 0.0).rgb, v.clip.xy);
+}
+
+/// With the bloom chain's top level blurred up and added: four diagonal
+/// bilinear taps a texel out, half the tent of [`up`], which spares the
+/// full-size picture four taps a pixel (1 ms at 2880×1440 on an Adreno 540)
+/// on a level that is already blurred.
+@fragment
+fn fs_present_glow(v: SkyOut) -> @location(0) vec4<f32> {
+    let at = (v.clip.xy - u.origin.zw) / vec2<f32>(textureDimensions(tex));
+    let o = 1.0 / vec2<f32>(textureDimensions(bloom_tex));
+    let taps = textureSampleLevel(bloom_tex, bloom_samp, at + o, 0.0).rgb
+        + textureSampleLevel(bloom_tex, bloom_samp, at - o, 0.0).rgb
+        + textureSampleLevel(bloom_tex, bloom_samp, at + vec2(o.x, -o.y), 0.0).rgb
+        + textureSampleLevel(bloom_tex, bloom_samp, at + vec2(-o.x, o.y), 0.0).rgb;
+    let glow = finite(taps / 4.0) * BLOOM_STRENGTH;
+    return present(textureSampleLevel(tex, samp, at, 0.0).rgb + glow, v.clip.xy);
 }
 
 // Bloom: a full-screen triangle with texture coordinates over the target.
@@ -238,7 +261,9 @@ fn above_white(c: vec3<f32>) -> vec3<f32> {
 }
 
 /// Half-size average of `tex` around `uv`: the centre and four diagonal
-/// bilinear taps a texel out (dual-filter downsampling).
+/// bilinear taps a texel out (dual-filter downsampling). Into a quarter-size
+/// level (the chain's top on a tall screen) the same taps cover its texel's
+/// 4×4 block.
 fn down(uv: vec2<f32>, threshold: bool) -> vec3<f32> {
     let o = 1.0 / vec2<f32>(textureDimensions(tex));
     var taps = array<vec2<f32>, 5>(
@@ -283,9 +308,4 @@ fn fs_bloom_down(v: PostOut) -> @location(0) vec4<f32> {
 @fragment
 fn fs_bloom_up(v: PostOut) -> @location(0) vec4<f32> {
     return vec4(up(v.uv), 1.0);
-}
-
-@fragment
-fn fs_bloom_add(v: PostOut) -> @location(0) vec4<f32> {
-    return vec4(finite(up(v.uv)) * BLOOM_STRENGTH, 1.0);
 }

@@ -26,6 +26,7 @@ mod pixels;
 mod platform;
 mod pointer;
 mod practice;
+mod profile;
 mod results;
 mod scene_build;
 mod scene_render;
@@ -99,6 +100,8 @@ pub struct Options {
     record: Option<(PathBuf, f32)>,
     /// Draw glowing things plainly (`--no-glow`), for comparison.
     no_glow: bool,
+    /// Log where each frame's time goes, once a second (`--profile`).
+    profile: bool,
 }
 
 fn parse_args() -> Options {
@@ -122,6 +125,7 @@ fn parse_args() -> Options {
         press: Vec::new(),
         record: None,
         no_glow: false,
+        profile: false,
     };
     let mut args = platform::args().into_iter();
     while let Some(a) = args.next() {
@@ -151,6 +155,7 @@ fn parse_args() -> Options {
             }
             "--no-hud" => o.no_hud = true,
             "--no-glow" => o.no_glow = true,
+            "--profile" => o.profile = true,
             "--screen" => {
                 o.screen = match val().as_str() {
                     "title" => menu::AppState::Title,
@@ -264,6 +269,7 @@ pub struct World {
     clear: gpu::ClearColor,
     screenshots: gpu::Screenshots,
     renderer: gpu::Renderer,
+    profile: profile::Profile,
     shot: ShotTimer,
     scripted: Scripted,
     screen: screen::Screen,
@@ -307,6 +313,7 @@ pub struct World {
 impl World {
     fn new(mut e: Engine, opts: Options, data: Data, state: menu::AppState) -> Self {
         e.time.fixed.set_hz(l3d_sim::TICKS_PER_SECOND as f64);
+        let profile = profile::Profile::new(opts.profile);
         World {
             e,
             current: CurrentLevel {
@@ -331,6 +338,7 @@ impl World {
             clear: gpu::ClearColor(Color::srgb(0.35, 0.55, 0.85)),
             screenshots: gpu::Screenshots::default(),
             renderer: gpu::Renderer::default(),
+            profile,
             shot: ShotTimer::default(),
             scripted: Scripted::default(),
             screen: screen::Screen::default(),
@@ -527,6 +535,7 @@ impl l3d_engine::Game for World {
     }
 
     fn frame(&mut self) {
+        self.profile.begin_frame();
         if !self.started {
             self.started = true;
             self.enter(self.state);
@@ -551,6 +560,7 @@ impl l3d_engine::Game for World {
         sfx::play(self);
         let scale = self.e.window.scale_factor();
         self.ui.layout(&self.screen, scale);
+        self.profile.cpu(profile::Cpu::Game);
         gpu::render(self);
     }
 }
