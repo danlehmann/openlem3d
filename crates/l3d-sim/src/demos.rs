@@ -863,13 +863,12 @@ pub const SOLUTIONS: &[Solution] = &[
             (1899, 8, 1, Some(false)),
         ],
     ),
-    // Mayhem 8 "Five Towers" by a route of our own (saves 30 of 30): with
-    // both hatches dropping at once, the lemmings right behind each builder
-    // walk off its unfinished staircase, so one is held back by a digger
-    // with nothing to dig, and the turner is one that would have died.
-    at(
-        67,
-        &[
+    // Mayhem 8 "Five Towers": the best known in ours, 1 short of the 30
+    // needed; with both hatches dropping at once, the lemmings right behind
+    // each builder walk off its unfinished staircase.
+    Solution {
+        level: 67,
+        plan: Plan::At(&[
             (294, 1, 1, Some(true)),
             (415, 3, 3, None),
             (580, 3, 1, Some(true)),
@@ -882,8 +881,9 @@ pub const SOLUTIONS: &[Solution] = &[
             (1270, 7, 3, None),
             (1430, 0, 2, None),
             (1535, 2, 1, Some(false)),
-        ],
-    ),
+        ]),
+        saves: 29,
+    },
     // Mayhem 9 "Over the Top", by the published walkthrough.
     at(
         68,

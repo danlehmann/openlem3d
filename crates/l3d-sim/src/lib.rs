@@ -2412,6 +2412,17 @@ impl Simulation {
     }
 
     fn dig(&mut self, l: &mut Lemming) {
+        // Nothing it can dig under it (steel, or nothing at all): it walks
+        // straight on and the skill is given back (verified on a changed
+        // "Team Work", 2026-10-24: on a steel lane the digger count dropped
+        // and came back, and the lemming never stopped walking).
+        if l.state_ticks == 1
+            && !matches!(self.dig_cell(l), Some((_, _, f)) if f & flags::STEEL == 0)
+        {
+            l.set_state(State::Walking);
+            self.skills_left[Skill::Digger as usize] += 1;
+            return;
+        }
         // Starting on segments another digger left part dug: as far on.
         if l.state_ticks == 1
             && let Some((c, mask, _)) = self.dig_target(l)
