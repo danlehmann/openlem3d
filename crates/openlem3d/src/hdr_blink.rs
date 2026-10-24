@@ -12,7 +12,8 @@ const PERIOD: f32 = 5.0;
 /// The label's canvas and size, as the mode notice's.
 const SCREEN: Vec2 = Vec2::new(640.0, 480.0);
 const SCALE: f32 = 2.0;
-const Y: f32 = 20.0;
+// Below the HUD's key hints at the top.
+const Y: f32 = 56.0;
 
 /// The label shown, and whether it says HDR is on.
 #[derive(Default)]

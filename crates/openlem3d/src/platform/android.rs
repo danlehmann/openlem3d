@@ -416,7 +416,8 @@ impl Drop for HdrLayer {
 }
 
 /// Whether the display can show HDR for a layer asking for it (Android 15
-/// and later).
+/// and later): it has an HDR/SDR ratio, and can go above white (the
+/// Googlebook's has one, but never above 1).
 fn hdr_shown(env: &mut JNIEnv, activity: &JObject) -> jni::errors::Result<bool> {
     if sdk(env)? < ANDROID_15 {
         return Ok(false);
@@ -424,10 +425,17 @@ fn hdr_shown(env: &mut JNIEnv, activity: &JObject) -> jni::errors::Result<bool> 
     let display = env
         .call_method(activity, "getDisplay", "()Landroid/view/Display;", &[])?
         .l()?;
-    Ok(!display.is_null()
-        && env
+    if display.is_null()
+        || !env
             .call_method(&display, "isHdrSdrRatioAvailable", "()Z", &[])?
-            .z()?)
+            .z()?
+    {
+        return Ok(false);
+    }
+    let highest = env
+        .call_method(&display, "getHighestHdrSdrRatio", "()F", &[])?
+        .f()?;
+    Ok(highest > 1.01)
 }
 
 /// Adds a `SurfaceView` filling the window, above it, asking for
