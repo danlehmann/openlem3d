@@ -20,7 +20,8 @@ struct Uniforms {
     // xy for the sky, 0 when the scene is rendered small; zw for the stretch.
     origin: vec4<f32>,
     // x: how much brighter than its palette colour a fully glowing texel is
-    // drawn; 0 when glow is off.
+    // drawn; 0 when glow is off. y: how far above white the screen shows
+    // (an HDR target, linear with 1 at white), or 0.
     post: vec4<f32>,
 };
 
@@ -194,6 +195,16 @@ fn from_srgb(c: vec3<f32>) -> vec3<f32> {
     return select(pow((c + 0.055) / 1.055, vec3(2.4)), c / 12.92, c <= vec3(0.04045));
 }
 
+/// On an HDR screen showing up to `headroom` times white: each channel as it
+/// is up to white, then above it eased into the headroom, so that the
+/// brightest glow still differs from the merely bright (and, again channel
+/// by channel, a flame's core turns white only at the top).
+fn into_headroom(c: vec3<f32>, headroom: f32) -> vec3<f32> {
+    let room = max(headroom - 1.0, 1e-3);
+    let over = max(c - vec3(1.0), vec3(0.0));
+    return min(c, vec3(1.0)) + room * (vec3(1.0) - exp(-over / room));
+}
+
 /// Interleaved gradient noise (Jimenez 2014): 0–1, even over the screen.
 fn noise(p: vec2<f32>) -> f32 {
     return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
@@ -201,6 +212,9 @@ fn noise(p: vec2<f32>) -> f32 {
 
 /// `c` onto the screen at `clip`.
 fn present(c: vec3<f32>, clip: vec2<f32>) -> vec4<f32> {
+    if (u.post.y > 0.0) {
+        return vec4(into_headroom(max(c, vec3(0.0)), u.post.y), 1.0);
+    }
     // The screen stores sRGB in 8 bits: dither in those steps.
     let s = to_srgb(clamp(c, vec3(0.0), vec3(1.0))) + (noise(clip) - 0.5) * 0.8 / 255.0;
     return vec4(from_srgb(clamp(s, vec3(0.0), vec3(1.0))), 1.0);

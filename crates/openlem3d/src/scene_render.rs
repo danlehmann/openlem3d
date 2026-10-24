@@ -103,6 +103,11 @@ pub struct SceneInput<'a> {
     pub camera: &'a SceneCamera,
     /// Times the scene's parts on the GPU (`--profile`).
     pub profile: &'a crate::profile::Profile,
+    /// The format of the target drawn into.
+    pub format: wgpu::TextureFormat,
+    /// How far above white the screen shows (an HDR target), or 0 (SDR:
+    /// glowing things clip at white).
+    pub headroom: f32,
 }
 
 /// The scene's colour format while glowing: room above white.
@@ -622,6 +627,7 @@ fn prepare(
     content: &SceneContent,
     sprites: &SceneSprites,
     camera: &SceneCamera,
+    headroom: f32,
 ) {
     let (w, h) = gpu.target_size;
     let scale = h as f32 / 480.0;
@@ -665,7 +671,7 @@ fn prepare(
     let glow = camera.glow && !small;
     let sky = if small || glow { [0.0, 0.0] } else { [x, y] };
     uniforms.extend([sky[0], sky[1], x, y]);
-    uniforms.extend([if glow { GLOW_GAIN } else { 0.0 }, 0.0, 0.0, 0.0]);
+    uniforms.extend([if glow { GLOW_GAIN } else { 0.0 }, headroom, 0.0, 0.0]);
     queue.write_buffer(&gpu.uniforms, 0, &f32_bytes(&uniforms));
     upload_sprites(device, queue, gpu, sprites);
     if gpu.version == Some(content.version) {
@@ -765,7 +771,7 @@ fn upload_sprites(
 
 impl SceneGpu {
     /// Draws the scene into `viewport` (x, y, width, height) of `target`, a
-    /// frame of `full` size in [`TARGET_FORMAT`].
+    /// frame of `full` size in `input.format`.
     pub fn draw(
         &mut self,
         gpu: &Gpu,
@@ -786,6 +792,7 @@ impl SceneGpu {
             input.content,
             input.sprites,
             input.camera,
+            input.headroom,
         );
         draw(self, device, encoder, target, full, viewport, input);
     }
@@ -802,7 +809,7 @@ fn draw(
 ) {
     let (camera, profile) = (input.camera, input.profile);
     let size = gpu.target_size;
-    let format = TARGET_FORMAT;
+    let format = input.format;
     let device = device.clone();
     // Rendered small and stretched over the screen, or at the screen's size:
     // offscreen in floating point while glowing, else straight onto it.

@@ -22,7 +22,7 @@ use std::collections::HashMap;
 use l3d_engine::input::Input;
 use l3d_engine::prelude::*;
 
-use crate::gpu::{Gpu, TARGET_FORMAT};
+use crate::gpu::Gpu;
 use crate::screen::Screen;
 
 /// A length: none, in logical pixels, or a percentage of the parent's.
@@ -699,6 +699,8 @@ const QUAD_FLOATS: usize = 16;
 pub struct UiGpu {
     layout: wgpu::BindGroupLayout,
     pipeline: wgpu::RenderPipeline,
+    /// The format of the targets it draws into.
+    pub format: wgpu::TextureFormat,
     /// Every picture is pixel art, sampled sharp.
     sampler: wgpu::Sampler,
     /// A white texel, for plain colours.
@@ -716,7 +718,8 @@ struct Uploaded {
 }
 
 impl UiGpu {
-    pub fn new(gpu: &Gpu) -> Self {
+    /// The UI's GPU side, drawing into targets of `format`.
+    pub fn new(gpu: &Gpu, format: wgpu::TextureFormat) -> Self {
         let device = &gpu.device;
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("ui"),
@@ -767,7 +770,7 @@ impl UiGpu {
                 module: &shader,
                 entry_point: Some("fs"),
                 targets: &[Some(wgpu::ColorTargetState {
-                    format: TARGET_FORMAT,
+                    format,
                     blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
@@ -801,6 +804,7 @@ impl UiGpu {
         UiGpu {
             layout,
             pipeline,
+            format,
             sampler,
             white,
             quads: None,

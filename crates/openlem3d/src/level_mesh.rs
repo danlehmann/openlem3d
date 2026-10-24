@@ -306,7 +306,7 @@ fn tile_uv(src: FaceDir, p: [f32; 3]) -> [f32; 2] {
 /// tile and the next 4 or 3; 0x40 loops a run chosen by the tile value
 /// ([L3DEdit] BLK notes, from testing in the original; unverified here).
 /// Frame rate unknown.
-fn face_animation(texture: u8, mods: u8) -> Option<(u32, i32)> {
+pub(crate) fn face_animation(texture: u8, mods: u8) -> Option<(u32, i32)> {
     if mods == 0xFF {
         return None;
     }

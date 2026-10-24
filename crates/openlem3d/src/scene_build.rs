@@ -1172,8 +1172,9 @@ pub fn build(data: &mut GameData, n: u32, show: Show) -> Result<BuiltLevel, l3d_
     scene.layers.push(block_layer(
         &mesh,
         {
-            let lit = glow::texture(level.texture_set, &tex, &pal);
-            glowing_rgba(&tex, 64, &pal, |p| lit[p])
+            let torches = glow::texture(level.texture_set, &tex, &pal);
+            let current = glow::electric(&tex, &glow::electric_runs(&level, &blocks), &pal);
+            glowing_rgba(&tex, 64, &pal, |p| torches[p].max(current[p]))
         },
         &scene.lights,
         &level,

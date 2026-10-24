@@ -41,6 +41,20 @@ pub fn config_dir() -> Option<PathBuf> {
     None
 }
 
+/// How far above white the screen can show now (macOS: its extended
+/// dynamic range headroom, which follows the brightness), as a multiple of
+/// white; 1 where it can't.
+pub fn hdr_headroom() -> f32 {
+    #[cfg(target_os = "macos")]
+    return objc2::MainThreadMarker::new()
+        .and_then(objc2_app_kit::NSScreen::mainScreen)
+        .map_or(1.0, |s| {
+            s.maximumExtendedDynamicRangeColorComponentValue().max(1.0) as f32
+        });
+    #[cfg(not(target_os = "macos"))]
+    1.0
+}
+
 /// How far the system draws over each edge of the window, in physical pixels:
 /// left, top, right, bottom. On Android these are the caption bar of a
 /// desktop window, the status and navigation bars, the on-screen keyboard,

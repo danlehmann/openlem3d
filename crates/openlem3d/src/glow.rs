@@ -1,5 +1,6 @@
 //! Which pixels glow in Enhanced mode (ours, not the original's): flames,
-//! lamps, neon signs, sparkles and laser beams are drawn brighter than
+//! lamps, neon signs, sparkles, laser beams and electrified floors (the
+//! current crackling over them) are drawn brighter than
 //! white, and the scene renderer lets that excess bloom into their
 //! surroundings. Everything else keeps its palette colour exactly.
 //!
@@ -7,7 +8,9 @@
 //! values glow, down to `255 − GLOW_STEPS` at full strength. That stays
 //! above the cutout threshold, so glowing texels are never see-through.
 
+use l3d_formats::blk::{BlockSet, flags};
 use l3d_formats::gamedata::Palette;
+use l3d_formats::level::Level;
 
 /// Alpha steps between a plain texel and a fully glowing one; the scene
 /// shader decodes the same scale.
@@ -99,6 +102,58 @@ pub fn texture(set: u8, pixels: &[u8], pal: &Palette) -> Vec<f32> {
             }
         })
         .collect()
+}
+
+/// Level header flag: its liquid electrocutes rather than drowns.
+const LIQUID_ZAPS: u16 = 0x8000;
+
+/// The texture animations (first tile, frame count as in
+/// `level_mesh::face_animation`) on the faces of liquid blocks, on a level
+/// whose liquid electrocutes: its current.
+pub fn electric_runs(level: &Level, blocks: &BlockSet) -> Vec<(u32, i32)> {
+    if level.flags & LIQUID_ZAPS == 0 {
+        return Vec::new();
+    }
+    let mut runs: Vec<(u32, i32)> = blocks
+        .defs
+        .iter()
+        .filter(|d| d.flags & flags::LIQUID != 0 && !d.is_placeholder())
+        .flat_map(|d| d.faces)
+        .filter_map(|f| crate::level_mesh::face_animation(f.texture, f.modifiers))
+        .collect();
+    runs.sort_unstable();
+    runs.dedup();
+    runs
+}
+
+/// Per-pixel glow of the texture strip `pixels` (64×64 tiles) from the
+/// animations `runs`: in each frame, the pixels that differ from what that
+/// spot shows in most frames. The sparks run all over the grating from frame
+/// to frame, so the grating is what most frames show, and only the current
+/// glows.
+pub fn electric(pixels: &[u8], runs: &[(u32, i32)], pal: &Palette) -> Vec<f32> {
+    const TILE: usize = 64 * 64;
+    let mut glow = vec![0.0; pixels.len()];
+    for &(first, frames) in runs {
+        let tiles: Vec<usize> = (0..frames.unsigned_abs() as usize)
+            .map(|f| first as usize + f)
+            .filter(|t| (t + 1) * TILE <= pixels.len())
+            .collect();
+        for p in 0..TILE {
+            let at = |t: usize| pixels[t * TILE + p];
+            let usual = tiles
+                .iter()
+                .map(|&t| at(t))
+                .max_by_key(|&i| tiles.iter().filter(|&&t| at(t) == i).count());
+            for &t in &tiles {
+                let i = at(t);
+                if i != 0 && Some(i) != usual {
+                    glow[t * TILE + p] = strength(pal[i as usize]);
+                }
+            }
+        }
+    }
+    glow
 }
 
 /// Per-pixel glow of an all-round (space) sky, `width` wide and wrapping

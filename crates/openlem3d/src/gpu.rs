@@ -30,6 +30,8 @@ pub struct Screenshots(pub Vec<PathBuf>);
 
 /// The format everything is drawn in before it is copied to the window.
 pub const TARGET_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
+/// The same on an HDR window: linear, 1 at white and brighter above.
+const HDR_TARGET_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 
 #[derive(Default)]
 pub(crate) struct Renderer {
@@ -142,25 +144,35 @@ fn create_surface(instance: &wgpu::Instance, handle: &WindowHandle) -> wgpu::Sur
 struct Surface {
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
-    /// The format of the views drawn into it: an sRGB one.
+    /// The format of the views drawn into it: an sRGB one, or a linear
+    /// float one on an HDR window.
     view_format: wgpu::TextureFormat,
+    /// Whether it shows brighter than white (`--hdr`, where the window can).
+    hdr: bool,
     /// Configured for a window that has since changed.
     stale: bool,
 }
 
 impl Surface {
-    /// Bevy's choice: sRGB RGBA8 or BGRA8 where the window offers it.
-    fn new(gpu: &Gpu, surface: wgpu::Surface<'static>) -> Self {
+    /// sRGB RGBA8 or BGRA8 where the window offers it; with `hdr`, linear
+    /// RGBA16 floats where it offers those (macOS: extended dynamic range).
+    fn new(gpu: &Gpu, surface: wgpu::Surface<'static>, hdr: bool) -> Self {
         let formats = surface.get_capabilities(&gpu.adapter).formats;
+        let hdr = hdr && cfg!(target_os = "macos") && formats.contains(&HDR_TARGET_FORMAT);
         let format = formats
             .iter()
             .copied()
-            .find(|f| {
-                *f == wgpu::TextureFormat::Rgba8UnormSrgb
-                    || *f == wgpu::TextureFormat::Bgra8UnormSrgb
+            .find(|&f| {
+                if hdr {
+                    f == HDR_TARGET_FORMAT
+                } else {
+                    f == wgpu::TextureFormat::Rgba8UnormSrgb
+                        || f == wgpu::TextureFormat::Bgra8UnormSrgb
+                }
             })
             .or(formats.first().copied())
             .expect("the window offers no formats");
+        info!("window format {format:?}{}", if hdr { ", HDR" } else { "" });
         let view_format = format.add_srgb_suffix();
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
@@ -180,6 +192,7 @@ impl Surface {
             surface,
             config,
             view_format,
+            hdr,
             stale: true,
         }
     }
@@ -201,6 +214,10 @@ impl Surface {
         (c.width, c.height, c.present_mode) = (size.x, size.y, present);
         gpu.idle();
         self.surface.configure(&gpu.device, &self.config);
+        #[cfg(target_os = "macos")]
+        if self.hdr {
+            edr::extended_linear(&self.surface);
+        }
         self.stale = false;
     }
 }
@@ -208,6 +225,7 @@ impl Surface {
 /// The texture a frame is drawn into.
 struct Target {
     size: UVec2,
+    format: wgpu::TextureFormat,
     texture: wgpu::Texture,
     view: wgpu::TextureView,
     /// Samples it, for copying it to the window.
@@ -321,7 +339,7 @@ impl Copy {
         &self.pipelines.last().expect("just pushed").1
     }
 
-    fn target(&self, device: &wgpu::Device, size: UVec2) -> Target {
+    fn target(&self, device: &wgpu::Device, size: UVec2, format: wgpu::TextureFormat) -> Target {
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("frame"),
             size: wgpu::Extent3d {
@@ -332,7 +350,7 @@ impl Copy {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: TARGET_FORMAT,
+            format,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT
                 | wgpu::TextureUsages::TEXTURE_BINDING
                 | wgpu::TextureUsages::COPY_SRC,
@@ -355,6 +373,7 @@ impl Copy {
         });
         Target {
             size,
+            format,
             texture,
             view,
             bind_group,
@@ -377,7 +396,7 @@ pub(crate) fn render(w: &mut World) {
     let (window, screen, clear, screenshots) =
         (&w.e.window, &w.screen, &w.clear, &mut w.screenshots);
     let profile = &mut w.profile;
-    let backend = w.opts.backend;
+    let (backend, hdr) = (w.opts.backend, w.opts.hdr);
     let Some(handle) = &w.e.handle else {
         // The app is suspended (Android): the window is gone.
         *surface = None;
@@ -404,11 +423,11 @@ pub(crate) fn render(w: &mut World) {
             }
             *scene = Some(sc);
             profile.start_gpu(&g.device, &g.queue);
-            *surface = Some(Surface::new(&g, s));
+            *surface = Some(Surface::new(&g, s, hdr));
             *gpu = Some(g);
         }
         Some(g) if new_handle || surface.is_none() => {
-            *surface = Some(Surface::new(g, create_surface(&g.instance, handle)));
+            *surface = Some(Surface::new(g, create_surface(&g.instance, handle), hdr));
         }
         Some(_) => {}
     }
@@ -453,8 +472,17 @@ pub(crate) fn render(w: &mut World) {
     profile.collect(&gpu.device);
     let device = &gpu.device;
     let copy = copy.get_or_insert_with(|| Copy::new(device));
-    if target.as_ref().is_none_or(|t| t.size != size) {
-        *target = Some(copy.target(device, size));
+    let s = surface.as_ref().expect("checked above");
+    let (format, headroom) = if s.hdr {
+        (HDR_TARGET_FORMAT, crate::platform::hdr_headroom())
+    } else {
+        (TARGET_FORMAT, 0.0)
+    };
+    if target
+        .as_ref()
+        .is_none_or(|t| t.size != size || t.format != format)
+    {
+        *target = Some(copy.target(device, size, format));
     }
     let target = target.as_ref().expect("made above");
     let mut encoder = device.create_command_encoder(&Default::default());
@@ -493,10 +521,15 @@ pub(crate) fn render(w: &mut World) {
                 sprites: &w.sprites,
                 camera: &w.camera,
                 profile,
+                format,
+                headroom,
             },
         );
     profile.stamp(&mut encoder, Stamp::Scene);
-    ui.get_or_insert_with(|| UiGpu::new(gpu)).draw(
+    if ui.as_ref().is_some_and(|u| u.format != format) {
+        *ui = None;
+    }
+    ui.get_or_insert_with(|| UiGpu::new(gpu, format)).draw(
         gpu,
         &mut encoder,
         &target.view,
@@ -532,7 +565,8 @@ pub(crate) fn render(w: &mut World) {
     }
     profile.stamp(&mut encoder, Stamp::Copy);
     profile.resolve(&mut encoder);
-    let shot = (!screenshots.0.is_empty()).then(|| read_back(device, &mut encoder, target));
+    let shot = (!screenshots.0.is_empty())
+        .then(|| (read_back(device, &mut encoder, target), target.format));
     profile.cpu(Cpu::Encode);
     gpu.queue.submit([encoder.finish()]);
     profile.submitted();
@@ -540,14 +574,21 @@ pub(crate) fn render(w: &mut World) {
         frame.present();
     }
     profile.cpu(Cpu::Present);
-    if let Some(buffer) = shot {
-        save(device, &buffer, size, &std::mem::take(&mut screenshots.0));
+    if let Some((buffer, format)) = shot {
+        save(
+            device,
+            &buffer,
+            size,
+            format,
+            &std::mem::take(&mut screenshots.0),
+        );
     }
 }
 
 /// Bytes per row of a screenshot's copy, as wgpu wants them aligned.
-fn padded_row(width: u32) -> u32 {
-    (width * 4).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT)
+fn padded_row(width: u32, format: wgpu::TextureFormat) -> u32 {
+    let texel = format.block_copy_size(None).unwrap_or(4);
+    (width * texel).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT)
 }
 
 /// Copies the frame into a buffer to read.
@@ -558,7 +599,7 @@ fn read_back(
 ) -> wgpu::Buffer {
     let buffer = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("screenshot"),
-        size: (padded_row(target.size.x) * target.size.y) as u64,
+        size: (padded_row(target.size.x, target.format) * target.size.y) as u64,
         usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         mapped_at_creation: false,
     });
@@ -568,7 +609,7 @@ fn read_back(
             buffer: &buffer,
             layout: wgpu::TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(padded_row(target.size.x)),
+                bytes_per_row: Some(padded_row(target.size.x, target.format)),
                 rows_per_image: None,
             },
         },
@@ -578,24 +619,41 @@ fn read_back(
 }
 
 /// Saves the frame read back into `buffer` to each of `paths`.
-fn save(device: &wgpu::Device, buffer: &wgpu::Buffer, size: UVec2, paths: &[PathBuf]) {
+fn save(
+    device: &wgpu::Device,
+    buffer: &wgpu::Buffer,
+    size: UVec2,
+    format: wgpu::TextureFormat,
+    paths: &[PathBuf],
+) {
     let slice = buffer.slice(..);
     slice.map_async(wgpu::MapMode::Read, |_| {});
     if let Err(e) = device.poll(wgpu::PollType::wait_indefinitely()) {
         error!("could not read the screenshot back: {e}");
         return;
     }
-    let row = padded_row(size.x) as usize;
+    let row = padded_row(size.x, format) as usize;
+    let texel = format.block_copy_size(None).unwrap_or(4) as usize;
     let texels: Vec<u8> = slice
         .get_mapped_range()
         .chunks(row)
-        .flat_map(|r| r[..size.x as usize * 4].iter().copied())
+        .flat_map(|r| r[..size.x as usize * texel].iter().copied())
         .collect();
-    // RGB: the frame is opaque.
-    let rgb: Vec<u8> = texels
-        .chunks(4)
-        .flat_map(|t| t[..3].iter().copied())
-        .collect();
+    // RGB: the frame is opaque. An HDR frame is clipped at white, as an SDR
+    // screen would show it.
+    let rgb: Vec<u8> = if format == HDR_TARGET_FORMAT {
+        texels
+            .chunks(8)
+            .flat_map(|t| {
+                (0..3).map(move |c| f16_to_srgb8(u16::from_le_bytes([t[2 * c], t[2 * c + 1]])))
+            })
+            .collect()
+    } else {
+        texels
+            .chunks(4)
+            .flat_map(|t| t[..3].iter().copied())
+            .collect()
+    };
     for path in paths {
         match save_png(path, size, &rgb) {
             Ok(()) => info!("Screenshot saved to {}", path.display()),
@@ -610,4 +668,40 @@ fn save_png(path: &std::path::Path, size: UVec2, rgb: &[u8]) -> Result<(), png::
     encoder.set_color(png::ColorType::Rgb);
     encoder.set_depth(png::BitDepth::Eight);
     encoder.write_header()?.write_image_data(rgb)
+}
+
+/// A linear half float, clipped to 0–1, as an 8-bit sRGB value.
+fn f16_to_srgb8(h: u16) -> u8 {
+    let (exp, mant) = ((h >> 10) & 0x1F, (h & 0x3FF) as f32);
+    let v = match exp {
+        0 => mant / 1024.0 / 16384.0,
+        31 => 0.0,
+        e => (1.0 + mant / 1024.0) * 2f32.powi(e as i32 - 15),
+    };
+    let v = if h & 0x8000 != 0 { 0.0 } else { v.min(1.0) };
+    let s = if v <= 0.003_130_8 {
+        v * 12.92
+    } else {
+        1.055 * v.powf(1.0 / 2.4) - 0.055
+    };
+    (s * 255.0).round() as u8
+}
+
+/// macOS extended dynamic range: brighter than white on screens that can.
+#[cfg(target_os = "macos")]
+mod edr {
+    use objc2_core_graphics::{CGColorSpace, kCGColorSpaceExtendedLinearSRGB};
+
+    /// Tells the window's Metal layer that its float values are linear sRGB
+    /// with 1 at white and more above it. wgpu asks for extended dynamic
+    /// range for such a surface but leaves the colour space unset.
+    pub fn extended_linear(surface: &wgpu::Surface) {
+        // SAFETY: the layer is only used here, between frames, on the thread
+        // that draws.
+        let Some(hal) = (unsafe { surface.as_hal::<wgpu::hal::api::Metal>() }) else {
+            return;
+        };
+        let space = CGColorSpace::with_name(Some(unsafe { kCGColorSpaceExtendedLinearSRGB }));
+        hal.render_layer().lock().setColorspace(space.as_deref());
+    }
 }

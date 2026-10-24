@@ -37,9 +37,19 @@ objc2-app-kit = { version = "0.3", default-features = false, features = [
     "NSApplication",
     "NSEvent",
     "NSResponder",
+    "NSScreen",
+    "objc2-core-foundation",
     "NSTouch",
     "NSView",
     "NSWindow",
+] }
+# HDR on the window's Metal layer (`src/gpu.rs`).
+objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGColorSpace"] }
+objc2-quartz-core = { version = "0.3", default-features = false, features = [
+    "std",
+    "CALayer",
+    "CAMetalLayer",
+    "objc2-core-graphics",
 ] }
 
 [target.'cfg(target_os = "android")'.dependencies]
