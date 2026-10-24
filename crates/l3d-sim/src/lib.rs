@@ -1911,6 +1911,24 @@ impl Simulation {
         // would not fit on it; the builder then stops (observed in Practice
         // "Builder" with a wall across the bridge: the brick running into it
         // is laid, then the builder walks back).
+        // Terrain no higher than the brick's top doesn't stop it: the brick
+        // is laid over it and the builder builds on from it (the owner's
+        // play of Mayhem 1: a brick level with a crate's lid was laid onto
+        // the crate, the builder climbed it and laid another).
+        let (x0, x1) = along(BRICK_START, BRICK_END, 0);
+        let (z0, z1) = along(BRICK_START, BRICK_END, 2);
+        let full = world::Brick {
+            min: [x0, l.pos[1], z0],
+            max: [x1, l.pos[1] + SUB / 4, z1],
+            id: template,
+        };
+        if !head_blocked && !self.world.brick_hits(&full, full.max[1]) {
+            self.world.lay_brick(full);
+            l.state = State::Building {
+                bricks_left: bricks_left - 1,
+            };
+            return;
+        }
         let mut end = BRICK_END;
         let laid = loop {
             let (x0, x1) = along(BRICK_START, end, 0);

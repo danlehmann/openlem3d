@@ -252,21 +252,34 @@ impl World {
     /// Adds a brick unless it would overlap solid terrain (sampled at its
     /// corners and centre); returns whether it was added.
     pub fn add_brick(&mut self, brick: Brick) -> bool {
-        let (lo, hi) = (brick.min, brick.max.map(|v| v - 1));
-        let mid = [0, 1, 2].map(|i| (lo[i] + hi[i]) / 2);
-        let samples = [
-            [lo[0], mid[1], lo[2]],
-            [hi[0], mid[1], lo[2]],
-            [lo[0], mid[1], hi[2]],
-            [hi[0], mid[1], hi[2]],
-            mid,
-        ];
-        if samples.iter().any(|&p| self.solid(p)) {
+        let mid = (brick.min[1] + brick.max[1] - 1) / 2;
+        if self.brick_hits(&brick, mid) {
             return false;
         }
+        self.lay_brick(brick);
+        true
+    }
+
+    /// Whether anything solid is in `brick`'s footprint at height `y`
+    /// (sampled at its corners and middle).
+    pub fn brick_hits(&self, brick: &Brick, y: i32) -> bool {
+        let (lo, hi) = (brick.min, brick.max.map(|v| v - 1));
+        let mid = [0, 2].map(|i| (lo[i] + hi[i]) / 2);
+        [
+            [lo[0], y, lo[2]],
+            [hi[0], y, lo[2]],
+            [lo[0], y, hi[2]],
+            [hi[0], y, hi[2]],
+            [mid[0], y, mid[1]],
+        ]
+        .iter()
+        .any(|&p| self.solid(p))
+    }
+
+    /// Adds `brick` as it is, whatever it overlaps.
+    pub fn lay_brick(&mut self, brick: Brick) {
         self.bricks.push(brick);
         self.bricks_changed = true;
-        true
     }
 
     /// Whether the bricks changed since the last call.
