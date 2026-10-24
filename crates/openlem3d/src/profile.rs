@@ -196,7 +196,10 @@ impl Profile {
                     .iter()
                     .map(|c| u64::from_le_bytes(*c))
                     .collect();
-                if stamps.windows(2).all(|w| w[1] >= w[0]) {
+                // Some drivers (Apple's) write zeros between commands.
+                if stamps.windows(2).all(|w| w[1] >= w[0])
+                    && stamps[STAMPS as usize - 1] > stamps[0]
+                {
                     t.gpu_frames += 1;
                     for (i, w) in stamps.windows(2).enumerate() {
                         let ms = (w[1] - w[0]) as f64 * g.period / 1e6;
@@ -281,7 +284,7 @@ impl Profile {
             t.slow,
             cpu.join(", "),
             if gpu.is_empty() {
-                "-".into()
+                "no timings from this driver".into()
             } else {
                 gpu.join(", ")
             },

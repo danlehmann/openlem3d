@@ -385,13 +385,18 @@ pub(crate) fn render(w: &mut World) {
     s.update(gpu, size, window.present_mode);
     // Without a frame to show (the window hidden, say), a screenshot is
     // still drawn.
+    let mut hidden = false;
     let frame = match s.surface.get_current_texture() {
         wgpu::CurrentSurfaceTexture::Success(t) => Some(t),
         wgpu::CurrentSurfaceTexture::Suboptimal(t) => {
             s.stale = true;
             Some(t)
         }
-        wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => None,
+        wgpu::CurrentSurfaceTexture::Timeout => None,
+        wgpu::CurrentSurfaceTexture::Occluded => {
+            hidden = true;
+            None
+        }
         wgpu::CurrentSurfaceTexture::Outdated => {
             s.stale = true;
             None
@@ -404,6 +409,11 @@ pub(crate) fn render(w: &mut World) {
     };
     profile.cpu(Cpu::Acquire);
     if frame.is_none() && screenshots.0.is_empty() {
+        // A hidden window (covered, minimised, the screen locked) gives no
+        // image and no wait for one: rest instead of spinning a core.
+        if hidden {
+            std::thread::sleep(Duration::from_millis(10));
+        }
         return;
     }
     profile.collect(&gpu.device);
