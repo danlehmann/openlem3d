@@ -991,7 +991,11 @@ pub fn rebuild_blocks(
     };
     out.layers[layer] = block_layer(
         &level_mesh::build(level, blocks, &on_top, hatch_open(sim.tick), &|x, y, z| {
-            sim.world.cut([x, y, z].map(|v| v as i32)) as f32 / 4.0
+            let c = [x, y, z].map(|v| v as i32);
+            (
+                sim.world.base(c) as f32 / 4.0,
+                sim.world.cut(c) as f32 / 4.0,
+            )
         }),
         texture,
         &scene.lights,
@@ -1078,7 +1082,7 @@ pub fn build(data: &mut GameData, n: u32, show: Show) -> Result<BuiltLevel, l3d_
         &blocks,
         &|tile| art_on_top(|i| tex.get(i).is_some_and(|&p| p != 0), tile),
         0.0,
-        &|_, _, _| 1.0,
+        &|_, _, _| (0.0, 1.0),
     );
     let mut scene = SceneData::default();
 

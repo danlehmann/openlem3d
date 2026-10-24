@@ -77,6 +77,9 @@ struct SolidCell {
     /// Height in quarter units above which the block has been dug away,
     /// leaving its shape below unchanged: 4 for a whole block.
     cut: u8,
+    /// Height in quarter units below which it has been blown away, leaving
+    /// its shape above unchanged: 0 for a whole block.
+    base: u8,
 }
 
 impl World {
@@ -94,6 +97,7 @@ impl World {
                 block: b,
                 flags: def.flags,
                 cut: 4,
+                base: 0,
             });
         }
         let land = level
@@ -178,7 +182,29 @@ impl World {
         }
         self.remove_bricks(c, 0xF & !((1 << cut) - 1));
         cell.cut = cut;
-        if cell.block.segments & ((1 << cut) - 1) == 0 {
+        if cell.block.segments & between(cell.base, cut) == 0 {
+            cell.block.segments = 0;
+        }
+        let i = index(c[0] as usize, c[1] as usize, c[2] as usize);
+        self.cells[i] = (cell.block.segments != 0).then_some(cell);
+        self.changes.push((c.map(|v| v as usize), cell.block));
+        true
+    }
+
+    /// Takes the block in cell `c` away below `base` quarter units: what lies
+    /// below goes, the shape above stays as it was (rather than squeezed into
+    /// the segments left). A block with nothing left above is removed.
+    /// Returns whether anything changed.
+    pub fn lift(&mut self, c: [i32; 3], base: u8) -> bool {
+        let Some(mut cell) = self.cell(c[0], c[1], c[2]) else {
+            return false;
+        };
+        if base <= cell.base {
+            return false;
+        }
+        self.remove_bricks(c, between(0, base));
+        cell.base = base;
+        if cell.block.segments & between(base, cell.cut) == 0 {
             cell.block.segments = 0;
         }
         let i = index(c[0] as usize, c[1] as usize, c[2] as usize);
@@ -193,11 +219,17 @@ impl World {
         self.cell(c[0], c[1], c[2]).map_or(4, |s| s.cut)
     }
 
+    /// The height in quarter units below which the block in cell `c` has
+    /// been blown away ([`World::lift`]): 0 for a whole block or none.
+    pub fn base(&self, c: [i32; 3]) -> u8 {
+        self.cell(c[0], c[1], c[2]).map_or(0, |s| s.base)
+    }
+
     /// The segments of the block in cell `c` that hold something: those
     /// present, below its cut. 0 for an empty cell.
     pub fn present(&self, c: [i32; 3]) -> u8 {
         self.cell(c[0], c[1], c[2])
-            .map_or(0, |s| s.block.segments & ((1 << s.cut) - 1))
+            .map_or(0, |s| s.block.segments & between(s.base, s.cut))
     }
 
     /// Removes the bricks overlapping the segments in `mask` of cell `c`;
@@ -274,7 +306,7 @@ impl World {
             return false;
         };
         let l = [0, 1, 2].map(|i| (p[i] - c[i] * SUB) as f32 / SUB as f32);
-        l[1] * 4.0 < cell.cut as f32 && inside_shape(cell.block, l)
+        (cell.base as f32..cell.cut as f32).contains(&(l[1] * 4.0)) && inside_shape(cell.block, l)
     }
 
     /// For a point inside a 45° deflector wall (shape 7): the outward normal
@@ -452,6 +484,12 @@ fn to_shape_space(l: [f32; 3], rotation: u8) -> [f32; 3] {
         (x, z) = (-z, x);
     }
     [x + 0.5, l[1], z + 0.5]
+}
+
+/// The segments from quarter `from` up to (not including) quarter `to`.
+fn between(from: u8, to: u8) -> u8 {
+    let below = |q: u8| ((1u16 << q.min(4)) - 1) as u8;
+    below(to) & !below(from)
 }
 
 /// The thickness of a ramp at its thin edge (22.5° ramps, and the flat top

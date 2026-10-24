@@ -1557,6 +1557,7 @@ fn key_code(name: &str) -> Option<KeyCode> {
         "KeyS" => KeyCode::KeyS,
         "KeyD" => KeyCode::KeyD,
         "KeyQ" => KeyCode::KeyQ,
+        "AltLeft" => KeyCode::AltLeft,
         "KeyE" => KeyCode::KeyE,
         "KeyR" => KeyCode::KeyR,
         "KeyF" => KeyCode::KeyF,

@@ -1655,12 +1655,17 @@ impl Simulation {
                         .fold(0u8, |m, seg| m | 1 << seg);
                     let c = [cx, cy, cz];
                     let low = mask.trailing_zeros();
-                    let above_band =
-                        self.world.present(c) & !mask & 0xFu8.checked_shl(low).unwrap_or(0);
+                    let present = self.world.present(c);
+                    let above_band = present & !mask & 0xFu8.checked_shl(low).unwrap_or(0);
+                    let below_band = present & !mask & !0xFu8.checked_shl(low).unwrap_or(0);
+                    let high = 8 - mask.leading_zeros();
                     // A shaped block losing its top is shaved flat and keeps
                     // its slopes below the cut, as for the digger (blasts on
                     // a hill of 45° ramps in the original left flat steps
-                    // with vertical faces, no shallower slope).
+                    // with vertical faces, no shallower slope). One losing
+                    // its bottom keeps its shape above, cut off flat
+                    // underneath, rather than squeezed into what is left
+                    // (ours: a ramp so squeezed changed its angle, owner).
                     match self.world.block(c) {
                         Some((b, _))
                             if b.shape != 0
@@ -1669,6 +1674,14 @@ impl Simulation {
                                 && self.world.breakable_towards(c, None) =>
                         {
                             self.world.shave(c, low as u8);
+                        }
+                        Some((b, _))
+                            if b.shape != 0
+                                && mask != 0
+                                && below_band == 0
+                                && self.world.breakable_towards(c, None) =>
+                        {
+                            self.world.lift(c, high as u8);
                         }
                         _ => {
                             self.world.remove_segments(c, mask);
