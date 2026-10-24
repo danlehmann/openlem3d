@@ -19,6 +19,8 @@ struct Out {
     @location(0) uv: vec2<f32>,
     @location(1) color: vec4<f32>,
     @location(2) @interpolate(flat) bounds: vec4<f32>,
+    // The texture coordinates at the rectangle's corners.
+    @location(3) @interpolate(flat) uv_rect: vec4<f32>,
 };
 
 @group(0) @binding(0) var image: texture_2d<f32>;
@@ -35,7 +37,24 @@ fn vs(@builtin(vertex_index) i: u32, q: Quad) -> Out {
     out.uv = mix(q.uv.xy, q.uv.zw, corner);
     out.color = q.color;
     out.bounds = q.bounds;
+    out.uv_rect = q.uv;
     return out;
+}
+
+// Where to sample (with a linear sampler) so that pixel art scaled by any
+// amount keeps square texels: each screen pixel takes the texel it lies in,
+// and only a pixel straddling two texels blends them, by how much of it lies
+// in each. At whole-number scales that is exactly the nearest texel. Never
+// beyond the picture's own texels, so neighbours in a sheet don't bleed in.
+fn sharp_uv(uv: vec2<f32>, uv_rect: vec4<f32>) -> vec2<f32> {
+    let size = vec2<f32>(textureDimensions(image));
+    let texel = uv * size;
+    let pixels_per_texel = 1.0 / max(fwidth(texel), vec2<f32>(1e-6));
+    let seam = floor(texel + 0.5);
+    let t = seam + clamp((texel - seam) * pixels_per_texel, vec2<f32>(-0.5), vec2<f32>(0.5));
+    let lo = (min(uv_rect.xy, uv_rect.zw) * size + 0.5) / size;
+    let hi = (max(uv_rect.xy, uv_rect.zw) * size - 0.5) / size;
+    return clamp(t / size, min(lo, hi), max(lo, hi));
 }
 
 @fragment
@@ -44,6 +63,6 @@ fn fs(in: Out) -> @location(0) vec4<f32> {
     let half = (in.bounds.zw - in.bounds.xy) * 0.5;
     let q = abs(in.pos.xy - (in.bounds.xy + half)) - half;
     let d = length(max(q, vec2<f32>(0.0))) + min(max(q.x, q.y), 0.0);
-    let color = textureSample(image, image_sampler, in.uv) * in.color;
+    let color = textureSample(image, image_sampler, sharp_uv(in.uv, in.uv_rect)) * in.color;
     return vec4<f32>(color.rgb, color.a * saturate(0.5 - d));
 }

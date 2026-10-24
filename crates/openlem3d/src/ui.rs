@@ -784,8 +784,10 @@ impl UiGpu {
         });
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("ui"),
-            mag_filter: wgpu::FilterMode::Nearest,
-            min_filter: wgpu::FilterMode::Nearest,
+            // Linear, sampled by `ui.wgsl`'s `sharp_uv` so that texels stay
+            // square at any scale.
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
             ..Default::default()
         });
         let white = texture(gpu, UVec2::ONE, wgpu::TextureFormat::Rgba8Unorm);

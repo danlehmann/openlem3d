@@ -40,8 +40,9 @@ const SKILL_Y: f32 = 168.0;
 /// Selected-skill animation: about one cell per 70 Hz frame/4 (a 12-cell
 /// ping-pong took about 200 ms; estimated).
 const SKILL_FPS: f32 = 50.0;
-/// Pause paws: one cell per 70 Hz frame.
-const PAWS_FPS: f32 = 70.0;
+/// Pause paws: half the original's one cell per 70 Hz frame, which the
+/// owner finds too hurried.
+const PAWS_FPS: f32 = 35.0;
 const ARROW_FPS: f32 = 20.0;
 /// The bomb's mushroom cloud, looped after a nuke (rate ours).
 const EXPLOSION_FPS: f32 = 14.0;
