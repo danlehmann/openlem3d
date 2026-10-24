@@ -60,7 +60,7 @@ pub(crate) fn level_over(w: &mut World) {
         level: current.number,
         saved: sim.counts.saved,
         // The level's lemmings: a nuke cuts `to_release` down to those
-        // already out, which turned 79 needed of 80 into 7900%.
+        // already out, which turned 79 needed of 80 into 79 of 1.
         total: game
             .terrain
             .as_ref()
@@ -148,7 +148,6 @@ pub(crate) fn spawn_results(w: &mut World) {
             );
         }
     };
-    let pct = |n: u32| n * 100 / o.total;
     text(
         &format!("Level {}  {}", o.level + 1, level.title.trim()),
         21.0,
@@ -162,17 +161,12 @@ pub(crate) fn spawn_results(w: &mut World) {
     };
     text(verdict, 320.0, 140.0, true);
     text(
-        &format!("You rescued {}%", pct(o.saved)),
+        &format!("You rescued {} of {}", o.saved, o.total),
         320.0,
         180.0,
         true,
     );
-    text(
-        &format!("You needed {}%", pct(o.needed)),
-        320.0,
-        210.0,
-        true,
-    );
+    text(&format!("You needed {}", o.needed), 320.0, 210.0, true);
     let next_level = if o.passed() {
         (o.level + 1) % LEVELS
     } else {
