@@ -1047,6 +1047,41 @@ fn splat(b: &mut LayerBuilder, i: usize, t: u32, at: [f32; 3], tex: [f32; 2]) {
     }
 }
 
+/// A bomber bursting, `t` ticks in, at `at`, drawn from `rect` (the fully
+/// swollen bomber): it swells a little more, then flies apart into small
+/// copies of itself that shoot up, spread and rain down past the ground
+/// (seen in the original side-on, 2026-10-23: about a dozen, half size,
+/// rising about 2 units in 0.8 s, gone after about 2½ s; speeds ours, read
+/// from those frames).
+fn burst(b: &mut LayerBuilder, i: usize, t: u32, at: [f32; 3], rect: [f32; 4], tex: [f32; 2]) {
+    if t < BURST_SWELL_TICKS {
+        b.sprite_scaled(at, rect, tex, 1, 0.0, LEMMING_TEXELS_PER_UNIT / BURST_SWELL);
+        return;
+    }
+    let age = (t - BURST_SWELL_TICKS) as f32;
+    for k in 0..BURST_PIECES {
+        let r = |salt: u32| noise([i as u32, 0xB0B, k, salt, 0]);
+        let angle = r(0) * std::f32::consts::TAU;
+        let v_out = BURST_OUT * (0.3 + 0.7 * r(1));
+        let v_up = BURST_UP.0 + r(2) * (BURST_UP.1 - BURST_UP.0);
+        let p = [
+            at[0] + angle.cos() * v_out * age,
+            at[1] + 0.2 + v_up * age - BURST_GRAVITY * age * age / 2.0,
+            at[2] + angle.sin() * v_out * age,
+        ];
+        b.sprite_scaled(p, rect, tex, 1, 0.0, LEMMING_TEXELS_PER_UNIT * 2.0);
+    }
+}
+
+/// A bursting bomber: ticks it swells further first, by how much, then its
+/// pieces, their speed outwards and upwards (units a tick) and their fall.
+const BURST_SWELL_TICKS: u32 = 2;
+const BURST_SWELL: f32 = 1.3;
+const BURST_PIECES: u32 = 12;
+const BURST_OUT: f32 = 0.04;
+const BURST_UP: (f32, f32) = (0.2, 0.36);
+const BURST_GRAVITY: f32 = 0.033;
+
 /// One of the level's other cameras, drawn in the world where it is.
 pub struct CameraMarker {
     /// The camera's number, 1–4.
@@ -1200,6 +1235,8 @@ pub fn build(
             State::Mining if l.state_ticks >= l3d_sim::MINE_CRACK_TICKS => {
                 cell_for(anim_for(State::Walking), view, l.state_ticks)
             }
+            // Bursting: pieces of the fully swollen bomber (see `burst`).
+            State::Exploding => cell_for(once(271, 5, Angles::Five), view, 4 * TICKS_PER_FRAME),
             // A basher walks up to the next wall, before the first and
             // between blocks (owner's observation).
             State::Bashing if l.bash_walk_ticks > 0 => {
@@ -1261,6 +1298,10 @@ pub fn build(
         }
         if l.state == State::Splatting {
             splat(&mut b, i, l.state_ticks, anchor, tex);
+            continue;
+        }
+        if l.state == State::Exploding {
+            burst(&mut b, i, l.state_ticks, anchor, rect, tex);
             continue;
         }
         // Teleporting: squeezed to a sliver, away, then stretched out again

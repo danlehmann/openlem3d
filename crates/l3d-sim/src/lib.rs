@@ -69,9 +69,6 @@ pub const SWELL_TICKS: u32 = 10;
 /// first lemming drops on the tick after (the owner saw the hatch start
 /// closed, open, and only then release; the duration is ours).
 pub const HATCH_OPEN_TICKS: u32 = 10;
-/// Explosion radius across the ground in sub-units (rough: the hole is
-/// about one cell long).
-const BLAST_RADIUS: i32 = SUB;
 /// How far below and above the bomber's feet the blast reaches.
 const BLAST_BELOW: i32 = SUB / 4;
 const BLAST_ABOVE: i32 = SUB / 2;
@@ -134,6 +131,10 @@ const MINE_STANDOFF: i32 = SUB / 4;
 /// Duration of terminal animations, in ticks (provisional).
 const EXIT_TICKS: u32 = 11;
 pub const DEATH_TICKS: u32 = 14;
+/// How long an exploding bomber's pieces fly before it is gone (measured in
+/// the original, 2026-10-23: they rise about 2 units and rain down for about
+/// 2½ s).
+pub const EXPLODE_TICKS: u32 = 35;
 /// How long a killing trap stays busy after taking a lemming (provisional).
 pub const TRAP_BUSY_TICKS: u32 = 28;
 /// How long a spring shows its launch after throwing a lemming (unmeasured:
@@ -1071,7 +1072,12 @@ impl Simulation {
                 }
             }
             State::Exploding | State::Splatting | State::Drowning | State::Zapped => {
-                if l.state_ticks >= DEATH_TICKS {
+                let ticks = if l.state == State::Exploding {
+                    EXPLODE_TICKS
+                } else {
+                    DEATH_TICKS
+                };
+                if l.state_ticks >= ticks {
                     l.gone = true;
                     self.counts.dead += 1;
                 }
@@ -1631,23 +1637,60 @@ impl Simulation {
         advance(l);
     }
 
-    /// Ends a bomber by blowing a hole: every column whose centre lies within
-    /// the blast radius of the bomber (across the ground) loses the same band,
-    /// from a quarter unit below its feet to half a unit above them, so the
-    /// crater floor is level (verified on a changed "Team Work", 2026-10-23:
-    /// a bomber on a 1-unit platform took its top quarter, one cell long; on
-    /// a changed "One Way" a wall beside a bomber lost its lower half).
+    /// Ends a bomber by blowing a hole: for a walker, its own column from a
+    /// quarter unit below its feet to half a unit above them, and the four
+    /// columns beside it (not the diagonal ones) from its feet up as far; for
+    /// a climber, the wall cell it climbs from a quarter below its feet to
+    /// three quarters above, and the wall cells either side of that from its
+    /// feet up. Verified on changed "Team Work" lanes and Practice "Bomber",
+    /// 2026-10-23/24, seen side-on and face-on: on Practice "Bomber" a
+    /// bomber swelling over half a unit short of the wall took the wall from
+    /// its feet up, and the path under itself; bombers walking along X,
+    /// early, midway and late in their cell, holed the cubes beside them and
+    /// the path cell under them, never the path cell ahead or behind; one
+    /// walking along Z holed a row across X; with stone beside the path, a
+    /// bomber on the floor took the floor's top quarter and the stone's
+    /// lower half, one on a quarter-unit slab the slab and the stone from
+    /// the slab's top up half a unit; one pressed against a wall took the
+    /// wall cell from a quarter below its feet to half above and left the
+    /// wall's neighbours whole; climbers with their feet a quarter and
+    /// a unit and a quarter up a wall took a unit of their wall cell, from a
+    /// quarter below the feet, and three quarters of the neighbouring one; a
+    /// climber just below stayed on the wall.
     fn explode(&mut self, l: &mut Lemming) {
-        let r = BLAST_RADIUS;
-        let (lo, hi) = (l.pos[1] - BLAST_BELOW, l.pos[1] + BLAST_ABOVE);
+        let climbing = matches!(l.state, State::Climbing);
+        let above = if climbing { 3 * SUB / 4 } else { BLAST_ABOVE };
+        let (lo, hi) = (l.pos[1] - BLAST_BELOW, l.pos[1] + above);
         let cell = |v: i32| v.div_euclid(SUB);
-        for cx in cell(l.pos[0] - r)..=cell(l.pos[0] + r) {
-            for cz in cell(l.pos[2] - r)..=cell(l.pos[2] + r) {
-                let d = [cx * SUB + SUB / 2 - l.pos[0], cz * SUB + SUB / 2 - l.pos[2]]
-                    .map(|v| v as i64);
-                if d[0] * d[0] + d[1] * d[1] > (r as i64) * (r as i64) {
-                    continue;
-                }
+        let d = l.dir.delta();
+        let feet = l.pos[1];
+        // The centre column (losing from below the feet) and those around
+        // it (only from the feet up): for a walker its own and the four
+        // beside it; for a climber the wall cell and those beside it along
+        // the wall.
+        let columns: Vec<([i32; 2], i32)> = if climbing {
+            let at = Self::cell_of([l.pos[0] + d[0] * SUB / 4, feet, l.pos[2] + d[2] * SUB / 4]);
+            [-1, 0, 1]
+                .map(|k| {
+                    (
+                        [at[0] + k * d[2], at[2] + k * d[0]],
+                        if k == 0 { lo } else { feet },
+                    )
+                })
+                .to_vec()
+        } else {
+            let at = Self::cell_of(l.pos);
+            [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1]]
+                .map(|[dx, dz]| {
+                    (
+                        [at[0] + dx, at[2] + dz],
+                        if dx == 0 && dz == 0 { lo } else { feet },
+                    )
+                })
+                .to_vec()
+        };
+        for ([cx, cz], lo) in columns {
+            {
                 for cy in cell(lo)..=cell(hi - 1) {
                     // Segments whose centres lie in the band.
                     let mask = (0..4)
