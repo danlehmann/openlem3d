@@ -769,6 +769,18 @@ impl Simulation {
         }
         self.skills_left[skill as usize] -= 1;
         let l = &mut self.lemmings[i];
+        // A builder still building given more carries on with the same
+        // staircase, its bricks topped up: starting a new one where it
+        // stood would lay a brick on a brick (owner: a step two bricks high).
+        if skill == Skill::Builder
+            && let State::Building { bricks_left } = l.state
+            && bricks_left > 0
+        {
+            l.state = State::Building {
+                bricks_left: BRICKS,
+            };
+            return true;
+        }
         // A builder out of bricks given more walks on to the end of its last
         // brick and builds on from there (verified on a changed "Team Work",
         // 2026-10-22: given while it stood on its last brick or walked along
@@ -1217,9 +1229,15 @@ impl Simulation {
     }
 
     /// Whether a lemming stands on a builder's brick rather than on terrain.
+    /// Whether the lemming stands on a brick: under its feet, or just
+    /// ahead of them (a builder that has stepped onto its last brick stands
+    /// on that brick's back edge, which isn't under it).
     fn on_brick(&self, l: &Lemming) -> bool {
-        let below = [l.pos[0], l.pos[1] - 1, l.pos[2]];
-        self.world.solid(below) && !self.world.terrain_solid(below)
+        let d = l.dir.delta();
+        [0, 1].iter().any(|&a| {
+            let below = [l.pos[0] + d[0] * a, l.pos[1] - 1, l.pos[2] + d[2] * a];
+            self.world.solid(below) && !self.world.terrain_solid(below)
+        })
     }
 
     /// How far a walker is from the end of the ground it stands on, when its
@@ -1916,33 +1934,6 @@ impl Simulation {
             return;
         }
         let d = l.dir.delta();
-        // A new staircase never starts on a brick that goes on ahead of the
-        // builder's feet: its first brick would lie on that one, a step of
-        // two bricks (owner: a builder given more at the end of its stairs
-        // stacked a brick on its last one). It walks on to the brick's end
-        // first, where the stairs would have gone on.
-        if bricks_left == BRICKS {
-            let ahead = [l.pos[0] + d[0], l.pos[1] - 1, l.pos[2] + d[2]];
-            let under = self
-                .world
-                .bricks
-                .iter()
-                .find(|b| b.max[1] == l.pos[1] && b.contains(ahead));
-            if let Some(b) = under {
-                // To its end along the heading, a walking step at a time.
-                let axis = if d[0] != 0 { 0 } else { 2 };
-                let end = if d[axis] > 0 {
-                    b.max[axis]
-                } else {
-                    b.min[axis]
-                };
-                let step = (end - l.pos[axis]).abs().min(WALK_SPEED);
-                l.pos[axis] += d[axis] * step;
-                // Phase 0 again next tick, to look again.
-                l.state_ticks -= 1;
-                return;
-            }
-        }
         // A builder standing a hair above a segment line (on the thin edge
         // of a ramp) builds from the line, so that walkers can step onto its
         // first brick (Fun 10 "Castle Lemmalot", whose published staircase
