@@ -513,6 +513,9 @@ pub struct Lemming {
     /// Ticks a basher has walked on towards its next wall since it last
     /// bashed; 0 while it bashes.
     pub bash_walk_ticks: u32,
+    /// A builder switched from a digger: it walks to the far edge of its
+    /// cell before building, whatever is there.
+    pub build_at_edge: bool,
 }
 
 impl Lemming {
@@ -532,6 +535,7 @@ impl Lemming {
             landed: false,
             pending: None,
             bash_walk_ticks: 0,
+            build_at_edge: false,
         }
     }
 
@@ -794,6 +798,20 @@ impl Simulation {
             l.pending = Some(State::Building {
                 bricks_left: BRICKS,
             });
+            return true;
+        }
+        // A digger given a builder climbs out onto the floor of its hole and
+        // walks to the far edge of its cell, then builds from there
+        // (verified on a changed "Team Work", 2026-10-24: switched at a
+        // platform's last cell after a quarter was dug, it walked to the
+        // edge and its staircase began out over the drop; the owner saw the
+        // same on Mayhem 1).
+        if skill == Skill::Builder && l.state == State::Digging {
+            l.set_state(State::Walking);
+            l.pending = Some(State::Building {
+                bricks_left: BRICKS,
+            });
+            l.build_at_edge = true;
             return true;
         }
         // Switched from another terrain skill, a lemming starts where it
@@ -1125,7 +1143,14 @@ impl Simulation {
                     let to_middle =
                         matches!(l.pending, Some(State::Building { .. } | State::Digging));
                     let dir = l.dir;
-                    self.walk(l, me, obstacles);
+                    if l.build_at_edge {
+                        // Within its own cell, along the floor of its hole.
+                        let next = ahead_of(l.pos, d, WALK_SPEED);
+                        l.pos[0] = next[0];
+                        l.pos[2] = next[2];
+                    } else {
+                        self.walk(l, me, obstacles);
+                    }
                     // Or at a wall that would turn the walker round, facing
                     // the wall (the original's basher demo bashes the crate it
                     // walked up to). A miner steps up to its place before the cell's edge when
@@ -1273,7 +1298,13 @@ impl Simulation {
         let at_mid = |v: i32, step: i32| {
             step == 0 || ((v - mid(v)) * step <= 0 && (v + step * WALK_SPEED - mid(v)) * step >= 0)
         };
-        if matches!(s, State::Building { .. } | State::Digging)
+        if l.build_at_edge {
+            if to_edge > WALK_SPEED {
+                return false;
+            }
+            l.pos = ahead_of(l.pos, d, to_edge - 1);
+            l.build_at_edge = false;
+        } else if matches!(s, State::Building { .. } | State::Digging)
             && at_mid(l.pos[0], d[0])
             && at_mid(l.pos[2], d[2])
         {
@@ -2583,6 +2614,33 @@ impl Simulation {
         let blocked = surface > l.pos[1] + STEP_UP + STEP_SLACK
             || (!rising && wall(&self.world, body + STEP_UP + 2))
             || ceiling;
+        // A brick step up with too little headroom over it is not taken: the
+        // walker walks on at its own height, under that brick (bricks are
+        // floors only), and off the end of the one it is on (owner's
+        // observation on Mayhem 1, the original beside ours: lemmings
+        // reaching a staircase's last brick under a stone overhang did not
+        // step onto it and fell; ours had turned them back).
+        let (terrain_surface, _) =
+            self.world
+                .terrain_surface_below(next[0], l.pos[1] + STEP_UP + STEP_SLACK + 1, next[2]);
+        if ceiling
+            && surface > l.pos[1]
+            && terrain_surface <= l.pos[1]
+            && !self
+                .world
+                .terrain_solid([next[0], l.pos[1] + HEAD_HEIGHT - 1, next[2]])
+            && !wall(&self.world, l.pos[1] + STEP_UP + 2)
+        {
+            l.pos[0] = next[0];
+            l.pos[2] = next[2];
+            let (ground, _) = self.world.surface_below(l.pos[0], l.pos[1], l.pos[2]);
+            if ground < l.pos[1] - STEP_DOWN {
+                l.start_falling();
+            } else {
+                l.pos[1] = ground;
+            }
+            return;
+        }
         if blocked {
             // Climbers climb walls that reach down to their feet; at an
             // overhang they turn like walkers (provisional: lets the

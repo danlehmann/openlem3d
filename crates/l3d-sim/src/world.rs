@@ -403,7 +403,8 @@ impl World {
         }
     }
 
-    fn terrain_surface_below(&self, x: i32, from_y: i32, z: i32) -> (i32, bool) {
+    /// As [`World::surface_below`], bricks aside.
+    pub fn terrain_surface_below(&self, x: i32, from_y: i32, z: i32) -> (i32, bool) {
         let mut y = from_y;
         // Step down in fine increments until the point below is solid.
         const STEP: i32 = SUB / 64;
