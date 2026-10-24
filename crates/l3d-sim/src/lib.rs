@@ -1916,6 +1916,33 @@ impl Simulation {
             return;
         }
         let d = l.dir.delta();
+        // A new staircase never starts on a brick that goes on ahead of the
+        // builder's feet: its first brick would lie on that one, a step of
+        // two bricks (owner: a builder given more at the end of its stairs
+        // stacked a brick on its last one). It walks on to the brick's end
+        // first, where the stairs would have gone on.
+        if bricks_left == BRICKS {
+            let ahead = [l.pos[0] + d[0], l.pos[1] - 1, l.pos[2] + d[2]];
+            let under = self
+                .world
+                .bricks
+                .iter()
+                .find(|b| b.max[1] == l.pos[1] && b.contains(ahead));
+            if let Some(b) = under {
+                // To its end along the heading, a walking step at a time.
+                let axis = if d[0] != 0 { 0 } else { 2 };
+                let end = if d[axis] > 0 {
+                    b.max[axis]
+                } else {
+                    b.min[axis]
+                };
+                let step = (end - l.pos[axis]).abs().min(WALK_SPEED);
+                l.pos[axis] += d[axis] * step;
+                // Phase 0 again next tick, to look again.
+                l.state_ticks -= 1;
+                return;
+            }
+        }
         // A builder standing a hair above a segment line (on the thin edge
         // of a ramp) builds from the line, so that walkers can step onto its
         // first brick (Fun 10 "Castle Lemmalot", whose published staircase
