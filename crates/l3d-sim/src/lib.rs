@@ -2218,14 +2218,16 @@ impl Simulation {
             }
         }
         // A unit on, into the broken block, down onto what is left of it (a
-        // segment down; out in the open, it falls), to the same place in it,
-        // where the next stroke starts.
+        // segment down, or up to two from feet raised on a slope it stood
+        // on; out in the open, it falls), to the same place in it, where the
+        // next stroke starts. Verified in the original: a miner given
+        // halfway up a slope rising into a block mines on block after block.
         l.pos[0] = next[0];
         l.pos[2] = next[1];
         let (ground, _) = self
             .world
             .surface_below(l.pos[0], l.pos[1] + STEP_UP, l.pos[2]);
-        if ground < l.pos[1] - MINE_DROP {
+        if ground < l.pos[1] - 2 * MINE_DROP {
             l.start_falling();
             return;
         }
