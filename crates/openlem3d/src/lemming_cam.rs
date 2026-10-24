@@ -2,7 +2,8 @@
 //! its eye level, turning as it turns, as the original's face icon does.
 //! Arm it with the face button, V or I, then click or tap a lemming. V or I again,
 //! Esc or a preset camera key (1–4) returns to the previous view, as does
-//! the lemming leaving play.
+//! the lemming going home; a lemming that dies passes the ride on to
+//! another.
 
 use l3d_engine::prelude::*;
 use l3d_sim::SUB;
@@ -47,6 +48,18 @@ impl LemmingCam {
         if let (Some((pos, yaw)), Some(_)) = (self.saved(), self.following()) {
             view.glide_to(pos, yaw);
         } else if let Some((pos, yaw)) = self.saved() {
+            view.pos = pos;
+            view.yaw = yaw;
+        }
+        view.roll = 0.0;
+        view.head = 0.0;
+        view.nod = 0.0;
+        *self = LemmingCam::Off;
+    }
+
+    /// Ends a ride at once, the view back where it was before it.
+    pub fn end_ride(&mut self, view: &mut ViewCamera) {
+        if let Some((pos, yaw)) = self.saved() {
             view.pos = pos;
             view.yaw = yaw;
         }
@@ -267,11 +280,24 @@ pub(crate) fn follow(w: &mut World) {
         return;
     };
     let Some(sim) = game.sim.as_ref() else { return };
-    // The lemming ridden with gone (home, or dead), the view goes on at once
-    // with the next lemming in play; with none, it stays where it is until
-    // another comes out (verified for drowning: the lemming right behind
-    // was taken each time; whether the rule is release order or nearest is
-    // open).
+    // The lemming ridden with home, the ride ends: the view is back where it
+    // was before the ride, at once, and highlighting stays on with no
+    // lemming (verified on a changed "Team Work", 2026-10-23: riding with
+    // the first of three into the exit, the view returned to the starting
+    // camera, the face closed its eyes and the arrow stayed green).
+    if let Some(l) = sim.lemmings.get(i)
+        && l.gone
+        && l.state == l3d_sim::State::Exiting
+    {
+        cam.end_ride(view);
+        highlight.lemming = None;
+        *entered = None;
+        return;
+    }
+    // The lemming ridden with dead, the view goes on at once with the next
+    // lemming in play; with none, it stays where it is until another comes
+    // out (verified for drowning: the lemming right behind was taken each
+    // time; whether the rule is release order or nearest is open).
     let mut switched = false;
     if sim.lemmings.get(i).is_none_or(|l| l.gone) {
         let n = sim.lemmings.len();

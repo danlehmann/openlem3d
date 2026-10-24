@@ -735,7 +735,12 @@ lemming view, where it moves on to the next lemming and rides along with it
 (owner's observation; ours takes the next in release order). In the Hi-Light
 demo, highlighting ended when the lemming ridden with died or left (about
 2.7 s after); in play the lemming view instead goes on with another lemming
-and the arrow stays green (see **Lemming cam**). In the lemming view a large
+when the one ridden with dies, and the arrow stays green (see **Lemming
+cam**). When it walks into the exit, the ride ends: the view looks up as it
+goes in, then is back at the starting camera with the face's eyes closed,
+and the arrow stays green and spinning (**verified with a changed level**,
+2026-10-23, riding with the first of three lemmings on Taxing 12 "Team
+Work"; ours ends the ride the same way, without the look up). In the lemming view a large
 white down-arrow often shows at the top centre of the screen, bobbing with
 the walk: probably the highlight arrow over the lemming ridden with, seen
 from just below (observed; identity estimated). Ours draws none there.
