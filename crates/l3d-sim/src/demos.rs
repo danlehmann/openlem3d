@@ -214,6 +214,27 @@ pub const SOLUTIONS: &[Solution] = &[
             (1430, 5, 1, Some(false)),
         ],
     ),
+    // Mayhem 1 "The Five Arches", after the published route (saves 78 of
+    // 78); solvable once a digger turned builder walked to its cell's edge
+    // first, as in the original.
+    Solution {
+        level: 60,
+        plan: Plan::Rated(
+            &[(600, 49)],
+            &[
+                (39, 0, 7, None),
+                (385, 0, 6, None),
+                (568, 1, 7, None),
+                (619, 2, 7, None),
+                (655, 0, 3, None),
+                (697, 2, 6, None),
+                (851, 2, 2, None),
+                (1024, 0, 2, None),
+                (1277, 1, 6, None),
+            ],
+        ),
+        saves: 0,
+    },
     at(
         61,
         &[
