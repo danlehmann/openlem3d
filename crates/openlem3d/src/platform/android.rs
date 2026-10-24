@@ -14,6 +14,15 @@ const FULLSCREEN_MODE_REQUEST_EXIT: i32 = 0;
 const CUTOUT_MODE_ALWAYS: i32 = 3;
 /// `WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE`.
 const TRANSIENT_BARS_BY_SWIPE: i32 = 2;
+/// Before Android 11, `View`'s `SYSTEM_UI_FLAG_` `IMMERSIVE_STICKY`,
+/// `HIDE_NAVIGATION`, `FULLSCREEN`, `LAYOUT_HIDE_NAVIGATION` and
+/// `LAYOUT_FULLSCREEN`: the bars hidden until swiped in. (Not `LAYOUT_STABLE`,
+/// which would keep their room in the insets.)
+const IMMERSIVE_FLAGS: i32 = 0x1000 | 0x2 | 0x4 | 0x200 | 0x400;
+/// Android 9, with display cutouts; Android 11, with `WindowInsetsController`
+/// and `WindowInsets.Type`.
+const ANDROID_9: i32 = 28;
+const ANDROID_11: i32 = 30;
 
 /// Whether [`full_screen`] took effect, so the game draws into cutouts.
 static FULL_SCREEN: AtomicBool = AtomicBool::new(false);
@@ -123,6 +132,19 @@ pub fn insets() -> jni::errors::Result<[u32; 4]> {
             // Not attached to a window yet.
             return Ok([0; 4]);
         }
+        if sdk(env)? < ANDROID_11 {
+            // The bars and the keyboard; no cutouts before Android 9, and
+            // drawn into after.
+            let mut edge = |name: &str| -> jni::errors::Result<u32> {
+                Ok(env.call_method(&insets, name, "()I", &[])?.i()?.max(0) as u32)
+            };
+            return Ok([
+                edge("getSystemWindowInsetLeft")?,
+                edge("getSystemWindowInsetTop")?,
+                edge("getSystemWindowInsetRight")?,
+                edge("getSystemWindowInsetBottom")?,
+            ]);
+        }
         // The on-screen keyboard too, so that the game makes room for it.
         let mut types = inset_type(env, "systemBars")? | inset_type(env, "ime")?;
         if !FULL_SCREEN.load(Ordering::Relaxed) {
@@ -152,6 +174,9 @@ pub fn full_screen() {
         FULL_SCREEN.store(fill, Ordering::Relaxed);
         if !fill {
             return Ok(());
+        }
+        if sdk(env)? < ANDROID_9 {
+            return system_bars(env, activity, false);
         }
         let window = window(env, activity)?;
         let params = env
@@ -217,6 +242,19 @@ fn in_multi_window(env: &mut JNIEnv, activity: &JObject) -> jni::errors::Result<
 /// Shows the system bars, or hides them until swiped in from the edge.
 fn system_bars(env: &mut JNIEnv, activity: &JObject, shown: bool) -> jni::errors::Result<()> {
     let window = window(env, activity)?;
+    if sdk(env)? < ANDROID_11 {
+        let decor = env
+            .call_method(&window, "getDecorView", "()Landroid/view/View;", &[])?
+            .l()?;
+        let flags = if shown { 0 } else { IMMERSIVE_FLAGS };
+        env.call_method(
+            &decor,
+            "setSystemUiVisibility",
+            "(I)V",
+            &[JValue::Int(flags)],
+        )?;
+        return Ok(());
+    }
     let controller = env
         .call_method(
             &window,
@@ -243,6 +281,12 @@ fn system_bars(env: &mut JNIEnv, activity: &JObject, shown: bool) -> jni::errors
 fn window<'a>(env: &mut JNIEnv<'a>, activity: &JObject) -> jni::errors::Result<JObject<'a>> {
     env.call_method(activity, "getWindow", "()Landroid/view/Window;", &[])?
         .l()
+}
+
+/// `Build.VERSION.SDK_INT`: the Android version's API level.
+fn sdk(env: &mut JNIEnv) -> jni::errors::Result<i32> {
+    env.get_static_field("android/os/Build$VERSION", "SDK_INT", "I")?
+        .i()
 }
 
 /// `WindowInsets.Type.<name>()`.

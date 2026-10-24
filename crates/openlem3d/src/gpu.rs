@@ -9,6 +9,7 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use l3d_engine::prelude::*;
@@ -47,17 +48,27 @@ pub struct Gpu {
     adapter: wgpu::Adapter,
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
+    /// Set when the driver gives the device up.
+    lost: Arc<AtomicBool>,
 }
 
 impl Gpu {
     /// The device for the window `handle`, and the window's surface; with
-    /// GPU timestamps if `profile` asks for them and the GPU has them.
-    fn new(handle: &WindowHandle, profile: bool) -> (Gpu, wgpu::Surface<'static>) {
+    /// GPU timestamps if `profile` asks for them and the GPU has them, and
+    /// with the graphics APIs in `backend` if given.
+    fn new(
+        handle: &WindowHandle,
+        profile: bool,
+        backend: Option<wgpu::Backends>,
+    ) -> (Gpu, wgpu::Surface<'static>) {
         let mut desc = wgpu::InstanceDescriptor::new_without_display_handle_from_env();
         // Vulkan on Windows-on-ARM (Adreno) loses the device after a few
         // seconds, so Windows defaults to DX12. `WGPU_BACKEND` overrides.
         if cfg!(windows) && std::env::var_os("WGPU_BACKEND").is_none() {
             desc.backends = wgpu::Backends::DX12;
+        }
+        if let Some(b) = backend {
+            desc.backends = b;
         }
         let instance = wgpu::Instance::new(desc);
         let surface = create_surface(&instance, handle);
@@ -85,11 +96,18 @@ impl Gpu {
         .expect("could not open the GPU");
         // Logged rather than fatal, as Bevy's renderer did.
         device.on_uncaptured_error(Arc::new(|e| error!("GPU error: {e}")));
+        let lost = Arc::new(AtomicBool::new(false));
+        let flag = lost.clone();
+        device.set_device_lost_callback(move |reason, message| {
+            error!("GPU lost ({reason:?}): {message}");
+            flag.store(true, Ordering::Release);
+        });
         let gpu = Gpu {
             instance,
             adapter,
             device,
             queue,
+            lost,
         };
         (gpu, surface)
     }
@@ -359,6 +377,7 @@ pub(crate) fn render(w: &mut World) {
     let (window, screen, clear, screenshots) =
         (&w.e.window, &w.screen, &w.clear, &mut w.screenshots);
     let profile = &mut w.profile;
+    let backend = w.opts.backend;
     let Some(handle) = &w.e.handle else {
         // The app is suspended (Android): the window is gone.
         *surface = None;
@@ -368,7 +387,22 @@ pub(crate) fn render(w: &mut World) {
     *generation = w.e.handle_generation;
     match gpu {
         None => {
-            let (g, s) = Gpu::new(handle, profile.on);
+            let (mut g, mut s) = Gpu::new(handle, profile.on, backend);
+            // Old Vulkan drivers can fail to compile a shader and give the
+            // device up (the Nexus 6P's Adreno 430), where their OpenGL ES
+            // works. Compiling before the window is attached lets OpenGL ES
+            // take over cleanly.
+            let mut sc = SceneGpu::new(&g.device, &g.adapter);
+            sc.compile(&g.device);
+            if g.lost.load(Ordering::Acquire)
+                && g.adapter.get_info().backend == wgpu::Backend::Vulkan
+            {
+                warn!("the Vulkan driver failed; using OpenGL ES");
+                drop((sc, s, g));
+                (g, s) = Gpu::new(handle, profile.on, Some(wgpu::Backends::GL));
+                sc = SceneGpu::new(&g.device, &g.adapter);
+            }
+            *scene = Some(sc);
             profile.start_gpu(&g.device, &g.queue);
             *surface = Some(Surface::new(&g, s));
             *gpu = Some(g);
@@ -446,19 +480,21 @@ pub(crate) fn render(w: &mut World) {
     });
     profile.stamp(&mut encoder, Stamp::Clear);
     let viewport = screen.pixels;
-    scene.get_or_insert_with(|| SceneGpu::new(device)).draw(
-        gpu,
-        &mut encoder,
-        &target.view,
-        size,
-        viewport,
-        &SceneInput {
-            content: &w.scene,
-            sprites: &w.sprites,
-            camera: &w.camera,
-            profile,
-        },
-    );
+    scene
+        .get_or_insert_with(|| SceneGpu::new(device, &gpu.adapter))
+        .draw(
+            gpu,
+            &mut encoder,
+            &target.view,
+            size,
+            viewport,
+            &SceneInput {
+                content: &w.scene,
+                sprites: &w.sprites,
+                camera: &w.camera,
+                profile,
+            },
+        );
     profile.stamp(&mut encoder, Stamp::Scene);
     ui.get_or_insert_with(|| UiGpu::new(gpu)).draw(
         gpu,

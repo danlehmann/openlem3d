@@ -102,6 +102,9 @@ pub struct Options {
     no_glow: bool,
     /// Log where each frame's time goes, once a second (`--profile`).
     profile: bool,
+    /// The graphics APIs to try (`--backend vulkan`, `gl`, `metal`, `dx12`),
+    /// for drivers that fail with the usual one.
+    backend: Option<wgpu::Backends>,
 }
 
 fn parse_args() -> Options {
@@ -126,6 +129,7 @@ fn parse_args() -> Options {
         record: None,
         no_glow: false,
         profile: false,
+        backend: None,
     };
     let mut args = platform::args().into_iter();
     while let Some(a) = args.next() {
@@ -156,6 +160,7 @@ fn parse_args() -> Options {
             "--no-hud" => o.no_hud = true,
             "--no-glow" => o.no_glow = true,
             "--profile" => o.profile = true,
+            "--backend" => o.backend = Some(wgpu::Backends::from_comma_list(&val())),
             "--screen" => {
                 o.screen = match val().as_str() {
                     "title" => menu::AppState::Title,

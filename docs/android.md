@@ -49,6 +49,10 @@ desktop, separated by spaces or newlines):
 (where the GPU has timestamps) the GPU; read it with `adb logcat | grep
 profile:`.
 
+The game uses Vulkan, and OpenGL ES where the Vulkan driver fails to compile
+its shaders (the Nexus 6P's, on Android 8.1). `--backend gl` (or `vulkan`)
+picks one for testing.
+
 ## Building
 
     ANDROID_NDK_HOME=... ANDROID_JAR=.../android.jar android/build-apk.sh

@@ -105,7 +105,6 @@ pub struct SceneInput<'a> {
     pub profile: &'a crate::profile::Profile,
 }
 
-const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 /// The scene's colour format while glowing: room above white.
 const HDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 const UNIFORM_SIZE: u64 = 144;
@@ -154,6 +153,9 @@ pub struct SceneGpu {
     hdr: Option<HdrTargets>,
     /// Depth buffer and its size.
     depth: Option<((u32, u32), wgpu::TextureView)>,
+    /// Floats where the GPU can draw into them, for reversed depth's
+    /// precision; otherwise (the Nexus 6P's Adreno 430 on Vulkan) 24 bits.
+    depth_format: wgpu::TextureFormat,
     /// The part of the colour target drawn in (the camera's viewport): its
     /// top-left corner and size, for the sky parameters.
     target_origin: (u32, u32),
@@ -199,7 +201,19 @@ struct UploadedLayer {
 }
 
 impl SceneGpu {
-    pub fn new(device: &wgpu::Device) -> Self {
+    pub fn new(device: &wgpu::Device, adapter: &wgpu::Adapter) -> Self {
+        let depth_format = [
+            wgpu::TextureFormat::Depth32Float,
+            wgpu::TextureFormat::Depth24Plus,
+        ]
+        .into_iter()
+        .find(|&f| {
+            adapter
+                .get_texture_format_features(f)
+                .allowed_usages
+                .contains(wgpu::TextureUsages::RENDER_ATTACHMENT)
+        })
+        .unwrap_or(wgpu::TextureFormat::Depth24Plus);
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("scene"),
             entries: &[
@@ -270,6 +284,7 @@ impl SceneGpu {
             sprites: None,
             hdr: None,
             depth: None,
+            depth_format,
             target_origin: (0, 0),
             target_size: (1, 1),
             textures: Vec::new(),
@@ -277,6 +292,12 @@ impl SceneGpu {
     }
 
     /// The pipelines drawing into `format`, made on first use.
+    /// Compiles the shaders for drawing into the usual target, ahead of the
+    /// first frame.
+    pub fn compile(&mut self, device: &wgpu::Device) {
+        self.pipelines(device, TARGET_FORMAT);
+    }
+
     fn pipelines(&mut self, device: &wgpu::Device, format: wgpu::TextureFormat) -> &Pipelines {
         if let Some(i) = self.pipelines.iter().position(|(f, _)| *f == format) {
             return &self.pipelines[i].1;
@@ -316,7 +337,7 @@ impl SceneGpu {
             }),
             primitive: wgpu::PrimitiveState { cull_mode: Some(wgpu::Face::Back), ..Default::default() },
             depth_stencil: Some(wgpu::DepthStencilState {
-                format: DEPTH_FORMAT,
+                format: self.depth_format,
                 depth_write_enabled: Some(true),
                 depth_compare: Some(wgpu::CompareFunction::Greater),
                 stencil: Default::default(),
@@ -343,7 +364,7 @@ impl SceneGpu {
             }),
             primitive: Default::default(),
             depth_stencil: Some(wgpu::DepthStencilState {
-                format: DEPTH_FORMAT,
+                format: self.depth_format,
                 depth_write_enabled: Some(false),
                 depth_compare: Some(wgpu::CompareFunction::Always),
                 stencil: Default::default(),
@@ -535,7 +556,7 @@ impl SceneGpu {
                     mip_level_count: 1,
                     sample_count: 1,
                     dimension: wgpu::TextureDimension::D2,
-                    format: DEPTH_FORMAT,
+                    format: self.depth_format,
                     usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
                     view_formats: &[],
                 })
