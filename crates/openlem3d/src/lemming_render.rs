@@ -566,8 +566,8 @@ fn draw_cracks(
     }
 }
 
-/// The mine effects: the cracks spreading over the block ahead of a miner,
-/// one frame a tick, and pieces of it flying back out of its face (the
+/// The mine effects: the cracks spreading over the block ahead of a miner
+/// while it cracks it, and pieces of it flying back out of its face (the
 /// original shows both, owner's observation; timing, counts and speeds
 /// ours, after the basher's).
 fn mine_effects(b: &mut LayerBuilder, sim: &Simulation, blocks: Option<&BlockSet>, tex: [f32; 2]) {
@@ -576,7 +576,8 @@ fn mine_effects(b: &mut LayerBuilder, sim: &Simulation, blocks: Option<&BlockSet
             continue;
         };
         for &(cell, mask) in &cells {
-            draw_cracks(b, sim, cell, mask, t, tex);
+            let frame = t * CRACK_FRAMES / (l3d_sim::MINE_CRACK_TICKS - 1);
+            draw_cracks(b, sim, cell, mask, frame, tex);
         }
         let Some(&(cell, _)) = cells.first() else {
             continue;
@@ -599,7 +600,7 @@ fn mine_effects(b: &mut LayerBuilder, sim: &Simulation, blocks: Option<&BlockSet
         let c = cell.map(|v| v as f32);
         let face = [c[0] + 0.5 - d[0] * 0.5, c[2] + 0.5 - d[2] * 0.5];
         let feet = crate::units(l.pos[1]);
-        let stroke = sim.tick as u32 / 49;
+        let stroke = sim.tick as u32 / 72;
         for (burst, &start) in MINE_BURSTS.iter().enumerate() {
             if !(start..start + CHUNK_TICKS).contains(&t) {
                 continue;
@@ -633,8 +634,9 @@ fn mine_effects(b: &mut LayerBuilder, sim: &Simulation, blocks: Option<&BlockSet
     }
 }
 
-/// Bursts of pieces from a block a miner cracks, ticks into the cracking.
-const MINE_BURSTS: [u32; 2] = [1, 9];
+/// Bursts of pieces from a block a miner cracks, ticks into the cracking
+/// (about one a swing: 0.6 s apart in the original).
+const MINE_BURSTS: [u32; 4] = [1, 10, 19, 28];
 
 /// The dig effects: the cracks spreading over the segment a digger is
 /// digging out, on its sides and over its top, all of them over the time it

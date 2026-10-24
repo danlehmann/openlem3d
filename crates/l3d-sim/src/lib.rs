@@ -117,8 +117,9 @@ pub const BASH_CRACK_START: u32 = 7;
 const BASH_SWING_TICKS: u32 = 8;
 /// Ticks a miner cracks the block ahead before it breaks; with the walk
 /// across the broken block (a unit at walking speed, 32 ticks) a stroke
-/// takes 49 ticks (rough: one cell about every 3.5 s).
-pub const MINE_CRACK_TICKS: u32 = 17;
+/// takes 72 ticks (measured in the original: breaks 5.14 s apart, the walk
+/// about 2.2 s of it).
+pub const MINE_CRACK_TICKS: u32 = 40;
 /// Cells of the block a miner breaks, each with its segments being broken.
 pub type MineCells = Vec<([i32; 3], u8)>;
 /// How far each block a miner breaks lies below the last (owner's
