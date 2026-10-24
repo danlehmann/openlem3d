@@ -706,6 +706,81 @@ fn dig_effects(b: &mut LayerBuilder, sim: &Simulation, blocks: Option<&BlockSet>
             (crack / ATLAS_COLUMNS) * LEMMING_CELL,
         );
         draw_top_cracks(b, sim, cell, mask, [cx as f32, cy as f32], tex);
+        draw_bottom_cracks(b, sim, cell, mask, [cx as f32, cy as f32], tex);
+    }
+}
+
+/// The cracks (at `at` in the atlas) under what a digger is digging out of
+/// `cell` (its segments in `mask`) where that has air below it: on the
+/// sloped underside of an upside-down wedge it cuts into, or under a block
+/// hanging in the air, facing down, in pieces that each lie wholly on such
+/// an underside.
+fn draw_bottom_cracks(
+    b: &mut LayerBuilder,
+    sim: &Simulation,
+    cell: [i32; 3],
+    mask: u8,
+    at: [f32; 2],
+    tex: [f32; 2],
+) {
+    let sub = l3d_sim::SUB;
+    let (low, high) = (
+        cell[1] * sub + mask.trailing_zeros() as i32 * sub / 4,
+        cell[1] * sub + (8 - mask.leading_zeros()) as i32 * sub / 4,
+    );
+    // The underside at a point of the cell, in sub-units: the lowest solid
+    // height in the band, if there is air below it.
+    let underside = |fx: f32, fz: f32| {
+        let inside = |c: i32, f: f32| c * sub + ((f * sub as f32) as i32).clamp(0, sub - 1);
+        let (x, z) = (inside(cell[0], fx), inside(cell[2], fz));
+        let solid = |y: i32| sim.world.block_at([x, y, z]).is_some();
+        // Found in steps, then down to where the brick starts.
+        let mut bottom = (low..high).step_by(4).find(|&y| solid(y))?;
+        while bottom > low && solid(bottom - 1) {
+            bottom -= 1;
+        }
+        (!solid(bottom - 1)).then_some(bottom)
+    };
+    let n = TOP_CRACK_PIECES as f32;
+    let piece = 64.0 / n;
+    for i in 0..TOP_CRACK_PIECES {
+        for j in 0..TOP_CRACK_PIECES {
+            let (fx0, fx1) = (i as f32 / n, (i + 1) as f32 / n);
+            let (fz0, fz1) = (j as f32 / n, (j + 1) as f32 / n);
+            let e = 0.01 / n;
+            let corners = [
+                (fx0 + e, fz0 + e),
+                (fx1 - e, fz0 + e),
+                (fx1 - e, fz1 - e),
+                (fx0 + e, fz1 - e),
+            ];
+            let Some(heights) = corners
+                .iter()
+                .map(|&(fx, fz)| underside(fx, fz).map(|y| crate::units(y) - CRACK_OFFSET))
+                .collect::<Option<Vec<f32>>>()
+            else {
+                continue;
+            };
+            let (x0, x1) = (cell[0] as f32 + fx0, cell[0] as f32 + fx1);
+            let (z0, z1) = (cell[2] as f32 + fz0, cell[2] as f32 + fz1);
+            // Wound to face down.
+            b.quad(
+                [
+                    [x0, heights[0], z0],
+                    [x1, heights[1], z0],
+                    [x1, heights[2], z1],
+                    [x0, heights[3], z1],
+                ],
+                [
+                    at[0] + i as f32 * piece,
+                    at[1] + j as f32 * piece,
+                    piece,
+                    piece,
+                ],
+                tex,
+                1.0,
+            );
+        }
     }
 }
 
