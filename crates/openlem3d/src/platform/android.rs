@@ -23,6 +23,15 @@ const IMMERSIVE_FLAGS: i32 = 0x1000 | 0x2 | 0x4 | 0x200 | 0x400;
 /// and `WindowInsets.Type`.
 const ANDROID_9: i32 = 28;
 const ANDROID_11: i32 = 30;
+/// Android 15, where a layer asks for HDR headroom.
+const ANDROID_15: i32 = 35;
+/// How far above white the HDR layer's brightest values go, as a multiple
+/// of white (the Pixel 11 Pro's display allows up to 8). The layer asks for
+/// it, and Android fits it to what the display shows at the moment, rather
+/// than the game following the display's ratio.
+pub const HDR_HEADROOM: f32 = 8.0;
+/// `ActivityInfo.COLOR_MODE_HDR`.
+const COLOR_MODE_HDR: i32 = 2;
 
 /// Whether [`full_screen`] took effect, so the game draws into cutouts.
 static FULL_SCREEN: AtomicBool = AtomicBool::new(false);
@@ -45,6 +54,8 @@ fn with_activity<T>(
     let mut env = vm.attach_current_thread_permanently()?;
     let result = env.with_local_frame(32, |env| f(env, &activity));
     if result.is_err() && env.exception_check()? {
+        // Its stack trace, in the log.
+        env.exception_describe()?;
         env.exception_clear()?;
     }
     result
@@ -281,6 +292,181 @@ fn system_bars(env: &mut JNIEnv, activity: &JObject, shown: bool) -> jni::errors
 fn window<'a>(env: &mut JNIEnv<'a>, activity: &JObject) -> jni::errors::Result<JObject<'a>> {
     env.call_method(activity, "getWindow", "()Landroid/view/Window;", &[])?
         .l()
+}
+
+/// The `SurfaceView` drawn into for HDR, once added to the window (see
+/// [`HdrLayer`]).
+static HDR_VIEW: std::sync::Mutex<Option<jni::objects::GlobalRef>> = std::sync::Mutex::new(None);
+/// Whether the view has been asked for (or found impossible).
+static HDR_ASKED: AtomicBool = AtomicBool::new(false);
+
+/// The surface of a `SurfaceView` over the window, drawn into instead of the
+/// window for HDR: the system lifts the display's brightness above white
+/// only for a layer that asks for it, and the window's own layer, which a
+/// native activity draws into without Android's UI, never does. Holds the
+/// native window on the view's current surface.
+pub struct HdrLayer {
+    window: std::ptr::NonNull<std::ffi::c_void>,
+}
+
+unsafe extern "C" {
+    fn ANativeWindow_fromSurface(
+        env: *mut jni::sys::JNIEnv,
+        surface: jni::sys::jobject,
+    ) -> *mut std::ffi::c_void;
+    fn ANativeWindow_release(window: *mut std::ffi::c_void);
+}
+
+impl HdrLayer {
+    /// Adds the view, the first time, where HDR can be shown (Android 15
+    /// and later, on a display with HDR headroom).
+    pub fn prepare() -> jni::errors::Result<()> {
+        if !HDR_ASKED.swap(true, Ordering::Relaxed) && with_activity(hdr_shown)? {
+            on_main_thread("add the HDR view", add_hdr_view);
+        }
+        Ok(())
+    }
+
+    /// The view's surface, once it is ready; none until the view exists and
+    /// has one, nor where HDR can't be shown.
+    pub fn create() -> jni::errors::Result<Option<HdrLayer>> {
+        let Some(view) = HDR_VIEW.lock().unwrap_or_else(|e| e.into_inner()).clone() else {
+            return Ok(None);
+        };
+        with_activity(|env, _| {
+            let holder = env
+                .call_method(
+                    view.as_obj(),
+                    "getHolder",
+                    "()Landroid/view/SurfaceHolder;",
+                    &[],
+                )?
+                .l()?;
+            let surface = env
+                .call_method(&holder, "getSurface", "()Landroid/view/Surface;", &[])?
+                .l()?;
+            if surface.is_null() || !env.call_method(&surface, "isValid", "()Z", &[])?.z()? {
+                return Ok(None);
+            }
+            // SAFETY: a live JNI environment and Surface.
+            let native = unsafe { ANativeWindow_fromSurface(env.get_raw(), surface.as_raw()) };
+            Ok(std::ptr::NonNull::new(native).map(|window| HdrLayer { window }))
+        })
+    }
+
+    /// Whether the view's surface is ready (while there is a view).
+    pub fn ready() -> bool {
+        let Some(view) = HDR_VIEW.lock().unwrap_or_else(|e| e.into_inner()).clone() else {
+            return false;
+        };
+        with_activity(|env, _| {
+            let holder = env
+                .call_method(
+                    view.as_obj(),
+                    "getHolder",
+                    "()Landroid/view/SurfaceHolder;",
+                    &[],
+                )?
+                .l()?;
+            let surface = env
+                .call_method(&holder, "getSurface", "()Landroid/view/Surface;", &[])?
+                .l()?;
+            Ok(!surface.is_null() && env.call_method(&surface, "isValid", "()Z", &[])?.z()?)
+        })
+        .unwrap_or(false)
+    }
+
+    /// The native window to draw into.
+    pub fn window(&self) -> std::ptr::NonNull<std::ffi::c_void> {
+        self.window
+    }
+
+    /// Takes the view away again, for good: its surface can't show HDR.
+    pub fn give_up() {
+        let Some(view) = HDR_VIEW.lock().unwrap_or_else(|e| e.into_inner()).take() else {
+            return;
+        };
+        on_main_thread("remove the HDR view", move |env, _| {
+            let parent = env
+                .call_method(
+                    view.as_obj(),
+                    "getParent",
+                    "()Landroid/view/ViewParent;",
+                    &[],
+                )?
+                .l()?;
+            if !parent.is_null() {
+                env.call_method(
+                    &parent,
+                    "removeView",
+                    "(Landroid/view/View;)V",
+                    &[JValue::Object(view.as_obj())],
+                )?;
+            }
+            Ok(())
+        });
+    }
+}
+
+impl Drop for HdrLayer {
+    fn drop(&mut self) {
+        // SAFETY: the reference taken by ANativeWindow_fromSurface.
+        unsafe { ANativeWindow_release(self.window.as_ptr()) };
+    }
+}
+
+/// Whether the display can show HDR for a layer asking for it (Android 15
+/// and later).
+fn hdr_shown(env: &mut JNIEnv, activity: &JObject) -> jni::errors::Result<bool> {
+    if sdk(env)? < ANDROID_15 {
+        return Ok(false);
+    }
+    let display = env
+        .call_method(activity, "getDisplay", "()Landroid/view/Display;", &[])?
+        .l()?;
+    Ok(!display.is_null()
+        && env
+            .call_method(&display, "isHdrSdrRatioAvailable", "()Z", &[])?
+            .z()?)
+}
+
+/// Adds a `SurfaceView` filling the window, above it, asking for
+/// [`HDR_HEADROOM`]; keeps it in [`HDR_VIEW`]. Input still reaches the game
+/// through the window's input queue.
+fn add_hdr_view(env: &mut JNIEnv, activity: &JObject) -> jni::errors::Result<()> {
+    let view = env.new_object(
+        "android/view/SurfaceView",
+        "(Landroid/content/Context;)V",
+        &[JValue::Object(activity)],
+    )?;
+    env.call_method(&view, "setZOrderOnTop", "(Z)V", &[JValue::Bool(1)])?;
+    env.call_method(
+        &view,
+        "setDesiredHdrHeadroom",
+        "(F)V",
+        &[JValue::Float(HDR_HEADROOM)],
+    )?;
+    const MATCH_PARENT: i32 = -1;
+    let params = env.new_object(
+        "android/view/ViewGroup$LayoutParams",
+        "(II)V",
+        &[JValue::Int(MATCH_PARENT), JValue::Int(MATCH_PARENT)],
+    )?;
+    env.call_method(
+        activity,
+        "addContentView",
+        "(Landroid/view/View;Landroid/view/ViewGroup$LayoutParams;)V",
+        &[JValue::Object(&view), JValue::Object(&params)],
+    )?;
+    let window = window(env, activity)?;
+    env.call_method(
+        &window,
+        "setColorMode",
+        "(I)V",
+        &[JValue::Int(COLOR_MODE_HDR)],
+    )?;
+    *HDR_VIEW.lock().unwrap_or_else(|e| e.into_inner()) = Some(env.new_global_ref(view)?);
+    Ok(())
 }
 
 /// `Build.VERSION.SDK_INT`: the Android version's API level.

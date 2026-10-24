@@ -164,7 +164,13 @@ fn fs_sky(v: SkyOut) -> @location(0) vec4<f32> {
         let texel = floor(fract(full) * dims);
         let phase = noise(texel) * 6.2832;
         let twinkle = 0.65 + 0.35 * sin(u.sky.w * (1.5 + noise(texel.yx))  + phase);
-        return vec4(c.rgb * (1.0 + glow_of(c.a) * twinkle * u.post.x), 1.0);
+        let lit = c.rgb * (1.0 + glow_of(c.a) * twinkle * u.post.x);
+        // On an HDR screen the sky stays a backdrop: its stars clip at white
+        // as on an SDR one, rather than outshining what is in front of it.
+        if (u.post.y > 0.0) {
+            return vec4(min(lit, vec3(1.0)), 1.0);
+        }
+        return vec4(lit, 1.0);
     }
     let row = clamp(p.y / u.sky.y, 0.0, 1.0) * dims.y;
     let uv = vec2(col / dims.x, min(row, dims.y - 0.5) / dims.y);
@@ -198,10 +204,15 @@ fn from_srgb(c: vec3<f32>) -> vec3<f32> {
 /// On an HDR screen showing up to `headroom` times white: each channel as it
 /// is up to white, then above it eased into the headroom, so that the
 /// brightest glow still differs from the merely bright (and, again channel
-/// by channel, a flame's core turns white only at the top).
+/// by channel, a flame's core turns white only at the top). What is above
+/// white is first stretched so that a fully glowing white texel (white plus
+/// the glow gain) lands at four fifths of the room: the glow is tuned for
+/// SDR, where it clips, and would otherwise use little of a large headroom.
 fn into_headroom(c: vec3<f32>, headroom: f32) -> vec3<f32> {
     let room = max(headroom - 1.0, 1e-3);
-    let over = max(c - vec3(1.0), vec3(0.0));
+    // 1 - exp(-ln 5) = 4/5.
+    let stretch = max(1.0, 1.609 * room / max(u.post.x, 1.0));
+    let over = max(c - vec3(1.0), vec3(0.0)) * stretch;
     return min(c, vec3(1.0)) + room * (vec3(1.0) - exp(-over / room));
 }
 

@@ -11,6 +11,7 @@ mod confirm;
 mod fade;
 mod glow;
 mod gpu;
+mod hdr_blink;
 mod hud;
 mod key_buttons;
 mod lemming_cam;
@@ -106,8 +107,10 @@ pub struct Options {
     /// for drivers that fail with the usual one.
     backend: Option<wgpu::Backends>,
     /// Show glowing things brighter than white where the screen can
-    /// (`--hdr`; macOS for now).
+    /// (`--hdr`).
     hdr: bool,
+    /// HDR and clipped at white by turns, labelled (`--hdr-blink`).
+    hdr_blink: bool,
 }
 
 fn parse_args() -> Options {
@@ -134,6 +137,7 @@ fn parse_args() -> Options {
         profile: false,
         backend: None,
         hdr: false,
+        hdr_blink: false,
     };
     let mut args = platform::args().into_iter();
     while let Some(a) = args.next() {
@@ -165,6 +169,7 @@ fn parse_args() -> Options {
             "--no-glow" => o.no_glow = true,
             "--profile" => o.profile = true,
             "--hdr" => o.hdr = true,
+            "--hdr-blink" => (o.hdr, o.hdr_blink) = (true, true),
             "--backend" => o.backend = Some(wgpu::Backends::from_comma_list(&val())),
             "--screen" => {
                 o.screen = match val().as_str() {
@@ -310,6 +315,7 @@ pub struct World {
     confirm: confirm::Confirm,
     fade: fade::Fade,
     style: style::Style,
+    hdr_blink: hdr_blink::HdrBlink,
     key_buttons: key_buttons::KeyButtons,
     muted: music::MusicMuted,
     music: music::LevelMusic,
@@ -379,6 +385,7 @@ impl World {
             confirm: confirm::Confirm::default(),
             fade: fade::Fade::default(),
             style: style::Style::default(),
+            hdr_blink: hdr_blink::HdrBlink::default(),
             key_buttons: key_buttons::KeyButtons::default(),
             muted: music::MusicMuted::default(),
             music: music::LevelMusic::default(),
@@ -567,6 +574,7 @@ impl l3d_engine::Game for World {
         }
         self.update();
         update_lemming_sprites(self);
+        hdr_blink::update(self);
         sfx::play(self);
         let scale = self.e.window.scale_factor();
         self.ui.layout(&self.screen, scale);

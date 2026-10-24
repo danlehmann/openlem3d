@@ -41,9 +41,10 @@ pub fn config_dir() -> Option<PathBuf> {
     None
 }
 
-/// How far above white the screen can show now (macOS: its extended
-/// dynamic range headroom, which follows the brightness), as a multiple of
-/// white; 1 where it can't.
+/// How far above white to draw, as a multiple of white: on macOS what the
+/// screen can show now (its extended dynamic range headroom, which follows
+/// the brightness); on Android a fixed amount the system fits to the
+/// display; 1 elsewhere.
 pub fn hdr_headroom() -> f32 {
     #[cfg(target_os = "macos")]
     return objc2::MainThreadMarker::new()
@@ -51,8 +52,77 @@ pub fn hdr_headroom() -> f32 {
         .map_or(1.0, |s| {
             s.maximumExtendedDynamicRangeColorComponentValue().max(1.0) as f32
         });
-    #[cfg(not(target_os = "macos"))]
+    // The headroom the HDR layer is drawn with, which Android fits to the
+    // display.
+    #[cfg(target_os = "android")]
+    return android::HDR_HEADROOM;
+    #[cfg(not(any(target_os = "macos", target_os = "android")))]
     1.0
+}
+
+/// Where HDR takes a layer of its own to draw into rather than the window
+/// (Android: see `android::HdrLayer`); elsewhere there is never one.
+pub struct HdrLayer {
+    #[cfg(target_os = "android")]
+    layer: android::HdrLayer,
+    /// Its size in pixels.
+    pub size: l3d_engine::prelude::UVec2,
+}
+
+impl HdrLayer {
+    /// A layer of `size` pixels, where HDR can be shown through one (on
+    /// Android once its view is ready; the first call adds it).
+    pub fn create(size: l3d_engine::prelude::UVec2) -> Option<HdrLayer> {
+        #[cfg(target_os = "android")]
+        return android::HdrLayer::create()
+            .unwrap_or_else(|e| {
+                l3d_engine::warn_once!("could not make an HDR layer: {e}");
+                None
+            })
+            .map(|layer| HdrLayer { layer, size });
+        #[cfg(not(target_os = "android"))]
+        {
+            let _ = size;
+            None
+        }
+    }
+
+    /// Gets ready to make layers (Android: adds the view, the first time).
+    pub fn prepare() {
+        #[cfg(target_os = "android")]
+        if let Err(e) = android::HdrLayer::prepare() {
+            l3d_engine::warn_once!("could not prepare an HDR layer: {e}");
+        }
+    }
+
+    /// Gives up on HDR layers: one was made, but can't show HDR.
+    pub fn give_up() {
+        #[cfg(target_os = "android")]
+        android::HdrLayer::give_up();
+    }
+
+    /// Whether a layer could be made now where there was none before.
+    pub fn ready() -> bool {
+        #[cfg(target_os = "android")]
+        return android::HdrLayer::ready();
+        #[cfg(not(target_os = "android"))]
+        false
+    }
+
+    /// What to make a GPU surface from.
+    pub fn target(&self) -> wgpu::SurfaceTargetUnsafe {
+        #[cfg(target_os = "android")]
+        return wgpu::SurfaceTargetUnsafe::RawHandle {
+            raw_display_handle: Some(wgpu::rwh::RawDisplayHandle::Android(
+                wgpu::rwh::AndroidDisplayHandle::new(),
+            )),
+            raw_window_handle: wgpu::rwh::RawWindowHandle::AndroidNdk(
+                wgpu::rwh::AndroidNdkWindowHandle::new(self.layer.window()),
+            ),
+        };
+        #[cfg(not(target_os = "android"))]
+        unreachable!("only Android makes HDR layers")
+    }
 }
 
 /// How far the system draws over each edge of the window, in physical pixels:

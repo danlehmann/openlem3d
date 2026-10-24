@@ -43,6 +43,9 @@ pub(crate) struct Renderer {
     copy: Option<Copy>,
     scene: Option<SceneGpu>,
     ui: Option<UiGpu>,
+    /// The layer drawn into for HDR where that takes one (Android), for the
+    /// surface made on it; dropped after that.
+    hdr_layer: Option<crate::platform::HdrLayer>,
 }
 
 pub struct Gpu {
@@ -134,6 +137,46 @@ impl Gpu {
     }
 }
 
+/// The surface to draw a frame onto: for HDR where that takes a layer of
+/// its own (Android), and `to_layer`, on one made for it, kept in `layer`;
+/// else on the window (`window_surface`, or one made now), in HDR where the
+/// window can.
+fn attach(
+    gpu: &Gpu,
+    handle: &WindowHandle,
+    window_surface: Option<wgpu::Surface<'static>>,
+    hdr: bool,
+    to_layer: bool,
+    size: UVec2,
+    layer: &mut Option<crate::platform::HdrLayer>,
+) -> Surface {
+    *layer = None;
+    if hdr && !to_layer {
+        crate::platform::HdrLayer::prepare();
+    }
+    if hdr
+        && to_layer
+        && let Some(l) = crate::platform::HdrLayer::create(size)
+    {
+        // SAFETY: the layer outlives the surface: the renderer drops the
+        // surface first.
+        match unsafe { gpu.instance.create_surface_unsafe(l.target()) } {
+            Ok(s) => {
+                let s = Surface::new(gpu, s, true);
+                if s.hdr {
+                    *layer = Some(l);
+                    return s;
+                }
+                crate::platform::HdrLayer::give_up();
+            }
+            Err(e) => warn!("could not draw into the HDR layer: {e}"),
+        }
+    }
+    let window = window_surface.unwrap_or_else(|| create_surface(&gpu.instance, handle));
+    // Android shows a window's own float pixels only up to white.
+    Surface::new(gpu, window, hdr && !cfg!(target_os = "android"))
+}
+
 fn create_surface(instance: &wgpu::Instance, handle: &WindowHandle) -> wgpu::Surface<'static> {
     instance
         .create_surface(handle.0.clone())
@@ -158,7 +201,10 @@ impl Surface {
     /// RGBA16 floats where it offers those (macOS: extended dynamic range).
     fn new(gpu: &Gpu, surface: wgpu::Surface<'static>, hdr: bool) -> Self {
         let formats = surface.get_capabilities(&gpu.adapter).formats;
-        let hdr = hdr && cfg!(target_os = "macos") && formats.contains(&HDR_TARGET_FORMAT);
+        if hdr {
+            info!("window formats {formats:?}");
+        }
+        let hdr = hdr && formats.contains(&HDR_TARGET_FORMAT);
         let format = formats
             .iter()
             .copied()
@@ -384,6 +430,7 @@ impl Copy {
 /// Draws a frame: the clear colour, the scene in the screen's part of the
 /// window, the UI, then onto the window.
 pub(crate) fn render(w: &mut World) {
+    let hdr_on = crate::hdr_blink::on(w);
     let Renderer {
         generation,
         gpu,
@@ -392,6 +439,7 @@ pub(crate) fn render(w: &mut World) {
         copy,
         scene,
         ui,
+        hdr_layer,
     } = &mut w.renderer;
     let (window, screen, clear, screenshots) =
         (&w.e.window, &w.screen, &w.clear, &mut w.screenshots);
@@ -400,10 +448,21 @@ pub(crate) fn render(w: &mut World) {
     let Some(handle) = &w.e.handle else {
         // The app is suspended (Android): the window is gone.
         *surface = None;
+        *hdr_layer = None;
         return;
     };
     let new_handle = *generation != w.e.handle_generation;
     *generation = w.e.handle_generation;
+    let size = UVec2::new(window.physical_width(), window.physical_height()).max(UVec2::ONE);
+    // A layer is made at the window's size: a resized window gets a new one.
+    // A new window is first drawn into itself, and only a later frame
+    // switches to the layer: Android takes a window's touch area from the
+    // picture it shows, and one that never showed one gets no touches.
+    let to_layer = hdr_layer.as_ref().is_some_and(|l| l.size != size)
+        || (hdr && hdr_layer.is_none() && surface.is_some() && crate::platform::HdrLayer::ready());
+    if to_layer {
+        *surface = None;
+    }
     match gpu {
         None => {
             let (mut g, mut s) = Gpu::new(handle, profile.on, backend);
@@ -423,18 +482,18 @@ pub(crate) fn render(w: &mut World) {
             }
             *scene = Some(sc);
             profile.start_gpu(&g.device, &g.queue);
-            *surface = Some(Surface::new(&g, s, hdr));
+            *surface = Some(attach(&g, handle, Some(s), hdr, false, size, hdr_layer));
             *gpu = Some(g);
         }
         Some(g) if new_handle || surface.is_none() => {
-            *surface = Some(Surface::new(g, create_surface(&g.instance, handle), hdr));
+            *surface = None;
+            *surface = Some(attach(g, handle, None, hdr, to_layer, size, hdr_layer));
         }
         Some(_) => {}
     }
     let (Some(gpu), Some(s)) = (gpu.as_ref(), surface.as_mut()) else {
         return;
     };
-    let size = UVec2::new(window.physical_width(), window.physical_height()).max(UVec2::ONE);
     s.update(gpu, size, window.present_mode);
     // Without a frame to show (the window hidden, say), a screenshot is
     // still drawn.
@@ -474,7 +533,13 @@ pub(crate) fn render(w: &mut World) {
     let copy = copy.get_or_insert_with(|| Copy::new(device));
     let s = surface.as_ref().expect("checked above");
     let (format, headroom) = if s.hdr {
-        (HDR_TARGET_FORMAT, crate::platform::hdr_headroom())
+        // Clipped at white, as on an SDR screen, in `--hdr-blink`'s off half.
+        let headroom = if hdr_on {
+            crate::platform::hdr_headroom()
+        } else {
+            1.0
+        };
+        (HDR_TARGET_FORMAT, headroom)
     } else {
         (TARGET_FORMAT, 0.0)
     };

@@ -53,6 +53,13 @@ The game uses Vulkan, and OpenGL ES where the Vulkan driver fails to compile
 its shaders (the Nexus 6P's, on Android 8.1). `--backend gl` (or `vulkan`)
 picks one for testing.
 
+`--hdr` shows glowing things brighter than white on Android 15 and later,
+where the display can: the game then draws into a `SurfaceView` over its
+window that asks for HDR headroom, since Android lifts the brightness only
+for a layer that asks, and a native activity's own window never does.
+Elsewhere it changes nothing. `--hdr-blink` switches HDR on and off every
+five seconds, labelled, for comparing.
+
 ## Building
 
     ANDROID_NDK_HOME=... ANDROID_JAR=.../android.jar android/build-apk.sh
