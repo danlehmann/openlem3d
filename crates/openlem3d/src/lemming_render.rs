@@ -655,15 +655,67 @@ fn dig_effects(b: &mut LayerBuilder, sim: &Simulation, blocks: Option<&BlockSet>
             (crack % ATLAS_COLUMNS) * LEMMING_CELL,
             (crack / ATLAS_COLUMNS) * LEMMING_CELL,
         );
-        let c = cell.map(|v| v as f32);
-        let y = c[1] + (mask.trailing_zeros() + 1) as f32 * 0.25 + CRACK_OFFSET;
-        let (x0, z0, x1, z1) = (c[0], c[2], c[0] + 1.0, c[2] + 1.0);
-        b.quad(
-            [[x0, y, z1], [x1, y, z1], [x1, y, z0], [x0, y, z0]],
-            [cx as f32, cy as f32, 64.0, 64.0],
-            tex,
-            1.0,
-        );
+        draw_top_cracks(b, sim, cell, mask, [cx as f32, cy as f32], tex);
+    }
+}
+
+/// Pieces across a cell (each way) of the cracks over a digger's segment.
+const TOP_CRACK_PIECES: usize = 8;
+
+/// The cracks (at `at` in the atlas) over the top of what a digger is
+/// digging out of `cell` (its segments in `mask`): lying on the block's
+/// surface within that band, so that they follow a ramp's slope where the
+/// ramp is cut, and only where there is something to dig.
+fn draw_top_cracks(
+    b: &mut LayerBuilder,
+    sim: &Simulation,
+    cell: [i32; 3],
+    mask: u8,
+    at: [f32; 2],
+    tex: [f32; 2],
+) {
+    let sub = l3d_sim::SUB;
+    let (low, high) = (
+        cell[1] * sub + mask.trailing_zeros() as i32 * sub / 4,
+        cell[1] * sub + (8 - mask.leading_zeros()) as i32 * sub / 4,
+    );
+    // The surface at a point of the cell, in sub-units: the band's top where
+    // the block reaches it, the band's bottom where it doesn't reach that.
+    let surface = |fx: f32, fz: f32| {
+        let inside = |c: i32, f: f32| c * sub + ((f * sub as f32) as i32).clamp(0, sub - 1);
+        sim.world
+            .surface_below(inside(cell[0], fx), high, inside(cell[2], fz))
+            .0
+    };
+    let height = |fx: f32, fz: f32| crate::units(surface(fx, fz).clamp(low, high)) + CRACK_OFFSET;
+    let n = TOP_CRACK_PIECES as f32;
+    let piece = 64.0 / n;
+    for i in 0..TOP_CRACK_PIECES {
+        for j in 0..TOP_CRACK_PIECES {
+            let (fx0, fx1) = (i as f32 / n, (i + 1) as f32 / n);
+            let (fz0, fz1) = (j as f32 / n, (j + 1) as f32 / n);
+            if surface((fx0 + fx1) / 2.0, (fz0 + fz1) / 2.0) <= low {
+                continue;
+            }
+            let (x0, x1) = (cell[0] as f32 + fx0, cell[0] as f32 + fx1);
+            let (z0, z1) = (cell[2] as f32 + fz0, cell[2] as f32 + fz1);
+            b.quad(
+                [
+                    [x0, height(fx0, fz1), z1],
+                    [x1, height(fx1, fz1), z1],
+                    [x1, height(fx1, fz0), z0],
+                    [x0, height(fx0, fz0), z0],
+                ],
+                [
+                    at[0] + i as f32 * piece,
+                    at[1] + j as f32 * piece,
+                    piece,
+                    piece,
+                ],
+                tex,
+                1.0,
+            );
+        }
     }
 }
 
