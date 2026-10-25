@@ -401,3 +401,30 @@ fn walker_turns_back_at_the_start_of_a_staircase_blockers_step() {
         "turned {gap} before the blocker"
     );
 }
+
+#[test]
+fn miner_on_its_way_takes_a_turner_and_a_blocker() {
+    for skill in [Skill::Turner, Skill::Blocker] {
+        let mut sim = open_level(1)
+            .skill(0, Skill::Miner, 1)
+            .skill(1, skill, 1)
+            .sim();
+        run(&mut sim, 30);
+        assert!(sim.assign(0, Skill::Miner));
+        let taken = if skill == Skill::Turner {
+            sim.assign_turner(0, Dir::PosX.anticlockwise())
+        } else {
+            sim.assign(0, skill)
+        };
+        assert!(taken, "{skill:?} refused");
+        run(&mut sim, 40);
+        assert!(
+            matches!(
+                sim.lemmings[0].state,
+                State::Turning { .. } | State::Blocking
+            ),
+            "{:?}",
+            sim.lemmings[0].state
+        );
+    }
+}

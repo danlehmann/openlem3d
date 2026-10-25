@@ -592,6 +592,15 @@ impl Lemming {
         (off(p[0]) * d[0] + off(p[2]) * d[2]).abs() < SUB / 4
     }
 
+    /// Whether it has no skill waiting to start, or only a dig, bash or mine
+    /// (on its way to where it starts, which a turner or blocker replaces).
+    fn idle_or_work_pending(&self) -> bool {
+        matches!(
+            self.pending,
+            None | Some(State::Digging | State::Bashing | State::Mining)
+        )
+    }
+
     fn set_state(&mut self, s: State) {
         self.state = s;
         self.state_ticks = 0;
@@ -801,7 +810,7 @@ impl Simulation {
             // owner: a miner takes a turner in the original; the others and
             // where it then stands are provisional).
             Skill::Blocker => {
-                l.pending.is_none()
+                l.idle_or_work_pending()
                     && (l.state == State::Walking
                         || matches!(l.state, State::Digging | State::Bashing | State::Mining)
                         || matches!(l.state, State::Building { .. } | State::Shrugging)
@@ -813,7 +822,7 @@ impl Simulation {
             // taken after 2, 4 and 6 bricks, also as soon as the 4th was
             // laid, and never after 3).
             Skill::Turner => {
-                l.pending.is_none()
+                l.idle_or_work_pending()
                     && (l.state == State::Walking
                         || matches!(l.state, State::Digging | State::Bashing | State::Mining)
                         || matches!(l.state, State::Building { .. } | State::Shrugging)
