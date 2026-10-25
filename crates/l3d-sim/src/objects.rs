@@ -88,7 +88,15 @@ pub fn level_objects(level: &Level) -> Option<(ObjectKind, Vec<Object>)> {
         .cells()
         .filter(|(_, _, _, _, o)| (0x60..=0x67).contains(&o.kind))
         .filter_map(|(x, y, z, b, o)| {
-            let surface = match top(y as i32, b) {
+            // A flame-blower or laser in a cell whose block hangs overhead
+            // (no bottom segment) is in its housing: it catches lemmings
+            // walking on the floor below (recorded in the original,
+            // 2026-10-24, under a half block, as "Raiders of the Lost
+            // Lemming" and "Lemlab" place them, with the object cell's
+            // second byte 0 or 5 alike; a squasher there never fired).
+            let overhead =
+                matches!(kind, ObjectKind::FlameBlower | ObjectKind::Laser) && b.segments & 1 == 0;
+            let surface = match top(y as i32, b).filter(|_| !overhead) {
                 Some(t) => t,
                 None if kind.kills() || anchor(kind, o.kind) => (y as i32 * SUB).max(GROUND),
                 None => return None,

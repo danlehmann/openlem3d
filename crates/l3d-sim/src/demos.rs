@@ -587,9 +587,11 @@ pub const SOLUTIONS: &[Solution] = &[
         35,
         &[
             (236, 0, 1, Some(false)),
-            (613, 1, 3, None),
-            (722, 1, 1, Some(true)),
-            (1028, 2, 1, Some(true)),
+            (455, 1, 3, None),
+            (666, 1, 1, Some(false)),
+            (825, 2, 4, None),
+            (1245, 2, 4, None),
+            (1655, 2, 1, Some(true)),
         ],
     ),
     at(
@@ -845,6 +847,8 @@ pub const SOLUTIONS: &[Solution] = &[
             (1249, 12, 4, None),
         ],
     ),
+    // Mayhem 12 "Raiders of the Lost Lemming" by the Lemmings Wiki strategy
+    // (its flame-blowers rule out the published route as transcribed).
     at(
         71,
         &[
@@ -853,12 +857,15 @@ pub const SOLUTIONS: &[Solution] = &[
             (237, 0, 1, Some(false)),
             (485, 1, 1, Some(true)),
             (600, 3, 1, Some(true)),
-            (734, 2, 5, None),
-            (1059, 4, 1, Some(false)),
-            (1172, 5, 1, Some(false)),
-            (1479, 6, 1, Some(false)),
-            (1567, 7, 3, None),
-            (1899, 8, 1, Some(false)),
+            (660, 2, 5, None),
+            (1247, 7, 1, Some(false)),
+            (1360, 8, 1, Some(false)),
+            (1665, 9, 1, Some(false)),
+            (1747, 10, 3, None),
+            (1944, 10, 1, Some(false)),
+            (1987, 11, 6, None),
+            (2101, 12, 1, Some(true)),
+            (2137, 11, 1, Some(true)),
         ],
     ),
     // Mayhem 8 "Five Towers" by a route of our own (saves 30 of 30): with

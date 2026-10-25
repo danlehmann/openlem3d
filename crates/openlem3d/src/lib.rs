@@ -1199,6 +1199,7 @@ fn update_lemming_sprites(w: &mut World) {
         blocks,
         scene_build::ATLAS_ROWS,
         yaw,
+        w.view.pos,
         &game.doors,
         eyes,
         highlight.lemming,

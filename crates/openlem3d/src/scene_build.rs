@@ -191,42 +191,6 @@ impl LayerBuilder {
             .extend([base, base + 1, base + 2, base, base + 2, base + 3]);
     }
 
-    /// Like [`Self::sprite_scaled`], the texture turned a quarter turn: its
-    /// left edge at the top, its right edge at the bottom, so a horizontal
-    /// picture stands upright, `rect`'s width tall.
-    pub fn sprite_turned(
-        &mut self,
-        anchor: [f32; 3],
-        rect: [f32; 4],
-        tex_size: [f32; 2],
-        texels_per_unit: f32,
-    ) {
-        let [x, y, w, h] = rect;
-        let (hw, hh) = (h / texels_per_unit / 2.0, w / texels_per_unit);
-        let (u0, u1) = (x / tex_size[0], (x + w) / tex_size[0]);
-        let (v0, v1) = (y / tex_size[1], (y + h) / tex_size[1]);
-        let base = self.base();
-        for (off, uv) in [
-            ([-hw, 0.0], [u1, v0]),
-            ([hw, 0.0], [u1, v1]),
-            ([hw, hh], [u0, v1]),
-            ([-hw, hh], [u0, v0]),
-        ] {
-            Vertex {
-                pos: anchor,
-                uv,
-                brightness: 1.0,
-                cutout: true,
-                offset: off,
-                anim: [1.0, 0.0],
-                light: [0.0; 3],
-            }
-            .push(&mut self.vertices);
-        }
-        self.indices
-            .extend([base, base + 1, base + 2, base, base + 2, base + 3]);
-    }
-
     /// Adds a fixed quad with corners bottom-left, bottom-right, top-right,
     /// top-left as seen from its front, showing texel rectangle `rect`
     /// (`[x, y, w, h]`) of a texture of `tex_size`.

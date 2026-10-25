@@ -153,6 +153,7 @@ pub(crate) fn sim_events(w: &mut World) {
             Event::Zapped => "SPOTFX/LIGHTNG",
             Event::Electrocuted => "SPOTFX/CRACKLE2",
             Event::Screamed => "VOXFX/FALLER3",
+            Event::Thudded => "SPOTFX/THUD1",
             Event::Trapped => match sim.object_kind {
                 Some(ObjectKind::FlameBlower) => "SPOTFX/FLAMETHR",
                 Some(ObjectKind::Laser) => "SPOTFX/CRACKLE2",

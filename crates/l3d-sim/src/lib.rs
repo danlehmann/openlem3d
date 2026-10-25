@@ -80,6 +80,8 @@ const BLAST_ABOVE: i32 = SUB / 2;
 /// Practice "Digger"'s bridge, seen side-on, with the first quarter gone
 /// one period after the assignment).
 pub const DIG_TICKS: u32 = 42;
+/// Ticks between a digger's scooping sounds (recorded).
+const DIG_SOUND_TICKS: u32 = 4;
 /// Ticks per brick laid by a builder (verified: 25 ± 1).
 pub const BUILD_TICKS: u32 = 25;
 /// Ticks from the assignment to the first brick: the builder stands still
@@ -629,6 +631,8 @@ pub enum Event {
     Electrocuted,
     /// A falling lemming has fallen far enough to scream.
     Screamed,
+    /// A lemming landed on its back, stunned.
+    Thudded,
     Trapped,
     Climbed,
     UmbrellaOpened,
@@ -1077,6 +1081,8 @@ impl Simulation {
                 State::Bouncing { .. } => Some(Event::Bounced),
                 State::Flying { .. } => Some(Event::Catapulted),
                 State::Shrugging => Some(Event::BuilderDone),
+                // Landing on its back after a long fall (recorded: THUD1).
+                State::Stunned => Some(Event::Thudded),
                 _ => None,
             };
         }
@@ -1085,7 +1091,10 @@ impl Simulation {
             State::Building { bricks_left } if matches!(b, State::Building { bricks_left: was } if was > bricks_left) => {
                 Some(Event::Brick)
             }
-            State::Digging if on(DIG_TICKS) => Some(Event::Dug),
+            // A scoop every few ticks while it digs (recorded in the
+            // original's Practice "Digger" demo, 2026-10-25: GRAVEL3 every
+            // 4 ticks).
+            State::Digging if on(DIG_SOUND_TICKS) => Some(Event::Dug),
             State::Bashing if on(BASH_SWING_TICKS) && self.bash_cell_full(after) => {
                 Some(Event::Bashed)
             }

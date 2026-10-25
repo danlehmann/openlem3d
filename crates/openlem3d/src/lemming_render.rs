@@ -300,19 +300,12 @@ const SQUASHER_FRAMES: [u32; 10] = [3, 7, 7, 6, 5, 4, 3, 2, 1, 0];
 /// shut (frame 7) and open again (recorded).
 const BEAR_TRAP_FRAMES: [u32; 9] = [7, 7, 7, 5, 4, 3, 2, 1, 0];
 
-/// The flame-blower's jet, `t` ticks after it fired: it shoots straight
-/// down from the block over the trap, full length for [`JET_FULL_TICKS`],
-/// then shrinks back up and is gone at [`JET_TICKS`] (recorded in the
-/// original, 2026-10-24, with the trap under a block as real levels place
-/// it). Its frames are the sheet's eight horizontal jets, 64×32 texels in
-/// the top and bottom halves of frames 0–3, turned upright.
-fn flame_jet(
-    b: &mut LayerBuilder,
-    sim: &Simulation,
-    o: &l3d_sim::objects::Object,
-    t: u32,
-    tex: [f32; 2],
-) {
+/// The flame-blower's jet, `t` ticks after it fired: full length for
+/// [`JET_FULL_TICKS`], then shrinking back and gone at [`JET_TICKS`]
+/// (recorded in the original, 2026-10-24, with the trap under a block as
+/// real levels place it). Its frames are the sheet's eight jets, 64×32
+/// texels in the top and bottom halves of frames 0–3.
+fn flame_jet(b: &mut LayerBuilder, o: &l3d_sim::objects::Object, t: u32, eye: Vec3, tex: [f32; 2]) {
     if t >= JET_TICKS {
         return;
     }
@@ -321,48 +314,94 @@ fn flame_jet(
     } else {
         (JET_TICKS - t) as f32 / (JET_TICKS - JET_FULL_TICKS) as f32
     };
-    let ceiling = jet_ceiling(sim, o);
     let jet = t % 8;
-    let cell = TRAP_ATLAS_FIRST + jet / 2;
+    beam(
+        b,
+        o,
+        eye,
+        tex,
+        (jet / 2, jet % 2),
+        length,
+        JET_HEIGHT,
+        JET_THICKNESS,
+    );
+}
+
+/// The laser's beam, `t` ticks after it fired: on while its lemming flashes
+/// as an X-ray (the owner's picture of "Lemlab"), cycling through the
+/// sheet's four beams, the tops of frames 0–3.
+fn laser_beam(
+    b: &mut LayerBuilder,
+    o: &l3d_sim::objects::Object,
+    t: u32,
+    eye: Vec3,
+    tex: [f32; 2],
+) {
+    if t < LASER_TICKS {
+        beam(
+            b,
+            o,
+            eye,
+            tex,
+            (t % 4, 0),
+            1.0,
+            LASER_HEIGHT,
+            LASER_THICKNESS,
+        );
+    }
+}
+
+/// A trap's beam across its cell along Z, `height` above the floor, turned
+/// about its own axis to face the camera at `eye`, drawn from the half
+/// (0 top, 1 bottom) of trap frame `frame.0`; `length` (0–1) of it shows,
+/// from its −Z end. Both beams run across the corridor, side-on in the
+/// owner's pictures of "Raiders of the Lost Lemming" and "Lemlab", and
+/// along the view in recordings looking along Z; that they always run
+/// along Z is inferred (the trap blocks seen were turned 0 and 1).
+#[allow(clippy::too_many_arguments)]
+fn beam(
+    b: &mut LayerBuilder,
+    o: &l3d_sim::objects::Object,
+    eye: Vec3,
+    tex: [f32; 2],
+    frame: (u32, u32),
+    length: f32,
+    height: f32,
+    thickness: f32,
+) {
+    let cell = TRAP_ATLAS_FIRST + frame.0;
     let (cx, cy) = (
         (cell % ATLAS_COLUMNS) * LEMMING_CELL,
-        (cell / ATLAS_COLUMNS) * LEMMING_CELL + (jet % 2) * TRAP_FRAME / 2,
+        (cell / ATLAS_COLUMNS) * LEMMING_CELL + frame.1 * TRAP_FRAME / 2,
     );
-    let texels = JET_TEXELS_PER_UNIT / length;
-    let height = TRAP_FRAME as f32 / texels;
-    let anchor = [
+    let mid = Vec3::new(
         o.cell[0] as f32 + 0.5,
-        ceiling - height,
+        crate::units(o.surface) + height,
         o.cell[2] as f32 + 0.5,
-    ];
-    b.sprite_turned(
-        anchor,
-        [
-            cx as f32,
-            cy as f32,
-            TRAP_FRAME as f32,
-            (TRAP_FRAME / 2) as f32,
-        ],
+    );
+    let from = mid - Vec3::Z * (BEAM_LENGTH / 2.0);
+    let to = from + Vec3::Z * (BEAM_LENGTH * length);
+    let side = (to - from).cross(eye - mid).normalize_or_zero() * (thickness / 2.0);
+    let corners = [from + side, to + side, to - side, from - side].map(|v| v.to_array());
+    let s = TRAP_FRAME as f32;
+    b.quad(
+        corners,
+        [cx as f32, cy as f32, s * length, s / 2.0],
         tex,
-        texels,
+        1.0,
     );
 }
 
-/// The underside of whatever is over a trap, in units: where its jet comes
-/// from (two units up when nothing is).
-fn jet_ceiling(sim: &Simulation, o: &l3d_sim::objects::Object) -> f32 {
-    let [x, z] = [o.cell[0] * SUB + SUB / 2, o.cell[2] * SUB + SUB / 2];
-    let top = o.surface + 2 * SUB;
-    let y = (o.surface + SUB / 16..top)
-        .step_by((SUB / 16) as usize)
-        .find(|&y| sim.world.solid([x, y, z]))
-        .unwrap_or(top);
-    crate::units(y)
-}
-
-/// The flame-blower's jet: its scale, and how long it lasts at full length
-/// and in all (recorded).
-const JET_TEXELS_PER_UNIT: f32 = 56.0;
+/// A beam's length, units; the flame-blower's jet's thickness and height
+/// above the floor (about a lemming's knee) and the laser's (its waist),
+/// read from the owner's pictures; how long the jet lasts at full length
+/// and in all, and the laser beam (recorded).
+const BEAM_LENGTH: f32 = 1.2;
+const JET_THICKNESS: f32 = 0.6;
+const JET_HEIGHT: f32 = 0.3;
+const LASER_THICKNESS: f32 = 0.45;
+const LASER_HEIGHT: f32 = 0.45;
+const LASER_TICKS: u32 = 5;
 const JET_FULL_TICKS: u32 = 11;
 const JET_TICKS: u32 = 18;
 /// How fast a lemming caught by a flame-blower rises into the block over
@@ -384,7 +423,7 @@ const REMNANT_SCALE: f32 = 0.55;
 /// their recorded frames when they fire; the weird trap shows only while it
 /// plays; flame-blowers and lasers show only while firing. Which frames are
 /// idle is read off the sheets.
-fn objects(b: &mut LayerBuilder, sim: &Simulation, tex: [f32; 2]) {
+fn objects(b: &mut LayerBuilder, sim: &Simulation, eye: Vec3, tex: [f32; 2]) {
     let Some(kind) = sim.object_kind else { return };
     let texels_per_unit = if kind == ObjectKind::WeirdTrap {
         128.0
@@ -437,12 +476,16 @@ fn objects(b: &mut LayerBuilder, sim: &Simulation, tex: [f32; 2]) {
             // (recorded).
             ObjectKind::WeirdTrap if !firing || elapsed as u32 > last => continue,
             ObjectKind::WeirdTrap => elapsed as u32,
-            // The laser's beam is never seen (recorded); the lemming is
-            // electrocuted.
-            ObjectKind::Laser => continue,
+            // The lemming is electrocuted while the beam is on.
+            ObjectKind::Laser => {
+                if firing {
+                    laser_beam(b, o, elapsed as u32, eye, tex);
+                }
+                continue;
+            }
             ObjectKind::FlameBlower => {
                 if firing {
-                    flame_jet(b, sim, o, elapsed as u32, tex);
+                    flame_jet(b, o, elapsed as u32, eye, tex);
                 }
                 continue;
             }
@@ -1312,6 +1355,7 @@ pub fn build(
     blocks: Option<&BlockSet>,
     atlas_rows: u32,
     camera_yaw: f32,
+    eye: Vec3,
     doors: &[Door],
     eyes: Option<usize>,
     highlight: Option<usize>,
@@ -1323,7 +1367,7 @@ pub fn build(
         (ATLAS_COLUMNS * LEMMING_CELL) as f32,
         (atlas_rows * LEMMING_CELL) as f32,
     ];
-    objects(&mut b, sim, tex);
+    objects(&mut b, sim, eye, tex);
     camera_markers(&mut b, cameras, camera_yaw, tex);
     bash_effects(&mut b, sim, blocks, tex);
     mine_effects(&mut b, sim, blocks, tex);
@@ -1364,6 +1408,13 @@ pub fn build(
     {
         let facing = facing(l);
         let yaw = drawn.get(i).map_or(facing.yaw(), |d| d.1);
+        // A lemming caught by a flame-blower spins as it rises (owner, on
+        // "Raiders of the Lost Lemming"; an eighth of a turn a tick is ours).
+        let yaw = if l.state == State::Trapped && sim.object_kind == Some(ObjectKind::FlameBlower) {
+            yaw + l.state_ticks as f32 * FRAC_PI_4
+        } else {
+            yaw
+        };
         let view = ViewAngle::from_yaws(yaw, camera_yaw);
         let (cell, mirror) = match l.state {
             // The stored turner points to its right (cells 30–36, seen from
