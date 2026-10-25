@@ -2336,9 +2336,19 @@ impl Simulation {
                 // Practice "Basher" changed to have one before the crate: a
                 // notch with a vertical face, the basher standing in it);
                 // a shaped block keeps its slope below the cut.
-                let cut = if shallow {
+                // With more of it above the stroke (the sloped top of a ramp
+                // against a wall, bashed into at its foot), that stays, cut
+                // off flat underneath (owner, Fun 15: the cracks showed the
+                // lower half, then the whole ramp went).
+                let present = self.world.present(cell);
+                let low = mask.trailing_zeros();
+                let above = present & !mask & 0xFu8.checked_shl(low).unwrap_or(0) != 0;
+                let below = present & !mask & !0xFu8.checked_shl(low).unwrap_or(0) != 0;
+                let cut = if shallow && above && !below {
                     self.world.breakable_towards(cell, Some(d))
-                        && self.world.shave(cell, mask.trailing_zeros() as u8)
+                        && self.world.lift(cell, (8 - mask.leading_zeros()) as u8)
+                } else if shallow && !above {
+                    self.world.breakable_towards(cell, Some(d)) && self.world.shave(cell, low as u8)
                 } else {
                     self.world.remove_segments_towards(cell, mask, Some(d))
                 };
