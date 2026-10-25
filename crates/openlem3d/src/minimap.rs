@@ -149,21 +149,18 @@ pub(crate) fn build_base(w: &mut World) {
             } else {
                 sea
             };
-            for y in (0..SIZE_Y).rev() {
-                let b = level.block(x, y, z);
-                if b.is_empty() || b.id == 3 || b.id == 4 {
-                    continue;
-                }
-                colour = match b.id {
-                    0 => HATCH,
-                    1 => EXIT,
-                    id => blocks
-                        .defs
-                        .get(id as usize)
-                        .and_then(|def| tile(def.face(FaceDir::PosY).texture))
-                        .unwrap_or(colour),
-                };
-                break;
+            // A hatch or exit shows even under the blocks above it (Fun 16:
+            // the hatch inside a tower).
+            let mut column = (0..SIZE_Y).rev().map(|y| level.block(x, y, z));
+            if let Some(b) = column.clone().find(|b| !b.is_empty() && b.id <= 1) {
+                colour = if b.id == 0 { HATCH } else { EXIT };
+            } else if let Some(b) = column.find(|b| !b.is_empty() && b.id != 3 && b.id != 4)
+                && let Some(c) = blocks
+                    .defs
+                    .get(b.id as usize)
+                    .and_then(|def| tile(def.face(FaceDir::PosY).texture))
+            {
+                colour = c;
             }
             for dz in 0..PX {
                 for dx in 0..PX {
