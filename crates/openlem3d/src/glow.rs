@@ -185,15 +185,12 @@ pub fn stars(pixels: &[u8], width: usize, pal: &Palette) -> Vec<f32> {
 
 /// Lemming sprite cells (`LEMM.MHC`) that light up: the electrocuted
 /// lemming's X-ray skeleton (the odd cells of 514–523, alternating with the
-/// lemming), the lightning under the zap cloud (524–533, its yellow) and the
-/// start of a bomber's explosion (534 and, dimmer, 535), drawn as smoke but
-/// flashing white-hot here.
+/// lemming) and the lightning under the zap cloud (524–533, its yellow).
+/// The smoke puff after (534–537) stays grey, as in the original.
 pub fn lemming(cell: u32, i: u8, pal: &Palette) -> f32 {
     let lit = match cell {
         515..=523 if cell % 2 == 1 && cool(i) => 1.0,
         524..=533 if (43..=45).contains(&i) => 1.0,
-        534 => 1.0,
-        535 => 0.4,
         _ => 0.0,
     };
     lit * strength(pal[i as usize])

@@ -43,6 +43,10 @@ const STEP_DOWN: i32 = SUB / 4;
 /// survived and 4 killed out of a miner's tunnel in Practice "Miner", and
 /// lemmings dropping 4 units into a hole dug on Fun 4's castle die).
 const SPLAT_HEIGHT: i32 = 4 * SUB;
+/// How far a lemming falls before it screams (recorded in the original,
+/// 2026-10-24: falls of 5½ and 4½ units both screamed 17 ticks in, about
+/// 3½ units down, whenever they would land).
+const SCREAM_HEIGHT: i32 = 7 * SUB / 2;
 /// Shorter falls of this height or more leave the lemming on its back for
 /// [`STUN_TICKS`] (owner's observation: falls of 3, 3¼ and 3¾ units from a
 /// miner's tunnel in Practice "Miner" stun, 2¾ does not; the time is ours).
@@ -623,6 +627,8 @@ pub enum Event {
     Exploded,
     Zapped,
     Electrocuted,
+    /// A falling lemming has fallen far enough to scream.
+    Screamed,
     Trapped,
     Climbed,
     UmbrellaOpened,
@@ -1050,6 +1056,12 @@ impl Simulation {
             std::mem::discriminant(&a) != std::mem::discriminant(&b) || after.state_ticks == 0;
         if !before.teleported && after.teleported {
             return Some(Event::Teleported);
+        }
+        if let (State::Falling { from_y }, State::Falling { .. }) = (b, a)
+            && from_y - before.pos[1] < SCREAM_HEIGHT
+            && from_y - after.pos[1] >= SCREAM_HEIGHT
+        {
+            return Some(Event::Screamed);
         }
         if changed {
             return match a {

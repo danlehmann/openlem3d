@@ -1100,7 +1100,7 @@ fn burst(
     at: [f32; 3],
     rect: [f32; 4],
     tex: [f32; 2],
-    pieces: u32,
+    (pieces, out, scale): (u32, f32, f32),
 ) {
     if t < BURST_SWELL_TICKS {
         b.sprite_scaled(at, rect, tex, 1, 0.0, LEMMING_TEXELS_PER_UNIT / BURST_SWELL);
@@ -1110,14 +1110,14 @@ fn burst(
     for k in 0..pieces {
         let r = |salt: u32| noise([i as u32, 0xB0B, k, salt, 0]);
         let angle = r(0) * std::f32::consts::TAU;
-        let v_out = BURST_OUT * (0.3 + 0.7 * r(1));
+        let v_out = out * (0.3 + 0.7 * r(1));
         let v_up = BURST_UP.0 + r(2) * (BURST_UP.1 - BURST_UP.0);
         let p = [
             at[0] + angle.cos() * v_out * age,
             at[1] + 0.2 + v_up * age - BURST_GRAVITY * age * age / 2.0,
             at[2] + angle.sin() * v_out * age,
         ];
-        b.sprite_scaled(p, rect, tex, 1, 0.0, LEMMING_TEXELS_PER_UNIT * 2.0);
+        b.sprite_scaled(p, rect, tex, 1, 0.0, LEMMING_TEXELS_PER_UNIT / scale);
     }
 }
 
@@ -1127,6 +1127,11 @@ const BURST_SWELL_TICKS: u32 = 2;
 const BURST_SWELL: f32 = 1.3;
 const BURST_PIECES: u32 = 12;
 const SPLAT_PIECES: u32 = 8;
+/// A splat's pieces fan out wider: about 1½ units in ten ticks (recorded).
+const SPLAT_OUT: f32 = 0.14;
+/// A splat's pieces are bigger than a bomber's: about two thirds of the
+/// swollen lemming (recorded).
+const SPLAT_SCALE: f32 = 0.7;
 const BURST_OUT: f32 = 0.04;
 const BURST_UP: (f32, f32) = (0.2, 0.36);
 const BURST_GRAVITY: f32 = 0.033;
@@ -1377,9 +1382,9 @@ pub fn build(
         }
         if matches!(l.state, State::Exploding | State::Splatting) {
             let pieces = if l.state == State::Exploding {
-                BURST_PIECES
+                (BURST_PIECES, BURST_OUT, 0.5)
             } else {
-                SPLAT_PIECES
+                (SPLAT_PIECES, SPLAT_OUT, SPLAT_SCALE)
             };
             burst(&mut b, i, l.state_ticks, anchor, rect, tex, pieces);
             continue;
