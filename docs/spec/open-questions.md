@@ -7,8 +7,6 @@ Each names where it shows up, so a run can go straight there.
 ## Mechanics
 
 - **Trampolines:** the largest hop, what blue pads do (inferred: shorten the next hop), and how a drop onto a pad picks its hop (inferred: the shortest one rising higher than the drop).
-- **Skills on sliding lemmings.** Whether a turner or blocker can be given
-  to a lemming on ice (Practice "Slippery", `LEVEL.095`). We refuse them.
 - **Turned walkers.** Whether walkers turn at a turner's arm's length or on
   its line (we use its line; Practice "Claustrophobic" needs that). In the
   original's "Turner" demo walkers bunched up and turned about one path
