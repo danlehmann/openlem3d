@@ -276,8 +276,8 @@ and were turned there too. So a turner reaches walkers up to half a unit
 above it. Ours turns a builder at the end of a step that ends at the turner's
 centre.
 
-Blockers with builders (inferred: the owner expects them to act like
-turners; untested): ours gives a blocker to a builder under the same rule,
+Blockers act the same with builders (**verified** by the owner on Fun 13
+"Tower of Stone", 2026-10-24): ours gives a blocker to a builder under the same rule,
 standing it at its step's end, and turns a builder back when its next step
 would reach a blocker no more than half a unit below or above. Walkers are
 still turned back by a blocker only less than half a unit from its height:

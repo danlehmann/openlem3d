@@ -871,7 +871,7 @@ impl Simulation {
         // 2026-10-24: given over the drop, it stood at the staircase's end
         // and did not fall; the owner on Fun 9: given while it still
         // climbed its step, it stood at the step's end).
-        // A blocker likewise (inferred: the same as a turner, by the owner).
+        // A blocker likewise (verified by the owner on Fun 13, 2026-10-24).
         if skill == Skill::Blocker && matches!(l.state, State::Building { .. } | State::Shrugging) {
             l.pos = l.step_end();
             l.set_state(State::Blocking);
@@ -2000,7 +2000,7 @@ impl Simulation {
     /// (the owner on Fun 9, 2026-10-24: building from the cell before a
     /// turner's, it was turned after 2 bricks, half a unit above the turner,
     /// and so were the walkers following it); a blocker its next step would
-    /// reach turns it back (inferred: the same as a turner, by the owner).
+    /// reach turns it back (verified by the owner on Fun 13, 2026-10-24).
     /// It then walks, its bricks left unlaid.
     fn builder_redirected(l: &Lemming, me: usize, obstacles: &[Obstacle]) -> Option<Dir> {
         if !matches!(l.state, State::Building { .. })
