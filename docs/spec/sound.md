@@ -34,7 +34,7 @@ the source for these (unverified in play):
 | `VOXFX/PRACTISE`, `FUN2`, `TRICKY1`, `TAXING1`, `MAYHEM1` | A rating is selected |
 | `VOXFX/LETSGO1` | Start of a level |
 | `VOXFX/OK2`, `UH_UH1` | A lemming takes a skill, or can't |
-| `VOXFX/OHNO1` | About to blow up |
+| `VOXFX/OHNO1` | About to blow up: as the bomber starts to swell, about 10 ticks before the explosion (recorded, Practice "Bomber" demo) |
 | `VOXFX/DROWN1`, `SPOTFX/SPLASH` | A lemming drowns / falls into water (recorded: drowning in mud or the sea plays `DROWN1` only) |
 | `VOXFX/WOUNDED1` | A lemming splats (recorded; `VOXFX/FALLER3` screams before the landing, see behaviour.md, "Deaths") |
 | `SPOTFX/EXPLOSN3` | A lemming blows up |
@@ -42,10 +42,10 @@ the source for these (unverified in play):
 | `SPOTFX/FANFARE` | Enough lemmings have exited |
 | `VOXFX/CHEERS1`, `BOOS` | End of level, passed or failed |
 | `VOXFX/SHRUG1` | A builder has finished |
-| `SPOTFX/BRICKS1`, `GRAVEL3`, `PICKAXE4`, `HAMMER1` | Building (no comment), digging, mining, bashing. Recorded (Practice "Digger" demo, 2026-10-25): `GRAVEL3` every 4 ticks the whole time a digger digs. Ours otherwise: each brick and mine stroke, and each 8-tick basher swing while something is in front of it (provisional) |
+| `SPOTFX/BRICKS1`, `GRAVEL3`, `PICKAXE4`, `HAMMER1` | Building (no comment), digging, mining, bashing. Recorded (Practice "Digger" demo, 2026-10-25): `GRAVEL3` every 4 ticks the whole time a digger digs. A miner's `PICKAXE4` every 4 ticks while it cracks the block ahead, none while it walks down it; `BRICKS1` for each brick; a basher makes no sound (Practice "Miner", "Builder" and "Basher" demos) |
 | `SPOTFX/ANVIL1` | A digger, miner or basher hits metal |
-| `SPOTFX/SUCKER2` | Climbing |
-| `SPOTFX/BROLLY1` | An umbrella opens |
+| `SPOTFX/SUCKER2` | Climbing: every 8 ticks while it climbs (recorded, Practice "Climber" demo) |
+| `SPOTFX/BROLLY1` | An umbrella opens, then every 19 ticks while it floats (recorded, Practice "Floater" demo) |
 | `SPOTFX/BOING1`, `CTAPULT1`, `TELEPORT` | Trampoline, catapult, teleporter |
 | `SPOTFX/FLAMETHR`, `MANTRAP1`, `CRACKLE2` | Flame-blower, man trap, laser trap (recorded: the squasher and the bear trap play `MANTRAP1`, the weird trap nothing; `CRACKLE2` also for a lemming electrocuted by liquid) |
 | `SPOTFX/LIGHTNG` | A lemming leaves the level (lightning; recorded at the kill boundary) |

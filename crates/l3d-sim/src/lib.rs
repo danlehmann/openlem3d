@@ -80,8 +80,12 @@ const BLAST_ABOVE: i32 = SUB / 2;
 /// Practice "Digger"'s bridge, seen side-on, with the first quarter gone
 /// one period after the assignment).
 pub const DIG_TICKS: u32 = 42;
-/// Ticks between a digger's scooping sounds (recorded).
+/// Ticks between a digger's scooping sounds, a miner's picks, a climber's
+/// suckers and an umbrella's flaps (recorded).
 const DIG_SOUND_TICKS: u32 = 4;
+const PICK_SOUND_TICKS: u32 = 4;
+const CLIMB_SOUND_TICKS: u32 = 8;
+const UMBRELLA_SOUND_TICKS: u32 = 19;
 /// Ticks per brick laid by a builder (verified: 25 ± 1).
 pub const BUILD_TICKS: u32 = 25;
 /// Ticks from the assignment to the first brick: the builder stands still
@@ -115,9 +119,6 @@ pub const BASH_TICKS: u32 = 32;
 /// 7 in the Practice "Basher" demo); its strokes then end every
 /// [`BASH_TICKS`].
 pub const BASH_CRACK_START: u32 = 7;
-/// Ticks per swing of a basher's mallets: one cycle of its 8-frame
-/// animation (provisional).
-const BASH_SWING_TICKS: u32 = 8;
 /// Ticks a miner cracks the block ahead before it breaks; with the walk
 /// across the broken block (a unit at walking speed, 32 ticks) a stroke
 /// takes 72 ticks (measured in the original: breaks 5.14 s apart, the walk
@@ -633,6 +634,8 @@ pub enum Event {
     Screamed,
     /// A lemming landed on its back, stunned.
     Thudded,
+    /// A bomber starts to swell.
+    OhNo,
     Trapped,
     Climbed,
     UmbrellaOpened,
@@ -642,7 +645,6 @@ pub enum Event {
     Brick,
     BuilderDone,
     Dug,
-    Bashed,
     Mined,
 }
 
@@ -1095,10 +1097,18 @@ impl Simulation {
             // original's Practice "Digger" demo, 2026-10-25: GRAVEL3 every
             // 4 ticks).
             State::Digging if on(DIG_SOUND_TICKS) => Some(Event::Dug),
-            State::Bashing if on(BASH_SWING_TICKS) && self.bash_cell_full(after) => {
-                Some(Event::Bashed)
+            // The rest recorded in the original's Practice demos,
+            // 2026-10-25: a miner's pick every 4 ticks while it cracks the
+            // block ahead, none while it walks down; a climber's suckers
+            // every 8 ticks and an open umbrella every 19 while they last; a
+            // bomber's "Oh no!" as it starts to swell. A basher makes no
+            // sound at all.
+            State::Mining if after.state_ticks < MINE_CRACK_TICKS && on(PICK_SOUND_TICKS) => {
+                Some(Event::Mined)
             }
-            State::Mining if after.state_ticks == MINE_CRACK_TICKS => Some(Event::Mined),
+            State::Climbing if on(CLIMB_SOUND_TICKS) => Some(Event::Climbed),
+            State::Floating if on(UMBRELLA_SOUND_TICKS) => Some(Event::UmbrellaOpened),
+            _ if !a.is_terminal() && after.fuse == Some(SWELL_TICKS) => Some(Event::OhNo),
             _ => None,
         }
     }

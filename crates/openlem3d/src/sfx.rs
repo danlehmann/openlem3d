@@ -154,6 +154,7 @@ pub(crate) fn sim_events(w: &mut World) {
             Event::Electrocuted => "SPOTFX/CRACKLE2",
             Event::Screamed => "VOXFX/FALLER3",
             Event::Thudded => "SPOTFX/THUD1",
+            Event::OhNo => "VOXFX/OHNO1",
             Event::Trapped => match sim.object_kind {
                 Some(ObjectKind::FlameBlower) => "SPOTFX/FLAMETHR",
                 Some(ObjectKind::Laser) => "SPOTFX/CRACKLE2",
@@ -169,7 +170,6 @@ pub(crate) fn sim_events(w: &mut World) {
             Event::Brick => "SPOTFX/BRICKS1",
             Event::BuilderDone => "VOXFX/SHRUG1",
             Event::Dug => "SPOTFX/GRAVEL3",
-            Event::Bashed => "SPOTFX/HAMMER1",
             Event::Mined => "SPOTFX/PICKAXE4",
         };
         sounds.play(name);
