@@ -255,7 +255,14 @@ which turn in general was not tested further.
 **A builder takes a turner (verified with a changed level, 2026-10-24).**
 Given both clicks while building over a drop, it stopped laying bricks and
 stood as a turner at the end of its unfinished staircase; it did not walk on
-or fall, and the turner count dropped by one. A walker that catches up with a
+or fall, and the turner count dropped by one. The owner confirmed it on Fun 9
+"Castle Lemmalot" after 2, 4 and 6 bricks: the builder stood as a turner at
+the end of its last step, and walkers coming up the staircase were sent
+sideways off it. After 3 bricks the turner was ignored, repeatedly, and not
+used up. A builder starts at its cell's centre and each brick takes it half a
+unit on, so after an even count it stands at a cell's centre again and after
+an odd one on an edge; the implementation takes the turner only at a centre
+(inferred from the counts). A walker that catches up with a
 builder still building walks past it and off the staircase's unfinished end
 (same test, release rate 50); it is not turned back.
 

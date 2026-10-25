@@ -539,6 +539,13 @@ impl Lemming {
         }
     }
 
+    /// Whether it stands at the centre of its cell along its heading.
+    fn centred(&self) -> bool {
+        let d = self.dir.delta();
+        let off = |v: i32| v.rem_euclid(SUB) - SUB / 2;
+        off(self.pos[0]) * d[0] + off(self.pos[2]) * d[2] == 0
+    }
+
     fn set_state(&mut self, s: State) {
         self.state = s;
         self.state_ticks = 0;
@@ -739,8 +746,14 @@ impl Simulation {
             // Not to a climber on its wall: there a digger is refused and
             // not paid for (verified by the owner on "Candyland Climber").
             Skill::Blocker => l.state == State::Walking && l.pending.is_none(),
+            // A builder only where it stands at a cell's centre; elsewhere
+            // it refuses it and keeps it (the owner on Fun 9 "Castle
+            // Lemmalot", 2026-10-24: taken after 2, 4 and 6 bricks, not
+            // after 3).
             Skill::Turner => {
-                l.pending.is_none() && matches!(l.state, State::Walking | State::Building { .. })
+                l.pending.is_none()
+                    && (l.state == State::Walking
+                        || matches!(l.state, State::Building { .. }) && l.centred())
             }
             // A builder out of bricks, laid or shrugging, takes more
             // (provisional, as in the 2D games; Fun 10 "Castle Lemmalot"
