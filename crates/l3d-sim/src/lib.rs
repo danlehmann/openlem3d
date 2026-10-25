@@ -170,10 +170,11 @@ const SPRING_REST_PER_UNIT: f32 = 2.65;
 pub const PAD_BUSY_TICKS: u32 = 4;
 /// Rope-slide speed, sub-units per tick (unmeasured).
 const ROPE_SPEED: i32 = 35;
-/// Ticks a lemming hangs from the rope's handle before sliding (observed:
-/// about 0.6 s; with [`ROPE_SPEED`], Practice "Rope Slide" takes about
-/// 6.35 s from grab to release, as observed).
-const ROPE_GRAB_TICKS: u32 = 8;
+/// Ticks a lemming hangs from the rope's pulley before sliding (recorded in
+/// the original's Practice "Rope Slide", 2026-10-25: it slides off within a
+/// tick or two of the grab; with [`ROPE_SPEED`] the ride takes about the
+/// 6.35 s from grab to release observed).
+const ROPE_GRAB_TICKS: u32 = 1;
 /// Spring flights: ticks per unit of horizontal distance (observed: about
 /// 1.6 s for 16 units in Practice "Catapults"), and peak height as a
 /// fraction of the distance (unmeasured).
@@ -1679,9 +1680,24 @@ impl Simulation {
         {
             return;
         }
-        let Some((_, receiver)) = self.sender_at(l.pos) else {
+        let Some((sender, receiver)) = self.sender_at(l.pos) else {
             return;
         };
+        // It grabs as it reaches the middle of the sender's cell (recorded).
+        let centre = self.objects[sender].feet();
+        let d = l.dir.delta();
+        let before = (centre[0] - l.pos[0]) * d[0] + (centre[2] - l.pos[2]) * d[2];
+        // Where the floor ends before the middle (the ledges of Tricky 6
+        // "Lemmhanger"), it grabs as it enters the cell (inferred: the
+        // published route needs it).
+        let floor_at_centre = self
+            .world
+            .surface_below(centre[0], l.pos[1] + STEP_UP, centre[2])
+            .0
+            >= l.pos[1] - STEP_DOWN;
+        if before > 0 && floor_at_centre && !matches!(l.state, State::Falling { .. }) {
+            return;
+        }
         let to = self.objects[receiver].feet();
         if self
             .lemmings

@@ -10,7 +10,7 @@ use std::f32::consts::{FRAC_PI_4, TAU};
 
 use l3d_engine::math::Vec3;
 use l3d_sim::objects::ObjectKind;
-use l3d_sim::{SUB, Simulation, State};
+use l3d_sim::{Simulation, State};
 
 use crate::scene_build::{
     ATLAS_COLUMNS, BOMBNUMB_ATLAS_FIRST, CRACK_ATLAS_FIRST, CRACK_FRAMES, DOOR_ATLAS_FIRST,
@@ -35,21 +35,16 @@ const TICKS_PER_FRAME: u32 = 1;
 const UMBRELLA_FIRST: u32 = 336;
 /// How far a rope slide's rope runs above the straight line its rider's
 /// feet follow, from the floor at the sender to the floor at the receiver,
-/// where no rope is found (¾–1 unit in Practice "Rope Slide").
+/// (¾–1 unit in Practice "Rope Slide").
 const ROPE_ABOVE_PATH: f32 = 0.75;
 
-/// The height in units of the rope over a rope-slide rider at `pos`: the top
-/// of the first solid run within two units above its feet (the rope is the
-/// sloping top of a run of 22.5° ramp blocks, Practice "Rope Slide"), or
-/// [`ROPE_ABOVE_PATH`] above them.
-fn rope_above(world: &l3d_sim::world::World, pos: [i32; 3]) -> f32 {
-    let step = SUB / 32;
-    let at = |y: i32| world.solid([pos[0], y, pos[2]]);
-    let top = (pos[1] + step..pos[1] + 2 * SUB)
-        .step_by(step as usize)
-        .skip_while(|&y| !at(y))
-        .find(|&y| !at(y));
-    top.map_or(crate::units(pos[1]) + ROPE_ABOVE_PATH, crate::units)
+/// The height in units of the rope over a rope-slide rider at `pos`,
+/// [`ROPE_ABOVE_PATH`] above the line its feet follow (the rope is drawn by
+/// a run of ramp blocks parallel to that line, ¾–1 unit above it in
+/// Practice "Rope Slide"; searching the blocks for it found the deck
+/// instead just off the start).
+fn rope_above(pos: [i32; 3]) -> f32 {
+    crate::units(pos[1]) + ROPE_ABOVE_PATH
 }
 const UMBRELLA_FRAMES: u32 = 8;
 
@@ -409,6 +404,10 @@ const JET_TICKS: u32 = 18;
 /// block half a unit up).
 const JET_LIFT: f32 = 0.09;
 const JET_LIFT_TICKS: u32 = 8;
+
+/// The rope rider's scale: its 64-texel frame is a lemming hanging from its
+/// pulley, half a unit tall.
+const ROPE_RIDER_TEXELS_PER_UNIT: f32 = 128.0;
 
 /// The ticks, from when a squasher or bear trap fires, over which the
 /// caught lemming shows as a shrinking remnant once the trap opens, and the
@@ -1515,10 +1514,30 @@ pub fn build(
             [cx as f32, cy as f32, size, size]
         };
         let mut anchor = drawn.get(i).map_or(l.pos.map(crate::units), |d| d.0);
+        // A rope rider is drawn from the rope slide's own sheet: the lemming
+        // hanging from its pulley, five views from the front round its left
+        // to the back, like a walker's (the sheet, and the original's
+        // Practice "Rope Slide", 2026-10-25), the pulley at the rope.
+        if matches!(l.state, State::OnRope { .. }) {
+            let (cell, mirror) = cell_for(anim(TRAP_ATLAS_FIRST, 1, Angles::Five), view, 0);
+            let (cx, cy) = (
+                (cell % ATLAS_COLUMNS) * LEMMING_CELL,
+                (cell / ATLAS_COLUMNS) * LEMMING_CELL,
+            );
+            let s = TRAP_FRAME as f32;
+            let rect = if mirror {
+                [cx as f32 + s, cy as f32, -s, s]
+            } else {
+                [cx as f32, cy as f32, s, s]
+            };
+            anchor[1] = rope_above(l.pos) - s / ROPE_RIDER_TEXELS_PER_UNIT;
+            b.sprite_scaled(anchor, rect, tex, 1, 0.0, ROPE_RIDER_TEXELS_PER_UNIT);
+            continue;
+        }
         // On a rope slide the raised hand, at the top of the cell, holds the
         // rope (owner's picture).
         if matches!(l.state, State::OnRope { .. }) {
-            anchor[1] = rope_above(&sim.world, l.pos) - size / LEMMING_TEXELS_PER_UNIT;
+            anchor[1] = rope_above(l.pos) - size / LEMMING_TEXELS_PER_UNIT;
         }
         if matches!(l.state, State::Exploding | State::Splatting) {
             let pieces = if l.state == State::Exploding {
