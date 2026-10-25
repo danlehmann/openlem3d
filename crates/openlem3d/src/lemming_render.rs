@@ -293,21 +293,44 @@ fn cell_for(a: Anim, view: ViewAngle, ticks: u32) -> (u32, bool) {
     )
 }
 
+/// The squasher's frames, a tick each from when it fires: it slams down
+/// (frame 7 is fully down) and rises again. Recorded in the original
+/// (`docs/spec/behaviour.md`, "Deaths").
+const SQUASHER_FRAMES: [u32; 10] = [3, 7, 7, 6, 5, 4, 3, 2, 1, 0];
+/// The bear trap's frames, a tick each from when it fires: the jaws snap
+/// shut (frame 7) and open again (recorded).
+const BEAR_TRAP_FRAMES: [u32; 9] = [7, 7, 7, 5, 4, 3, 2, 1, 0];
+
+/// The ticks, from when a squasher or bear trap fires, over which the
+/// caught lemming shows as a shrinking remnant once the trap opens, and the
+/// remnant's scale at first (recorded: about half size, gone about 14
+/// ticks in).
+const REMNANT_TICKS: (u32, u32) = (3, 14);
+const REMNANT_SCALE: f32 = 0.55;
+
 /// Interactive objects other than trampolines (`TRAPS` frames, one unit
-/// tall). Bear traps and squashers rest on frame 0 and play frames 1–7
-/// while busy; the weird trap rests on its last (empty) frame and plays
-/// from 0; flame-blowers and lasers show only while firing. Which frames are idle is read off the sheets;
-/// timings are provisional.
+/// tall; the weird trap's, a whole lemming figure, half a unit, lemming
+/// size as recorded). Bear traps and squashers rest on frame 0 and play
+/// their recorded frames when they fire; the weird trap shows only while it
+/// plays; flame-blowers and lasers show only while firing. Which frames are
+/// idle is read off the sheets.
 fn objects(b: &mut LayerBuilder, sim: &Simulation, tex: [f32; 2]) {
-    const TRAP_TEXELS_PER_UNIT: f32 = 64.0;
     let Some(kind) = sim.object_kind else { return };
+    let texels_per_unit = if kind == ObjectKind::WeirdTrap {
+        128.0
+    } else {
+        64.0
+    };
     let last = TRAP_ATLAS_CELLS - 1;
     for o in &sim.objects {
         let firing = o.busy > 0;
-        // Progress through the busy time, 0 → frames − 1.
-        let step = |frames: u32| {
-            ((l3d_sim::TRAP_BUSY_TICKS - o.busy) * frames / l3d_sim::TRAP_BUSY_TICKS)
-                .min(frames - 1)
+        let elapsed = (l3d_sim::TRAP_BUSY_TICKS - o.busy) as usize;
+        let played = |seq: &[u32]| {
+            if firing {
+                seq.get(elapsed).copied().unwrap_or(0)
+            } else {
+                0
+            }
         };
         let frame = match kind {
             // Trampolines are pads in the static scene; one a lemming has just
@@ -337,20 +360,13 @@ fn objects(b: &mut LayerBuilder, sim: &Simulation, tex: [f32; 2]) {
                 continue;
             }
             ObjectKind::RopeSlide => continue,
-            ObjectKind::BearTrap | ObjectKind::Squasher => {
-                if firing {
-                    1 + step(last)
-                } else {
-                    0
-                }
-            }
-            ObjectKind::WeirdTrap => {
-                if firing {
-                    step(TRAP_ATLAS_CELLS)
-                } else {
-                    last
-                }
-            }
+            ObjectKind::Squasher => played(&SQUASHER_FRAMES),
+            ObjectKind::BearTrap => played(&BEAR_TRAP_FRAMES),
+            // Unseen until it fires; the caught lemming then sinks a frame
+            // per tick, down to the bare chains, and it is gone again
+            // (recorded).
+            ObjectKind::WeirdTrap if !firing || elapsed as u32 > last => continue,
+            ObjectKind::WeirdTrap => elapsed as u32,
             ObjectKind::FlameBlower | ObjectKind::Laser if !firing => continue,
             ObjectKind::FlameBlower | ObjectKind::Laser => o.busy % 4,
             // Teleporter and spring pads are in the static scene too; a
@@ -380,7 +396,7 @@ fn objects(b: &mut LayerBuilder, sim: &Simulation, tex: [f32; 2]) {
             tex,
             1,
             0.0,
-            TRAP_TEXELS_PER_UNIT,
+            texels_per_unit,
         );
     }
 }
@@ -1248,11 +1264,16 @@ pub fn build(
             d.brightness,
         );
     }
-    // Trapped lemmings are shown by the trap's own animation.
+    // Trapped lemmings are shown by the trap's own animation, but for the
+    // remnant a squasher or bear trap leaves (see `REMNANT_TICKS`).
+    let remnant = matches!(
+        sim.object_kind,
+        Some(ObjectKind::Squasher | ObjectKind::BearTrap)
+    );
     for (i, l) in lemmings
         .iter()
         .enumerate()
-        .filter(|(i, l)| !l.gone && l.state != State::Trapped && Some(*i) != eyes)
+        .filter(|(i, l)| !l.gone && (l.state != State::Trapped || remnant) && Some(*i) != eyes)
     {
         let facing = facing(l);
         let yaw = drawn.get(i).map_or(facing.yaw(), |d| d.1);
@@ -1267,6 +1288,7 @@ pub fn build(
                 (cell, !mirror)
             }
             State::Stunned => cell_for(anim_for(l.state), view, 0),
+            State::Trapped => cell_for(anim_for(State::Walking), view, 0),
             // A miner walks down the block it has broken (owner's
             // observation).
             State::Mining if l.state_ticks >= l3d_sim::MINE_CRACK_TICKS => {
@@ -1380,6 +1402,16 @@ pub fn build(
                         anchor[2] + dz as f32 * ahead,
                     ],
                 )
+            }
+            State::Trapped => {
+                let (from, to) = REMNANT_TICKS;
+                let t = l.state_ticks;
+                let s = if (from..to).contains(&t) {
+                    REMNANT_SCALE * (to - t) as f32 / (to - from) as f32
+                } else {
+                    0.0
+                };
+                (s, anchor)
             }
             _ => (1.0, anchor),
         };
