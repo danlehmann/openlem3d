@@ -2659,14 +2659,15 @@ impl Simulation {
             let near = |p: [i32; 3]| {
                 (p[0] - o.pos[0]).abs() < BLOCK_RADIUS
                     && (p[2] - o.pos[2]).abs() < BLOCK_RADIUS
-                    && (p[1] - o.pos[1]).abs() < SUB / 2
+                    && (p[1] - o.pos[1]).abs() <= SUB / 2
             };
             let towards = (o.pos[axis] - l.pos[axis]) * d[axis] > 0;
             match o.turn_to {
                 // Blockers turn walkers back at arm's length, and turn back
                 // those already that close walking towards them (observed:
                 // a blocker set in a tight pack turns the lemmings right
-                // behind it; none walks through).
+                // behind it; none walks through), up to half a unit above or below
+                // it (verified by the owner: 2 steps up a staircase over it).
                 None if near(next) && towards => {
                     l.dir = l.dir.reverse();
                     return;

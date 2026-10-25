@@ -279,9 +279,10 @@ centre.
 Blockers act the same with builders (**verified** by the owner on Fun 13
 "Tower of Stone", 2026-10-24): ours gives a blocker to a builder under the same rule,
 standing it at its step's end, and turns a builder back when its next step
-would reach a blocker no more than half a unit below or above. Walkers are
-still turned back by a blocker only less than half a unit from its height:
-reaching half a unit breaks the stored Fun 2 solution. A walker climbing a
+would reach a blocker no more than half a unit below or above. Walkers half a
+unit above a blocker are turned back too, as by a turner (**verified** by the
+owner, 2026-10-24: walkers 2 steps up a staircase over a blocker on the
+ground turned back). A walker climbing a
 staircase towards a blocker standing on it is turned back as it reaches the
 start of the blocker's step, sharing that step with it for a single frame
 (owner, Fun 13, 2026-10-24); ours turns it there too. A builder stopped at

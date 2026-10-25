@@ -331,26 +331,24 @@ pub const SOLUTIONS: &[Solution] = &[
     ),
     // Fun levels, play-tested in the simulation; each follows the published
     // route unless noted.
-    // Fun 2 by a route of our own (saves 75 of 70).
+    // Fun 2 by a route of our own (saves 76 of 70).
     Solution {
         level: 1,
         plan: Plan::Rated(
             &[(187, 99)],
             &[
                 (12, 0, 8, None),
-                (57, 2, 8, None),
-                (78, 3, 8, None),
-                (120, 5, 8, None),
-                (141, 6, 8, None),
-                (162, 7, 8, None),
-                (183, 8, 8, None),
-                (252, 1, 6, None),
-                (340, 9, 8, None),
-                (340, 79, 8, None),
-                (524, 4, 0, None),
-                (600, 0, 6, None),
-                (690, 26, 0, None),
-                (750, 42, 0, None),
+                (56, 2, 8, None),
+                (77, 3, 8, None),
+                (119, 5, 8, None),
+                (140, 6, 8, None),
+                (161, 7, 8, None),
+                (182, 8, 8, None),
+                (251, 1, 6, None),
+                (348, 9, 8, None),
+                (348, 79, 8, None),
+                (532, 4, 0, None),
+                (608, 0, 6, None),
             ],
         ),
         saves: 0,
