@@ -79,7 +79,8 @@ pub fn lifted(w: &World) -> bool {
 }
 
 /// One finger: horizontal drag turns, vertical drag moves forward/back.
-/// Two fingers: as [`two_fingers`].
+/// Two fingers: as [`two_fingers`]. Riding along, any sideways drag turns the
+/// head, as an action-button drag does.
 pub(crate) fn touch_camera(w: &mut World) {
     let (screen, camera) = (&w.screen, &w.camera);
     let twist = &mut w.touch_twist;
@@ -96,6 +97,10 @@ pub(crate) fn touch_camera(w: &mut World) {
         return;
     }
     let delta = active.iter().map(|t| t.delta()).sum::<Vec2>() / active.len() as f32;
+    if w.lemming_cam.following().is_some() {
+        w.view.look(delta.x * TURN_PER_PX);
+        return;
+    }
     if let [a, b, ..] = active[..] {
         let (now, before) = (
             (a.position(), b.position()),

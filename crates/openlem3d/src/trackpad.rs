@@ -17,7 +17,7 @@ use std::time::{Duration, Instant};
 use l3d_engine::prelude::*;
 
 use crate::World;
-use crate::touch::{Twist, TwoFingers, two_fingers};
+use crate::touch::{TURN_PER_PX, Twist, TwoFingers, two_fingers};
 
 /// Trackpad travel across its whole width, in touchscreen pixels: the
 /// fingers move the camera as far as a drag this long on the screen.
@@ -53,7 +53,7 @@ impl Trackpad {
 
 /// Two or more fingers move the camera as two on a touchscreen do (see
 /// [`two_fingers`]), towards the pointer; with Shift, dragging turns and
-/// moves forward and back.
+/// moves forward and back. Riding along, a sideways drag turns the head.
 pub(crate) fn trackpad_camera(w: &mut World) {
     let toward = ray(w);
     let turning = turning(&w.e.input.keys);
@@ -85,13 +85,18 @@ pub(crate) fn trackpad_camera(w: &mut World) {
                 turning,
                 toward,
             };
-            two_fingers(&mut w.view, &fingers);
+            if w.lemming_cam.following().is_some() {
+                w.view.look(delta.x * TURN_PER_PX);
+            } else {
+                two_fingers(&mut w.view, &fingers);
+            }
         }
     }
     pad.previous = now;
 }
 
-/// Pan and pinch gestures, as two fingers on the trackpad.
+/// Pan and pinch gestures, as two fingers on the trackpad (riding along, a
+/// sideways pan turns the head).
 pub(crate) fn gesture_camera(w: &mut World) {
     let input = &w.e.input;
     // Physical pixels, as winit reports them.
@@ -102,6 +107,10 @@ pub(crate) fn gesture_camera(w: &mut World) {
         return;
     }
     w.trackpad.last_gesture = Some(Instant::now());
+    if w.lemming_cam.following().is_some() {
+        w.view.look(delta.x * TURN_PER_PX);
+        return;
+    }
     let fingers = TwoFingers {
         delta,
         spread,

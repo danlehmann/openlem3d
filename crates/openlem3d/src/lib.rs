@@ -308,6 +308,7 @@ pub struct World {
     minimap_view: minimap::MinimapView,
     selected: hud::SelectedSkill,
     pending: hud::PendingTurner,
+    ride_press: hud::RidePress,
     highlight: hud::Highlight,
     arrows: hud::TurnerArrows,
     lemming_cam: lemming_cam::LemmingCam,
@@ -378,6 +379,7 @@ impl World {
             minimap_view: minimap::MinimapView::default(),
             selected: hud::SelectedSkill::default(),
             pending: hud::PendingTurner::default(),
+            ride_press: hud::RidePress::default(),
             highlight: hud::Highlight::default(),
             arrows: hud::TurnerArrows::default(),
             lemming_cam: lemming_cam::LemmingCam::default(),
@@ -679,6 +681,13 @@ impl ViewCamera {
         self.pos.x = pivot[0] + dx * c - dz * s;
         self.pos.z = pivot[1] + dx * s + dz * c;
         self.yaw += a;
+    }
+
+    /// Turns the lemming view's head `by` radians to the right, at most a
+    /// quarter turn either way.
+    fn look(&mut self, by: f32) {
+        self.head =
+            (self.head + by).clamp(-std::f32::consts::FRAC_PI_2, std::f32::consts::FRAC_PI_2);
     }
 
     /// Jumps to a preset view.
@@ -1439,14 +1448,17 @@ pub(crate) fn camera_controls(w: &mut World) {
         });
         cam.yaw += spin * 1.8 * dt;
         // Riding along, the same keys and regions turn the head instead, as
-        // does a sideways action-button drag (enhanced).
+        // do A and D and a sideways drag with any button (enhanced).
         if lemming_cam.following().is_some() {
-            let mut look = (turn + spin) * lemming_cam::HEAD_SPEED * time.delta_secs();
-            if action_dragging {
+            let sideways = key(KeyCode::KeyD) - key(KeyCode::KeyA);
+            let mut look = (turn + spin + sideways).clamp(-1.0, 1.0)
+                * lemming_cam::HEAD_SPEED
+                * time.delta_secs();
+            let middle_dragging = enhanced && mouse.pressed(MouseButton::Middle) && !ui_active;
+            if action_dragging || dragging || middle_dragging {
                 look += motion.delta.x * touch::TURN_PER_PX;
             }
-            cam.head =
-                (cam.head + look).clamp(-std::f32::consts::FRAC_PI_2, std::f32::consts::FRAC_PI_2);
+            cam.look(look);
         } else {
             cam.head = 0.0;
         }
@@ -1719,7 +1731,7 @@ fn key_code(name: &str) -> Option<KeyCode> {
 
 /// Pointer travel (logical pixels) after which holding a mouse button is a
 /// drag rather than a hold or a click.
-const DRAG_SLOP: f32 = 6.0;
+pub(crate) const DRAG_SLOP: f32 = 6.0;
 /// Camera speed with the keys and arrows (grid units per second).
 pub const CAMERA_SPEED: f32 = 6.0;
 /// Camera rise per wheel notch (grid units).

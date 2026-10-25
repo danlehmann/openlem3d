@@ -141,6 +141,8 @@ pub(crate) fn load_art(w: &mut World) {
 struct PanelPos {
     at: Vec2,
     size: Vec2,
+    /// Placed with the skill row although above it (the floater's umbrella).
+    skill_row: bool,
 }
 
 /// What clicking an element does.
@@ -248,7 +250,14 @@ impl Builder<'_> {
             n = n.button();
         }
         let id = self.ui.child(self.root, n);
-        self.panel.pos.insert(id, PanelPos { at, size });
+        self.panel.pos.insert(
+            id,
+            PanelPos {
+                at,
+                size,
+                skill_row: false,
+            },
+        );
         if let Some(a) = action {
             self.panel.actions.push((id, a));
         }
@@ -270,6 +279,7 @@ impl Builder<'_> {
                 PanelPos {
                     at,
                     size: glyphs.size,
+                    skill_row: false,
                 },
             );
             ids.push(s);
@@ -399,13 +409,17 @@ pub(crate) fn spawn_panel(w: &mut World) {
         Some(Action::Faster),
         Some(Animated::Faster),
     );
-    b.item(
+    // The floater's umbrella, over its skill button, stays with the skill row.
+    let umbrella = b.item(
         Vec2::new(274.0, 143.0),
         Vec2::splat(32.0),
         art.umbrella.clone(),
         None,
         None,
     );
+    if let Some(p) = b.panel.pos.get_mut(&umbrella) {
+        p.skill_row = true;
+    }
     // The height bar down the right edge, a button so that it is not part
     // of the view.
     let bar = b.item(
@@ -483,12 +497,12 @@ fn layout(w: &mut World) {
     panel.pos.retain(|id, _| w.ui.contains(*id));
     for (&id, p) in &panel.pos {
         let Some(n) = w.ui.get_mut(id) else { continue };
-        let x = if p.at.x >= BAR_X || (p.at.y < 160.0 && p.at.x >= 256.0) {
+        let x = if p.at.x >= BAR_X || (p.at.y < 160.0 && p.at.x >= 256.0 && !p.skill_row) {
             width - (SCREEN.x - p.at.x) * s
         } else {
             p.at.x * s
         };
-        let y = if p.at.y >= 160.0 {
+        let y = if p.at.y >= 160.0 || p.skill_row {
             height - (SCREEN.y - p.at.y) * s
         } else {
             p.at.y * s
@@ -662,8 +676,7 @@ fn held_buttons(w: &mut World) {
                 view.orbit(sim.centre(), -turn * crate::ORBIT_SPEED * time.delta_secs());
             }
         } else {
-            view.head = (view.head - turn * crate::lemming_cam::HEAD_SPEED * time.delta_secs())
-                .clamp(-std::f32::consts::FRAC_PI_2, std::f32::consts::FRAC_PI_2);
+            view.look(-turn * crate::lemming_cam::HEAD_SPEED * time.delta_secs());
         }
     }
 }
@@ -1058,6 +1071,7 @@ fn caption(w: &mut World) {
             PanelPos {
                 at: CAPTION_AT + Vec2::X * x,
                 size: font.size,
+                skill_row: false,
             },
         );
     }

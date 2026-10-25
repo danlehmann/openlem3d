@@ -322,13 +322,19 @@ pub(crate) fn follow(w: &mut World) {
         view.head = 0.0;
         view.nod = 0.0;
     }
-    // A turner looks where its arm points, the way it sends walkers
-    // (verified in Practice "Turner": riding with a "Turn right" turner, the
-    // original's view faces that side, not along the path it came on), and
-    // the head turned to the side looks that much further round.
+    // A turner looks halfway between back the way the walkers come and where
+    // its arm sends them, 45° to each (owner, the original beside ours; an
+    // earlier reading had it face the arm's side), and the head turned to
+    // the side looks that much further round.
     let yaw = view.head
         + match l.state {
-            l3d_sim::State::Turning { to } => to.yaw(),
+            l3d_sim::State::Turning { to } => {
+                let back = l.dir.reverse().yaw();
+                let quarter = (to.yaw() - back + std::f32::consts::PI)
+                    .rem_euclid(std::f32::consts::TAU)
+                    - std::f32::consts::PI;
+                back + quarter / 2.0
+            }
             // A blocker stands side-on, as it is drawn (owner's observation).
             l3d_sim::State::Blocking => l.dir.clockwise().yaw(),
             _ => l.dir.yaw(),

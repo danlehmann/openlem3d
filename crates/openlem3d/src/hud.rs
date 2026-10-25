@@ -157,6 +157,11 @@ pub struct Highlight {
 #[derive(Default)]
 pub struct PendingTurner(pub Option<usize>);
 
+/// Riding along: where the action button went down, so that letting it go
+/// there clicks a lemming, while a drag turns the view.
+#[derive(Default)]
+pub struct RidePress(pub Option<Vec2>);
+
 /// Assigns the selected skill to the lemming nearest a click or tap. A
 /// turner takes two: one on the lemming, then one to the side it should
 /// point to.
@@ -165,7 +170,7 @@ pub(crate) fn assign_on_pointer(w: &mut World) {
     let (window, screen, camera) = (&w.e.window, &w.screen, &w.camera);
     let (selected, pending, lemming_cam) = (&mut w.selected, &mut w.pending, &mut w.lemming_cam);
     let (game, sfx, settings) = (&mut w.game, &mut w.sfx, &w.settings);
-    let (highlight, view) = (&mut w.highlight, &w.view);
+    let (highlight, view, ride_press) = (&mut w.highlight, &w.view, &mut w.ride_press.0);
     // During a replay a click only takes over (`take_over`, next).
     if game.replay.is_some() {
         return;
@@ -187,27 +192,54 @@ pub(crate) fn assign_on_pointer(w: &mut World) {
     if pending.0.is_some_and(|i| !sim.can_assign(i, Skill::Turner)) {
         pending.0 = None;
     }
+    // Riding along, a click on another lemming takes effect when the button
+    // is let go without a drag: a drag starting on a lemming turns the view
+    // (owner: it switched to that lemming's view at the press).
+    let action = settings.action_button();
+    let cursor = screen.cursor(window);
+    if following.is_some() && mouse.just_pressed(action) && !w.ui.any_active() {
+        *ride_press = cursor;
+    }
+    let ride_click = if mouse.just_released(action) {
+        ride_press
+            .take()
+            .filter(|p| cursor.is_some_and(|c| c.distance(*p) < crate::DRAG_SLOP))
+    } else {
+        None
+    };
     // Clicks on HUD buttons are not world clicks.
     if w.ui.any_active() {
         return;
     }
-    let point = if mouse.just_pressed(settings.action_button()) {
+    let tap = touches
+        .iter_just_released()
+        .find(|t| t.distance().length() < crate::touch::TAP_SLOP && !starts.on_button(t.id()))
+        .map(|t| screen.on_screen(t.position()));
+    if let Some(f) = following
+        && pending.0 != Some(f)
+    {
+        if let Some(point) = ride_click.or(tap)
+            && let Some(i) = lemming_near(sim, camera, screen.size, point, Some(f))
+        {
+            lemming_cam.ride(i, highlight, selected, view);
+            sfx.play("SPOTFX/SCALE");
+        }
+        return;
+    }
+    let point = if mouse.just_pressed(action) {
         screen.cursor(window)
     } else {
         // A tap is a touch released without having been dragged, and not
         // from a button (a turner given by its button with a lemming
         // highlighted waits for the next tap, not this one).
-        touches
-            .iter_just_released()
-            .find(|t| t.distance().length() < crate::touch::TAP_SLOP && !starts.on_button(t.id()))
-            .map(|t| screen.on_screen(t.position()))
+        tap
     };
     let Some(point) = point else { return };
     let size = screen.size;
     // Riding along, nothing is selected (verified): a turner given to the
     // lemming ridden with points to the side of the screen clicked (left
-    // half: its left), and a click on another lemming rides along with it
-    // instead.
+    // half: its left). (A click on another lemming rides along with it, on
+    // release, above.)
     if let Some(f) = following {
         if pending.0 == Some(f) {
             if paused {
@@ -219,10 +251,6 @@ pub(crate) fn assign_on_pointer(w: &mut World) {
             let ok = sim.assign_turner(f, sides[riding_right_half(head, size, point) as usize]);
             sfx.play(if ok { "VOXFX/OK2" } else { "VOXFX/UH_UH1" });
             return;
-        }
-        if let Some(i) = lemming_near(sim, camera, size, point, Some(f)) {
-            lemming_cam.ride(i, highlight, selected, view);
-            sfx.play("SPOTFX/SCALE");
         }
         return;
     }
