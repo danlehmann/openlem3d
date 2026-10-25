@@ -13,10 +13,6 @@ Each names where it shows up, so a run can go straight there.
   draws the turner turned round to face the way it came (the walkers
   behind it), holding out the arm on the side it sends them; kept facing
   its walking direction, turners showed their backs on "Take a Dive".
-- **Hanging deflectors.** "Team Work" (`LEVEL.051`) has a deflector hanging
-  ¼ unit above the floor. We let a deflector turn a walker wherever it
-  crosses the body, feet to head; before that, walkers passed under it, hit
-  their heads and froze. Check that the original turns them there.
 - **Ramp slot on "All Around the Watchtower"** (`LEVEL.027`): two half-height
   ramps peak either side of a one-cell slot (16, 1, 6) 0.75 units deep; our
   lemmings fall in and can't leave. Probably the design: with our ramp
