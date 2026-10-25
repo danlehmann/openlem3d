@@ -1489,7 +1489,14 @@ impl Simulation {
         {
             o.busy = TRAP_BUSY_TICKS;
             l.fuse = None;
-            l.set_state(State::Trapped);
+            // A laser electrocutes the lemming as electric liquid does,
+            // with no beam to be seen (recorded in the original,
+            // 2026-10-24, with the laser under a block as in "Lemlab").
+            l.set_state(if self.object_kind == Some(objects::ObjectKind::Laser) {
+                State::Electrocuted
+            } else {
+                State::Trapped
+            });
         }
     }
 

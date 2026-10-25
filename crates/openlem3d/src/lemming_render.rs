@@ -301,6 +301,77 @@ const SQUASHER_FRAMES: [u32; 10] = [3, 7, 7, 6, 5, 4, 3, 2, 1, 0];
 /// shut (frame 7) and open again (recorded).
 const BEAR_TRAP_FRAMES: [u32; 9] = [7, 7, 7, 5, 4, 3, 2, 1, 0];
 
+/// The flame-blower's jet, `t` ticks after it fired: it shoots straight
+/// down from the block over the trap, full length for [`JET_FULL_TICKS`],
+/// then shrinks back up and is gone at [`JET_TICKS`] (recorded in the
+/// original, 2026-10-24, with the trap under a block as real levels place
+/// it). Its frames are the sheet's eight horizontal jets, 64×32 texels in
+/// the top and bottom halves of frames 0–3, turned upright.
+fn flame_jet(
+    b: &mut LayerBuilder,
+    sim: &Simulation,
+    o: &l3d_sim::objects::Object,
+    t: u32,
+    tex: [f32; 2],
+) {
+    if t >= JET_TICKS {
+        return;
+    }
+    let length = if t < JET_FULL_TICKS {
+        1.0
+    } else {
+        (JET_TICKS - t) as f32 / (JET_TICKS - JET_FULL_TICKS) as f32
+    };
+    let ceiling = jet_ceiling(sim, o);
+    let jet = t % 8;
+    let cell = TRAP_ATLAS_FIRST + jet / 2;
+    let (cx, cy) = (
+        (cell % ATLAS_COLUMNS) * LEMMING_CELL,
+        (cell / ATLAS_COLUMNS) * LEMMING_CELL + (jet % 2) * TRAP_FRAME / 2,
+    );
+    let texels = JET_TEXELS_PER_UNIT / length;
+    let height = TRAP_FRAME as f32 / texels;
+    let anchor = [
+        o.cell[0] as f32 + 0.5,
+        ceiling - height,
+        o.cell[2] as f32 + 0.5,
+    ];
+    b.sprite_turned(
+        anchor,
+        [
+            cx as f32,
+            cy as f32,
+            TRAP_FRAME as f32,
+            (TRAP_FRAME / 2) as f32,
+        ],
+        tex,
+        texels,
+    );
+}
+
+/// The underside of whatever is over a trap, in units: where its jet comes
+/// from (two units up when nothing is).
+fn jet_ceiling(sim: &Simulation, o: &l3d_sim::objects::Object) -> f32 {
+    let [x, z] = [o.cell[0] * SUB + SUB / 2, o.cell[2] * SUB + SUB / 2];
+    let top = o.surface + 2 * SUB;
+    let y = (o.surface + SUB / 16..top)
+        .step_by((SUB / 16) as usize)
+        .find(|&y| sim.world.solid([x, y, z]))
+        .unwrap_or(top);
+    crate::units(y)
+}
+
+/// The flame-blower's jet: its scale, and how long it lasts at full length
+/// and in all (recorded).
+const JET_TEXELS_PER_UNIT: f32 = 56.0;
+const JET_FULL_TICKS: u32 = 11;
+const JET_TICKS: u32 = 18;
+/// How fast a lemming caught by a flame-blower rises into the block over
+/// it, units a tick, and when it is gone (recorded: about 6 ticks to the
+/// block half a unit up).
+const JET_LIFT: f32 = 0.09;
+const JET_LIFT_TICKS: u32 = 8;
+
 /// The ticks, from when a squasher or bear trap fires, over which the
 /// caught lemming shows as a shrinking remnant once the trap opens, and the
 /// remnant's scale at first (recorded: about half size, gone about 14
@@ -367,8 +438,15 @@ fn objects(b: &mut LayerBuilder, sim: &Simulation, tex: [f32; 2]) {
             // (recorded).
             ObjectKind::WeirdTrap if !firing || elapsed as u32 > last => continue,
             ObjectKind::WeirdTrap => elapsed as u32,
-            ObjectKind::FlameBlower | ObjectKind::Laser if !firing => continue,
-            ObjectKind::FlameBlower | ObjectKind::Laser => o.busy % 4,
+            // The laser's beam is never seen (recorded); the lemming is
+            // electrocuted.
+            ObjectKind::Laser => continue,
+            ObjectKind::FlameBlower => {
+                if firing {
+                    flame_jet(b, sim, o, elapsed as u32, tex);
+                }
+                continue;
+            }
             // Teleporter and spring pads are in the static scene too; a
             // spring shows its launch (frames 1–7, side on) while busy.
             ObjectKind::Teleporter => continue,
@@ -1275,9 +1353,10 @@ pub fn build(
     }
     // Trapped lemmings are shown by the trap's own animation, but for the
     // remnant a squasher or bear trap leaves (see `REMNANT_TICKS`).
+    // (or a flame-blower's lifted lemming).
     let remnant = matches!(
         sim.object_kind,
-        Some(ObjectKind::Squasher | ObjectKind::BearTrap)
+        Some(ObjectKind::Squasher | ObjectKind::BearTrap | ObjectKind::FlameBlower)
     );
     for (i, l) in lemmings
         .iter()
@@ -1463,6 +1542,12 @@ pub fn build(
                         anchor[2] + dz as f32 * ahead,
                     ],
                 )
+            }
+            // Lifted on the flame-blower's jet into the block over it.
+            State::Trapped if sim.object_kind == Some(ObjectKind::FlameBlower) => {
+                let t = l.state_ticks;
+                let s = if t < JET_LIFT_TICKS { 1.0 } else { 0.0 };
+                (s, [anchor[0], anchor[1] + JET_LIFT * t as f32, anchor[2]])
             }
             State::Trapped => {
                 let (from, to) = REMNANT_TICKS;
