@@ -1,6 +1,6 @@
 //! Which pixels glow in Enhanced mode (ours, not the original's): flames,
-//! lamps, neon signs, sparkles, laser beams and electrified floors (the
-//! current crackling over them) are drawn brighter than
+//! lamps, neon signs, sparkles, laser beams, electrified floors (the
+//! current crackling over them) and the glints on ice are drawn brighter than
 //! white, and the scene renderer lets that excess bloom into their
 //! surroundings. Everything else keeps its palette colour exactly.
 //!
@@ -151,6 +151,51 @@ pub fn electric(pixels: &[u8], runs: &[(u32, i32)], pal: &Palette) -> Vec<f32> {
                     glow[t * TILE + p] = strength(pal[i as usize]);
                 }
             }
+        }
+    }
+    glow
+}
+
+/// The tiles on the faces of slippery (ice) blocks.
+pub fn ice_tiles(blocks: &BlockSet) -> Vec<usize> {
+    let mut tiles: Vec<usize> = blocks
+        .defs
+        .iter()
+        .filter(|d| d.flags & flags::SLIPPERY != 0 && !d.is_placeholder())
+        .flat_map(|d| d.faces)
+        .filter(|f| f.texture != 0xFF)
+        .map(|f| f.texture as usize)
+        .collect();
+    tiles.sort_unstable();
+    tiles.dedup();
+    tiles
+}
+
+/// Per-pixel glow of the texture strip `pixels` (64×64 tiles) on `tiles`:
+/// the ice's glints, its texels clearly brighter than those around them,
+/// as [`stars`] picks out a sky's stars.
+pub fn ice(pixels: &[u8], tiles: &[usize], pal: &Palette) -> Vec<f32> {
+    const TILE: usize = 64 * 64;
+    const R: isize = 2;
+    let mut glow = vec![0.0; pixels.len()];
+    for &t in tiles.iter().filter(|&&t| (t + 1) * TILE <= pixels.len()) {
+        let tile = &pixels[t * TILE..(t + 1) * TILE];
+        let value = |x: isize, y: isize| {
+            let rgb = pal[tile[(y.rem_euclid(64) * 64 + x.rem_euclid(64)) as usize] as usize];
+            *rgb.iter().max().unwrap() as f32 / 255.0
+        };
+        for p in 0..TILE {
+            let (x, y) = ((p % 64) as isize, (p / 64) as isize);
+            let mut sum = 0.0;
+            for dy in -R..=R {
+                for dx in -R..=R {
+                    sum += value(x + dx, y + dy);
+                }
+            }
+            let around = sum / ((2 * R + 1) * (2 * R + 1)) as f32;
+            let v = value(x, y);
+            glow[t * TILE + p] =
+                ((v - around - 0.08) / 0.2).clamp(0.0, 1.0) * ((v - 0.6) / 0.3).clamp(0.0, 1.0);
         }
     }
     glow
