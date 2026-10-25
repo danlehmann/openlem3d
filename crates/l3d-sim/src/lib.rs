@@ -1261,6 +1261,11 @@ impl Simulation {
             State::Building { bricks_left } => {
                 self.build(l, bricks_left);
                 if let Some(to) = Self::builder_redirected(l, me, obstacles) {
+                    // Turned aside, it leaves along the middle of the cell.
+                    if to != l.dir.reverse() {
+                        let axis = if l.dir.delta()[0] != 0 { 0 } else { 2 };
+                        l.pos[axis] = mid(l.pos[axis]);
+                    }
                     l.set_state(State::Walking);
                     l.dir = to;
                 }
@@ -2719,6 +2724,9 @@ impl Simulation {
                     l.pending = None;
                     l.set_state(State::Bashing);
                 } else {
+                    // Turned at the centre of the deflector's cell, so that
+                    // it leaves along the middle (as in the air, below).
+                    l.pos[axis] = mid(next[axis]);
                     l.dir = l.dir.deflected(n);
                 }
                 return;
