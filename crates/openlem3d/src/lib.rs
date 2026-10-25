@@ -911,11 +911,9 @@ pub struct Game {
     speed: f32,
     /// Simulation ticks owed at the current speed, under one.
     tick_credit: f32,
-    /// Each lemming's place before the last step's ticks, and how many
-    /// there were, for drawing it moving smoothly over the step
-    /// ([`Game::drawn_pos`]).
+    /// Each lemming's place before the last step's ticks, for drawing it
+    /// moving smoothly over the step ([`Game::drawn_pos`]).
     prev_pos: Vec<[i32; 3]>,
-    step_ticks: u32,
     /// The way each lemming is drawn facing, turning towards the way it
     /// faces ([`Game::turn_yaws`]).
     yaws: Vec<f32>,
@@ -1022,7 +1020,6 @@ fn step_simulation(w: &mut World) {
         speed,
         tick_credit,
         prev_pos,
-        step_ticks,
         replay,
         doors,
         ..
@@ -1053,13 +1050,11 @@ fn step_simulation(w: &mut World) {
     prev_pos.clear();
     prev_pos.extend(sim.lemmings.iter().map(|l| l.pos));
     if *paused {
-        *step_ticks = 0;
         return;
     }
     *tick_credit += *speed;
     let ticks = tick_credit.floor() as u32;
     *tick_credit -= ticks as f32;
-    *step_ticks = ticks;
     for _ in 0..ticks {
         if replay.as_mut().is_some_and(|r| !r.feed(sim)) {
             *replay = None;
@@ -1105,25 +1100,21 @@ impl Game {
     /// Where lemming `i` is drawn, in units: between its places before and
     /// after the last step's ticks, `f` of the way, so that it moves
     /// smoothly at the screen's frame rate rather than in the simulation's
-    /// steps (ours). One that jumped further than [`SMOOTH_LIMIT`] a tick (a
-    /// hatch, a teleporter) is drawn where it is.
+    /// steps (ours). Only a lemming that really goes from one place to
+    /// another, out of a hatch or through a teleporter, is drawn where it is.
     fn drawn_pos(&self, sim: &l3d_sim::Simulation, i: usize, f: f32) -> [f32; 3] {
-        let now = sim.lemmings[i].pos;
-        let limit = SMOOTH_LIMIT * self.step_ticks.max(1) as i32;
+        let l = &sim.lemmings[i];
         match self.prev_pos.get(i) {
-            Some(before) if (0..3).all(|k| (now[k] - before[k]).abs() <= limit) => {
+            Some(before) if !matches!(l.state, l3d_sim::State::Teleporting { .. }) => {
                 std::array::from_fn(|k| {
-                    crate::units(before[k]) + (crate::units(now[k]) - crate::units(before[k])) * f
+                    crate::units(before[k]) + (crate::units(l.pos[k]) - crate::units(before[k])) * f
                 })
             }
-            _ => now.map(crate::units),
+            _ => l.pos.map(crate::units),
         }
     }
 }
 
-/// The furthest a lemming moves in a tick and is still drawn moving between
-/// (sub-units): half a unit.
-const SMOOTH_LIMIT: i32 = l3d_sim::SUB / 2;
 /// How fast a lemming is drawn turning, radians per second of game time: a
 /// quarter turn in a quarter of a second, through the diagonal views.
 const TURN_RATE: f32 = std::f32::consts::FRAC_PI_2 / 0.25;

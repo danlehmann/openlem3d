@@ -147,31 +147,6 @@ const NOD_PERIOD: f32 = 6.0;
 /// A walker turns there only once its centre reaches the face, so an eye
 /// above its centre would look through the block.
 const DEFLECTOR_CLEARANCE: f32 = 0.2;
-/// Moves between two ticks longer than this (in units) are jumps, which the
-/// eye takes at once rather than sweeping through the level.
-const JUMP: f32 = 1.0;
-
-/// The eye's places at the last two simulation steps. Between steps the view
-/// slides from the earlier to the later, one step behind the lemming, so it
-/// moves smoothly at any frame rate.
-#[derive(Default)]
-struct Trail {
-    from: Vec3,
-    to: Vec3,
-    /// Fixed time at the latest step seen.
-    stepped: std::time::Duration,
-}
-
-impl Trail {
-    /// A trail resting at `eye`.
-    fn at(eye: Vec3, stepped: std::time::Duration) -> Self {
-        Trail {
-            from: eye,
-            to: eye,
-            stepped,
-        }
-    }
-}
 
 /// `eye`, moved straight out from the diagonal face of any deflector it is
 /// closer to than [`DEFLECTOR_CLEARANCE`] (or behind).
@@ -243,7 +218,6 @@ pub(crate) struct Follow {
     started: bool,
     sway: f32,
     entered: Option<usize>,
-    trail: Trail,
 }
 
 /// Leaving the level leaves the lemming view.
@@ -255,8 +229,7 @@ pub(crate) fn follow(w: &mut World) {
     let (time, fixed) = (w.e.time.game, w.e.time.fixed);
     let (game, opts) = (&w.game, &w.opts);
     let f = &mut w.follow;
-    let (started, sway, entered, trail) =
-        (&mut f.started, &mut f.sway, &mut f.entered, &mut f.trail);
+    let (started, sway, entered) = (&mut f.started, &mut f.sway, &mut f.entered);
     let (cam, highlight, view) = (&mut w.lemming_cam, &mut w.highlight, &mut w.view);
     // `--follow N`: ride with lemming N as soon as it appears.
     if let Some(i) = opts.follow
@@ -315,7 +288,9 @@ pub(crate) fn follow(w: &mut World) {
         highlight.lemming = Some(i);
     }
     let l = &sim.lemmings[i];
-    let feet = Vec3::from_array(l.pos.map(crate::units));
+    // Where the lemming is drawn, moving smoothly between the simulation's
+    // steps (and at once through a teleporter).
+    let feet = Vec3::from_array(game.drawn_pos(sim, i, fixed.overstep_fraction().clamp(0.0, 1.0)));
     // Passing to another lemming, the head faces forward again (owner's
     // observation).
     if switched || *entered != Some(i) {
@@ -351,7 +326,6 @@ pub(crate) fn follow(w: &mut World) {
         view.pos = target;
         view.yaw = yaw;
         view.roll = 0.0;
-        *trail = Trail::at(target, fixed.elapsed());
         return;
     }
     // Riding along with a new lemming: the camera first glides into its
@@ -362,21 +336,7 @@ pub(crate) fn follow(w: &mut World) {
         view.glide_to(target, yaw);
     }
     if view.glide.is_some() {
-        *trail = Trail::at(target, fixed.elapsed());
         return;
-    }
-    // A fixed step has run since the last frame: the simulation's position
-    // (unchanged if it did not step, paused or waiting) becomes the new end.
-    if fixed.elapsed() != trail.stepped {
-        *trail = if target.distance(trail.to) > JUMP {
-            Trail::at(target, fixed.elapsed())
-        } else {
-            Trail {
-                from: trail.to,
-                to: target,
-                stepped: fixed.elapsed(),
-            }
-        };
     }
     let k = 1.0 - (-FOLLOW_RATE * time.delta_secs()).exp();
     // A slight roll from side to side with the lemming's steps while it
@@ -406,5 +366,5 @@ pub(crate) fn follow(w: &mut World) {
     let turn = (yaw - view.yaw + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU)
         - std::f32::consts::PI;
     view.yaw += turn * k;
-    view.pos = trail.from.lerp(trail.to, fixed.overstep_fraction());
+    view.pos = target;
 }
