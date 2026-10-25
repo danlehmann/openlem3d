@@ -2,7 +2,8 @@
 //! is described in `docs/spec/ui-graphics.md`): large-font labels in boxes,
 //! toggles shown as a yellow (on) or red (off) light, sliders as ten
 //! lights, "Default Config" and "Exit and Save" along the bottom. Only
-//! settings that mean something here are offered, and one of ours, Glow.
+//! settings that mean something here are offered, and two of ours, Glow and
+//! Rewind.
 //! Esc also saves and leaves.
 
 use l3d_engine::prelude::*;
@@ -59,6 +60,7 @@ enum Item {
     LeftHanded,
     Fullscreen,
     Glow,
+    Rewind,
     Music,
     Effects,
     Camera,
@@ -82,13 +84,14 @@ const SLIDER_COLUMNS: [(f32, f32); 2] = [(0.0, 64.0), (160.0, 224.0)];
 const BOX_HEIGHT: f32 = 14.0;
 const TEXT_SCALE: f32 = 1.0;
 
-const TOGGLES: [(Item, &str, usize, usize); 6] = [
+const TOGGLES: [(Item, &str, usize, usize); 7] = [
     (Item::Land, "Land", 0, 0),
     (Item::Sea, "Sea", 0, 1),
     (Item::Sky, "Sky", 0, 2),
     (Item::LeftHanded, "Left Handed", 0, 3),
     (Item::Fullscreen, "Fullscreen", 1, 0),
     (Item::Glow, "Glow", 1, 1),
+    (Item::Rewind, "Rewind", 1, 2),
 ];
 const SLIDERS: [(Item, &str, usize, usize); 3] = [
     (Item::Music, "CD Music", 0, 0),
@@ -198,6 +201,7 @@ fn toggle(s: &mut Settings, item: Item) {
         Item::LeftHanded => s.left_handed = !s.left_handed,
         Item::Fullscreen => s.fullscreen = !s.fullscreen,
         Item::Glow => s.glow = !s.glow,
+        Item::Rewind => s.rewind = !s.rewind,
         _ => {}
     }
 }
@@ -251,6 +255,7 @@ pub(crate) fn show_lights(w: &mut World) {
             Item::LeftHanded => s.left_handed,
             Item::Fullscreen => s.fullscreen,
             Item::Glow => s.glow,
+            Item::Rewind => s.rewind,
             item => level(&mut s, item).is_some_and(|v| *v >= l.1),
         };
         w.ui.set_image(id, if on { &lights.on } else { &lights.off });

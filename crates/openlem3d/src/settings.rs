@@ -24,6 +24,9 @@ pub struct Settings {
     /// In Enhanced mode, bright things glow (ours); off, they are drawn
     /// plainly, which spares a slow GPU most of its work.
     pub glow: bool,
+    /// Backspace runs the level back in time (ours); off, no snapshots are
+    /// kept for it.
+    pub rewind: bool,
     /// Volumes and camera speed, 0–10 lights as on the original's sliders.
     pub music: u8,
     pub effects: u8,
@@ -48,6 +51,7 @@ impl Default for Settings {
             fullscreen: false,
             enhanced: true,
             glow: true,
+            rewind: true,
             music: 8,
             effects: 8,
             camera: 5,
@@ -145,6 +149,7 @@ impl Settings {
                 "fullscreen" => s.fullscreen = flag,
                 "enhanced" => s.enhanced = flag,
                 "glow" => s.glow = flag,
+                "rewind" => s.rewind = flag,
                 "music" => s.music = level.unwrap_or(s.music),
                 "effects" => s.effects = level.unwrap_or(s.effects),
                 "camera" => s.camera = level.unwrap_or(s.camera),
@@ -172,7 +177,7 @@ impl Settings {
         let Some(path) = Self::path() else { return };
         let on = |b: bool| if b { "on" } else { "off" };
         let text = format!(
-            "land = {}\nsea = {}\nsky = {}\nleft_handed = {}\nfullscreen = {}\nenhanced = {}\nglow = {}\nmusic = {}\neffects = {}\ncamera = {}\ncompleted = {}\nbest = {}\n",
+            "land = {}\nsea = {}\nsky = {}\nleft_handed = {}\nfullscreen = {}\nenhanced = {}\nglow = {}\nrewind = {}\nmusic = {}\neffects = {}\ncamera = {}\ncompleted = {}\nbest = {}\n",
             on(self.land),
             on(self.sea),
             on(self.sky),
@@ -180,6 +185,7 @@ impl Settings {
             on(self.fullscreen),
             on(self.enhanced),
             on(self.glow),
+            on(self.rewind),
             self.music,
             self.effects,
             self.camera,

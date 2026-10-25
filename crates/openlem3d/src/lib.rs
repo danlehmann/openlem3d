@@ -926,6 +926,37 @@ pub struct Game {
     pub replay: Option<Replay>,
     /// The exits' doors as drawn.
     doors: Vec<lemming_render::Door>,
+    /// With Rewind on, the level as it was every [`SNAPSHOT_TICKS`] ticks,
+    /// oldest first, for running it back.
+    snapshots: Vec<l3d_sim::Simulation>,
+}
+
+/// Ticks between rewind snapshots: two seconds, about 140 KB each.
+const SNAPSHOT_TICKS: u64 = 28;
+
+/// Runs `sim` back `ticks` ticks (no further than the oldest snapshot):
+/// from the latest snapshot at or before then, the player's commands are
+/// applied again up to that tick, and anything later is forgotten.
+fn rewind(sim: &mut l3d_sim::Simulation, snapshots: &mut Vec<l3d_sim::Simulation>, ticks: u64) {
+    let target = sim.tick.saturating_sub(ticks);
+    while snapshots.len() > 1 && snapshots.last().is_some_and(|s| s.tick > target) {
+        snapshots.pop();
+    }
+    let Some(snap) = snapshots.last() else {
+        return;
+    };
+    let target = target.max(snap.tick);
+    let mut back = snap.clone();
+    while back.tick < target {
+        back.step();
+        let now = back.tick;
+        for &(_, c) in sim.log.iter().filter(|(t, _)| *t == now) {
+            back.apply(c);
+        }
+    }
+    // Their sounds were heard the first time.
+    back.take_events();
+    *sim = back;
 }
 
 /// An earlier attempt's commands, fed back into a restarted level.
@@ -1002,6 +1033,12 @@ fn pause_keys(w: &mut World) {
 
 fn step_simulation(w: &mut World) {
     let (options, scene) = (&w.opts, &mut w.scene);
+    let keep_snapshots = w.settings.rewind;
+    let backwards = keep_snapshots && w.e.input.keys.pressed(KeyCode::Backspace);
+    // A turner half given (one click) may be to a lemming not yet out then.
+    if backwards {
+        w.pending.0 = None;
+    }
     // The level waits while the camera glides to a preset view, or the
     // picture changes resolution, so neither costs the player time.
     if w.pixelation.changing() || w.view.glide.is_some() {
@@ -1022,6 +1059,7 @@ fn step_simulation(w: &mut World) {
         prev_pos,
         replay,
         doors,
+        snapshots,
         ..
     } = &mut w.game
     else {
@@ -1049,6 +1087,46 @@ fn step_simulation(w: &mut World) {
     // where they are, so that nothing drifts.
     prev_pos.clear();
     prev_pos.extend(sim.lemmings.iter().map(|l| l.pos));
+    if !keep_snapshots {
+        snapshots.clear();
+    }
+    // Backspace runs the level back at the pace it would run forward
+    // (ours), paused or not; a replay stops there and the player takes over.
+    if backwards && sim.tick > snapshots.first().map_or(u64::MAX, |s| s.tick) {
+        *replay = None;
+        *tick_credit += if *fast_forward {
+            FAST_FORWARD_TICKS as f32
+        } else {
+            1.0
+        };
+        let ticks = tick_credit.floor() as u64;
+        *tick_credit -= ticks as f32;
+        if ticks == 0 {
+            return;
+        }
+        let before = sim.world.clone();
+        rewind(sim, snapshots, ticks);
+        sim.world.take_changes();
+        sim.world.take_bricks_changed();
+        if before.same_terrain(&sim.world) && sim.tick > l3d_sim::HATCH_OPEN_TICKS as u64 {
+            return;
+        }
+        let (Some((level, blocks, layer)), Some(current)) = (terrain, &scene.data) else {
+            return;
+        };
+        for x in 0..l3d_formats::level::SIZE_X {
+            for y in 0..l3d_formats::level::SIZE_Y {
+                for z in 0..l3d_formats::level::SIZE_Z {
+                    let cell = sim.world.block([x as i32, y as i32, z as i32]);
+                    level.set_block(x, y, z, cell.map(|(b, _)| b).unwrap_or_default());
+                }
+            }
+        }
+        let rebuilt = scene_build::rebuild_blocks(current, *layer, level, blocks, sim);
+        scene.version += 1;
+        scene.data = Some(Arc::new(rebuilt));
+        return;
+    }
     if *paused {
         return;
     }
@@ -1056,6 +1134,12 @@ fn step_simulation(w: &mut World) {
     let ticks = tick_credit.floor() as u32;
     *tick_credit -= ticks as f32;
     for _ in 0..ticks {
+        if keep_snapshots
+            && sim.tick.is_multiple_of(SNAPSHOT_TICKS)
+            && snapshots.last().is_none_or(|s| s.tick < sim.tick)
+        {
+            snapshots.push(sim.clone());
+        }
         if replay.as_mut().is_some_and(|r| !r.feed(sim)) {
             *replay = None;
         }
@@ -1261,6 +1345,7 @@ pub(crate) fn load_level(w: &mut World) {
         slots: level.cameras.each_ref().map(preset_view),
     });
     game.sim = Some(l3d_sim::Simulation::new(&level, &blocks));
+    game.snapshots.clear();
     if opts.solve
         && let Some(log) = l3d_sim::demos::demo(n, &level, &blocks)
     {

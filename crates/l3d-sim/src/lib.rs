@@ -686,6 +686,7 @@ struct Obstacle {
 }
 
 /// The state of a level being played.
+#[derive(Clone)]
 pub struct Simulation {
     pub world: World,
     pub lemmings: Vec<Lemming>,

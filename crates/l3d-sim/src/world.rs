@@ -29,6 +29,7 @@ pub enum Floor {
 }
 
 /// A level's solid geometry for lemmings.
+#[derive(Clone)]
 pub struct World {
     cells: Vec<Option<SolidCell>>,
     /// Convex land polygons as `(x, z)` corner points, in grid units.
@@ -76,7 +77,7 @@ impl Brick {
 }
 
 /// A non-empty cell that blocks lemmings.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 struct SolidCell {
     block: BlockCell,
     /// Behaviour flags of the block definition.
@@ -299,6 +300,11 @@ impl World {
     }
 
     /// The solid block in cell `c`, with its flags.
+    /// Whether `other` has the same terrain: blocks, cuts and bricks.
+    pub fn same_terrain(&self, other: &World) -> bool {
+        self.cells == other.cells && self.bricks == other.bricks
+    }
+
     pub fn block(&self, c: [i32; 3]) -> Option<(BlockCell, u8)> {
         self.cell(c[0], c[1], c[2]).map(|s| (s.block, s.flags))
     }
