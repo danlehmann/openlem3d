@@ -502,9 +502,53 @@ fn sparkle_at(t: u32, from: [i32; 3], to: [i32; 3]) -> Option<[i32; 3]> {
 const EXIT_SHRINK_TICKS: u32 = 6;
 const EXIT_SHRINK_DEPTH: f32 = 0.2;
 
-/// The electrocution cloud's cells.
+/// The storm cloud's cells: growing (524–526), striking with bolts
+/// (527–529), shrinking away (530–533).
 const ZAP_CLOUD_FIRST: u32 = 524;
-const ZAP_CLOUD_FRAMES: u32 = 10;
+/// Height of a standing lemming's head top above its feet, in units (the
+/// figure fills about 110 of the cell's 128 pixels).
+const LEMMING_HEAD: f32 = 110.0 / LEMMING_TEXELS_PER_UNIT;
+/// The storm cloud's scale: about 2.4 lemming cells across, as recorded.
+const ZAP_CLOUD_TEXELS_PER_UNIT: f32 = LEMMING_TEXELS_PER_UNIT / 2.4;
+/// The smoke puff's cells, big to small.
+const PUFF_FIRST: u32 = 534;
+
+/// The ticks into an electrocution or a boundary zap at which the lemming
+/// shows as an X-ray skeleton (recorded in the original, 2026-10-24: the
+/// liquid flashes it three times; at the boundary each burst of bolts
+/// strikes it twice and the last once).
+fn xray(state: State, t: u32) -> bool {
+    match state {
+        State::Electrocuted => t < 5 && t % 2 == 0,
+        State::Zapped => matches!(t, 1 | 3 | 7 | 9 | 13),
+        _ => false,
+    }
+}
+
+/// The smoke puff a zapped or electrocuted lemming leaves, as a frame of
+/// [`PUFF_FIRST`], two ticks each (recorded): it replaces the lemming.
+fn puff(state: State, t: u32) -> Option<u32> {
+    let from = match state {
+        State::Electrocuted => l3d_sim::ELECTROCUTE_TICKS - 8,
+        State::Zapped => l3d_sim::ZAP_TICKS - 8,
+        _ => return None,
+    };
+    (t >= from).then(|| ((t - from) / 2).min(3))
+}
+
+/// The storm cloud over a lemming zapped at the boundary, `t` ticks in, as
+/// a cell (recorded): it gathers, strikes in three bursts of bolts three
+/// ticks apart, and shrinks away while the lemming is smoke.
+fn zap_cloud(t: u32) -> Option<u32> {
+    let frame = match t {
+        0 => 1,
+        1..=3 | 7..=9 | 13..=15 => 3 + (t - 1) % 6,
+        4..=6 | 10..=12 => 2,
+        16..=19 => 6 + t - 16,
+        _ => return None,
+    };
+    Some(ZAP_CLOUD_FIRST + frame)
+}
 
 /// How far crack quads stand off the block's faces, in units.
 const CRACK_OFFSET: f32 = 0.004;
@@ -1042,69 +1086,28 @@ fn bash_effects(b: &mut LayerBuilder, sim: &Simulation, blocks: Option<&BlockSet
     }
 }
 
-/// A splatted lemming's fragments: texels of the blue smock (walker cell 0,
-/// texels 22–40 across and 28–48 down in 64-pixel cells, scaled to the
-/// atlas's cells) flying out on all sides and falling
-/// back, over the death (`docs/spec/behaviour.md`, Splat: "a burst of blue
-/// fragments", verified; count, speeds and spread are ours).
-const SPLAT_PIECES: u32 = 60;
-const SPLAT_SMOCK: [f32; 4] = [22.0, 28.0, 18.0, 20.0];
-const SPLAT_OUT: (f32, f32) = (0.03, 0.09);
-const SPLAT_UP: (f32, f32) = (0.04, 0.16);
-const SPLAT_GRAVITY: f32 = 0.025;
-/// Drawn larger than the lemming, so a piece is a few screen pixels.
-const SPLAT_TEXELS_PER_UNIT: f32 = 40.0;
-
-fn splat(b: &mut LayerBuilder, i: usize, t: u32, at: [f32; 3], tex: [f32; 2]) {
-    let age = t as f32;
-    // The smock's place is given in 64-pixel cells.
-    let k_cell = LEMMING_CELL as f32 / 64.0;
-    for k in 0..SPLAT_PIECES {
-        let r = |salt: u32| noise([i as u32, 0x5A1A7, k, salt, 0]);
-        let angle = r(0) * std::f32::consts::TAU;
-        let v_out = SPLAT_OUT.0 + r(1) * (SPLAT_OUT.1 - SPLAT_OUT.0);
-        let v_up = SPLAT_UP.0 + r(2) * (SPLAT_UP.1 - SPLAT_UP.0);
-        // Pieces stop at the ground they burst from.
-        let y = (at[1] + 0.05 + v_up * age - SPLAT_GRAVITY * age * age / 2.0).max(at[1]);
-        let p = [
-            at[0] + angle.cos() * v_out * age,
-            y,
-            at[2] + angle.sin() * v_out * age,
-        ];
-        let size = 3.0 + (r(3) * 4.0).floor();
-        let (sx, sy) = (
-            (r(4) * (SPLAT_SMOCK[2] - size)).floor(),
-            (r(5) * (SPLAT_SMOCK[3] - size)).floor(),
-        );
-        b.sprite_scaled(
-            p,
-            [
-                (SPLAT_SMOCK[0] + sx) * k_cell,
-                (SPLAT_SMOCK[1] + sy) * k_cell,
-                size * k_cell,
-                size * k_cell,
-            ],
-            tex,
-            1,
-            0.0,
-            SPLAT_TEXELS_PER_UNIT * k_cell,
-        );
-    }
-}
-
-/// A bomber bursting, `t` ticks in, at `at`, drawn from `rect` (the fully
-/// swollen bomber): it swells a little more, then flies apart into small
-/// copies of itself that shoot up, spread and rain down past the ground
-/// (seen in the original side-on, 2026-10-23: about a dozen, half size,
-/// rising about 2 units in 0.8 s, gone after about 2½ s; speeds ours, read
-/// from those frames).
-fn burst(b: &mut LayerBuilder, i: usize, t: u32, at: [f32; 3], rect: [f32; 4], tex: [f32; 2]) {
+/// A bomber or a splatted lemming bursting, `t` ticks in, at `at`, drawn
+/// from `rect` (the fully swollen bomber): it swells a little more, then
+/// flies apart into `pieces` small copies of itself that shoot up, spread
+/// and rain down past the ground (seen in the original side-on, 2026-10-23:
+/// about a dozen, half size, rising about 2 units in 0.8 s, gone after
+/// about 2½ s; speeds ours, read from those frames). A splat bursts the
+/// same way into about eight (recorded, 2026-10-24).
+fn burst(
+    b: &mut LayerBuilder,
+    i: usize,
+    t: u32,
+    at: [f32; 3],
+    rect: [f32; 4],
+    tex: [f32; 2],
+    pieces: u32,
+) {
     if t < BURST_SWELL_TICKS {
         b.sprite_scaled(at, rect, tex, 1, 0.0, LEMMING_TEXELS_PER_UNIT / BURST_SWELL);
         return;
     }
     let age = (t - BURST_SWELL_TICKS) as f32;
-    for k in 0..BURST_PIECES {
+    for k in 0..pieces {
         let r = |salt: u32| noise([i as u32, 0xB0B, k, salt, 0]);
         let angle = r(0) * std::f32::consts::TAU;
         let v_out = BURST_OUT * (0.3 + 0.7 * r(1));
@@ -1123,6 +1126,7 @@ fn burst(b: &mut LayerBuilder, i: usize, t: u32, at: [f32; 3], rect: [f32; 4], t
 const BURST_SWELL_TICKS: u32 = 2;
 const BURST_SWELL: f32 = 1.3;
 const BURST_PIECES: u32 = 12;
+const SPLAT_PIECES: u32 = 8;
 const BURST_OUT: f32 = 0.04;
 const BURST_UP: (f32, f32) = (0.2, 0.36);
 const BURST_GRAVITY: f32 = 0.033;
@@ -1289,13 +1293,29 @@ pub fn build(
             }
             State::Stunned => cell_for(anim_for(l.state), view, 0),
             State::Trapped => cell_for(anim_for(State::Walking), view, 0),
+            // Sinking a frame every two ticks, gone after the last
+            // (recorded).
+            State::Drowning => cell_for(anim_for(l.state), view, l.state_ticks / 2),
+            // Standing, flashing between itself and its X-ray (cells
+            // 514–523 in pairs).
+            State::Zapped | State::Electrocuted => cell_for(
+                anim_for(l.state),
+                view,
+                if xray(l.state, l.state_ticks) {
+                    TICKS_PER_FRAME
+                } else {
+                    0
+                },
+            ),
             // A miner walks down the block it has broken (owner's
             // observation).
             State::Mining if l.state_ticks >= l3d_sim::MINE_CRACK_TICKS => {
                 cell_for(anim_for(State::Walking), view, l.state_ticks)
             }
             // Bursting: pieces of the fully swollen bomber (see `burst`).
-            State::Exploding => cell_for(once(271, 5, Angles::Five), view, 4 * TICKS_PER_FRAME),
+            State::Exploding | State::Splatting => {
+                cell_for(once(271, 5, Angles::Five), view, 4 * TICKS_PER_FRAME)
+            }
             // A basher walks up to the next wall, before the first and
             // between blocks (owner's observation).
             State::Bashing if l.bash_walk_ticks > 0 => {
@@ -1355,12 +1375,48 @@ pub fn build(
         if matches!(l.state, State::OnRope { .. }) {
             anchor[1] = rope_above(&sim.world, l.pos) - size / LEMMING_TEXELS_PER_UNIT;
         }
-        if l.state == State::Splatting {
-            splat(&mut b, i, l.state_ticks, anchor, tex);
+        if matches!(l.state, State::Exploding | State::Splatting) {
+            let pieces = if l.state == State::Exploding {
+                BURST_PIECES
+            } else {
+                SPLAT_PIECES
+            };
+            burst(&mut b, i, l.state_ticks, anchor, rect, tex, pieces);
             continue;
         }
-        if l.state == State::Exploding {
-            burst(&mut b, i, l.state_ticks, anchor, rect, tex);
+        if l.state == State::Zapped
+            && let Some(cell) = zap_cloud(l.state_ticks)
+        {
+            // The storm cloud over the lemming, its bolts reaching down to
+            // the lemming's head (cells 524–533, view-independent).
+            let (cx, cy) = (
+                (cell % ATLAS_COLUMNS) * LEMMING_CELL,
+                (cell / ATLAS_COLUMNS) * LEMMING_CELL,
+            );
+            let over = [anchor[0], anchor[1] + LEMMING_HEAD, anchor[2]];
+            b.sprite_scaled(
+                over,
+                [cx as f32, cy as f32, size, size],
+                tex,
+                1,
+                0.0,
+                ZAP_CLOUD_TEXELS_PER_UNIT,
+            );
+        }
+        if let Some(frame) = puff(l.state, l.state_ticks) {
+            let cell = PUFF_FIRST + frame;
+            let (cx, cy) = (
+                (cell % ATLAS_COLUMNS) * LEMMING_CELL,
+                (cell / ATLAS_COLUMNS) * LEMMING_CELL,
+            );
+            b.sprite_scaled(
+                anchor,
+                [cx as f32, cy as f32, size, size],
+                tex,
+                1,
+                0.0,
+                LEMMING_TEXELS_PER_UNIT,
+            );
             continue;
         }
         // Teleporting: squeezed to a sliver, away, then stretched out again
@@ -1471,31 +1527,6 @@ pub fn build(
                 1,
                 0.0,
                 DIGIT_TEXELS_PER_UNIT,
-            );
-        }
-        if l.state == State::Zapped {
-            // The electrocution cloud over the lemming: it gathers, strikes
-            // with lightning and shrinks away (cells 524–533, view-independent;
-            // spread over the death, timing unmeasured).
-            let frame =
-                (l.state_ticks * ZAP_CLOUD_FRAMES / l3d_sim::DEATH_TICKS).min(ZAP_CLOUD_FRAMES - 1);
-            let cell = ZAP_CLOUD_FIRST + frame;
-            let (cx, cy) = (
-                (cell % ATLAS_COLUMNS) * LEMMING_CELL,
-                (cell / ATLAS_COLUMNS) * LEMMING_CELL,
-            );
-            let over = [
-                anchor[0],
-                anchor[1] + size / LEMMING_TEXELS_PER_UNIT * 0.6,
-                anchor[2],
-            ];
-            b.sprite_scaled(
-                over,
-                [cx as f32, cy as f32, size, size],
-                tex,
-                1,
-                0.0,
-                LEMMING_TEXELS_PER_UNIT,
             );
         }
         if l.state == State::Floating {

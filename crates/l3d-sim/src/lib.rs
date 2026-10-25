@@ -131,6 +131,16 @@ const MINE_STANDOFF: i32 = SUB / 4;
 /// Duration of terminal animations, in ticks (provisional).
 const EXIT_TICKS: u32 = 11;
 pub const DEATH_TICKS: u32 = 14;
+/// How long a lemming zapped at the level boundary takes to die: the storm
+/// cloud strikes it for 15 ticks, then it is a puff of smoke for 8
+/// (recorded in the original, 2026-10-24).
+pub const ZAP_TICKS: u32 = 23;
+/// How long an electrocuted lemming takes to die: 5 ticks of X-ray flashes,
+/// then 8 of smoke (recorded).
+pub const ELECTROCUTE_TICKS: u32 = 13;
+/// How long a drowning lemming takes to sink out of sight: six frames, two
+/// ticks each (recorded).
+pub const DROWN_TICKS: u32 = 12;
 /// How long an exploding bomber's pieces fly before it is gone (measured in
 /// the original, 2026-10-23: they rise about 2 units and rain down for about
 /// 2½ s).
@@ -1187,10 +1197,13 @@ impl Simulation {
             | State::Drowning
             | State::Zapped
             | State::Electrocuted => {
-                let ticks = if l.state == State::Exploding {
-                    EXPLODE_TICKS
-                } else {
-                    DEATH_TICKS
+                let ticks = match l.state {
+                    // A splat bursts into pieces like a bomber (recorded).
+                    State::Exploding | State::Splatting => EXPLODE_TICKS,
+                    State::Zapped => ZAP_TICKS,
+                    State::Electrocuted => ELECTROCUTE_TICKS,
+                    State::Drowning => DROWN_TICKS,
+                    _ => DEATH_TICKS,
                 };
                 if l.state_ticks >= ticks {
                     l.gone = true;
