@@ -2974,8 +2974,15 @@ impl Simulation {
         // "Team Work", 2026-10-23: walkers came up a 22.5° slope from the
         // floor to half a unit and stepped onto a slab a quarter above it).
         let rising = surface > l.pos[1] && surface - l.pos[1] <= WALK_SPEED;
+        // Only terrain reaching down to step height is a wall; terrain above
+        // it is a ceiling, met by the centre's next step (verified on a
+        // changed Practice "Mud", 2026-10-25: under a cube leaving a quarter
+        // unit of headroom, walkers walked on until their centre reached
+        // the cell's edge before turning).
         let blocked = surface > l.pos[1] + STEP_UP + STEP_SLACK
-            || (!rising && wall(&self.world, body + STEP_UP + 2))
+            || (!rising
+                && wall(&self.world, body + STEP_UP + 2)
+                && wall(&self.world, body + STEP_UP - 1))
             || ceiling;
         // A brick step up with too little headroom over it is not taken: the
         // walker walks on at its own height, under that brick (bricks are

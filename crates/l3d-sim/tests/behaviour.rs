@@ -428,3 +428,37 @@ fn miner_on_its_way_takes_a_turner_and_a_blocker() {
         );
     }
 }
+
+/// The furthest x lemming 0 reaches walking +X from the hatch towards a cell
+/// at (20, 2, 16) with the given segments.
+fn furthest_x(segments: u16) -> i32 {
+    let mut sim = open_level(1).block(20, 2, 16, FLOOR, 0, segments).sim();
+    let mut x = 0;
+    for _ in 0..400 {
+        sim.step();
+        if let Some(l) = sim.lemmings.first() {
+            x = x.max(l.pos[0]);
+        }
+    }
+    x
+}
+
+#[test]
+fn walkers_climb_a_quarter_step_and_turn_at_half() {
+    assert!(furthest_x(0b0001) > 21 * SUB, "a ¼ step is climbed");
+    assert!(furthest_x(0b0011) < 20 * SUB, "a ½ step turns walkers");
+}
+
+#[test]
+fn walkers_need_half_a_unit_of_headroom_and_walk_in_under_less() {
+    assert!(
+        furthest_x(0b1100) > 21 * SUB,
+        "½ unit of headroom is enough"
+    );
+    // With ¼ they walk on until their centre reaches the cell's edge.
+    let x = furthest_x(0b1110);
+    assert!(
+        (20 * SUB - SUB / 16..=20 * SUB).contains(&x),
+        "turned at {x}"
+    );
+}

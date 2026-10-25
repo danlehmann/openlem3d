@@ -27,7 +27,6 @@ Each names where it shows up, so a run can go straight there.
   lemmings fall in and can't leave. Probably the design: with our ramp
   orientation the half-height ramps continue the full ramps below them
   seamlessly, while the reverse leaves a 1.5-unit drop at z = 8.
-- **Highest step a walker climbs** (we use ¼ unit; ½ is untested).
 - **Sea drift and animation:** the Z speed (one rough observation was 2–4×
   ours; X agrees), and whether and how fast the sea animates in place on
   levels without flag `0x0010`.
