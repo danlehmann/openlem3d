@@ -144,6 +144,10 @@ enum Angles {
 enum Playback {
     /// Frames 0, 1, … in a loop.
     Loop,
+    /// Frames 0, 1, …, the last, then back down, in a loop: for poses that
+    /// sweep one way through the frames (the turner's and blocker's head,
+    /// the floater's legs), which a loop would snap back.
+    PingPong,
     /// Frames 0, 1, …, then the last frame held.
     Once,
     /// The listed frame indices in a loop, the front and back views drawn
@@ -172,6 +176,15 @@ const fn anim(first: u32, frames: u32, angles: Angles) -> Anim {
     }
 }
 
+const fn ping_pong(first: u32, frames: u32, angles: Angles) -> Anim {
+    Anim {
+        first,
+        frames,
+        angles,
+        playback: Playback::PingPong,
+    }
+}
+
 const fn once(first: u32, frames: u32, angles: Angles) -> Anim {
     Anim {
         first,
@@ -196,8 +209,8 @@ fn anim_for(state: State) -> Anim {
         State::Walking => anim(0, 6, Five),
         // Not found yet: lemmings walk into the exit.
         State::Exiting => anim(0, 6, Five),
-        State::Turning { .. } => anim(30, 7, EightByLeft),
-        State::Blocking => anim(86, 7, Five),
+        State::Turning { .. } => ping_pong(30, 7, EightByLeft),
+        State::Blocking => ping_pong(86, 7, Five),
         State::Falling { .. } => Anim {
             first: 399,
             frames: 5,
@@ -210,7 +223,7 @@ fn anim_for(state: State) -> Anim {
         // The puff of smoke left by the blast; the swelling before it is
         // drawn from the fuse (see `build`).
         State::Exploding => once(534, 4, One),
-        State::Floating => anim(296, 5, Eight),
+        State::Floating => ping_pong(296, 5, Eight),
         // Arms spread on ice: the pose with arms spread and one leg kicking
         // up, played as a ping-pong (both verified: a lemming sliding away
         // from the camera matched cells 558–562, the back view, in this
@@ -223,7 +236,7 @@ fn anim_for(state: State) -> Anim {
         },
         // Hanging from the handle by one raised hand: the floater's pose
         // (owner's picture of the original).
-        State::OnRope { .. } => anim(296, 5, Eight),
+        State::OnRope { .. } => ping_pong(296, 5, Eight),
         State::Flying { .. } | State::Bouncing { .. } => Anim {
             first: 399,
             frames: 5,
@@ -251,6 +264,10 @@ fn cell_for(a: Anim, view: ViewAngle, ticks: u32) -> (u32, bool) {
     let step = ticks / TICKS_PER_FRAME;
     let (frame, flip) = match a.playback {
         Playback::Loop => (step % a.frames, false),
+        Playback::PingPong => {
+            let k = step % (2 * a.frames - 2).max(1);
+            (k.min(2 * a.frames - 2 - k), false)
+        }
         Playback::Once => (step.min(a.frames - 1), false),
         Playback::MirroredCycle(cycle) => (cycle[step as usize % cycle.len()], true),
         Playback::Cycle(cycle) => (cycle[step as usize % cycle.len()], false),
