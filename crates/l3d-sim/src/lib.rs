@@ -539,11 +539,36 @@ impl Lemming {
         }
     }
 
-    /// Whether it stands at the centre of its cell along its heading.
-    fn centred(&self) -> bool {
+    /// For a builder, building or shrugging, the end of the step it stands
+    /// on or is climbing: on top of the newest brick laid, at its far end.
+    fn step_end(&self) -> [i32; 3] {
+        let d = self.dir.delta();
+        let (run, up) = match self.state {
+            State::Shrugging => (BRICK_RUN, 0),
+            State::Building { .. } if self.state_ticks >= FIRST_BRICK_TICKS => {
+                let phase = ((self.state_ticks - FIRST_BRICK_TICKS) % BUILD_TICKS) as i32;
+                if phase < BRICK_WALK_TICKS {
+                    let walked = BRICK_RUN * phase / BRICK_WALK_TICKS;
+                    (BRICK_RUN - walked, if phase == 0 { SUB / 4 } else { 0 })
+                } else {
+                    (0, 0)
+                }
+            }
+            _ => (0, 0),
+        };
+        [
+            self.pos[0] + d[0] * run,
+            self.pos[1] + up,
+            self.pos[2] + d[2] * run,
+        ]
+    }
+
+    /// Whether `p` lies nearer the centre of its cell than an edge, along
+    /// this lemming's heading.
+    fn centred(&self, p: [i32; 3]) -> bool {
         let d = self.dir.delta();
         let off = |v: i32| v.rem_euclid(SUB) - SUB / 2;
-        off(self.pos[0]) * d[0] + off(self.pos[2]) * d[2] == 0
+        (off(p[0]) * d[0] + off(p[2]) * d[2]).abs() < SUB / 4
     }
 
     fn set_state(&mut self, s: State) {
@@ -745,15 +770,22 @@ impl Simulation {
             Skill::Bomber => l.fuse.is_none(),
             // Not to a climber on its wall: there a digger is refused and
             // not paid for (verified by the owner on "Candyland Climber").
-            Skill::Blocker => l.state == State::Walking && l.pending.is_none(),
-            // A builder only where it stands at a cell's centre; elsewhere
-            // it refuses it and keeps it (the owner on Fun 9 "Castle
-            // Lemmalot", 2026-10-24: taken after 2, 4 and 6 bricks, not
-            // after 3).
+            Skill::Blocker => {
+                l.pending.is_none()
+                    && (l.state == State::Walking
+                        || matches!(l.state, State::Building { .. } | State::Shrugging)
+                            && l.centred(l.step_end()))
+            }
+            // A builder only where its step ends at a cell's centre, even
+            // while it still climbs that step; elsewhere it refuses it and
+            // keeps it (the owner on Fun 9 "Castle Lemmalot", 2026-10-24:
+            // taken after 2, 4 and 6 bricks, also as soon as the 4th was
+            // laid, and never after 3).
             Skill::Turner => {
                 l.pending.is_none()
                     && (l.state == State::Walking
-                        || matches!(l.state, State::Building { .. }) && l.centred())
+                        || matches!(l.state, State::Building { .. } | State::Shrugging)
+                            && l.centred(l.step_end()))
             }
             // A builder out of bricks, laid or shrugging, takes more
             // (provisional, as in the 2D games; Fun 10 "Castle Lemmalot"
@@ -834,11 +866,19 @@ impl Simulation {
             l.build_at_edge = true;
             return true;
         }
-        // A builder given a turner stops and turns where it stands, on its
-        // unfinished staircase (verified on a changed "Team Work",
+        // A builder given a turner stops and turns at the end of its step,
+        // on its unfinished staircase (verified on a changed "Team Work",
         // 2026-10-24: given over the drop, it stood at the staircase's end
-        // and did not fall).
-        if skill == Skill::Turner && matches!(l.state, State::Building { .. }) {
+        // and did not fall; the owner on Fun 9: given while it still
+        // climbed its step, it stood at the step's end).
+        // A blocker likewise (inferred: the same as a turner, by the owner).
+        if skill == Skill::Blocker && matches!(l.state, State::Building { .. } | State::Shrugging) {
+            l.pos = l.step_end();
+            l.set_state(State::Blocking);
+            return true;
+        }
+        if skill == Skill::Turner && matches!(l.state, State::Building { .. } | State::Shrugging) {
+            l.pos = l.step_end();
             l.set_state(State::Turning {
                 to: l.dir.anticlockwise(),
             });
@@ -1218,7 +1258,13 @@ impl Simulation {
             State::Bouncing { ticks, k, y0 } => self.fly(l, ticks, k, y0),
             State::Climbing => self.climb(l),
             State::Digging => self.dig(l),
-            State::Building { bricks_left } => self.build(l, bricks_left),
+            State::Building { bricks_left } => {
+                self.build(l, bricks_left);
+                if let Some(to) = Self::builder_redirected(l, me, obstacles) {
+                    l.set_state(State::Walking);
+                    l.dir = to;
+                }
+            }
             State::Shrugging => {
                 if l.state_ticks >= SHRUG_TICKS {
                     l.set_state(State::Walking);
@@ -1944,9 +1990,45 @@ impl Simulation {
     /// half a unit of each other's height: a turner standing on the high
     /// edge of a slope, at a whole-unit height, is in the cell above the
     /// walkers it turns.
+    /// The heading a turner or blocker sends a builder off in, as it reaches
+    /// the end of a step: a turner whose centre it has reached turns it
+    /// (the owner on Fun 9, 2026-10-24: building from the cell before a
+    /// turner's, it was turned after 2 bricks, half a unit above the turner,
+    /// and so were the walkers following it); a blocker its next step would
+    /// reach turns it back (inferred: the same as a turner, by the owner).
+    /// It then walks, its bricks left unlaid.
+    fn builder_redirected(l: &Lemming, me: usize, obstacles: &[Obstacle]) -> Option<Dir> {
+        if !matches!(l.state, State::Building { .. })
+            || l.state_ticks < FIRST_BRICK_TICKS
+            || ((l.state_ticks - FIRST_BRICK_TICKS) % BUILD_TICKS) as i32 != BRICK_WALK_TICKS
+        {
+            return None;
+        }
+        let d = l.dir.delta();
+        let next = [
+            l.pos[0] + d[0] * BRICK_RUN,
+            l.pos[1] + SUB / 4,
+            l.pos[2] + d[2] * BRICK_RUN,
+        ];
+        obstacles
+            .iter()
+            .filter(|o| o.lemming != me)
+            .find_map(|o| match o.turn_to {
+                Some(to) => (to != l.dir
+                    && l.dir == o.heading
+                    && l.centred(l.pos)
+                    && Self::same_column(o.pos, l.pos))
+                .then_some(to),
+                None => ((next[0] - o.pos[0]).abs() < BLOCK_RADIUS
+                    && (next[2] - o.pos[2]).abs() < BLOCK_RADIUS
+                    && (l.pos[1] - o.pos[1]).abs() <= SUB / 2)
+                    .then(|| l.dir.reverse()),
+            })
+    }
+
     fn same_column(a: [i32; 3], b: [i32; 3]) -> bool {
         let (ca, cb) = (Self::cell_of(a), Self::cell_of(b));
-        ca[0] == cb[0] && ca[2] == cb[2] && (a[1] - b[1]).abs() < SUB / 2
+        ca[0] == cb[0] && ca[2] == cb[2] && (a[1] - b[1]).abs() <= SUB / 2
     }
 
     /// Falls or stands depending on the ground now under the feet.

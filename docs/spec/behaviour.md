@@ -236,8 +236,8 @@ earlier run in the middle of a platform, read as "builds where it stands",
 fits this too: there the first brick met the hole's far wall). The cracks of a segment the digger was part way through stay on the block (owner's observation), and a digger later set to work there carries on from them (inferred). The published solution of Mayhem 1 "The Five Arches" [XeyeWalk]
 makes a digger a builder too; with ½-unit bricks our simulation of it no
 longer saves the 78 needed (open). Implemented as such; a basher or miner
-switched to starts where it stands (ours). Blockers are given only to
-walkers, turners to walkers and builders (below): a blocker or a turner given a miner, basher or digger
+switched to starts where it stands (ours). Blockers and turners are given
+only to walkers and builders (below): a blocker or a turner given a miner, basher or digger
 stayed as it was and the count did not drop (**verified with a changed
 level**, 2026-10-23). A builder that has laid its last
 brick, or is shrugging, can be given more bricks (provisional, as in the 2D
@@ -259,10 +259,31 @@ or fall, and the turner count dropped by one. The owner confirmed it on Fun 9
 "Castle Lemmalot" after 2, 4 and 6 bricks: the builder stood as a turner at
 the end of its last step, and walkers coming up the staircase were sent
 sideways off it. After 3 bricks the turner was ignored, repeatedly, and not
-used up. A builder starts at its cell's centre and each brick takes it half a
-unit on, so after an even count it stands at a cell's centre again and after
-an odd one on an edge; the implementation takes the turner only at a centre
-(inferred from the counts). A walker that catches up with a
+used up. The turner is taken as soon as the 4th brick is laid,
+before the builder climbs onto it, and the builder then stands at that
+step's end. A builder starts at its cell's centre and each brick takes it
+half a unit on, so after an even count its step ends at a cell's centre and
+after an odd one on an edge; the implementation takes the turner only where
+the step it stands on or climbs ends nearer a cell's centre than its edge, and
+moves it to that end (inferred from the counts; a builder that started at an
+edge was not tried).
+
+A builder that reaches a turner is turned like a walker (owner, Fun 9,
+2026-10-24): a turner stood at the far end of a block, and a builder set to
+work in the cell before stopped after 2 bricks, half a unit above the turner,
+and walked off the turner's way; the walkers following it climbed the 2 steps
+and were turned there too. So a turner reaches walkers up to half a unit
+above it. Ours turns a builder at the end of a step that ends at the turner's
+centre.
+
+Blockers with builders (inferred: the owner expects them to act like
+turners; untested): ours gives a blocker to a builder under the same rule,
+standing it at its step's end, and turns a builder back when its next step
+would reach a blocker no more than half a unit below or above. Walkers are
+still turned back by a blocker only less than half a unit from its height:
+reaching half a unit breaks the stored Fun 2 solution.
+
+A walker that catches up with a
 builder still building walks past it and off the staircase's unfinished end
 (same test, release rate 50); it is not turned back.
 

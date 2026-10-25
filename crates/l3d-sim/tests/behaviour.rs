@@ -250,3 +250,110 @@ fn one_way_blocks_give_way_in_one_direction() {
         );
     }
 }
+
+/// Runs until lemming `i`'s builder has `left` bricks still to lay.
+fn build_until(sim: &mut Simulation, i: usize, left: u8) {
+    while sim.lemmings[i].state != (State::Building { bricks_left: left }) {
+        assert!(sim.tick < 1000, "builder never got to {left} bricks left");
+        sim.step();
+    }
+}
+
+#[test]
+fn builder_takes_a_turner_only_where_its_step_ends_at_a_centre() {
+    let mut sim = open_level(1)
+        .skill(0, Skill::Builder, 1)
+        .skill(1, Skill::Turner, 2)
+        .sim();
+    run(&mut sim, 30);
+    assert!(sim.assign(0, Skill::Builder));
+    while !matches!(sim.lemmings[0].state, State::Building { .. }) {
+        sim.step();
+    }
+    let start = sim.lemmings[0].pos;
+    // Whether the end of brick `n` lies at a cell's centre.
+    let centre_after = |n: i32| {
+        let off = (start[0] + n * SUB / 2).rem_euclid(SUB) - SUB / 2;
+        off.abs() < SUB / 4
+    };
+    let (odd, even) = if centre_after(4) { (3, 4) } else { (4, 5) };
+    let to = Dir::PosX.anticlockwise();
+    // Just laid, the odd brick ends at an edge: refused, the turner kept.
+    build_until(&mut sim, 0, 6 - odd);
+    assert!(!sim.assign_turner(0, to));
+    assert_eq!(sim.skills_left[Skill::Turner as usize], 2);
+    // Just laid, before the builder climbs it, the even brick ends at a
+    // centre: taken, and the builder stands at its end.
+    build_until(&mut sim, 0, 6 - even);
+    assert!(sim.assign_turner(0, to));
+    assert_eq!(sim.skills_left[Skill::Turner as usize], 1);
+    let l = &sim.lemmings[0];
+    assert!(matches!(l.state, State::Turning { .. }), "{:?}", l.state);
+    assert_eq!(l.pos[0], start[0] + even as i32 * SUB / 2);
+    assert_eq!(l.pos[1], start[1] + even as i32 * SUB / 4);
+}
+
+#[test]
+fn builder_reaching_a_turner_half_a_unit_up_is_turned() {
+    let mut sim = open_level(1)
+        .skill(0, Skill::Builder, 1)
+        .skill(1, Skill::Turner, 1)
+        .sim();
+    let to = Dir::PosX.anticlockwise();
+    // The first lemming made a turner in cell x = 19.
+    while sim.lemmings.is_empty()
+        || sim.lemmings[0].state != State::Walking
+        || sim.lemmings[0].pos[0].div_euclid(SUB) != 19
+    {
+        sim.step();
+    }
+    assert!(sim.assign_turner(0, to));
+    // The next one builds from the centre of cell 18.
+    while sim.lemmings.len() < 2
+        || sim.lemmings[1].state != State::Walking
+        || sim.lemmings[1].pos[0].div_euclid(SUB) != 18
+    {
+        assert!(sim.tick < 1000, "second lemming never reached cell 18");
+        sim.step();
+    }
+    assert!(sim.assign(1, Skill::Builder));
+    while matches!(
+        sim.lemmings[1].state,
+        State::Walking | State::Building { .. }
+    ) && sim.lemmings[1].dir == Dir::PosX
+    {
+        assert!(sim.tick < 1000, "builder never turned");
+        sim.step();
+    }
+    let l = &sim.lemmings[1];
+    assert_eq!(l.state, State::Walking);
+    assert_eq!(l.dir, to);
+    assert_eq!(sim.world.bricks.len(), 2);
+    assert_eq!(l.pos[0], 19 * SUB + SUB / 2);
+}
+
+#[test]
+fn builder_becomes_a_blocker_where_its_step_ends_at_a_centre() {
+    let mut sim = open_level(1)
+        .skill(0, Skill::Builder, 1)
+        .skill(1, Skill::Blocker, 2)
+        .sim();
+    run(&mut sim, 30);
+    assert!(sim.assign(0, Skill::Builder));
+    while !matches!(sim.lemmings[0].state, State::Building { .. }) {
+        sim.step();
+    }
+    let start = sim.lemmings[0].pos;
+    let centre_after = |n: i32| {
+        let off = (start[0] + n * SUB / 2).rem_euclid(SUB) - SUB / 2;
+        off.abs() < SUB / 4
+    };
+    let (odd, even) = if centre_after(4) { (3, 4) } else { (4, 5) };
+    build_until(&mut sim, 0, 6 - odd);
+    assert!(!sim.assign(0, Skill::Blocker));
+    build_until(&mut sim, 0, 6 - even);
+    assert!(sim.assign(0, Skill::Blocker));
+    let l = &sim.lemmings[0];
+    assert_eq!(l.state, State::Blocking);
+    assert_eq!(l.pos[0], start[0] + even as i32 * SUB / 2);
+}
