@@ -550,7 +550,11 @@ pub fn inside_shape(block: BlockCell, l: [f32; 3]) -> bool {
         2 => 1.0 - t < 0.5 * cone,
         3 => t < cone,
         4 => 1.0 - t < cone,
-        5 => t < 1.0 - z,
+        // A 45° ramp in a shorter run keeps its slope, rising from the
+        // run's bottom, and is flat where it reaches the run's top: walkers
+        // reaching it from the side turn there (Fun 17 "Hole in Ten", whose
+        // route bashes through the wedge a blocker stands on; the owner).
+        5 => y - lo < 1.0 - z,
         // A turner standing on the thin edge of the flat top (Taxing 5) must
         // not fall through it.
         6 => y > (lo + (hi - lo) * z).min(hi - RAMP_EDGE),

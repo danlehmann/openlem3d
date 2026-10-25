@@ -486,13 +486,17 @@ pub const SOLUTIONS: &[Solution] = &[
         ),
         saves: 0,
     },
+    // Fun 17 "Hole in Ten", the owner's route: a blocker (and floater) on
+    // the wedge atop the left ramp; the first walker back up that ramp bashes
+    // through the wedge, freeing the blocker, which floats down, is turned
+    // at the stone block and bashes through the foot of the right ramp.
     at(
         16,
         &[
             (112, 0, 0, None),
             (113, 0, 8, None),
-            (1345, 9, 4, None),
-            (2040, 0, 4, None),
+            (860, 1, 4, None),
+            (1530, 0, 4, None),
         ],
     ),
     // The published route (mining round the ring), the release rate raised
@@ -682,16 +686,17 @@ pub const SOLUTIONS: &[Solution] = &[
             (985, 2, 6, None),
         ],
     ),
+    // Taxing 16 "The Arena" by xeye's route: three blocks blown up, then
+    // the walkers turned at the inside of the L-shaped sandstone block and
+    // a bridge built from the top of the small one.
     at(
         55,
         &[
             (110, 0, 2, None),
-            (620, 1, 2, None),
-            (1587, 2, 2, None),
-            (1862, 3, 2, None),
-            (2240, 4, 2, None),
-            (2690, 5, 1, Some(true)),
-            (2770, 6, 3, None),
+            (1260, 1, 2, None),
+            (2160, 2, 2, None),
+            (2603, 3, 1, Some(true)),
+            (2721, 4, 3, None),
         ],
     ),
     // Taxing 17 by the published walkthrough.

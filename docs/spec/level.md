@@ -175,7 +175,7 @@ assuming rotation 0.
 | 0 | Cube |
 | 1 / 2 | Half-height square pyramid, apex up / down (special segment rules) |
 | 3 / 4 | Full-height square pyramid, apex up / down |
-| 5 / 6 | 45° ramp facing +Z/+Y, or +Z/−Y (uses the +Z face texture) |
+| 5 / 6 | 45° ramp facing +Z/+Y, or +Z/−Y (uses the +Z face texture). A 5 with fewer segments keeps its 45° slope, rising from the bottom of the segments, and is flat where it reaches their top, rather than being squeezed into them (**verified** on Fun 17 "Hole in Ten": the half-height wedge atop the left ramp, segments `0011`, shows half a cell of slope and half of flat top in the original; walkers reaching it from the side turn there, and the owner's route bashes through it). Whether 6 does the same, falling from the top, is unchecked |
 | 7 | Vertical 45° deflector wall facing +Z/+X (uses the +Z face texture) |
 | 8 / 9 | 22.5° ramp on the upper / lower two slices. With fewer segments the slope stays ½ unit per cell, falling from the top of the segments (8) or rising from their bottom (9), rather than being squeezed into them (**inferred** from the levels: half-height ramp cells, segments `0011`, sit beside full ones in 26 levels, and only this reading makes each pair one even slope, as in the ramp tubes of Taxing 1 "Spaghetti Junction" and the bridge of Fun 12 "Alpine Assault Course", where a 45° ramp up to height 3 continues into a half-height 22.5° ramp up to 3.5) |
 | 10 / 11 | Outer corner where two 45° ramps meet (top / bottom) |
