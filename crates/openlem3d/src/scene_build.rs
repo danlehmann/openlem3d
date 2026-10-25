@@ -35,6 +35,11 @@ const SEA_MARGIN: f32 = 4000.0;
 /// Practice grass; half the sky's vertical stretch of 150/64).
 const FLOOR_SCALE: f32 = 75.0 / 64.0;
 
+/// How often per second the sea moves by its header water speed in texels:
+/// 17.5, a quarter of the 70 Hz display (measured with a marked 128×128 sea
+/// on Fun 1, 2026-10-25: at speed 4 on either axis it moved 3 tiles in 5.5 s).
+const SEA_DRIFT_STEPS_PER_SECOND: f32 = 17.5;
+
 /// Converts indexed pixels to RGBA; palette index 0 becomes transparent.
 pub fn indexed_to_rgba(pixels: &[u8], width: u32, pal: &Palette) -> RgbaImage {
     glowing_rgba(pixels, width, pal, |_| 0.0)
@@ -1125,8 +1130,9 @@ pub fn build(data: &mut GameData, n: u32, show: Show) -> Result<BuiltLevel, l3d_
                 frames,
             )
         };
-        // The header's water speeds, read as texels per tick (unverified).
-        let per_second = l3d_sim::TICKS_PER_SECOND as f32 / size;
+        // The header's water speeds, in texels per 1/17.5 s (measured with
+        // a marked sea, `docs/spec/camera.md`).
+        let per_second = SEA_DRIFT_STEPS_PER_SECOND / size;
         let drift = [
             level.water_speed_x as f32 * per_second,
             level.water_speed_z as f32 * per_second,

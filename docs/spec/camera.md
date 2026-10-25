@@ -173,24 +173,18 @@ How we verified it:
 - **Sea texture, without the flag:** a 64-wide strip, probably 64×64
   animation frames (unverified). We cycle them at 8 frames per second unless
   the level flag `0x0010` ("sea not animated") is set.
-- **Sea drift (partly verified):** the header's water speeds (`water_speed_x`,
-  `_z`, values −3 to 4, one level −33) are taken as texels per tick, the
-  sea moving against their signs: on `LEVEL.080` (X −1, Z +1, 128×128 sea
-  over 2 units) that is 0.22 units/s towards +X and towards −Z. Observed in
-  the original's Practice "Blocker" demo with the camera still (camera 1,
-  1.75 units above the sea, facing −Z): the near sea slid about 18 px/s
-  right and 5 px/s up on the 640×480 screen, which works out to about
-  +0.2 units/s in X and 0.4–0.9 units/s towards −Z. Directions and the X
-  speed agree; the Z estimate rests on a 2–5 pixel vertical shift of a
-  finely shrunk texture (±30 % or worse) and is not taken as a correction.
-  A second run on `LEVEL.098` (same speeds and sea as `LEVEL.080`; camera 1
-  held still, sea in front of the trampoline row) measured a steady shift of
-  (+13, −7) px per 0.5 s, about 0.5 units/s towards +X (±15 %) and 0.8
-  units/s towards −Z (±35 %). Directions agree again; the X speed disagrees
-  with the first run (0.2), and both runs find Z faster than X although the
-  header gives them equal magnitude. Left unchanged until a cleaner
-  measurement. Whether the sea also changes shape in place stays open (the
-  leftover mismatch grew with time, which perspective could also explain).
+- **Sea drift (verified, 2026-10-25):** the header's water speeds
+  (`water_speed_x`, `_z`, values −3 to 4, one level −33) move the sea by
+  that many texels 17.5 times a second (a quarter of the 70 Hz display),
+  against their signs. Measured with a grid painted into Fun 1's 128×128
+  sea (`cdcopy mark`), speed 4 set on one axis at a time and a camera that
+  sees that axis's drift sideways: in the original the grid lines slid
+  steadily and came back to the same pixels after 5.5 s, 3 tiles, on
+  either axis (0.545 tiles/s, ±1 %); ours, then one step a tick, moved
+  0.437 and now 0.547. X and Z go at the same rate and the directions
+  agree. (Two earlier rough readings off demos had Z 2–4 times faster than
+  X; they rested on a few pixels' vertical shift of a shrunk texture.)
+  Whether the sea also changes shape in place stays open.
 - **Land polygons:** drawn at the same height with the `LAND` texture. Shape
   verified visually in `LEVEL.000`.
   - **Texture scale:** with the level flag `0x0100` ("128×128 land"), one
