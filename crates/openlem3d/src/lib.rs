@@ -896,6 +896,18 @@ pub struct Game {
     pub paused: bool,
     /// Fast-forward: several simulation ticks per tick.
     pub fast_forward: bool,
+    /// Simulation ticks per tick now: 0 paused, 1 normal, up to
+    /// [`FAST_FORWARD_TICKS`]. It rises gradually after a pause and into
+    /// fast-forward, and drops at once (ours).
+    speed: f32,
+    /// Simulation ticks owed at the current speed, under one.
+    tick_credit: f32,
+    /// Each lemming's place before the last tick, for drawing it moving
+    /// smoothly between ticks ([`Game::drawn_pos`]).
+    prev_pos: Vec<[i32; 3]>,
+    /// The way each lemming is drawn facing, turning towards the way it
+    /// faces ([`Game::turn_yaws`]).
+    yaws: Vec<f32>,
     pub save_requirement: u32,
     /// The level's block grid as currently shaped (destructible skills change
     /// it), its block dictionary, and the scene layer showing it.
@@ -955,6 +967,9 @@ impl Replay {
 /// Simulation ticks per tick while fast-forwarding (the original's speed-up
 /// is unmeasured).
 const FAST_FORWARD_TICKS: u32 = 3;
+/// Seconds for the game to reach normal speed after a pause, and again for
+/// fast-forward to reach its speed.
+const SPEED_RAMP_SECONDS: f32 = 0.5;
 
 /// P or Space pauses and resumes the level, and Enter turns fast-forward on
 /// and off (not during the preview, which keeps it waiting itself, nor while
@@ -985,9 +1000,12 @@ fn step_simulation(w: &mut World) {
     }
     let Game {
         sim: Some(sim),
-        paused: false,
+        paused,
         terrain,
         fast_forward,
+        speed,
+        tick_credit,
+        prev_pos,
         replay,
         doors,
         ..
@@ -995,10 +1013,35 @@ fn step_simulation(w: &mut World) {
     else {
         return;
     };
-    for _ in 0..if *fast_forward { FAST_FORWARD_TICKS } else { 1 } {
+    // Speeding up gradually, after a pause and into fast-forward, and
+    // stopping or slowing at once, so the player keeps control; the ticks
+    // are the same ones, so only their pace changes.
+    let target = match (*paused, *fast_forward) {
+        (true, _) => 0.0,
+        (false, false) => 1.0,
+        (false, true) => FAST_FORWARD_TICKS as f32,
+    };
+    let rise =
+        (FAST_FORWARD_TICKS - 1) as f32 / (SPEED_RAMP_SECONDS * l3d_sim::TICKS_PER_SECOND as f32);
+    // Out of a pause straight to normal speed (a gradual start showed
+    // lemmings gliding while their poses stood still, owner).
+    *speed = if target < *speed || *speed < 1.0 {
+        target.min(1.0)
+    } else {
+        (*speed + rise).min(target)
+    };
+    if *paused {
+        return;
+    }
+    *tick_credit += *speed;
+    let ticks = tick_credit.floor() as u32;
+    *tick_credit -= ticks as f32;
+    for _ in 0..ticks {
         if replay.as_mut().is_some_and(|r| !r.feed(sim)) {
             *replay = None;
         }
+        prev_pos.clear();
+        prev_pos.extend(sim.lemmings.iter().map(|l| l.pos));
         sim.step();
         lemming_render::step_doors(doors, sim);
         for &step in &options.assign {
@@ -1025,7 +1068,73 @@ fn step_simulation(w: &mut World) {
     scene.data = Some(Arc::new(rebuilt));
 }
 
+impl Game {
+    /// How far the game is from its last tick to the next, 0 to 1, for
+    /// drawing lemmings between their places; 1 (where they are) in Original
+    /// mode, which moves them in steps as the original did.
+    fn tick_progress(&self, enhanced: bool, overstep: f32) -> f32 {
+        if enhanced {
+            (self.tick_credit + overstep * self.speed).clamp(0.0, 1.0)
+        } else {
+            1.0
+        }
+    }
+
+    /// Where lemming `i` is drawn, in units: between its places before and
+    /// after the last tick, `f` of the way, so that it moves smoothly at
+    /// the screen's frame rate rather than in the simulation's steps (ours).
+    /// One that jumped further than [`SMOOTH_LIMIT`] (a hatch, a teleporter)
+    /// is drawn where it is.
+    fn drawn_pos(&self, sim: &l3d_sim::Simulation, i: usize, f: f32) -> [f32; 3] {
+        let now = sim.lemmings[i].pos;
+        match self.prev_pos.get(i) {
+            Some(before) if (0..3).all(|k| (now[k] - before[k]).abs() <= SMOOTH_LIMIT) => {
+                std::array::from_fn(|k| {
+                    crate::units(before[k]) + (crate::units(now[k]) - crate::units(before[k])) * f
+                })
+            }
+            _ => now.map(crate::units),
+        }
+    }
+}
+
+/// The furthest a lemming moves in a tick and is still drawn moving between
+/// (sub-units): half a unit.
+const SMOOTH_LIMIT: i32 = l3d_sim::SUB / 2;
+/// How fast a lemming is drawn turning, radians per second of game time: a
+/// quarter turn in a quarter of a second, through the diagonal views.
+const TURN_RATE: f32 = std::f32::consts::FRAC_PI_2 / 0.25;
+
+impl Game {
+    /// Turns each lemming's drawn facing towards the way it faces, by `dt`
+    /// seconds of game time at the game's speed (none while paused); at once
+    /// in Original mode, and for lemmings just released.
+    fn turn_yaws(&mut self, enhanced: bool, dt: f32) {
+        use std::f32::consts::{PI, TAU};
+        let Some(sim) = &self.sim else { return };
+        let step = TURN_RATE * dt * self.speed;
+        for (i, l) in sim.lemmings.iter().enumerate() {
+            let target = lemming_render::facing(l).yaw();
+            let Some(yaw) = self.yaws.get_mut(i) else {
+                self.yaws.push(target);
+                continue;
+            };
+            let diff = (target - *yaw + PI).rem_euclid(TAU) - PI;
+            *yaw = if enhanced && diff.abs() > step {
+                (*yaw + step * diff.signum()).rem_euclid(TAU)
+            } else {
+                target
+            };
+        }
+    }
+}
+
 fn update_lemming_sprites(w: &mut World) {
+    let dt = w.e.time.real.delta_secs();
+    w.game.turn_yaws(w.settings.enhanced, dt);
+    let f = w
+        .game
+        .tick_progress(w.settings.enhanced, w.e.time.fixed.overstep_fraction());
     let (game, lemming_cam, highlight) = (&w.game, &w.lemming_cam, &w.highlight);
     let (info, preset, sprites) = (&w.info, &w.preset, &mut w.sprites);
     let Some(sim) = &game.sim else { return };
@@ -1053,8 +1162,17 @@ fn update_lemming_sprites(w: &mut World) {
         .following()
         .filter(|_| cams.clone().all(|c| c.glide.is_none()));
     let blocks = game.terrain.as_ref().map(|(_, blocks, _)| blocks);
+    let drawn: Vec<([f32; 3], f32)> = (0..sim.lemmings.len())
+        .map(|i| {
+            (
+                game.drawn_pos(sim, i, f),
+                game.yaws.get(i).copied().unwrap_or(0.0),
+            )
+        })
+        .collect();
     *sprites = lemming_render::build(
         sim,
+        &drawn,
         blocks,
         scene_build::ATLAS_ROWS,
         yaw,
@@ -1111,6 +1229,9 @@ pub(crate) fn load_level(w: &mut World) {
     let preset = opts.camera.filter(|c| (1..=4).contains(c)).unwrap_or(1) - 1;
     w.preset.set(preset);
     game.fast_forward = false;
+    (game.speed, game.tick_credit) = (1.0, 0.0);
+    game.prev_pos.clear();
+    game.yaws.clear();
     game.paused = false;
     // A restart starts afresh: not riding along, nothing highlighted.
     w.lemming_cam = lemming_cam::LemmingCam::Off;

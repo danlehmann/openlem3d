@@ -1168,12 +1168,28 @@ fn camera_markers(b: &mut LayerBuilder, markers: &[CameraMarker], viewer_yaw: f3
     }
 }
 
+/// The way a lemming's sprite faces. A turner stands facing the walkers
+/// coming up behind it, the way it came (seen in the original's "Turner"
+/// demo; drawn the other way, turners showed their backs to the cameras of
+/// "Take a Dive"). A blocker stands side-on, its outstretched arms pointing
+/// back the way it came and on the way it was going (owner's observation).
+pub fn facing(l: &l3d_sim::Lemming) -> l3d_sim::Dir {
+    match l.state {
+        State::Turning { .. } => l.dir.reverse(),
+        State::Blocking => l.dir.clockwise(),
+        _ => l.dir,
+    }
+}
+
 /// Builds this frame's lemming sprites for a camera facing `camera_yaw`,
 /// leaving out lemming `eyes`, the one the view looks out of, and marking
 /// lemming `highlight` with an arrow; and the other cameras' markers.
+/// `drawn` is where each lemming is drawn, in units, and the way it faces
+/// (see `Game::drawn_pos` and `Game::turn_yaws`).
 #[allow(clippy::too_many_arguments)]
 pub fn build(
     sim: &Simulation,
+    drawn: &[([f32; 3], f32)],
     blocks: Option<&BlockSet>,
     atlas_rows: u32,
     camera_yaw: f32,
@@ -1221,17 +1237,9 @@ pub fn build(
         .enumerate()
         .filter(|(i, l)| !l.gone && l.state != State::Trapped && Some(*i) != eyes)
     {
-        // A turner stands facing the walkers coming up behind it, the way it
-        // came (seen in the original's "Turner" demo; drawn the other way,
-        // turners showed their backs to the cameras of "Take a Dive").
-        // A blocker stands side-on, its outstretched arms pointing back the
-        // way it came and on the way it was going (owner's observation).
-        let facing = match l.state {
-            State::Turning { .. } => l.dir.reverse(),
-            State::Blocking => l.dir.clockwise(),
-            _ => l.dir,
-        };
-        let view = ViewAngle::from_yaws(facing.yaw(), camera_yaw);
+        let facing = facing(l);
+        let yaw = drawn.get(i).map_or(facing.yaw(), |d| d.1);
+        let view = ViewAngle::from_yaws(yaw, camera_yaw);
         let (cell, mirror) = match l.state {
             // The stored turner points to its right (cells 30–36, seen from
             // the front, hold out the lemming's right arm); one pointing
@@ -1302,7 +1310,7 @@ pub fn build(
         } else {
             [cx as f32, cy as f32, size, size]
         };
-        let mut anchor = l.pos.map(crate::units);
+        let mut anchor = drawn.get(i).map_or(l.pos.map(crate::units), |d| d.0);
         // On a rope slide the raised hand, at the top of the cell, holds the
         // rope (owner's picture).
         if matches!(l.state, State::OnRope { .. }) {
