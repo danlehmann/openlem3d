@@ -386,6 +386,20 @@ fn shape_y(shape: u8, v: f32, y0: f32, y1: f32) -> f32 {
     }
 }
 
+/// The (unnormalised) normal of planar polygon `verts` by Newell's method,
+/// from all its corners: a polygon clipped at a cut can start with three
+/// corners on a line, whose cross product is zero.
+fn polygon_normal(verts: &[[f32; 3]]) -> [f32; 3] {
+    let mut n = [0.0; 3];
+    for (i, a) in verts.iter().enumerate() {
+        let b = verts[(i + 1) % verts.len()];
+        n[0] += (a[1] - b[1]) * (a[2] + b[2]);
+        n[1] += (a[2] - b[2]) * (a[0] + b[0]);
+        n[2] += (a[0] - b[0]) * (a[1] + b[1]);
+    }
+    n
+}
+
 /// The part of planar convex polygon `poly` at or below height `h` (or, not
 /// `below`, at or above it); the points where its edges cross that height
 /// are added to `crossings`.
@@ -485,18 +499,13 @@ impl MeshData {
         both_sides: bool,
         anim: [f32; 2],
     ) {
-        let n = {
-            let (a, b, c) = (verts[0], verts[1], verts[2]);
-            let u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
-            let v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
-            let n = [
-                u[1] * v[2] - u[2] * v[1],
-                u[2] * v[0] - u[0] * v[2],
-                u[0] * v[1] - u[1] * v[0],
-            ];
-            let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt().max(1e-6);
-            n.map(|c| c / len)
-        };
+        let n = polygon_normal(verts);
+        let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+        // A face a cut has left without area (a ramp's thin end).
+        if len < 1e-6 {
+            return;
+        }
+        let n = n.map(|c| c / len);
         let color = [brightness, brightness, brightness, 1.0];
         for side in 0..if both_sides { 2 } else { 1 } {
             let base = self.positions.len() as u32;
@@ -665,14 +674,7 @@ pub fn build(
                     continue;
                 }
                 // Wind the polygon counter-clockwise as seen from outside.
-                let (a, b, c) = (verts[0], verts[1], verts[2]);
-                let u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
-                let v = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
-                let n = [
-                    u[1] * v[2] - u[2] * v[1],
-                    u[2] * v[0] - u[0] * v[2],
-                    u[0] * v[1] - u[1] * v[0],
-                ];
+                let n = polygon_normal(&verts);
                 let pc = {
                     let k = verts.len() as f32;
                     let s = verts.iter().fold([0.0; 3], |acc, q| {
