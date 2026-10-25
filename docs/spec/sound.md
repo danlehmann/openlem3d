@@ -35,8 +35,8 @@ the source for these (unverified in play):
 | `VOXFX/LETSGO1` | Start of a level |
 | `VOXFX/OK2`, `UH_UH1` | A lemming takes a skill, or can't |
 | `VOXFX/OHNO1` | About to blow up |
-| `VOXFX/DROWN1`, `SPOTFX/SPLASH` | A lemming drowns / falls into water |
-| `VOXFX/WOUNDED1` | A lemming splats |
+| `VOXFX/DROWN1`, `SPOTFX/SPLASH` | A lemming drowns / falls into water (recorded: drowning in mud or the sea plays `DROWN1` only) |
+| `VOXFX/WOUNDED1` | A lemming splats (recorded; `VOXFX/FALLER3` screams before the landing, see behaviour.md, "Deaths") |
 | `SPOTFX/EXPLOSN3` | A lemming blows up |
 | `VOXFX/YIPPEE1` | A lemming reaches the exit |
 | `SPOTFX/FANFARE` | Enough lemmings have exited |
@@ -47,8 +47,8 @@ the source for these (unverified in play):
 | `SPOTFX/SUCKER2` | Climbing |
 | `SPOTFX/BROLLY1` | An umbrella opens |
 | `SPOTFX/BOING1`, `CTAPULT1`, `TELEPORT` | Trampoline, catapult, teleporter |
-| `SPOTFX/FLAMETHR`, `MANTRAP1`, `CRACKLE2` | Flame-blower, man trap, laser trap |
-| `SPOTFX/LIGHTNG` | A lemming leaves the level (lightning) |
+| `SPOTFX/FLAMETHR`, `MANTRAP1`, `CRACKLE2` | Flame-blower, man trap, laser trap (recorded: the squasher and the bear trap play `MANTRAP1`, the weird trap nothing; `CRACKLE2` also for a lemming electrocuted by liquid) |
+| `SPOTFX/LIGHTNG` | A lemming leaves the level (lightning; recorded at the kill boundary) |
 | `SPOTFX/TICK1` | Time running out |
 | `SPOTFX/SCALE` | Lemming view or highlight beep |
 | `VOXFX/GEDDON1` | Armageddon (nuke) clicked |

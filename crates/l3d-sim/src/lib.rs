@@ -423,6 +423,9 @@ pub enum State {
     Drowning,
     /// Killed by the level boundary (the original shows a lightning zap).
     Zapped,
+    /// Killed by electric liquid (header flag `0x8000`): no storm cloud,
+    /// unlike [`State::Zapped`] (verified, `docs/spec/behaviour.md`, "Deaths").
+    Electrocuted,
     /// Caught by a trap; the trap's own animation shows the death.
     Trapped,
     /// Hanging from a rope slide, riding towards its far end (feet
@@ -478,6 +481,7 @@ impl State {
                 | State::Splatting
                 | State::Drowning
                 | State::Zapped
+                | State::Electrocuted
                 | State::Trapped
         )
     }
@@ -608,6 +612,7 @@ pub enum Event {
     Splatted,
     Exploded,
     Zapped,
+    Electrocuted,
     Trapped,
     Climbed,
     UmbrellaOpened,
@@ -1043,6 +1048,7 @@ impl Simulation {
                 State::Splatting => Some(Event::Splatted),
                 State::Exploding => Some(Event::Exploded),
                 State::Zapped => Some(Event::Zapped),
+                State::Electrocuted => Some(Event::Electrocuted),
                 State::Trapped => Some(Event::Trapped),
                 State::Climbing => Some(Event::Climbed),
                 State::Floating => Some(Event::UmbrellaOpened),
@@ -1176,7 +1182,11 @@ impl Simulation {
                     l.set_state(State::Walking);
                 }
             }
-            State::Exploding | State::Splatting | State::Drowning | State::Zapped => {
+            State::Exploding
+            | State::Splatting
+            | State::Drowning
+            | State::Zapped
+            | State::Electrocuted => {
                 let ticks = if l.state == State::Exploding {
                     EXPLODE_TICKS
                 } else {
@@ -1901,7 +1911,7 @@ impl Simulation {
     /// block top: it drowns, unless the level makes liquid electric.
     fn sunk(&self) -> State {
         if self.world.liquid_zaps {
-            State::Zapped
+            State::Electrocuted
         } else {
             State::Drowning
         }

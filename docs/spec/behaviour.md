@@ -389,11 +389,17 @@ and "Teleporter" use 8, 4, 3 and 5, which agrees.
 
 | Cause | Result |
 |---|---|
-| Landing in water outside land polygons, or on a block flagged liquid | Drowning (walking off the land: verified). On levels with header flag `0x8000` liquid zaps instead (verified for the sea by the owner on Mayhem 11 "Across the Network": walkers going off the land are electrocuted; ours zaps on that level's electric floor, liquid block tops, too, unverified) |
-| Landing after a fall longer than the splat height | Splat, unless the block is flagged "no splat". The lemming vanishes in a burst of blue fragments (verified; the owner too: it bursts into many pieces, no body left lying). Drawn as 40 bits of the smock flying out over the 14-tick death (count, speeds ours) |
-| Leaving the kill boundary (header `0x153`) or rising above the kill ceiling | Zapped |
+| Landing in water outside land polygons, or on a block flagged liquid | Drowning: the lemming sinks with its arms up and is gone about 11 ticks after it steps in; `VOXFX/DROWN1` plays, not `SPLASH` (recorded, mud and sea). On levels with header flag `0x8000` liquid electrocutes instead, the sea and liquid block tops alike (recorded on a changed Practice "Mud", 2026-10-24, the mud and, with the land cut back, the sea; the owner saw it on Mayhem 11 "Across the Network" and in the mud of Fun 15 "The M-A-Z-E"): an X-ray skeleton flash of about 4 ticks, then a grey smoke puff that shrinks away over about 8 ticks, no storm cloud; `SPOTFX/CRACKLE2` plays |
+| Landing after a fall longer than the splat height | Splat, unless the block is flagged "no splat". The lemming bursts and leaves no body (verified; the owner too). Recorded (a changed Practice "Mud" with the hatch at layer 6, 2026-10-24): the landed lemming swells and bursts into about eight swollen lemmings (like the bomber's swollen frames) that fly up and out in arcs and fall back; `VOXFX/FALLER3` (a scream) starts about 8 ticks before the landing, after a fall of about 3.6 units or 17 ticks, and `VOXFX/WOUNDED1` plays on landing. Ours draws 40 bits of the smock (provisional) and does not scream yet |
+| Leaving the kill boundary (header `0x153`) or rising above the kill ceiling | Zapped: a storm cloud about three lemmings wide gathers over it, yellow bolts strike several times over about 1.5 s with an X-ray skeleton flash at each, then the same smoke puff as electrocution; `SPOTFX/LIGHTNG` plays (recorded at the boundary) |
+| A killing trap (header `0x114`; recorded on a changed Practice "Mud", 2026-10-24) | Flame blower (0): the lemming rises on a small jet of flame and shrinks away upwards, `SPOTFX/FLAMETHR`. Squasher (1): it slams down within a tick and rises over about 8, leaving a flattened lemming that shrinks away, `SPOTFX/MANTRAP1`. Bear trap (2): the jaws snap shut within a tick and open over about 8, the same remnant, `SPOTFX/MANTRAP1`. Weird trap (6): the lemming sinks into the ground beside a small black object over about 10 ticks, silently. Laser (7): as electrocution, skeleton flash then smoke, `SPOTFX/CRACKLE2` |
 
 Each death animation lasts about 1 s (provisional).
+
+The original plays its samples at the Sound Blaster's rates, 1 MHz / *n*:
+22050 Hz samples play at 22222 Hz. Recordings of the original match the
+samples only when resampled that way (`DROWN1` correlates at 0.99–1.00;
+without it, 0.5).
 
 ## When a skill starts (measured)
 

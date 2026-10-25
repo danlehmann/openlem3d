@@ -144,16 +144,20 @@ pub(crate) fn sim_events(w: &mut World) {
         sounds.fanfare_played = false;
     }
     for e in sim.take_events() {
+        use l3d_sim::objects::ObjectKind;
         let name = match e {
             Event::Exited => "VOXFX/YIPPEE1",
-            Event::Drowned => "SPOTFX/SPLASH",
+            Event::Drowned => "VOXFX/DROWN1",
             Event::Splatted => "VOXFX/WOUNDED1",
             Event::Exploded => "SPOTFX/EXPLOSN3",
             Event::Zapped => "SPOTFX/LIGHTNG",
+            Event::Electrocuted => "SPOTFX/CRACKLE2",
             Event::Trapped => match sim.object_kind {
-                Some(l3d_sim::objects::ObjectKind::FlameBlower) => "SPOTFX/FLAMETHR",
-                Some(l3d_sim::objects::ObjectKind::Laser) => "SPOTFX/CRACKLE2",
-                _ => "SPOTFX/MANTRAP1",
+                Some(ObjectKind::FlameBlower) => "SPOTFX/FLAMETHR",
+                Some(ObjectKind::Laser) => "SPOTFX/CRACKLE2",
+                Some(ObjectKind::Squasher | ObjectKind::BearTrap) => "SPOTFX/MANTRAP1",
+                // The weird trap is silent (recorded in the original).
+                _ => continue,
             },
             Event::Climbed => "SPOTFX/SUCKER2",
             Event::UmbrellaOpened => "SPOTFX/BROLLY1",

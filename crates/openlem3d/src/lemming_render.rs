@@ -251,7 +251,7 @@ fn anim_for(state: State) -> Anim {
         // Lying still on the back, feet up (cells 429–443, the first frame:
         // owner's observation, no animation; see `build`).
         State::Stunned => once(429, 3, Five),
-        State::Zapped | State::Trapped => anim(514, 2, Five),
+        State::Zapped | State::Electrocuted | State::Trapped => anim(514, 2, Five),
         // Reaching up the wall and pulling the knees up (cells 121–160).
         State::Climbing => anim(121, 8, Five),
         // Standing on the pad facing the camera (observed); see `build`.

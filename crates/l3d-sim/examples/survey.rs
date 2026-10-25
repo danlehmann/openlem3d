@@ -43,6 +43,7 @@ fn main() {
                         State::Splatting => "splat",
                         State::Drowning => "drown",
                         State::Zapped => "zapped",
+                        State::Electrocuted => "electrocuted",
                         State::Exploding => "blown",
                         State::Trapped => "trapped",
                         _ => "other",
