@@ -55,6 +55,9 @@ pub struct World {
     /// digging out and the ticks it had spent on them. The cracks stay, and
     /// a digger there later carries on from them.
     pub dig_wear: Vec<([i32; 3], u8, u32)>,
+    /// Segments a miner left part cracked, as [`World::dig_wear`] (the
+    /// ticks since the cracks began); only the cracks stay.
+    pub mine_wear: Vec<([i32; 3], u8, u32)>,
 }
 
 /// A builder's brick: a box from `min` (inclusive) to `max` (exclusive)
@@ -127,6 +130,7 @@ impl World {
             bricks: Vec::new(),
             bricks_changed: false,
             dig_wear: Vec::new(),
+            mine_wear: Vec::new(),
             common_id,
         }
     }
@@ -158,6 +162,7 @@ impl World {
             return bricks_removed;
         }
         self.dig_wear.retain(|w| w.0 != c);
+        self.mine_wear.retain(|w| w.0 != c);
         cell.block.segments &= !mask;
         let i = index(c[0] as usize, c[1] as usize, c[2] as usize);
         self.cells[i] = (cell.block.segments != 0).then_some(cell);

@@ -247,6 +247,18 @@ brick, or is shrugging, can be given more bricks (provisional, as in the 2D
 games; otherwise only a few ticks between its last brick and stepping off
 the staircase allow it, while Fun 10 "Castle Lemmalot" needs it).
 
+**A miner takes a turner, but not where it stands (owner, Fun 18 "Corkscrew
+Digger", 2026-10-25).** Between blocks, walking down the cell it has carved,
+it takes it as a walker does: it stands at the end of that cell, in front of
+the next block. While cracking a block it walks on and becomes the turner at
+the first cell edge it reaches after passing a cell's middle: from the top,
+or after one block, it walks over the cracked block and turns at that
+block's far edge. Deeper down, where it cannot walk on, it turns round, walks
+back and stands at the edge behind it, pointing to the other side than the
+one chosen: the side stays relative to the lemming. The cracks it made stay
+on the block.
+Ours does exactly this; diggers and bashers given a turner were not tried.
+
 **A turner takes two clicks (verified).** The first click on a lemming (with
 the turner selected) puts a white arrow over it; the lemming keeps walking
 and the arrow follows it. A second click, with the pointer moved to one side

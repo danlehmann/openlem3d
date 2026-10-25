@@ -818,6 +818,17 @@ fn side_cracks(
 /// original shows both, owner's observation; timing, counts and speeds
 /// ours, after the basher's).
 fn mine_effects(b: &mut LayerBuilder, sim: &Simulation, blocks: Option<&BlockSet>, tex: [f32; 2]) {
+    // The cracks a miner left when it was switched part way (they stay).
+    for &(cell, mask, t) in &sim.world.mine_wear {
+        draw_cracks(
+            b,
+            sim,
+            cell,
+            mask,
+            t * CRACK_FRAMES / (l3d_sim::MINE_CRACK_TICKS - 1),
+            tex,
+        );
+    }
     for (i, l) in sim.lemmings.iter().enumerate().filter(|(_, l)| !l.gone) {
         let Some((cells, t)) = sim.mine_target(l) else {
             continue;

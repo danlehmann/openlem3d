@@ -537,6 +537,10 @@ pub struct Lemming {
     /// A builder switched from a digger: it walks to the far edge of its
     /// cell before building, whatever is there.
     pub build_at_edge: bool,
+    /// A turner given to a miner: its heading then, and whether it has
+    /// since passed a cell's middle. It walks on and takes the turner at the
+    /// first cell edge after a middle, the side kept relative to its heading.
+    pub turn_from: Option<(Dir, bool)>,
 }
 
 impl Lemming {
@@ -557,6 +561,7 @@ impl Lemming {
             pending: None,
             bash_walk_ticks: 0,
             build_at_edge: false,
+            turn_from: None,
         }
     }
 
@@ -865,6 +870,18 @@ impl Simulation {
             let digger = self.lemmings[i].clone();
             self.leave_dig(&digger);
         }
+        // A miner switched part way through cracking the block ahead leaves
+        // its cracks on it (the owner: they vanished in ours, and stay in
+        // the original).
+        let cracking = self.mine_target(&self.lemmings[i]).is_some();
+        if let Some((cells, t)) = self.mine_target(&self.lemmings[i])
+            && t > 0
+        {
+            for (c, mask) in cells {
+                self.world.mine_wear.retain(|w| w.0 != c);
+                self.world.mine_wear.push((c, mask, t));
+            }
+        }
         let l = &mut self.lemmings[i];
         // A builder still building given more carries on with the same
         // staircase, its bricks topped up: starting a new one where it
@@ -912,6 +929,19 @@ impl Simulation {
         // 2026-10-24: given over the drop, it stood at the staircase's end
         // and did not fall; the owner on Fun 9: given while it still
         // climbed its step, it stood at the step's end).
+        // A miner given a turner becomes a walker with it: between blocks,
+        // as any walker, it turns at the end of its cell; while cracking a
+        // block it walks on, over that block, and turns at the first cell
+        // edge after a cell's middle, at a wall turning round first, the
+        // side kept relative to it (the owner on Fun 18 "Corkscrew Digger",
+        // 2026-10-25).
+        if skill == Skill::Turner && l.state == State::Mining {
+            if cracking {
+                l.turn_from = Some((l.dir, false));
+            }
+            l.set_state(State::Walking);
+            return true;
+        }
         // A digger, basher or miner given a blocker or turner stops work and
         // stands where it is (provisional).
         if matches!(l.state, State::Digging | State::Bashing | State::Mining) {
@@ -1321,12 +1351,16 @@ impl Simulation {
                     // ahead; bashers stay put, their stroke reaching the wall
                     // either way). A builder turns and walks back to the
                     // middle (ours).
+                    // A miner's turner not yet past a cell's middle turns
+                    // round instead (see `Lemming::turn_from`).
                     if l.state == State::Walking
                         && l.dir == dir.reverse()
                         && !to_middle
+                        && !matches!(l.turn_from, Some((_, false)))
                         && let Some(s) = l.pending.take()
                     {
                         l.dir = dir;
+                        l.turn_from = None;
                         let at = Self::mine_stand(l.pos, d);
                         if s == State::Mining
                             && Self::to_edge(l.pos, d) > MINE_STANDOFF
@@ -1483,6 +1517,28 @@ impl Simulation {
         let at_mid = |v: i32, step: i32| {
             step == 0 || ((v - mid(v)) * step <= 0 && (v + step * WALK_SPEED - mid(v)) * step >= 0)
         };
+        if let (Some((from, past)), State::Turning { to }) = (l.turn_from, s) {
+            if !past {
+                if at_mid(l.pos[0], d[0]) && at_mid(l.pos[2], d[2]) {
+                    l.turn_from = Some((from, true));
+                }
+                return false;
+            }
+            if to_edge > WALK_SPEED {
+                return false;
+            }
+            l.pos = ahead_of(l.pos, d, to_edge - 1);
+            let right = to == from.clockwise();
+            let to = if right {
+                l.dir.clockwise()
+            } else {
+                l.dir.anticlockwise()
+            };
+            l.turn_from = None;
+            l.pending = None;
+            l.set_state(State::Turning { to });
+            return true;
+        }
         if l.build_at_edge {
             if to_edge > WALK_SPEED {
                 return false;
