@@ -7,12 +7,7 @@ Each names where it shows up, so a run can go straight there.
 ## Mechanics
 
 - **Trampolines:** the largest hop, what blue pads do (inferred: shorten the next hop), and how a drop onto a pad picks its hop (inferred: the shortest one rising higher than the drop).
-- **Turned walkers.** Whether walkers turn at a turner's arm's length or on
-  its line (we use its line; Practice "Claustrophobic" needs that). In the
-  original's "Turner" demo walkers bunched up and turned about one path
-  width (≈1 unit, by screen distance) before the turner, never reaching its
-  line; the turner's exact cell was not pinned down.
-- **Turner pose.** In the same demo the turner was seen side on, facing the
+- **Turner pose.** In the original's "Turner" demo the turner was seen side on, facing the
   walkers coming towards it, one arm straight out along its facing, while
   the walkers turned to its own left (one view; medium confidence). Ours
   draws the turner turned round to face the way it came (the walkers
