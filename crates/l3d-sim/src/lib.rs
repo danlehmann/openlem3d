@@ -797,9 +797,13 @@ impl Simulation {
             Skill::Bomber => l.fuse.is_none(),
             // Not to a climber on its wall: there a digger is refused and
             // not paid for (verified by the owner on "Candyland Climber").
+            // Diggers, bashers and miners take them too, where they work (the
+            // owner: a miner takes a turner in the original; the others and
+            // where it then stands are provisional).
             Skill::Blocker => {
                 l.pending.is_none()
                     && (l.state == State::Walking
+                        || matches!(l.state, State::Digging | State::Bashing | State::Mining)
                         || matches!(l.state, State::Building { .. } | State::Shrugging)
                             && l.centred(l.step_end()))
             }
@@ -811,6 +815,7 @@ impl Simulation {
             Skill::Turner => {
                 l.pending.is_none()
                     && (l.state == State::Walking
+                        || matches!(l.state, State::Digging | State::Bashing | State::Mining)
                         || matches!(l.state, State::Building { .. } | State::Shrugging)
                             && l.centred(l.step_end()))
             }
@@ -898,6 +903,23 @@ impl Simulation {
         // 2026-10-24: given over the drop, it stood at the staircase's end
         // and did not fall; the owner on Fun 9: given while it still
         // climbed its step, it stood at the step's end).
+        // A digger, basher or miner given a blocker or turner stops work and
+        // stands where it is (provisional).
+        if matches!(l.state, State::Digging | State::Bashing | State::Mining) {
+            match skill {
+                Skill::Blocker => {
+                    l.set_state(State::Blocking);
+                    return true;
+                }
+                Skill::Turner => {
+                    l.set_state(State::Turning {
+                        to: l.dir.anticlockwise(),
+                    });
+                    return true;
+                }
+                _ => {}
+            }
+        }
         // A blocker likewise (verified by the owner on Fun 13, 2026-10-24).
         if skill == Skill::Blocker && matches!(l.state, State::Building { .. } | State::Shrugging) {
             l.pos = l.step_end();

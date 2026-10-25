@@ -237,7 +237,10 @@ fits this too: there the first brick met the hole's far wall). The cracks of a s
 makes a digger a builder too; with ½-unit bricks our simulation of it no
 longer saves the 78 needed (open). Implemented as such; a basher or miner
 switched to starts where it stands (ours). Blockers and turners are given
-only to walkers and builders (below): a blocker or a turner given a miner, basher or digger
+to walkers and builders (below), and to diggers, bashers and miners at work,
+which stop and stand where they are (the owner: a miner takes a turner in the
+original; the other four combinations and where the lemming then stands are
+provisional), but not the reverse: a blocker or a turner given a miner, basher or digger
 stayed as it was and the count did not drop (**verified with a changed
 level**, 2026-10-23). A builder that has laid its last
 brick, or is shrugging, can be given more bricks (provisional, as in the 2D
