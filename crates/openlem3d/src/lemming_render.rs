@@ -127,13 +127,13 @@ enum Angles {
     /// view faces screen-left (verified by eye on the walker, cells 12–17,
     /// and the ¾ views 6–11 and 18–23); the right-hand angles mirror them.
     Five,
-    /// Eight blocks going round the lemming from the front by its right
-    /// (asymmetric poses; the floater's order is unverified).
-    Eight,
+
     /// Eight blocks going round the lemming from the front by its left, as
     /// the turner's: its block 2 (cells 44–50) faces screen-left and block 6
     /// (72–78) screen-right, the pointing arm towards the camera (verified
-    /// by eye).
+    /// by eye); the floater's too (its block 1, 301–305, looks and swings
+    /// its legs to screen-left; the other order showed a floater facing away
+    /// from where it then walked, owner's observation).
     EightByLeft,
     /// One block, the same from every side (smoke, sparks).
     One,
@@ -223,7 +223,7 @@ fn anim_for(state: State) -> Anim {
         // The puff of smoke left by the blast; the swelling before it is
         // drawn from the fuse (see `build`).
         State::Exploding => once(534, 4, One),
-        State::Floating => ping_pong(296, 5, Eight),
+        State::Floating => ping_pong(296, 5, EightByLeft),
         // Arms spread on ice: the pose with arms spread and one leg kicking
         // up, played as a ping-pong (both verified: a lemming sliding away
         // from the camera matched cells 558–562, the back view, in this
@@ -236,7 +236,7 @@ fn anim_for(state: State) -> Anim {
         },
         // Hanging from the handle by one raised hand: the floater's pose
         // (owner's picture of the original).
-        State::OnRope { .. } => ping_pong(296, 5, Eight),
+        State::OnRope { .. } => ping_pong(296, 5, EightByLeft),
         State::Flying { .. } | State::Bouncing { .. } => Anim {
             first: 399,
             frames: 5,
@@ -273,7 +273,6 @@ fn cell_for(a: Anim, view: ViewAngle, ticks: u32) -> (u32, bool) {
         Playback::Cycle(cycle) => (cycle[step as usize % cycle.len()], false),
     };
     let (block, mirror) = match a.angles {
-        Angles::Eight => (view.round_index(), false),
         Angles::EightByLeft => ((8 - view.round_index()) % 8, false),
         Angles::One => (0, false),
         Angles::Five => {
