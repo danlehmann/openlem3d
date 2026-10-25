@@ -29,6 +29,11 @@ mod level_flags {
 
 /// How far the sea plane extends beyond the grid, in grid units.
 const SEA_MARGIN: f32 = 4000.0;
+/// How much bigger the original draws the land and sea textures than whole
+/// grid units: 75/64 (measured with marked textures in the original,
+/// 2026-10-25: 2.34–2.36 times our old 2-unit sea on Fun 1, 1.17 times the
+/// Practice grass; half the sky's vertical stretch of 150/64).
+const FLOOR_SCALE: f32 = 75.0 / 64.0;
 
 /// Converts indexed pixels to RGBA; palette index 0 becomes transparent.
 pub fn indexed_to_rgba(pixels: &[u8], width: u32, pal: &Palette) -> RgbaImage {
@@ -1097,12 +1102,13 @@ pub fn build(data: &mut GameData, n: u32, show: Show) -> Result<BuiltLevel, l3d_
     {
         // With the "128×128" flag the 16 KB file is one 128×128 texture;
         // otherwise it is a 64-wide strip of 64×64 frames, which animate
-        // unless the level says the sea is still. Texel density matches block
-        // faces, 64 per grid unit (unverified).
+        // unless the level says the sea is still. The sea has the land's
+        // density, whatever the half-scale flag, times [`FLOOR_SCALE`]
+        // (measured with marked textures, `docs/spec/camera.md`).
         let (img, tile, size, frames) = if flags & level_flags::SEA_128 != 0 {
             (
                 indexed_to_rgba(&sea[..(128 * 128).min(sea.len())], 128, &pal),
-                2.0,
+                4.0 * FLOOR_SCALE,
                 128.0,
                 1,
             )
@@ -1114,7 +1120,7 @@ pub fn build(data: &mut GameData, n: u32, show: Show) -> Result<BuiltLevel, l3d_
             };
             (
                 indexed_to_rgba(&sea[..(64 * 64 * frames as usize).min(sea.len())], 64, &pal),
-                1.0,
+                2.0 * FLOOR_SCALE,
                 64.0,
                 frames,
             )
@@ -1136,13 +1142,13 @@ pub fn build(data: &mut GameData, n: u32, show: Show) -> Result<BuiltLevel, l3d_
         && let Ok(land) = data.gfx("LAND", level.land_gfx)
     {
         // With the "128" flag the file is one 128×128 texture spanning 4 grid
-        // units (verified visually on Mayhem 6 and Fun 1); without it, a strip
-        // of 64×64 textures, each spanning 2 units, chosen per polygon
-        // (`docs/spec/graphics.md`).
+        // units; without it, a strip of 64×64 textures, each spanning 2 units,
+        // chosen per polygon (`docs/spec/graphics.md`); both times
+        // [`FLOOR_SCALE`].
         let (size, mut tile) = if flags & level_flags::LAND_128 != 0 {
-            (128, 4.0)
+            (128, 4.0 * FLOOR_SCALE)
         } else {
-            (64, 2.0)
+            (64, 2.0 * FLOOR_SCALE)
         };
         if flags & level_flags::LAND_HALF_SCALE != 0 {
             tile /= 2.0;

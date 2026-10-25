@@ -129,7 +129,7 @@ The sky is a flat backdrop, not part of the 3D scene:
 - **Vertical extent:** the whole 64-row `SKY` image is stretched to fill the
   screen from the top edge down to the horizon (about 150 rows, a scale of
   about 2.34).
-- **Horizontal scale:** each sky texel is drawn 2 screen pixels wide.
+- **Horizontal scale:** each sky texel is drawn 2 screen pixels wide, in the original's 3D view, 640×400 (**verified with a marked sky**, 2026-10-25: a stripe painted every 64 texels showed 128 pixels apart, in all four directions on Fun 1 and on Practice "Blocker"; ours had scaled it to a 480-row screen, 1.67 pixels a texel).
 - **Panning:** turning the camera pans the image horizontally, and the
   1024-texel image wraps once per full turn. The sky therefore moves more
   slowly across the screen than the 3D world does.
@@ -169,7 +169,7 @@ How we verified it:
   - Verified visually in `LEVEL.000`: read this way, the sea shows the
     original's even noise pattern. Read as 64-wide frames, it showed a
     visible tile grid.
-  - Our density of 64 texels per grid unit is unverified.
+  - **Scale (verified with marked textures, 2026-10-25):** the sea has the land's density whatever the half-scale flag `0x0800`, and every floor texture is 75/64 bigger than whole grid units: a 128×128 sea or land spans 4 × 75/64 units, a 64×64 one 2 × 75/64 (land with `0x0800`: half that). Painted with a grid and read off screenshots of the original and of ours from the same cameras, the tile lines then fell within a pixel or two at every depth (before: ours 2.34 times too fine for the sea, 1.17 for the land). 75/64 is half the sky's vertical stretch of 150/64.
 - **Sea texture, without the flag:** a 64-wide strip, probably 64×64
   animation frames (unverified). We cycle them at 8 frames per second unless
   the level flag `0x0010` ("sea not animated") is set.
@@ -194,7 +194,7 @@ How we verified it:
 - **Land polygons:** drawn at the same height with the `LAND` texture. Shape
   verified visually in `LEVEL.000`.
   - **Texture scale:** with the level flag `0x0100` ("128×128 land"), one
-    128×128 texture spans 4 grid units. Verified visually: the circuit-board
+    128×128 texture spans 4 grid units (times 75/64, see the sea's scale above). Verified visually: the circuit-board
     floor of `LEVEL.065` and the grass of `LEVEL.000` match the original at
     that scale; half of it was clearly too fine.
   - **Without the flag:** the file is a strip of 64×64 textures, each

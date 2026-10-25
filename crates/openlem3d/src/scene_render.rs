@@ -630,7 +630,10 @@ fn prepare(
     headroom: f32,
 ) {
     let (w, h) = gpu.target_size;
-    let scale = h as f32 / 480.0;
+    // The original's 3D view is 400 rows tall (its 640×400 mode); its sky
+    // texels are 2 of those pixels wide (measured with a marked sky,
+    // 2026-10-25: stripes 64 texels apart 128 pixels apart).
+    let scale = h as f32 / 400.0;
     let mut uniforms = camera.view_proj.to_cols_array().to_vec();
     // The sky's left-edge column is given for a 640-wide screen; wider
     // screens show more sky around the same centre.

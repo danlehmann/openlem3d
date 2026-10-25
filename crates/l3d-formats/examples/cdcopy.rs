@@ -36,6 +36,8 @@ fn main() {
             let from: u32 = from.parse().expect("level number");
             level(dir, n, from, &args[3..]);
         }
+        "mark" => mark(dir, &args[2..], true),
+        "unmark" => mark(dir, &args[2..], false),
         a => panic!("unknown command {a}"),
     }
 }
@@ -76,8 +78,14 @@ fn level(dir: &Path, n: u32, from: u32, edits: &[String]) {
 /// Writes `bytes` as file `LEVELS/name`, unpacked, to the end of the copy and
 /// points its directory record there.
 fn put(dir: &Path, data: &mut GameData, name: &str, bytes: &[u8]) {
-    // The directory record of the file, in the LEVELS directory's extent.
-    let levels = data.fs.lookup("LEVELS").unwrap();
+    put_in(dir, data, "LEVELS", name, bytes);
+}
+
+/// Writes `bytes` as file `folder/name`, unpacked, to the end of the copy and
+/// points its directory record there.
+fn put_in(dir: &Path, data: &mut GameData, folder: &str, name: &str, bytes: &[u8]) {
+    // The directory record of the file, in the folder's extent.
+    let levels = data.fs.lookup(folder).unwrap();
     let mut iso = File::options()
         .read(true)
         .write(true)
@@ -170,4 +178,58 @@ fn make(dir: &Path) {
     }
     std::fs::write(dir.join("patched.cue"), sheet).unwrap();
     println!("{} sectors -> {}", total, dir.join("data.iso").display());
+}
+
+/// `cdcopy mark DIR SEA=n[:W] LAND=n[:W] SKY=n ...`: paints calibration marks into those
+/// `GFX` textures of the copy, so that their scale, tiling and offset can be
+/// read off screenshots of the original and of ours alike. A sea or land gets a red
+/// border round each W×W tile (128 unless given) and a white square in its
+/// first corner; a 1024-wide sky a white stripe every 64 columns, column
+/// `64k` with a stripe `8 + 3k` rows long. `cdcopy unmark DIR SEA=n ...`
+/// puts the original files back.
+fn mark(dir: &Path, files: &[String], marked: bool) {
+    let mut data = GameData::open(&locate_data_dir(None)).expect("game CD");
+    let pal = data.palette("GFX/LM3D.PAL").unwrap();
+    let nearest = |c: [i32; 3]| {
+        (1..256)
+            .min_by_key(|&i| {
+                let p = pal[i];
+                (0..3).map(|k| (p[k] as i32 - c[k]).pow(2)).sum::<i32>()
+            })
+            .unwrap() as u8
+    };
+    let (red, white) = (nearest([255, 0, 0]), nearest([255, 255, 255]));
+    for f in files {
+        let (kind, n) = f.split_once('=').expect("KIND=n[:WIDTH]");
+        let (n, width) = n.split_once(':').unwrap_or((n, ""));
+        let n: u8 = n.parse().unwrap();
+        let mut px = data.gfx(kind, n).unwrap();
+        if marked {
+            match kind {
+                "SEA" | "LAND" => {
+                    let w = width.parse().unwrap_or(128);
+                    for (i, p) in px.iter_mut().enumerate() {
+                        let (x, y) = (i % w, (i / w) % w);
+                        if x < 2 || y < 2 {
+                            *p = red;
+                        }
+                        if (4..20).contains(&x) && (4..20).contains(&y) {
+                            *p = white;
+                        }
+                    }
+                }
+                "SKY" => {
+                    let w = 1024;
+                    for (i, p) in px.iter_mut().enumerate() {
+                        let (x, y) = (i % w, i / w);
+                        if x % 64 < 3 && y < 8 + 3 * (x / 64) {
+                            *p = white;
+                        }
+                    }
+                }
+                k => panic!("can't mark {k}"),
+            }
+        }
+        put_in(dir, &mut data, "GFX", &format!("{kind}.{n:03}"), &px);
+    }
 }

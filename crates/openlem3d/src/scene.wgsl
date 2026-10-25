@@ -4,7 +4,7 @@ struct Uniforms {
     view_proj: mat4x4<f32>,
     // x: sky column (in sky texels) at the left edge of the screen,
     // y: horizon row in framebuffer pixels,
-    // z: framebuffer pixels per original-screen pixel (height / 480),
+    // z: framebuffer pixels per original-screen pixel (height / 400),
     // w: time in seconds.
     sky: vec4<f32>,
     // Camera right vector (xyz); billboards are spanned by it and +Y.
@@ -158,7 +158,7 @@ fn fs_sky(v: SkyOut) -> @location(0) vec4<f32> {
     if (u.right.w > 0.5) {
         // All-round sky: a horizontally wrapping panorama stretched over the
         // full screen height (provisional).
-        let full = vec2(col / dims.x, clamp(p.y / (480.0 * u.sky.z), 0.0, 0.999));
+        let full = vec2(col / dims.x, clamp(p.y / (400.0 * u.sky.z), 0.0, 0.999));
         let c = textureSampleLevel(tex, samp, full, 0.0);
         // Its stars glow, each twinkling at its own pace.
         let texel = floor(fract(full) * dims);

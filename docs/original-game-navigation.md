@@ -455,6 +455,11 @@ Findings from the screen-layout runs (`spec/ui-graphics.md`, "Screens")
 
 ## Changed levels: experiments in the original
 
+`cdcopy mark temp/patched SEA=n[:W] LAND=n[:W] SKY=n` paints a grid into
+sea and land textures and numbered stripes into a sky, so their scale and
+offset can be read off screenshots of the original and of ours alike;
+`cdcopy unmark` puts them back.
+
 `cargo run --release -p l3d-formats --example cdcopy -- make temp/patched`
 copies the CD's data track to `temp/patched/data.iso` with a CD sheet
 `patched.cue` whose music still comes from the original image (the original
