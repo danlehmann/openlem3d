@@ -902,9 +902,11 @@ pub struct Game {
     speed: f32,
     /// Simulation ticks owed at the current speed, under one.
     tick_credit: f32,
-    /// Each lemming's place before the last tick, for drawing it moving
-    /// smoothly between ticks ([`Game::drawn_pos`]).
+    /// Each lemming's place before the last step's ticks, and how many
+    /// there were, for drawing it moving smoothly over the step
+    /// ([`Game::drawn_pos`]).
     prev_pos: Vec<[i32; 3]>,
+    step_ticks: u32,
     /// The way each lemming is drawn facing, turning towards the way it
     /// faces ([`Game::turn_yaws`]).
     yaws: Vec<f32>,
@@ -996,6 +998,11 @@ fn step_simulation(w: &mut World) {
     // The level waits while the camera glides to a preset view, or the
     // picture changes resolution, so neither costs the player time.
     if w.pixelation.changing() || w.view.glide.is_some() {
+        // Waiting, lemmings are drawn where they stand.
+        if let Some(sim) = &w.game.sim {
+            w.game.prev_pos.clear();
+            w.game.prev_pos.extend(sim.lemmings.iter().map(|l| l.pos));
+        }
         return;
     }
     let Game {
@@ -1006,6 +1013,7 @@ fn step_simulation(w: &mut World) {
         speed,
         tick_credit,
         prev_pos,
+        step_ticks,
         replay,
         doors,
         ..
@@ -1030,18 +1038,23 @@ fn step_simulation(w: &mut World) {
     } else {
         (*speed + rise).min(target)
     };
+    // Where the lemmings stand before this step's ticks (all of them, so a
+    // fast-forward step of several is drawn over the whole step); paused,
+    // where they are, so that nothing drifts.
+    prev_pos.clear();
+    prev_pos.extend(sim.lemmings.iter().map(|l| l.pos));
     if *paused {
+        *step_ticks = 0;
         return;
     }
     *tick_credit += *speed;
     let ticks = tick_credit.floor() as u32;
     *tick_credit -= ticks as f32;
+    *step_ticks = ticks;
     for _ in 0..ticks {
         if replay.as_mut().is_some_and(|r| !r.feed(sim)) {
             *replay = None;
         }
-        prev_pos.clear();
-        prev_pos.extend(sim.lemmings.iter().map(|l| l.pos));
         sim.step();
         lemming_render::step_doors(doors, sim);
         for &step in &options.assign {
@@ -1069,26 +1082,27 @@ fn step_simulation(w: &mut World) {
 }
 
 impl Game {
-    /// How far the game is from its last tick to the next, 0 to 1, for
-    /// drawing lemmings between their places; 1 (where they are) in Original
-    /// mode, which moves them in steps as the original did.
+    /// How far the game is through its current step towards the next, 0
+    /// to 1, for drawing lemmings between their places; 1 (where they are)
+    /// in Original mode, which moves them in steps as the original did.
     fn tick_progress(&self, enhanced: bool, overstep: f32) -> f32 {
         if enhanced {
-            (self.tick_credit + overstep * self.speed).clamp(0.0, 1.0)
+            overstep.clamp(0.0, 1.0)
         } else {
             1.0
         }
     }
 
     /// Where lemming `i` is drawn, in units: between its places before and
-    /// after the last tick, `f` of the way, so that it moves smoothly at
-    /// the screen's frame rate rather than in the simulation's steps (ours).
-    /// One that jumped further than [`SMOOTH_LIMIT`] (a hatch, a teleporter)
-    /// is drawn where it is.
+    /// after the last step's ticks, `f` of the way, so that it moves
+    /// smoothly at the screen's frame rate rather than in the simulation's
+    /// steps (ours). One that jumped further than [`SMOOTH_LIMIT`] a tick (a
+    /// hatch, a teleporter) is drawn where it is.
     fn drawn_pos(&self, sim: &l3d_sim::Simulation, i: usize, f: f32) -> [f32; 3] {
         let now = sim.lemmings[i].pos;
+        let limit = SMOOTH_LIMIT * self.step_ticks.max(1) as i32;
         match self.prev_pos.get(i) {
-            Some(before) if (0..3).all(|k| (now[k] - before[k]).abs() <= SMOOTH_LIMIT) => {
+            Some(before) if (0..3).all(|k| (now[k] - before[k]).abs() <= limit) => {
                 std::array::from_fn(|k| {
                     crate::units(before[k]) + (crate::units(now[k]) - crate::units(before[k])) * f
                 })
