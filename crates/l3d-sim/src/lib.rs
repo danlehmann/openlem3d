@@ -1321,10 +1321,24 @@ impl Simulation {
             State::Blocking | State::Turning { .. } => {
                 // Standing still; fall if the ground disappears. Looked for
                 // from a step up, as a walker does, so that one standing on
-                // the join of two bricks stands on the higher one.
-                let (ground, _) = self
-                    .world
-                    .surface_below(l.pos[0], l.pos[1] + STEP_UP, l.pos[2]);
+                // the join of two bricks stands on the higher one. Also just
+                // behind its feet: a builder stopped at the end of a step
+                // stands on the far edge of its newest brick (verified: it
+                // stood there and did not fall).
+                let d = l.dir.delta();
+                let ground = [0, 1]
+                    .map(|back| {
+                        self.world
+                            .surface_below(
+                                l.pos[0] - d[0] * back,
+                                l.pos[1] + STEP_UP,
+                                l.pos[2] - d[2] * back,
+                            )
+                            .0
+                    })
+                    .into_iter()
+                    .max()
+                    .unwrap_or(i32::MIN);
                 if ground < l.pos[1] - STEP_DOWN {
                     l.start_falling();
                 }

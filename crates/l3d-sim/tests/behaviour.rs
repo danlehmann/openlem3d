@@ -291,6 +291,9 @@ fn builder_takes_a_turner_only_where_its_step_ends_at_a_centre() {
     assert!(matches!(l.state, State::Turning { .. }), "{:?}", l.state);
     assert_eq!(l.pos[0], start[0] + even as i32 * SUB / 2);
     assert_eq!(l.pos[1], start[1] + even as i32 * SUB / 4);
+    run(&mut sim, 30);
+    let l = &sim.lemmings[0];
+    assert!(matches!(l.state, State::Turning { .. }), "{:?}", l.state);
 }
 
 #[test]
@@ -341,6 +344,7 @@ fn builder_becomes_a_blocker_where_its_step_ends_at_a_centre() {
     run(&mut sim, 30);
     assert!(sim.assign(0, Skill::Builder));
     while !matches!(sim.lemmings[0].state, State::Building { .. }) {
+        assert!(sim.tick < 500, "no builder: {:?}", sim.lemmings[0].state);
         sim.step();
     }
     let start = sim.lemmings[0].pos;
@@ -356,4 +360,44 @@ fn builder_becomes_a_blocker_where_its_step_ends_at_a_centre() {
     let l = &sim.lemmings[0];
     assert_eq!(l.state, State::Blocking);
     assert_eq!(l.pos[0], start[0] + even as i32 * SUB / 2);
+    // It stands there, on the far edge of its newest brick.
+    run(&mut sim, 30);
+    assert_eq!(sim.lemmings[0].state, State::Blocking);
+}
+
+#[test]
+fn walker_turns_back_at_the_start_of_a_staircase_blockers_step() {
+    let mut sim = open_level(1)
+        .rate(1)
+        .skill(0, Skill::Builder, 1)
+        .skill(1, Skill::Blocker, 1)
+        .sim();
+    run(&mut sim, 30);
+    assert!(sim.assign(0, Skill::Builder));
+    while !matches!(sim.lemmings[0].state, State::Building { .. }) {
+        assert!(sim.tick < 500, "no builder: {:?}", sim.lemmings[0].state);
+        sim.step();
+    }
+    let start = sim.lemmings[0].pos;
+    let centre_after = |n: i32| {
+        let off = (start[0] + n * SUB / 2).rem_euclid(SUB) - SUB / 2;
+        off.abs() < SUB / 4
+    };
+    let even = if centre_after(4) { 4 } else { 5 };
+    build_until(&mut sim, 0, 6 - even);
+    assert!(sim.assign(0, Skill::Blocker));
+    let blocker = sim.lemmings[0].pos;
+    // The next lemming climbs the staircase and is turned back as it
+    // reaches the blocker's step (the owner on Fun 13, 2026-10-24).
+    while sim.lemmings.len() < 2 || sim.lemmings[1].dir == Dir::PosX {
+        assert!(!sim.finished() && sim.tick < 2000, "never turned back");
+        sim.step();
+    }
+    let l = &sim.lemmings[1];
+    assert_eq!(l.dir, Dir::NegX);
+    let gap = blocker[0] - l.pos[0];
+    assert!(
+        (SUB / 2 - 8..=SUB / 2).contains(&gap),
+        "turned {gap} before the blocker"
+    );
 }

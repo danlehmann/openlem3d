@@ -281,7 +281,13 @@ Blockers act the same with builders (**verified** by the owner on Fun 13
 standing it at its step's end, and turns a builder back when its next step
 would reach a blocker no more than half a unit below or above. Walkers are
 still turned back by a blocker only less than half a unit from its height:
-reaching half a unit breaks the stored Fun 2 solution.
+reaching half a unit breaks the stored Fun 2 solution. A walker climbing a
+staircase towards a blocker standing on it is turned back as it reaches the
+start of the blocker's step, sharing that step with it for a single frame
+(owner, Fun 13, 2026-10-24); ours turns it there too. A builder stopped at
+the end of a step stands on the far edge of its newest brick and does not
+fall (ours once let one heading +X or +Z drop off it, as the edge counted as
+off the brick).
 
 A walker that catches up with a
 builder still building walks past it and off the staircase's unfinished end
