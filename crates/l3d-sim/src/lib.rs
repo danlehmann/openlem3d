@@ -175,10 +175,13 @@ const ROPE_SPEED: i32 = 35;
 /// tick or two of the grab; with [`ROPE_SPEED`] the ride takes about the
 /// 6.35 s from grab to release observed).
 const ROPE_GRAB_TICKS: u32 = 1;
-/// Spring flights: ticks per unit of horizontal distance (observed: about
-/// 1.6 s for 16 units in Practice "Catapults"), and peak height as a
-/// fraction of the distance (unmeasured).
-const SPRING_TICKS_PER_UNIT: f32 = 1.4;
+/// Spring flights: ticks per unit of horizontal distance (recorded in the
+/// original's Practice "Catapults" demo, 2026-10-25: the launch sound and the
+/// landing thud 46 ticks apart on every throw of about 18 units, as long as
+/// the sender rests, see [`SPRING_REST_PER_UNIT`]; an earlier estimate of
+/// 1.6 s for 16 units was too short), and peak height as a fraction of the
+/// distance (unmeasured).
+const SPRING_TICKS_PER_UNIT: f32 = 2.55;
 const SPRING_ARC: f32 = 0.3;
 /// Trampoline hops, measured tick by tick in the original's Practice
 /// "Trampoline" and Fun 5 "Bounce Bounce" (`docs/spec/behaviour.md`): forward
