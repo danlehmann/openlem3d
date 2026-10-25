@@ -655,6 +655,14 @@ pub fn build(
                 s.map(|c| c / n)
             };
             for (mut verts, mut uvs, p, flap) in placed {
+                // A top's tile takes only the block's odd quarter turn: at
+                // rotations 2 and 3 it lies half a turn back, as at 0 and 1
+                // (`docs/spec/blk.md`).
+                if p.src == FaceDir::PosY && cell.rotation >= 2 {
+                    for uv in &mut uvs {
+                        *uv = [1.0 - uv[0], 1.0 - uv[1]];
+                    }
+                }
                 // Faces on the cell boundary are hidden by an opaque neighbour.
                 if let Some(local) = p.on_face.filter(|_| !flap) {
                     let world = rotate_dir(local, effective_rotation(cell.shape, cell.rotation));

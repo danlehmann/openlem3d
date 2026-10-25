@@ -53,10 +53,20 @@ Every file is exactly 1,408 bytes: 64 definitions × 22 bytes, uncompressed.
 | 2 | Shading: 0 = unchanged, up to 8 = darkest [L3DEdit]. Each step darkens the colours by about 7 % (verified: the steel spire of `LEVEL.068`, shading 7, shows tile 67 at about 0.45 of its colour in the original, matched by 1 − 7 × 0.07 applied to the palette colours) |
 
 A top face shows its tile with the tile's top edge along the block's +Z side
-and its left edge along +X, turning with the block's rotation (**verified** on
-Mayhem 11 "Across the Network", `LEVEL.070`: the chip lettered "T1086" across
-three cells of rotation 1, and the chip borders, match the original only this
-way).
+and its left edge along +X at rotation 0, and turned a quarter at rotation 1
+(**verified** on Mayhem 11 "Across the Network", `LEVEL.070`: the chip
+lettered "T1086" across three cells of rotation 1 matches the original only
+this way). Rotation 2 lies as rotation 0, and rotation 3 as rotation 1: the
+tile takes only the odd quarter turn, not the half turn the block's shape
+takes (**verified** on Practice "Claustrophobic", `LEVEL.090`: the
+T-junction tile at (21, 0, 21), rotation 3, opens towards the side path on −X
+only this way, owner's comparison, 2026-10-24; **inferred** from multi-tile
+pictures, which join up only this way: the chip outlines of `LEVEL.070`, whose
+corners are at rotation 2; the putting green and sand patch of `LEVEL.016`,
+rotation 2; the keyboard of `LEVEL.007`, slabs of rotation 3; turning
+rotation 0 or 1 a half breaks the chips and lettering of `LEVEL.070`).
+Shaped blocks follow the same rule by their stored rotation (the keyboard's
+slabs; ramps unchecked).
 
 ### Flags (unverified, [L3DEdit])
 
