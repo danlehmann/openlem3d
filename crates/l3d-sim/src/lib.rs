@@ -1131,6 +1131,17 @@ impl Simulation {
         {
             return Some(Event::Screamed);
         }
+        // Recorded in the original's Practice demos, 2026-10-25: a boing on
+        // every pad touch, not just the first, and a thud as a catapulted
+        // lemming lands.
+        if let (State::Bouncing { k: kb, .. }, State::Bouncing { k: ka, .. }) = (b, a)
+            && ka < kb
+        {
+            return Some(Event::Bounced);
+        }
+        if matches!(b, State::Flying { .. }) && !matches!(a, State::Flying { .. }) {
+            return Some(Event::Thudded);
+        }
         if changed {
             return match a {
                 State::Exiting => Some(Event::Exited),

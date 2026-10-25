@@ -46,7 +46,7 @@ the source for these (unverified in play):
 | `SPOTFX/ANVIL1` | A digger, miner or basher hits metal |
 | `SPOTFX/SUCKER2` | Climbing: every 8 ticks while it climbs (recorded, Practice "Climber" demo) |
 | `SPOTFX/BROLLY1` | An umbrella opens, then every 19 ticks while it floats (recorded, Practice "Floater" demo) |
-| `SPOTFX/BOING1`, `CTAPULT1`, `TELEPORT` | Trampoline, catapult, teleporter |
+| `SPOTFX/BOING1`, `CTAPULT1`, `TELEPORT` | Trampoline, catapult, teleporter (recorded in the Practice demos: `BOING1` on every pad touch, `CTAPULT1` at a launch with `THUD1` as the lemming lands, `TELEPORT` once per teleport; a rope slide makes no sound) |
 | `SPOTFX/FLAMETHR`, `MANTRAP1`, `CRACKLE2` | Flame-blower, man trap, laser trap (recorded: the squasher and the bear trap play `MANTRAP1`, the weird trap nothing; `CRACKLE2` also for a lemming electrocuted by liquid) |
 | `SPOTFX/LIGHTNG` | A lemming leaves the level (lightning; recorded at the kill boundary) |
 | `SPOTFX/TICK1` | Time running out |
