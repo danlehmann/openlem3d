@@ -213,14 +213,18 @@ pub(crate) fn results_input(w: &mut World) {
         || (mouse.just_pressed(MouseButton::Left) && !on_prompt)
         || (lifted && !on_prompt)
         || keys.any_just_pressed([KeyCode::Space, KeyCode::Enter, KeyCode::NumpadEnter]);
+    // A passed level moves the title screen's and the level list's rating
+    // on to the next level's: after Fun 20, Tricky (owner).
+    let next = (o.level + 1) % LEVELS;
+    let rating = |n: u32| (n / crate::menu::LEVELS_PER_RATING) as usize;
+    let rated = |n: u32| rating(n) < crate::menu::PRACTICE;
+    if (menu || go) && o.passed() && rated(o.level) && rated(next) {
+        w.rating.0 = rating(next);
+    }
     if menu {
         w.next_state = Some(crate::menu::level_menu(o.level));
     } else if go {
-        w.current.number = if o.passed() {
-            (o.level + 1) % LEVELS
-        } else {
-            o.level
-        };
+        w.current.number = if o.passed() { next } else { o.level };
         w.current.loaded = None;
         w.next_state = Some(AppState::Briefing);
     }
