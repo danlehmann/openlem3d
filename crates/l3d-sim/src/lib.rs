@@ -194,7 +194,7 @@ const MAX_HOP_TICKS: u32 = 486;
 /// The hop off a pad reached on foot along a level path, in ticks.
 const MIN_HOP_TICKS: u32 = 10;
 
-/// Ticks a red pad adds to the hop that lands on it, and a blue pad takes off.
+/// Ticks a red pad adds to the hop that lands on it.
 const HOP_STEP_TICKS: u32 = 8;
 
 /// Height of a trampoline hop of `ticks` above its take-off, `k` ticks in
@@ -1917,17 +1917,18 @@ impl Simulation {
                 if let Some(pad) = pad {
                     self.press_pad(l.pos);
                     // Red pads (0x60–0x63) throw the next hop
-                    // [`HOP_STEP_TICKS`] longer, blue ones (0x64–0x67) that
-                    // much shorter, and off a blue pad after the shortest hop
-                    // the lemming walks on (measured: hops of 14, 22, 30 ticks
-                    // up the red row of Practice "Trampoline"; inferred: its
-                    // demo's lemmings then come down along blue ones to walk
-                    // into the exit). A pad lower than the take-off adds its
-                    // drop as [`hop_after_drop`] does (inferred).
+                    // [`HOP_STEP_TICKS`] longer (measured: hops of 14, 22, 30
+                    // ticks up the red row of Practice "Trampoline"). Blue
+                    // ones (0x64–0x67) throw a hop of `N` ticks back 0.9·N − 5,
+                    // to the nearest tick, and off a blue pad after the
+                    // shortest hop the lemming walks on (measured on a test
+                    // level: hops of 26, 34, 42, 50 ticks gave 18, 26, 33,
+                    // 40). A pad lower than the take-off adds its drop as
+                    // [`hop_after_drop`] does (inferred).
                     let step = (SUB / HOP_STEP_TICKS as i32) as i64;
                     let level = ticks as i64 + (y0 - ground) as i64 / step;
                     let next = if pad.value >= 0x64 {
-                        level - HOP_STEP_TICKS as i64
+                        (9 * level - 45).div_euclid(10)
                     } else {
                         level + HOP_STEP_TICKS as i64
                     };

@@ -6,7 +6,7 @@ Each names where it shows up, so a run can go straight there.
 
 ## Mechanics
 
-- **Trampolines:** the largest hop, what blue pads do (inferred: shorten the next hop), and how a drop onto a pad picks its hop (inferred: the shortest one rising higher than the drop).
+- **Trampolines:** whether a red pad lengthens long hops by 8 ticks too (measured for hops up to 30), and how a hop landing on a lower pad counts the drop (inferred: as a straight drop does, 8 ticks a unit).
 - **Turner pose.** In the original's "Turner" demo the turner was seen side on, facing the
   walkers coming towards it, one arm straight out along its facing, while
   the walkers turned to its own left (one view; medium confidence). Ours
