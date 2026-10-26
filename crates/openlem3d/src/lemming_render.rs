@@ -24,6 +24,9 @@ use l3d_formats::blk::{BlockSet, FaceDir};
 /// (estimated from relative sizes in the original's camera 1 view of Fun 1;
 /// unverified).
 const LEMMING_TEXELS_PER_UNIT: f32 = LEMMING_CELL as f32 * 2.0;
+/// How far a climber is drawn back from the wall face it climbs, in units:
+/// half a lemming cell's width, so the sprite stays out of the wall.
+const CLIMBER_OFF_WALL: f32 = LEMMING_CELL as f32 / LEMMING_TEXELS_PER_UNIT / 2.0;
 /// The countdown digits (32 texels) stand a quarter unit tall.
 const DIGIT_TEXELS_PER_UNIT: f32 = 128.0;
 
@@ -1514,6 +1517,13 @@ pub fn build(
             [cx as f32, cy as f32, size, size]
         };
         let mut anchor = drawn.get(i).map_or(l.pos.map(crate::units), |d| d.0);
+        // A climber's centre is on the wall face; drawn there, half of it
+        // would be inside the wall.
+        if l.state == State::Climbing {
+            let d = l.dir.delta();
+            anchor[0] -= d[0] as f32 * CLIMBER_OFF_WALL;
+            anchor[2] -= d[2] as f32 * CLIMBER_OFF_WALL;
+        }
         // A rope rider is drawn from the rope slide's own sheet: the lemming
         // hanging from its pulley, five views from the front round its left
         // to the back, like a walker's (the sheet, and the original's
