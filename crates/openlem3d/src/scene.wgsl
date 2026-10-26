@@ -67,6 +67,9 @@ const ANIM_FPS: f32 = 8.0;
 /// 0, 1, 2, 3, 0, … one per captured frame).
 const SEA_FPS: f32 = 70.0;
 
+/// How far towards the camera a billboard's depth is taken, in world units.
+const BILLBOARD_DEPTH_PULL: f32 = 0.1;
+
 struct VOut {
     @builtin(position) clip: vec4<f32>,
     @location(0) uv: vec2<f32>,
@@ -105,9 +108,13 @@ fn vs(v: VIn) -> VOut {
     // A billboard is hidden only by what is in front of its middle (a
     // quarter unit above its anchor), all of it at that depth: a lemming
     // turning in a deflector's cell, half inside the block, is drawn whole,
-    // as the original draws it (owner's observation).
+    // as the original draws it (owner's observation). That point is taken
+    // a little towards the camera, so a lemming standing in the plane of a
+    // face (a turner at the edge of a step) is drawn in front of it rather
+    // than fighting it for depth.
     if (any(v.offset != vec2(0.0))) {
-        let mid = u.view_proj * vec4(v.pos + vec3(0.0, 0.25, 0.0), 1.0);
+        let towards = vec3(-u.right.z, 0.0, u.right.x) * BILLBOARD_DEPTH_PULL;
+        let mid = u.view_proj * vec4(v.pos + vec3(0.0, 0.25, 0.0) + towards, 1.0);
         o.clip.z = mid.z / mid.w * o.clip.w;
     }
     o.uv = v.uv + vec2(0.0, frame * v.anim.y);
