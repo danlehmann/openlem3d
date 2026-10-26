@@ -1114,11 +1114,16 @@ fn step_simulation(w: &mut World) {
         let (Some((level, blocks, layer)), Some(current)) = (terrain, &scene.data) else {
             return;
         };
+        // Only the cells the rewind changed: blocks lemmings pass through
+        // are not in the simulation's world, and stay as they are.
         for x in 0..l3d_formats::level::SIZE_X {
             for y in 0..l3d_formats::level::SIZE_Y {
                 for z in 0..l3d_formats::level::SIZE_Z {
-                    let cell = sim.world.block([x as i32, y as i32, z as i32]);
-                    level.set_block(x, y, z, cell.map(|(b, _)| b).unwrap_or_default());
+                    let c = [x as i32, y as i32, z as i32];
+                    let cell = sim.world.block(c);
+                    if cell != before.block(c) {
+                        level.set_block(x, y, z, cell.map(|(b, _)| b).unwrap_or_default());
+                    }
                 }
             }
         }
