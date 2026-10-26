@@ -6,7 +6,7 @@ Each names where it shows up, so a run can go straight there.
 
 ## Mechanics
 
-- **Trampolines:** whether a red pad lengthens long hops by 8 ticks too (measured for hops up to 30), and how a hop landing on a lower pad counts the drop (inferred: as a straight drop does, 8 ticks a unit).
+- **Trampolines:** the exact rule for the hop a pad throws after a hop: ours is fitted to hops counted in the original and gives two of them a tick long.
 - **Ramp slot on "All Around the Watchtower"** (`LEVEL.027`): two half-height
   ramps peak either side of a one-cell slot (16, 1, 6) 0.75 units deep; our
   lemmings fall in and can't leave. Probably the design: with our ramp

@@ -191,10 +191,15 @@ const SPRING_ARC: f32 = 0.3;
 const BOUNCE_VX: i32 = 32;
 const MAX_HOP_TICKS: u32 = 486;
 
-/// The hop off a pad reached on foot along a level path, in ticks.
+/// The hop off a red pad after the shortest drop, in ticks; a blue pad that
+/// would throw a shorter hop lets the lemming walk on.
 const MIN_HOP_TICKS: u32 = 10;
 
-/// Ticks a red pad adds to the hop that lands on it.
+/// The hop off a red pad reached on foot along a level path, in ticks
+/// (measured on a test level: 8 ticks in the air, then the touch).
+const WALK_ON_HOP_TICKS: u32 = 9;
+
+/// Ticks a red pad's hop gains per unit dropped onto it from a standstill.
 const HOP_STEP_TICKS: u32 = 8;
 
 /// Height of a trampoline hop of `ticks` above its take-off, `k` ticks in
@@ -206,14 +211,17 @@ fn hop_height(ticks: u32, k: i32) -> i32 {
 
 /// Ticks of the hop off a red pad after dropping `fallen` sub-units onto it:
 /// [`MIN_HOP_TICKS`] and [`HOP_STEP_TICKS`] more per unit dropped, to the
-/// nearest tick. Measured on Fun 5 "Bounce Bounce": about 10, 14 and 18
-/// ticks after drops of 0, ½ and 1 unit; Practice "Trampoline": 14 after its
-/// ½-unit drop. Fits the published solutions of Fun 1 "Take a Dive" (a
-/// 10-unit drop must carry lemmings about 11–12 units on: 90 ticks) and
-/// Tricky 2 "Which Exit?".
+/// nearest tick, or [`WALK_ON_HOP_TICKS`] after none. Measured on Fun 5
+/// "Bounce Bounce": about 14 and 18 ticks after drops of ½ and 1 unit;
+/// Practice "Trampoline": 14 after its ½-unit drop. Fits the published
+/// solutions of Fun 1 "Take a Dive" (a 10-unit drop must carry lemmings
+/// about 11–12 units on: 90 ticks) and Tricky 2 "Which Exit?".
 fn hop_after_drop(fallen: i32) -> u32 {
+    if fallen <= 0 {
+        return WALK_ON_HOP_TICKS;
+    }
     let step = SUB / HOP_STEP_TICKS as i32;
-    (MIN_HOP_TICKS + ((fallen.max(0) + step / 2) / step) as u32).min(MAX_HOP_TICKS)
+    (MIN_HOP_TICKS + ((fallen + step / 2) / step) as u32).min(MAX_HOP_TICKS)
 }
 
 /// Ticks of the hop off a blue pad after dropping `fallen` sub-units onto it:
@@ -227,6 +235,36 @@ fn hop_after_drop(fallen: i32) -> u32 {
 fn blue_hop_after_drop(fallen: i32) -> Option<u32> {
     let ticks = (7 * fallen.max(0) + SUB / 2) / SUB - 4;
     (ticks >= MIN_HOP_TICKS as i32).then(|| (ticks as u32).min(MAX_HOP_TICKS))
+}
+
+/// Thousandths of a tick per unit a hop falls from its apex onto a pad.
+const HOP_FALL_MILLITICKS: i64 = 8085;
+
+/// The hops off a red pad and off a blue pad (none: the lemming walks on)
+/// that a hop of `ticks` lands on, `below` sub-units under its take-off.
+/// Counting [`HOP_FALL_MILLITICKS`] for each unit fallen from the hop's
+/// apex, to the nearest tick: a red pad adds [`MIN_HOP_TICKS`], but throws
+/// at most [`HOP_STEP_TICKS`] more than the hop, and as many again per unit
+/// it lies below the take-off; a blue pad takes off 5½. Measured in the
+/// original by counting ticks: the red row of Practice "Trampoline" hops 14,
+/// 22, 30, 38, 45 and 52 ticks; on test levels, red pads level with a path
+/// 9, 17, 24, 32 and 40 (ours 9, 17, 25, 33, 40), a red pad after a hop of
+/// 49 ticks 55, and a blue pad 2 units below the take-off of a 41-tick hop
+/// 49. Fitted: blue pads after red hops of about 26, 34, 42 and 50 ticks
+/// gave 18, 26, 33 and 40.
+fn hops_after_hop(ticks: u32, below: i32) -> (u32, Option<u32>) {
+    let (n, k) = (ticks as i64, ticks as i64 / 2);
+    // The fall, in sub-units times `n + 1`.
+    let fallen = 120 * k * (n - k) + below as i64 * (n + 1);
+    let milli = fallen.max(0) * HOP_FALL_MILLITICKS / ((n + 1) * SUB as i64);
+    let step = HOP_STEP_TICKS as i64;
+    let most = n + step + (below as i64 * step + SUB as i64 / 2).div_euclid(SUB as i64);
+    let red = (MIN_HOP_TICKS as i64 + (milli + 500) / 1000).min(most);
+    let blue = milli / 1000 - 5;
+    (
+        (red.max(1) as u32).min(MAX_HOP_TICKS),
+        (blue >= MIN_HOP_TICKS as i64).then(|| (blue as u32).min(MAX_HOP_TICKS)),
+    )
 }
 
 /// Speed on slippery blocks, sub-units per tick.
@@ -1916,30 +1954,16 @@ impl Simulation {
                     .copied();
                 if let Some(pad) = pad {
                     self.press_pad(l.pos);
-                    // Red pads (0x60–0x63) throw the next hop
-                    // [`HOP_STEP_TICKS`] longer (measured: hops of 14, 22, 30
-                    // ticks up the red row of Practice "Trampoline"). Blue
-                    // ones (0x64–0x67) throw a hop of `N` ticks back 0.9·N − 5,
-                    // to the nearest tick, and off a blue pad after the
-                    // shortest hop the lemming walks on (measured on a test
-                    // level: hops of 26, 34, 42, 50 ticks gave 18, 26, 33,
-                    // 40). A pad lower than the take-off adds its drop as
-                    // [`hop_after_drop`] does (inferred).
-                    let step = (SUB / HOP_STEP_TICKS as i32) as i64;
-                    let level = ticks as i64 + (y0 - ground) as i64 / step;
-                    let next = if pad.value >= 0x64 {
-                        (9 * level - 45).div_euclid(10)
-                    } else {
-                        level + HOP_STEP_TICKS as i64
-                    };
-                    if next >= MIN_HOP_TICKS as i64 {
-                        l.set_state(State::Bouncing {
-                            ticks: (next as u32).min(MAX_HOP_TICKS),
+                    // Red pads are 0x60–0x63, blue ones 0x64–0x67.
+                    let (red, blue) = hops_after_hop(ticks, y0 - ground);
+                    let next = if pad.value >= 0x64 { blue } else { Some(red) };
+                    match next {
+                        Some(ticks) => l.set_state(State::Bouncing {
+                            ticks,
                             k: 0,
                             y0: ground,
-                        });
-                    } else {
-                        l.set_state(State::Walking);
+                        }),
+                        None => l.set_state(State::Walking),
                     }
                 } else {
                     self.land(l, on_block, 0);
