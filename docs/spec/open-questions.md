@@ -7,12 +7,6 @@ Each names where it shows up, so a run can go straight there.
 ## Mechanics
 
 - **Trampolines:** whether a red pad lengthens long hops by 8 ticks too (measured for hops up to 30), and how a hop landing on a lower pad counts the drop (inferred: as a straight drop does, 8 ticks a unit).
-- **Turner pose.** In the original's "Turner" demo the turner was seen side on, facing the
-  walkers coming towards it, one arm straight out along its facing, while
-  the walkers turned to its own left (one view; medium confidence). Ours
-  draws the turner turned round to face the way it came (the walkers
-  behind it), holding out the arm on the side it sends them; kept facing
-  its walking direction, turners showed their backs on "Take a Dive".
 - **Ramp slot on "All Around the Watchtower"** (`LEVEL.027`): two half-height
   ramps peak either side of a one-cell slot (16, 1, 6) 0.75 units deep; our
   lemmings fall in and can't leave. Probably the design: with our ramp
