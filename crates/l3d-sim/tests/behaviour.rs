@@ -462,3 +462,44 @@ fn walkers_need_half_a_unit_of_headroom_and_walk_in_under_less() {
         "turned at {x}"
     );
 }
+
+/// Lemming 0 as a climber walking +X from the hatch into a two-unit wall at
+/// x = 20 (layers 2 and 3) with `top` set at layer 4; how far it gets, how
+/// high, and how many are saved after 600 ticks.
+fn climb_wall(top: Option<(u16, u16, u16)>) -> (i32, i32, u32) {
+    let mut synth = open_level(1)
+        .block(20, 2, 16, FLOOR, 0, 0xF)
+        .block(20, 3, 16, FLOOR, 0, 0xF);
+    if let Some((id, rotation, segments)) = top {
+        synth = synth.block(20, 4, 16, id, rotation, segments);
+    }
+    let mut sim = synth.skill(0, Skill::Climber, 1).sim();
+    run(&mut sim, 30);
+    assert!(sim.assign(0, Skill::Climber));
+    let (mut x, mut y) = (0, 0);
+    for _ in 0..600 {
+        sim.step();
+        let l = &sim.lemmings[0];
+        x = x.max(l.pos[0]);
+        y = y.max(l.pos[1]);
+    }
+    (x, y, sim.counts.saved)
+}
+
+#[test]
+fn climber_lets_go_with_no_room_at_the_top() {
+    let (x, _, _) = climb_wall(None);
+    assert!(x > 21 * SUB, "over an open top");
+    // A block ¼ above the top leaves no room for the body.
+    let (x, y, _) = climb_wall(Some((FLOOR, 0, 0b1110)));
+    assert!(x < 20 * SUB, "stayed on its side: x = {x}");
+    assert!(y < 4 * SUB + SUB / 4, "no higher than the gap: y = {y}");
+}
+
+#[test]
+fn climber_goes_into_an_exit_doorway_at_the_top() {
+    // Rotation 3: the doorway faces −X, towards the climber.
+    let (_, y, saved) = climb_wall(Some((1, 3, 0xF)));
+    assert_eq!(saved, 1);
+    assert!(y < 4 * SUB + SUB / 4, "went in at the top: y = {y}");
+}

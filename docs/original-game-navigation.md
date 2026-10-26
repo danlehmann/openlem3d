@@ -498,6 +498,15 @@ instead, for header fields (`docs/spec/level.md`). **Verified** on Practice
   so copying another camera's bytes there saves camera clicks. A level whose
   lemmings all drown ends within seconds at release rate 99; a lower rate
   (`@E2=32,...`, 50) keeps them coming for about a minute.
+- **A Practice level's own demo on a changed level** (2026-10-25): change
+  the slot itself (`cdcopy level temp/patched 87 ...`), boot the copy,
+  save a main-menu state (`state.ps1 -Save`), quit, then relaunch from that
+  state with the queued Enter of "Level demos without focus". A main-menu
+  state saved before the change shows the unchanged level: the state keeps
+  DOS's cached CD directory, which still points at the old file. On a full
+  boot the queued Enter never reached the briefing, even when queued for 38 s
+  or 50 s. The demo's skill clicks still land as long as the lemmings reach
+  the same places at the same times.
 - **A turner without help** (2026-10-14): select the turner (174,440, 300 ms),
   park the pointer on the lemmings' path, poll grabs until the caption box
   at the bottom left (about x 60–140, y 350–376 in a 640-wide grab) shows

@@ -2188,11 +2188,31 @@ impl Simulation {
             return;
         }
         l.pos[1] += CLIMB_SPEED;
-        if !self.world.solid([ahead[0], l.pos[1], ahead[1]])
-            && !self
+        // An exit's doorway at the feet takes the climber in (verified with a
+        // changed level: Practice "Climber" with an exit block on its first
+        // wall, door facing the climbers, which went in one after another).
+        if let Some(b) = self
+            .world
+            .block_at([ahead[0], l.pos[1] + SUB / 8, ahead[1]])
+            .filter(|b| b.id == EXIT_ID)
+            && l.dir == door_of(b).reverse()
+        {
+            l.set_state(State::Exiting);
+            return;
+        }
+        if !self.world.solid([ahead[0], l.pos[1], ahead[1]]) {
+            if self
                 .world
                 .solid([ahead[0], l.pos[1] + HEAD_HEIGHT - 1, ahead[1]])
-        {
+            {
+                // At the top edge with no room for the body: let go and fall
+                // back (verified with a changed level: Practice "Climber"
+                // with a block ¼ unit above its first wall's top; the
+                // climbers fell back off at the gap).
+                l.dir = l.dir.reverse();
+                l.start_falling();
+                return;
+            }
             // Reached the top edge, with room for the body: step onto it.
             l.pos[0] = ahead[0];
             l.pos[2] = ahead[1];

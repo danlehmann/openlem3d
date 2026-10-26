@@ -162,7 +162,7 @@ pub const SOLUTIONS: &[Solution] = &[
             (362, 7, 7, None),
             (413, 8, 7, None),
             (464, 9, 7, None),
-            (770, 1, 1, Some(false)),
+            (770, 1, 1, Some(true)),
         ],
     ),
     at(
