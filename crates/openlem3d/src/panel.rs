@@ -160,6 +160,46 @@ enum Action {
     /// The arrow left of the face: leaves the lemming view.
     Arrow,
     LemmingCam,
+    /// A red corner dot: closes its part of the panel, or opens it again.
+    Toggle(Part),
+}
+
+/// The parts of the panel that the red corner dots close: the minimap (top
+/// left), the right-hand column down to the release rate (top right), and
+/// the skill row with the arrow, the face and the umbrella (bottom left).
+/// The height bar and the dots themselves always show (verified in the
+/// original, Fun 1, 2026-10-26: each dot closes its part, and clicked again
+/// opens it).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Part {
+    Minimap,
+    Column,
+    Skills,
+}
+
+/// The dots: where each sits, and the part it closes.
+const DOTS: [(Vec2, Part); 3] = [
+    (Vec2::new(0.0, 0.0), Part::Minimap),
+    (Vec2::new(317.0, 0.0), Part::Column),
+    (Vec2::new(0.0, 197.0), Part::Skills),
+];
+
+/// A dot's 3×3 pixels: a red ball lit from the top left (read off a 2×
+/// capture of the original, so approximate).
+fn dot_image() -> Image {
+    const PX: [[u8; 3]; 9] = [
+        [255, 90, 0],
+        [220, 10, 0],
+        [140, 0, 0],
+        [240, 30, 0],
+        [140, 3, 0],
+        [100, 0, 0],
+        [150, 0, 0],
+        [80, 0, 0],
+        [55, 0, 0],
+    ];
+    let rgba = PX.iter().flat_map(|&[r, g, b]| [r, g, b, 255]).collect();
+    crate::texture::rgba_image(3, 3, rgba)
 }
 
 /// A right-aligned string drawn with a panel font; `right` is the x of the
@@ -218,6 +258,10 @@ pub(crate) struct Panel {
     map: Option<NodeId>,
     frame: Option<NodeId>,
     caption: Option<(NodeId, String)>,
+    /// Each [`Part`]'s node, holding its items.
+    parts: Vec<(Part, NodeId)>,
+    /// The parts closed by their dots; they stay closed from level to level.
+    closed: Vec<Part>,
     last_bomb_click: Option<f32>,
     carry: f32,
     nuked_at: Option<f32>,
@@ -229,7 +273,13 @@ pub(crate) struct Panel {
     select_seen: u64,
 }
 
-/// Builds the panel: its items, each placed by [`PanelPos`].
+impl Panel {
+    pub(crate) fn is_open(&self, part: Part) -> bool {
+        !self.closed.contains(&part)
+    }
+}
+
+/// Builds the panel: its items, each placed by [`PanelPos`], under `root`.
 struct Builder<'a> {
     ui: &'a mut Ui,
     panel: &'a mut Panel,
@@ -237,6 +287,19 @@ struct Builder<'a> {
 }
 
 impl Builder<'_> {
+    /// Puts the items that follow into `part`, or straight onto the panel.
+    fn part(&mut self, panel_root: NodeId, part: Option<Part>) {
+        self.root = match part {
+            Some(part) => {
+                let shown = self.panel.is_open(part);
+                let id = self.ui.child(panel_root, UiNode::new().visible_if(shown));
+                self.panel.parts.push((part, id));
+                id
+            }
+            None => panel_root,
+        };
+    }
+
     fn item(
         &mut self,
         at: Vec2,
@@ -301,6 +364,7 @@ pub(crate) fn spawn_panel(w: &mut World) {
         return;
     }
     let frame = w.e.images.add(crate::minimap::frame_image());
+    let dot = w.e.images.add(dot_image());
     let root = w.ui.root(UiNode::new().layout(Node {
         width: percent(100),
         height: percent(100),
@@ -316,6 +380,7 @@ pub(crate) fn spawn_panel(w: &mut World) {
         root,
     };
     // The minimap and its frame (the map image arrives with the level).
+    b.part(root, Some(Part::Minimap));
     let icon24 = Vec2::splat(24.0);
     let p = |i: usize| art.panel[i].clone();
     let frame = b.item(Vec2::ZERO, Vec2::splat(70.0), frame, None, None);
@@ -332,6 +397,13 @@ pub(crate) fn spawn_panel(w: &mut World) {
     }
     b.panel.map = Some(map);
     // Right-hand column.
+    b.part(root, Some(Part::Column));
+    b.text(art, true, 299.0, 2.0, Value::In, 3);
+    b.text(art, true, 299.0, 18.0, Value::Out, 3);
+    b.text(art, true, 299.0, 34.0, Value::Time, 4);
+    b.text(art, false, 272.0, 140.0, Value::MinRate, 2);
+    b.text(art, false, 296.0, 140.0, Value::Rate, 2);
+    b.text(art, false, 269.0, 80.0, Value::CameraNumber, 1);
     b.item(
         Vec2::new(260.0, 0.0),
         Vec2::new(32.0, 16.0),
@@ -409,19 +481,9 @@ pub(crate) fn spawn_panel(w: &mut World) {
         Some(Action::Faster),
         Some(Animated::Faster),
     );
-    // The floater's umbrella, over its skill button, stays with the skill row.
-    let umbrella = b.item(
-        Vec2::new(274.0, 143.0),
-        Vec2::splat(32.0),
-        art.umbrella.clone(),
-        None,
-        None,
-    );
-    if let Some(p) = b.panel.pos.get_mut(&umbrella) {
-        p.skill_row = true;
-    }
     // The height bar down the right edge, a button so that it is not part
     // of the view.
+    b.part(root, None);
     let bar = b.item(
         Vec2::new(BAR_X, 0.0),
         Vec2::new(12.0, SCREEN.y),
@@ -442,6 +504,18 @@ pub(crate) fn spawn_panel(w: &mut World) {
     );
     b.panel.knob = Some(knob);
     // Bottom row.
+    b.part(root, Some(Part::Skills));
+    // The floater's umbrella, over its skill button, stays with the skill row.
+    let umbrella = b.item(
+        Vec2::new(274.0, 143.0),
+        Vec2::splat(32.0),
+        art.umbrella.clone(),
+        None,
+        None,
+    );
+    if let Some(p) = b.panel.pos.get_mut(&umbrella) {
+        p.skill_row = true;
+    }
     b.item(
         Vec2::new(0.0, 172.0),
         icon24,
@@ -465,15 +539,19 @@ pub(crate) fn spawn_panel(w: &mut World) {
             Some(Animated::Skill(skill)),
         );
     }
-    // Numbers.
-    b.text(art, true, 299.0, 2.0, Value::In, 3);
-    b.text(art, true, 299.0, 18.0, Value::Out, 3);
-    b.text(art, true, 299.0, 34.0, Value::Time, 4);
-    b.text(art, false, 272.0, 140.0, Value::MinRate, 2);
-    b.text(art, false, 296.0, 140.0, Value::Rate, 2);
-    b.text(art, false, 269.0, 80.0, Value::CameraNumber, 1);
     for (skill, (x, _)) in Skill::ALL.into_iter().zip(SKILL_BUTTONS) {
         b.text(art, false, x + 17.0, 188.0, Value::SkillCount(skill), 2);
+    }
+    // The dots, over everything else.
+    b.part(root, None);
+    for (at, part) in DOTS {
+        b.item(
+            at,
+            Vec2::splat(3.0),
+            dot.clone(),
+            Some(Action::Toggle(part)),
+            None,
+        );
     }
     let c = b.ui.child(root, UiNode::new());
     b.panel.caption = Some((c, String::new()));
@@ -534,6 +612,18 @@ fn buttons(w: &mut World) {
     let time = w.e.time.real;
     let _ = now;
     for action in pressed {
+        if let Action::Toggle(part) = action {
+            if panel.is_open(part) {
+                panel.closed.push(part);
+            } else {
+                panel.closed.retain(|&p| p != part);
+            }
+            let open = panel.is_open(part);
+            for &(_, id) in panel.parts.iter().filter(|&&(p, _)| p == part) {
+                w.ui.set_visible(id, open);
+            }
+            continue;
+        }
         let paused = game.paused;
         let Some(sim) = &mut game.sim else { return };
         match action {
@@ -626,8 +716,11 @@ fn buttons(w: &mut World) {
             Action::LemmingCam => {
                 lemming_cam.face(highlight, selected, view);
             }
-            Action::TurnClockwise | Action::TurnAnticlockwise | Action::Slower | Action::Faster => {
-            }
+            Action::TurnClockwise
+            | Action::TurnAnticlockwise
+            | Action::Slower
+            | Action::Faster
+            | Action::Toggle(_) => {}
         }
     }
 }

@@ -1,7 +1,7 @@
 //! The in-level minimap in the panel's top-left corner, like the original's
 //! (`docs/spec/ui-graphics.md`, "In-level panel"): a 64×64 top-down map,
-//! two pixels per cell, in a wooden frame at (0, 0)–(70, 70) with a red
-//! corner mark. Sea and land show their textures' average colour and each
+//! two pixels per cell, in a wooden frame at (0, 0)–(70, 70), closed and
+//! opened by the panel's red dot in its corner. Sea and land show their textures' average colour and each
 //! column its highest block's top colour; the exit is red, hatches orange,
 //! lemmings white and the camera a yellow dot (colours read off captures of
 //! the original). Clicking it moves the camera over that spot, as the
@@ -40,8 +40,8 @@ pub struct Minimap {
     clickable: bool,
 }
 
-/// The pixels of the 70×70 frame: brown planks with a dark inner edge and a
-/// red mark in the top-left corner; transparent inside.
+/// The pixels of the 70×70 frame: brown planks with a dark inner edge;
+/// transparent inside. The panel's red dot sits in its top-left corner.
 pub fn frame_image() -> Image {
     const N: usize = 70;
     let mut px = vec![0u8; N * N * 4];
@@ -49,7 +49,6 @@ pub fn frame_image() -> Image {
         for x in 0..N {
             let edge = x.min(y).min(N - 1 - x).min(N - 1 - y);
             let c: Option<[u8; 3]> = match edge {
-                _ if x < 3 && y < 3 => Some([200, 0, 0]),
                 0 => Some([90, 52, 24]),
                 1 => Some([150, 96, 48]),
                 2 => Some([30, 20, 10]),
@@ -217,7 +216,9 @@ pub struct MinimapView(pub Option<NodeId>);
 
 /// A click on the map puts the camera over that spot.
 pub(crate) fn click(w: &mut World) {
-    if !w.minimap.as_ref().is_some_and(|m| m.clickable && m.shown) {
+    if !w.minimap.as_ref().is_some_and(|m| m.clickable && m.shown)
+        || !w.panel.is_open(crate::panel::Part::Minimap)
+    {
         return;
     }
     let (mouse, touches) = (&w.e.input.mouse, &w.e.input.touches);
