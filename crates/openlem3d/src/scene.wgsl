@@ -125,10 +125,23 @@ fn vs(v: VIn) -> VOut {
 @fragment
 fn fs(v: VOut) -> @location(0) vec4<f32> {
     var uv = v.uv;
+    // The sea's and the land's textures are mipmapped (`SceneLayer::smooth`).
+    // A tiled surface's level of detail comes from the footprint of the uv
+    // before wrapping into a frame, which would otherwise jump at each
+    // repeat's edge. Magnified, the uv is snapped to texel centres, so up
+    // close the texels stay sharp squares, as everywhere else (for the
+    // other textures, sampled nearest, the snap changes nothing).
+    let size = vec2<f32>(textureDimensions(tex));
+    let frames = max(v.tile.x, 1.0);
+    let gx = dpdx(v.uv) / vec2(1.0, frames);
+    let gy = dpdy(v.uv) / vec2(1.0, frames);
     if (v.tile.x > 0.0) {
         uv = vec2(uv.x, (fract(uv.y) + v.tile.y) / v.tile.x);
     }
-    let c = textureSample(tex, samp, uv);
+    if (max(length(gx * size), length(gy * size)) < 1.0) {
+        uv = (floor(uv * size) + 0.5) / size;
+    }
+    let c = textureSampleGrad(tex, samp, uv, gx, gy);
     if (v.params.y > 0.5 && c.a < 0.5) {
         discard;
     }

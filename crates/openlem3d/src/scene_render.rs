@@ -59,6 +59,9 @@ pub struct SceneLayer {
     pub vertices: Vec<f32>,
     pub indices: Vec<u32>,
     pub texture: RgbaImage,
+    /// The texture has mipmaps and is sampled trilinearly and
+    /// anisotropically when shrunk (the sea and the land, seen far off).
+    pub smooth: bool,
 }
 
 /// RGBA8 sRGB texels, row-major.
@@ -136,6 +139,8 @@ pub struct SceneGpu {
     sampler: wgpu::Sampler,
     /// Smooth sampling, for the bloom chain.
     linear: wgpu::Sampler,
+    /// Trilinear, anisotropic and repeating, for [`SceneLayer::smooth`].
+    mipmapped: wgpu::Sampler,
     uniforms: wgpu::Buffer,
     /// Pipelines per colour format drawn into.
     pipelines: Vec<(wgpu::TextureFormat, Pipelines)>,
@@ -167,7 +172,7 @@ pub struct SceneGpu {
     target_size: (u32, u32),
     /// Uploaded textures by their texel data, kept while the content still
     /// uses that data (a terrain change re-uploads geometry only).
-    textures: Vec<(Arc<[u8]>, wgpu::BindGroup)>,
+    textures: Vec<(Arc<[u8]>, bool, wgpu::BindGroup)>,
 }
 
 struct Pipelines {
@@ -268,6 +273,16 @@ impl SceneGpu {
             min_filter: wgpu::FilterMode::Linear,
             ..Default::default()
         });
+        let mipmapped = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("scene mipmapped"),
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::Repeat,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
+            anisotropy_clamp: 16,
+            ..Default::default()
+        });
         let uniforms = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("scene uniforms"),
             size: UNIFORM_SIZE,
@@ -279,6 +294,7 @@ impl SceneGpu {
             shader,
             sampler,
             linear,
+            mipmapped,
             uniforms,
             pipelines: Vec::new(),
             low: None,
@@ -576,7 +592,13 @@ impl SceneGpu {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         img: &RgbaImage,
+        smooth: bool,
     ) -> wgpu::BindGroup {
+        let (levels, texels) = if smooth {
+            mip_chain(img)
+        } else {
+            (1, img.texels.to_vec())
+        };
         let texture = device.create_texture_with_data(
             queue,
             &wgpu::TextureDescriptor {
@@ -586,7 +608,7 @@ impl SceneGpu {
                     height: img.height,
                     depth_or_array_layers: 1,
                 },
-                mip_level_count: 1,
+                mip_level_count: levels,
                 sample_count: 1,
                 dimension: wgpu::TextureDimension::D2,
                 format: wgpu::TextureFormat::Rgba8UnormSrgb,
@@ -594,8 +616,13 @@ impl SceneGpu {
                 view_formats: &[],
             },
             wgpu::util::TextureDataOrder::LayerMajor,
-            &img.texels,
+            &texels,
         );
+        let sampler = if smooth {
+            &self.mipmapped
+        } else {
+            &self.sampler
+        };
         let view = texture.create_view(&Default::default());
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("scene"),
@@ -611,7 +638,7 @@ impl SceneGpu {
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
-                    resource: wgpu::BindingResource::Sampler(&self.sampler),
+                    resource: wgpu::BindingResource::Sampler(sampler),
                 },
             ],
         })
@@ -688,21 +715,23 @@ fn prepare(
         return;
     };
     let old = std::mem::take(&mut gpu.textures);
-    let bind = |gpu: &mut SceneGpu, img: &RgbaImage| {
-        let same = |(t, _): &&(Arc<[u8]>, wgpu::BindGroup)| Arc::ptr_eq(t, &img.texels);
-        if let Some((_, b)) = gpu.textures.iter().find(same) {
+    let bind = |gpu: &mut SceneGpu, img: &RgbaImage, smooth: bool| {
+        let same = |(t, s, _): &&(Arc<[u8]>, bool, wgpu::BindGroup)| {
+            Arc::ptr_eq(t, &img.texels) && *s == smooth
+        };
+        if let Some((.., b)) = gpu.textures.iter().find(same) {
             return b.clone();
         }
         let b = match old.iter().find(same) {
-            Some((_, b)) => b.clone(),
-            None => gpu.bind_texture(device, queue, img),
+            Some((.., b)) => b.clone(),
+            None => gpu.bind_texture(device, queue, img, smooth),
         };
-        gpu.textures.push((img.texels.clone(), b.clone()));
+        gpu.textures.push((img.texels.clone(), smooth, b.clone()));
         b
     };
     let mut layers = Vec::new();
     for l in data.layers.iter().filter(|l| !l.indices.is_empty()) {
-        let bind_group = bind(gpu, &l.texture);
+        let bind_group = bind(gpu, &l.texture, l.smooth);
         layers.push(UploadedLayer {
             vertices: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("scene vertices"),
@@ -723,8 +752,8 @@ fn prepare(
         });
     }
     gpu.layers = layers;
-    gpu.sky = data.sky.as_ref().map(|s| bind(gpu, s));
-    gpu.sprite_atlas = data.sprite_atlas.as_ref().map(|s| bind(gpu, s));
+    gpu.sky = data.sky.as_ref().map(|s| bind(gpu, s, false));
+    gpu.sprite_atlas = data.sprite_atlas.as_ref().map(|s| bind(gpu, s, false));
 }
 
 /// Copies this frame's sprite geometry into GPU buffers, growing them when
@@ -991,4 +1020,38 @@ fn set_viewport(pass: &mut wgpu::RenderPass, viewport: UVec4) {
 
 fn f32_bytes(v: &[f32]) -> Vec<u8> {
     v.iter().flat_map(|f| f.to_le_bytes()).collect()
+}
+
+/// `img` and its mipmaps down to one texel across, each a 2×2 box average
+/// in linear light of the one before, all in one buffer: the level count
+/// and the texels. A strip of square frames stacked down the texture keeps
+/// its frames apart, as no box straddles two frames.
+fn mip_chain(img: &RgbaImage) -> (u32, Vec<u8>) {
+    let to_linear = |c: u8| (c as f32 / 255.0).powf(2.2);
+    let to_srgb = |c: f32| (c.powf(1.0 / 2.2) * 255.0).round() as u8;
+    let mut out = img.texels.to_vec();
+    let (mut w, mut h) = (img.width as usize, img.height as usize);
+    let mut level = img.texels.to_vec();
+    let mut levels = 1;
+    while w > 1 && w.is_multiple_of(2) && h.is_multiple_of(2) {
+        let (nw, nh) = (w / 2, h / 2);
+        let mut next = vec![0u8; nw * nh * 4];
+        for y in 0..nh {
+            for x in 0..nw {
+                for c in 0..4 {
+                    let at = |dx: usize, dy: usize| level[((2 * y + dy) * w + 2 * x + dx) * 4 + c];
+                    let texels = [at(0, 0), at(1, 0), at(0, 1), at(1, 1)];
+                    next[(y * nw + x) * 4 + c] = if c == 3 {
+                        (texels.iter().map(|&a| a as u32).sum::<u32>() / 4) as u8
+                    } else {
+                        to_srgb(texels.iter().map(|&t| to_linear(t)).sum::<f32>() / 4.0)
+                    };
+                }
+            }
+        }
+        out.extend_from_slice(&next);
+        (w, h, level) = (nw, nh, next);
+        levels += 1;
+    }
+    (levels, out)
 }

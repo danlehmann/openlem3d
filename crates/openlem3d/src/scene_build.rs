@@ -249,6 +249,7 @@ impl LayerBuilder {
             vertices: self.vertices,
             indices: self.indices,
             texture,
+            smooth: false,
         }
     }
 }
@@ -282,7 +283,8 @@ fn block_layer(
 /// sea showed through the land at some window sizes (seen at exactly
 /// 1280×720 on Adreno/DX12).
 /// `frames` stacked frames animate the texture and `drift` scrolls it (uv
-/// per second).
+/// per second). The texture is [`SceneLayer::smooth`], against the shimmer
+/// of the far plane.
 fn plane_layer(y: f32, tile: f32, texture: RgbaImage, frames: u32, drift: [f32; 2]) -> SceneLayer {
     /// Size of the coarse tiles.
     const COARSE: f32 = 512.0;
@@ -328,7 +330,10 @@ fn plane_layer(y: f32, tile: f32, texture: RgbaImage, frames: u32, drift: [f32; 
             }
         }
     }
-    b.finish(texture)
+    SceneLayer {
+        smooth: true,
+        ..b.finish(texture)
+    }
 }
 
 /// Which texture of a multi-texture `LAND` file a polygon shows: the low
@@ -377,7 +382,10 @@ fn land_layer(
             }
         }
     }
-    b.finish(texture)
+    SceneLayer {
+        smooth: true,
+        ..b.finish(texture)
+    }
 }
 
 /// Texel rectangle `[x, y, w, h]` of static object `n` (1-based) in a
