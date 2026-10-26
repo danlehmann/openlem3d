@@ -59,8 +59,9 @@ pub struct SceneLayer {
     pub vertices: Vec<f32>,
     pub indices: Vec<u32>,
     pub texture: RgbaImage,
-    /// The texture has mipmaps and is sampled trilinearly and
-    /// anisotropically when shrunk (the sea and the land, seen far off).
+    /// The texture has mipmaps and, with [`SceneCamera::filtered`], is
+    /// sampled trilinearly and anisotropically when shrunk (the sea and the
+    /// land, seen far off).
     pub smooth: bool,
 }
 
@@ -97,6 +98,8 @@ pub struct SceneCamera {
     /// Let glowing texels shine and bloom (`crate::glow`); only when the
     /// scene is drawn at the screen's resolution.
     pub glow: bool,
+    /// Sample [`SceneLayer::smooth`] textures through their mipmaps.
+    pub filtered: bool,
 }
 
 /// What a frame draws of the scene.
@@ -172,7 +175,7 @@ pub struct SceneGpu {
     target_size: (u32, u32),
     /// Uploaded textures by their texel data, kept while the content still
     /// uses that data (a terrain change re-uploads geometry only).
-    textures: Vec<(Arc<[u8]>, bool, wgpu::BindGroup)>,
+    textures: Vec<(Arc<[u8]>, bool, Bound)>,
 }
 
 struct Pipelines {
@@ -207,7 +210,15 @@ struct UploadedLayer {
     vertices: wgpu::Buffer,
     indices: wgpu::Buffer,
     index_count: u32,
-    bind_group: wgpu::BindGroup,
+    bind_group: Bound,
+}
+
+/// An uploaded texture's bind groups: sampled nearest at full size, and,
+/// for a [`SceneLayer::smooth`] texture, through its mipmaps.
+#[derive(Clone)]
+struct Bound {
+    plain: wgpu::BindGroup,
+    filtered: Option<wgpu::BindGroup>,
 }
 
 impl SceneGpu {
@@ -593,7 +604,7 @@ impl SceneGpu {
         queue: &wgpu::Queue,
         img: &RgbaImage,
         smooth: bool,
-    ) -> wgpu::BindGroup {
+    ) -> Bound {
         let (levels, texels) = if smooth {
             mip_chain(img)
         } else {
@@ -618,30 +629,35 @@ impl SceneGpu {
             wgpu::util::TextureDataOrder::LayerMajor,
             &texels,
         );
-        let sampler = if smooth {
-            &self.mipmapped
-        } else {
-            &self.sampler
+        let group = |view: &wgpu::TextureView, sampler: &wgpu::Sampler| {
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("scene"),
+                layout: &self.layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: self.uniforms.as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::TextureView(view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: wgpu::BindingResource::Sampler(sampler),
+                    },
+                ],
+            })
         };
-        let view = texture.create_view(&Default::default());
-        device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("scene"),
-            layout: &self.layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: self.uniforms.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::Sampler(sampler),
-                },
-            ],
-        })
+        let full_size = texture.create_view(&wgpu::TextureViewDescriptor {
+            mip_level_count: Some(1),
+            ..Default::default()
+        });
+        Bound {
+            plain: group(&full_size, &self.sampler),
+            filtered: smooth
+                .then(|| group(&texture.create_view(&Default::default()), &self.mipmapped)),
+        }
     }
 }
 
@@ -716,9 +732,8 @@ fn prepare(
     };
     let old = std::mem::take(&mut gpu.textures);
     let bind = |gpu: &mut SceneGpu, img: &RgbaImage, smooth: bool| {
-        let same = |(t, s, _): &&(Arc<[u8]>, bool, wgpu::BindGroup)| {
-            Arc::ptr_eq(t, &img.texels) && *s == smooth
-        };
+        let same =
+            |(t, s, _): &&(Arc<[u8]>, bool, Bound)| Arc::ptr_eq(t, &img.texels) && *s == smooth;
         if let Some((.., b)) = gpu.textures.iter().find(same) {
             return b.clone();
         }
@@ -752,8 +767,11 @@ fn prepare(
         });
     }
     gpu.layers = layers;
-    gpu.sky = data.sky.as_ref().map(|s| bind(gpu, s, false));
-    gpu.sprite_atlas = data.sprite_atlas.as_ref().map(|s| bind(gpu, s, false));
+    gpu.sky = data.sky.as_ref().map(|s| bind(gpu, s, false).plain);
+    gpu.sprite_atlas = data
+        .sprite_atlas
+        .as_ref()
+        .map(|s| bind(gpu, s, false).plain);
 }
 
 /// Copies this frame's sprite geometry into GPU buffers, growing them when
@@ -923,7 +941,12 @@ fn draw(
     }
     pass.set_pipeline(&scene_p.geometry);
     for layer in &gpu.layers {
-        pass.set_bind_group(0, &layer.bind_group, &[]);
+        let filtered = layer
+            .bind_group
+            .filtered
+            .as_ref()
+            .filter(|_| camera.filtered);
+        pass.set_bind_group(0, filtered.unwrap_or(&layer.bind_group.plain), &[]);
         pass.set_vertex_buffer(0, layer.vertices.slice(..));
         pass.set_index_buffer(layer.indices.slice(..), wgpu::IndexFormat::Uint32);
         pass.draw_indexed(0..layer.index_count, 0, 0..1);

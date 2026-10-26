@@ -89,6 +89,7 @@ pub(crate) fn update(w: &mut World) {
     }
     camera.clear = w.clear.0.to_linear().to_vec4();
     camera.glow = settings.enhanced && settings.glow && !w.opts.no_glow;
+    camera.filtered = settings.enhanced;
     let screen = (w.screen.size * w.e.window.scale_factor()).round();
     camera.pixels = if p.detail >= 1.0 || screen.min_element() < 1.0 {
         UVec2::ZERO
