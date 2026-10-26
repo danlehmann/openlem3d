@@ -41,13 +41,14 @@ const UMBRELLA_FIRST: u32 = 336;
 /// (¾–1 unit in Practice "Rope Slide").
 const ROPE_ABOVE_PATH: f32 = 0.75;
 
-/// The height in units of the rope over a rope-slide rider at `pos`,
+/// The height in units of the rope over a rope-slide rider whose feet are
+/// drawn at height `feet`,
 /// [`ROPE_ABOVE_PATH`] above the line its feet follow (the rope is drawn by
 /// a run of ramp blocks parallel to that line, ¾–1 unit above it in
 /// Practice "Rope Slide"; searching the blocks for it found the deck
 /// instead just off the start).
-fn rope_above(pos: [i32; 3]) -> f32 {
-    crate::units(pos[1]) + ROPE_ABOVE_PATH
+fn rope_above(feet: f32) -> f32 {
+    feet + ROPE_ABOVE_PATH
 }
 const UMBRELLA_FRAMES: u32 = 8;
 
@@ -1540,14 +1541,14 @@ pub fn build(
             } else {
                 [cx as f32, cy as f32, s, s]
             };
-            anchor[1] = rope_above(l.pos) - s / ROPE_RIDER_TEXELS_PER_UNIT;
+            anchor[1] = rope_above(anchor[1]) - s / ROPE_RIDER_TEXELS_PER_UNIT;
             b.sprite_scaled(anchor, rect, tex, 1, 0.0, ROPE_RIDER_TEXELS_PER_UNIT);
             continue;
         }
         // On a rope slide the raised hand, at the top of the cell, holds the
         // rope (owner's picture).
         if matches!(l.state, State::OnRope { .. }) {
-            anchor[1] = rope_above(l.pos) - size / LEMMING_TEXELS_PER_UNIT;
+            anchor[1] = rope_above(anchor[1]) - size / LEMMING_TEXELS_PER_UNIT;
         }
         if matches!(l.state, State::Exploding | State::Splatting) {
             let pieces = if l.state == State::Exploding {
