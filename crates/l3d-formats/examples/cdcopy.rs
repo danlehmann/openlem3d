@@ -184,7 +184,8 @@ fn make(dir: &Path) {
 /// `GFX` textures of the copy, so that their scale, tiling and offset can be
 /// read off screenshots of the original and of ours alike. A sea or land gets a red
 /// border round each W×W tile (128 unless given) and a white square in its
-/// first corner; a 1024-wide sky a white stripe every 64 columns, column
+/// first corner, and tile `k` of a strip of them `k` small squares beside
+/// it (so animation frames can be told apart); a 1024-wide sky a white stripe every 64 columns, column
 /// `64k` with a stripe `8 + 3k` rows long. `cdcopy unmark DIR SEA=n ...`
 /// puts the original files back.
 fn mark(dir: &Path, files: &[String], marked: bool) {
@@ -214,6 +215,13 @@ fn mark(dir: &Path, files: &[String], marked: bool) {
                             *p = red;
                         }
                         if (4..20).contains(&x) && (4..20).contains(&y) {
+                            *p = white;
+                        }
+                        // A strip of square frames: frame f also gets f
+                        // small squares in a row beside the big one.
+                        let frame = i / (w * w);
+                        let j = x.saturating_sub(24) / 8;
+                        if x >= 24 && j < frame && x % 8 < 5 && (4..9).contains(&y) {
                             *p = white;
                         }
                     }

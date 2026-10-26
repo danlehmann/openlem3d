@@ -1106,8 +1106,9 @@ pub fn build(data: &mut GameData, n: u32, show: Show) -> Result<BuiltLevel, l3d_
         && let Ok(sea) = data.gfx("SEA", level.sea_gfx)
     {
         // With the "128×128" flag the 16 KB file is one 128×128 texture;
-        // otherwise it is a 64-wide strip of 64×64 frames, which animate
-        // unless the level says the sea is still. The sea has the land's
+        // otherwise it is a 64-wide strip of 64×64 frames, which animate (one
+        // per frame the original draws, `scene.wgsl`) unless the level says
+        // the sea is still. The sea has the land's
         // density, whatever the half-scale flag, times [`FLOOR_SCALE`]
         // (measured with marked textures, `docs/spec/camera.md`).
         let (img, tile, size, frames) = if flags & level_flags::SEA_128 != 0 {

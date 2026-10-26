@@ -62,6 +62,11 @@ fn glow_of(a: f32) -> f32 {
 /// Animation frames per second of animated sprites (unverified).
 const ANIM_FPS: f32 = 8.0;
 
+/// Frames per second of an animated sea: one per frame the original draws,
+/// at its 70 Hz display (measured with marked frames on Fun 2, 2026-10-25:
+/// 0, 1, 2, 3, 0, … one per captured frame).
+const SEA_FPS: f32 = 70.0;
+
 struct VOut {
     @builtin(position) clip: vec4<f32>,
     @location(0) uv: vec2<f32>,
@@ -75,7 +80,7 @@ struct VOut {
 fn vs(v: VIn) -> VOut {
     var o: VOut;
     var frame = 0.0;
-    let step = floor(u.sky.w * ANIM_FPS);
+    let step = floor(u.sky.w * select(ANIM_FPS, SEA_FPS, v.anim.y < 0.0));
     if (v.anim.x > 1.0) {
         frame = step % v.anim.x;
     } else if (v.anim.x < -1.0) {

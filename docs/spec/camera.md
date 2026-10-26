@@ -170,9 +170,12 @@ How we verified it:
     original's even noise pattern. Read as 64-wide frames, it showed a
     visible tile grid.
   - **Scale (verified with marked textures, 2026-10-25):** the sea has the land's density whatever the half-scale flag `0x0800`, and every floor texture is 75/64 bigger than whole grid units: a 128×128 sea or land spans 4 × 75/64 units, a 64×64 one 2 × 75/64 (land with `0x0800`: half that). Painted with a grid and read off screenshots of the original and of ours from the same cameras, the tile lines then fell within a pixel or two at every depth (before: ours 2.34 times too fine for the sea, 1.17 for the land). 75/64 is half the sky's vertical stretch of 150/64.
-- **Sea texture, without the flag:** a 64-wide strip, probably 64×64
-  animation frames (unverified). We cycle them at 8 frames per second unless
-  the level flag `0x0010` ("sea not animated") is set.
+- **Sea texture, without the flag:** a 64-wide strip of 64×64 animation
+  frames, shown in order 0, 1, 2, 3, 0, … one per frame drawn, unless the
+  level flag `0x0010` ("sea not animated") is set (**verified**, 2026-10-25:
+  each frame of Fun 2's sea marked with its number, `cdcopy mark SEA=4:64`;
+  in a recording of the original the marked frame advanced on every one of
+  the 70 captured frames a second). We cycle them 70 times a second.
 - **Sea drift (verified, 2026-10-25):** the header's water speeds
   (`water_speed_x`, `_z`, values −3 to 4, one level −33) move the sea by
   that many texels 17.5 times a second (a quarter of the 70 Hz display),
@@ -184,7 +187,6 @@ How we verified it:
   0.437 and now 0.547. X and Z go at the same rate and the directions
   agree. (Two earlier rough readings off demos had Z 2–4 times faster than
   X; they rested on a few pixels' vertical shift of a shrunk texture.)
-  Whether the sea also changes shape in place stays open.
 - **Land polygons:** drawn at the same height with the `LAND` texture. Shape
   verified visually in `LEVEL.000`.
   - **Texture scale:** with the level flag `0x0100` ("128×128 land"), one
