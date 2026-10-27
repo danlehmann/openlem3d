@@ -398,12 +398,6 @@ pub(crate) fn spawn_panel(w: &mut World) {
     b.panel.map = Some(map);
     // Right-hand column.
     b.part(root, Some(Part::Column));
-    b.text(art, true, 299.0, 2.0, Value::In, 3);
-    b.text(art, true, 299.0, 18.0, Value::Out, 3);
-    b.text(art, true, 299.0, 34.0, Value::Time, 4);
-    b.text(art, false, 272.0, 140.0, Value::MinRate, 2);
-    b.text(art, false, 296.0, 140.0, Value::Rate, 2);
-    b.text(art, false, 269.0, 80.0, Value::CameraNumber, 1);
     b.item(
         Vec2::new(260.0, 0.0),
         Vec2::new(32.0, 16.0),
@@ -481,6 +475,14 @@ pub(crate) fn spawn_panel(w: &mut World) {
         Some(Action::Faster),
         Some(Animated::Faster),
     );
+    // The counters, over the labels and icons: the clock label reaches
+    // under the time's colon, and the camera number sits on the camera.
+    b.text(art, true, 299.0, 2.0, Value::In, 3);
+    b.text(art, true, 299.0, 18.0, Value::Out, 3);
+    b.text(art, true, 299.0, 34.0, Value::Time, 4);
+    b.text(art, false, 272.0, 140.0, Value::MinRate, 2);
+    b.text(art, false, 296.0, 140.0, Value::Rate, 2);
+    b.text(art, false, 269.0, 80.0, Value::CameraNumber, 1);
     // The height bar down the right edge, a button so that it is not part
     // of the view.
     b.part(root, None);
