@@ -717,6 +717,15 @@ fn deflector_face(sim: &Simulation, cell: [i32; 3], y: f32) -> Option<[f32; 2]> 
         .map(|n| n.map(|v| v as f32 * std::f32::consts::FRAC_1_SQRT_2))
 }
 
+/// Whether `cell` holds a block that is never drawn: the original shows no
+/// cracks on it while it is bashed (owner, Tricky 9 "Land Ahoy", where the
+/// exit flags stand on such blocks).
+fn invisible(sim: &Simulation, cell: [i32; 3]) -> bool {
+    sim.world
+        .block(cell)
+        .is_some_and(|(b, _)| crate::level_mesh::INVISIBLE_IDS.contains(&b.id))
+}
+
 /// The black cracks of `OVERLAY.000` (frame `frame`) over the sides of the
 /// segments in `mask` of `cell`.
 fn draw_cracks(
@@ -727,6 +736,9 @@ fn draw_cracks(
     frame: u32,
     tex: [f32; 2],
 ) {
+    if invisible(sim, cell) {
+        return;
+    }
     let crack = CRACK_ATLAS_FIRST + frame.min(CRACK_FRAMES - 1);
     let c = cell.map(|v| v as f32);
     let (cx, cy) = (
@@ -946,6 +958,9 @@ fn draw_bottom_cracks(
     at: [f32; 2],
     tex: [f32; 2],
 ) {
+    if invisible(sim, cell) {
+        return;
+    }
     let sub = l3d_sim::SUB;
     let (low, high) = (
         cell[1] * sub + mask.trailing_zeros() as i32 * sub / 4,
@@ -1023,6 +1038,9 @@ fn draw_top_cracks(
     at: [f32; 2],
     tex: [f32; 2],
 ) {
+    if invisible(sim, cell) {
+        return;
+    }
     let sub = l3d_sim::SUB;
     let (low, high) = (
         cell[1] * sub + mask.trailing_zeros() as i32 * sub / 4,

@@ -319,6 +319,13 @@ puts a basher, miner or digger next to steel: their only steel cells
 steel, and solid blocks around the exits (the Practice exit house; invisible
 block 4 under the trees by the Fun 2 exit). Testing it needs a later level code.
 
+Invisible blocks (ids 3 and 4) that are not flagged steel are bashed like
+any other, but the original draws no cracks on them while they are cut
+(**observed by the owner**, Tricky 9 "Land Ahoy", 2026-10-26: the ring of
+invisible block 4 around the exit, which turns walkers away from the exit
+flags, was bashed through and the lemmings walked into the exit). Ours
+draws no cracks on them either.
+
 | Skill | Behaviour | Status |
 |---|---|---|
 | Blocker | Stands still. A walker turns around when its centre comes within about ½ unit of the blocker's centre, measured along the walker's path. The width of the area across the path is not measured. A walker already that close when the blocker starts turns around too if it is heading towards it (observed: a blocker set in a tight pack at release rate 99 on Practice "Blocker" turned back the lemmings right behind it; none walked through). | **turn distance verified: 0.48 ± 0.05 unit** (implemented: a 0.48-unit square) |

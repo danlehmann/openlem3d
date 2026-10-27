@@ -351,7 +351,7 @@ fn face_tiles(texture: u8, mods: u8) -> (u32, u32) {
 }
 
 /// Block ids with hard-coded invisible behaviour (see `docs/spec/blk.md`).
-const INVISIBLE_IDS: [u8; 2] = [3, 4];
+pub(crate) const INVISIBLE_IDS: [u8; 2] = [3, 4];
 
 /// Vertical extents `(bottom, top)` within the cell of the runs of
 /// consecutive segments in the mask, bottom first: one for a whole block, two
