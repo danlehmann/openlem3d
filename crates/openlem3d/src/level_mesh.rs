@@ -400,14 +400,18 @@ fn segment_runs(segments: u8) -> Vec<(f32, f32)> {
 
 /// The height within the cell of a shape's unit-cell point at height `v`
 /// (0–1), for the segment run `y0..y1`. Shapes are stretched to the run,
-/// except that 22.5° ramps keep their slope: a ramp's top falls ½ unit
-/// across the cell (or the run's height, if less) from the run's top (8),
-/// or rises as far from the run's bottom (9), so a half-height ramp cell
-/// and a full one beside it make one even slope.
+/// except that ramps keep their slope: a 22.5° ramp's top falls ½ unit
+/// across the cell from the run's top (8) or rises as far from its bottom
+/// (9), and a 45° ramp (5) rises from the run's bottom, so a half-height
+/// ramp cell and a full one beside it make one even slope. Where a slope
+/// leaves the run, `build` cuts the shape flat at the run's end: a
+/// quarter-height 8 reaches the run's bottom halfway across (the long
+/// ramps of Tricky 8 "All Around the Watchtower" end short of the 45° ones
+/// beside them in the original, owner's observation).
 fn shape_y(shape: u8, v: f32, y0: f32, y1: f32) -> f32 {
     match shape {
-        8 => y0.max(y1 - (1.0 - v)),
-        9 => y1.min(y0 + v),
+        8 => y1 - (1.0 - v),
+        9 => y0 + v,
         // Rising from the run's bottom at full slope; `build` cuts it at the
         // run's top.
         5 => y0 + v,
@@ -592,11 +596,15 @@ pub fn build(
             if top <= y0 || base >= y1 {
                 continue;
             }
-            // A 45° ramp in a shorter run keeps its slope (see `shape_y`)
-            // and is cut flat at the run's top.
-            let keeps_slope = cell.shape == 5 && y1 - y0 < 1.0;
-            let top = if keeps_slope { top.min(y1) } else { top };
-            let (clip_top, clip_base) = (top < y1 || keeps_slope, base > y0);
+            // A ramp in a shorter run keeps its slope (see `shape_y`) and is
+            // cut flat where it leaves the run: a rising one at the run's
+            // top, a falling one at its bottom.
+            let short = y1 - y0 < 1.0;
+            let rises = short && matches!(cell.shape, 5 | 9);
+            let falls = short && cell.shape == 8;
+            let top = if rises { top.min(y1) } else { top };
+            let base = if falls { base.max(y0) } else { base };
+            let (clip_top, clip_base) = (top < y1 || rises, base > y0 || falls);
             let origin = [x as f32, y as f32, z as f32];
             let rotation = effective_rotation(cell.shape, cell.rotation);
             let place = |lp: [f32; 3]| {

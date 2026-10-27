@@ -571,14 +571,21 @@ pub fn inside_shape(block: BlockCell, l: [f32; 3]) -> bool {
         6 => y > (lo + (hi - lo) * z).min(hi - RAMP_EDGE),
         7 => x + z < 1.0,
         // 22.5° ramps keep their slope whatever the run's height: the top
-        // falls ½ unit across the cell (or the run's height, if less) from
-        // the run's top, or for 9 the underside rises as far from its bottom,
-        // so a half-height ramp cell and a full one make one even slope (the
-        // ramp tubes of Taxing 1 "Spaghetti Junction"). Matches the renderer,
-        // but for a sliver at the thin edge so that a ramp meeting another at
-        // the cell boundary leaves no gap there.
-        8 => y < (hi - (hi - lo).min(0.5) * z).max(lo + RAMP_EDGE),
-        9 => y > (lo + (hi - lo).min(0.5) * z).min(hi - RAMP_EDGE),
+        // falls ½ unit across the cell from the run's top, or for 9 the
+        // underside rises as far from its bottom, so a half-height ramp cell
+        // and a full one make one even slope (the ramp tubes of Taxing 1
+        // "Spaghetti Junction"); a quarter-height one ends halfway across
+        // (Tricky 8 "All Around the Watchtower", owner's observation).
+        // Matches the renderer, but for a sliver at the thin edge so that a
+        // ramp meeting another at the cell boundary leaves no gap there.
+        8 => {
+            let top = hi - 0.5 * z;
+            top >= lo && y < top.max(lo + RAMP_EDGE)
+        }
+        9 => {
+            let bottom = lo + 0.5 * z;
+            bottom <= hi && y > bottom.min(hi - RAMP_EDGE)
+        }
         10 => t < x.min(z),
         11 => 1.0 - t < x.min(z),
         12 => x + z <= 1.0 && t <= 1.0 - x - z,
