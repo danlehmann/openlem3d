@@ -31,6 +31,8 @@ pub struct Settings {
     pub music: u8,
     pub effects: u8,
     pub camera: u8,
+    /// The rating last picked on the title screen (`menu::RATINGS`).
+    pub rating: usize,
     /// Levels completed (file numbers), for the Practice menu's ticks.
     pub completed: std::collections::BTreeSet<u32>,
     /// Best result per level (file number): lemmings saved, and seconds left
@@ -55,6 +57,7 @@ impl Default for Settings {
             music: 8,
             effects: 8,
             camera: 5,
+            rating: 0,
             completed: Default::default(),
             best: Default::default(),
         }
@@ -153,6 +156,13 @@ impl Settings {
                 "music" => s.music = level.unwrap_or(s.music),
                 "effects" => s.effects = level.unwrap_or(s.effects),
                 "camera" => s.camera = level.unwrap_or(s.camera),
+                "rating" => {
+                    s.rating = v
+                        .parse()
+                        .ok()
+                        .filter(|&r| r < crate::menu::RATINGS.len())
+                        .unwrap_or(s.rating)
+                }
                 "completed" => {
                     s.completed = v.split(',').filter_map(|n| n.trim().parse().ok()).collect()
                 }
@@ -177,7 +187,7 @@ impl Settings {
         let Some(path) = Self::path() else { return };
         let on = |b: bool| if b { "on" } else { "off" };
         let text = format!(
-            "land = {}\nsea = {}\nsky = {}\nleft_handed = {}\nfullscreen = {}\nenhanced = {}\nglow = {}\nrewind = {}\nmusic = {}\neffects = {}\ncamera = {}\ncompleted = {}\nbest = {}\n",
+            "land = {}\nsea = {}\nsky = {}\nleft_handed = {}\nfullscreen = {}\nenhanced = {}\nglow = {}\nrewind = {}\nmusic = {}\neffects = {}\ncamera = {}\nrating = {}\ncompleted = {}\nbest = {}\n",
             on(self.land),
             on(self.sea),
             on(self.sky),
@@ -189,6 +199,7 @@ impl Settings {
             self.music,
             self.effects,
             self.camera,
+            self.rating,
             self.completed
                 .iter()
                 .map(u32::to_string)

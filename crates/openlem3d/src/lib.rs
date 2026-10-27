@@ -336,6 +336,8 @@ impl World {
     fn new(mut e: Engine, opts: Options, data: Data, state: menu::AppState) -> Self {
         e.time.fixed.set_hz(l3d_sim::TICKS_PER_SECOND as f64);
         let profile = profile::Profile::new(opts.profile);
+        let settings = settings::Settings::load();
+        let rating = settings.rating;
         World {
             e,
             current: CurrentLevel {
@@ -347,7 +349,7 @@ impl World {
             state,
             next_state: None,
             started: false,
-            settings: settings::Settings::load(),
+            settings,
             game: Game::default(),
             preset: PresetIndex::default(),
             info: None,
@@ -370,7 +372,7 @@ impl World {
             art: None,
             title: title::Title::default(),
             screen_ui: None,
-            rating: menu::MenuRating::default(),
+            rating: menu::MenuRating(rating),
             titles: None,
             list: menu::LevelList::default(),
             briefing: briefing::Briefing::default(),
@@ -480,6 +482,7 @@ impl World {
                 style::toggle_on_title(self);
                 style::title_label(self);
                 sfx::watch_rating(self);
+                keep_rating(self);
             }
             Code => title::update_code(self),
             Options => {
@@ -943,6 +946,14 @@ pub struct Game {
 
 /// Ticks between rewind snapshots: two seconds, about 140 KB each.
 const SNAPSHOT_TICKS: u64 = 28;
+
+/// The rating picked on the title screen is kept for the next start.
+fn keep_rating(w: &mut World) {
+    if w.settings.rating != w.rating.0 {
+        w.settings.rating = w.rating.0;
+        w.settings.save();
+    }
+}
 
 /// Runs `sim` back `ticks` ticks (no further than the oldest snapshot):
 /// from the latest snapshot at or before then, the player's commands are
