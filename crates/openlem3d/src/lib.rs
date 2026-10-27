@@ -328,6 +328,11 @@ pub struct World {
 }
 
 impl World {
+    /// Backspace held with rewinding on: the level runs back.
+    fn backwards(&self) -> bool {
+        self.settings.rewind && self.e.input.keys.pressed(KeyCode::Backspace)
+    }
+
     fn new(mut e: Engine, opts: Options, data: Data, state: menu::AppState) -> Self {
         e.time.fixed.set_hz(l3d_sim::TICKS_PER_SECOND as f64);
         let profile = profile::Profile::new(opts.profile);
@@ -569,6 +574,13 @@ impl l3d_engine::Game for World {
         touch::record_touch_starts(self);
         key_buttons::press(self);
         self.change_state();
+        // A step is one simulation tick, so fast-forward steps more often
+        // and every sprite frame is still drawn.
+        let pace = self.game.pace(self.backwards());
+        self.e
+            .time
+            .fixed
+            .set_hz(l3d_sim::TICKS_PER_SECOND as f64 * pace as f64);
         while self.e.time.fixed_step() {
             if self.state == menu::AppState::Playing {
                 step_simulation(self);
@@ -903,15 +915,13 @@ pub fn fresh_level(w: &World) -> bool {
 pub struct Game {
     pub sim: Option<l3d_sim::Simulation>,
     pub paused: bool,
-    /// Fast-forward: several simulation ticks per tick.
+    /// Fast-forward: the level runs [`FAST_FORWARD_TICKS`] times as fast.
     pub fast_forward: bool,
-    /// Simulation ticks per tick now: 0 paused, 1 normal, up to
+    /// The level's pace now, in ticks per normal tick: 0 paused, 1 normal, up to
     /// [`FAST_FORWARD_TICKS`]. It rises gradually after a pause and into
     /// fast-forward, and drops at once (ours).
     speed: f32,
-    /// Simulation ticks owed at the current speed, under one.
-    tick_credit: f32,
-    /// Each lemming's place before the last step's ticks, for drawing it
+    /// Each lemming's place before the last tick, for drawing it
     /// moving smoothly over the step ([`Game::drawn_pos`]).
     prev_pos: Vec<[i32; 3]>,
     /// The way each lemming is drawn facing, turning towards the way it
@@ -1004,7 +1014,7 @@ impl Replay {
     }
 }
 
-/// Simulation ticks per tick while fast-forwarding (the original's speed-up
+/// How many times as fast the level runs while fast-forwarding (the original's speed-up
 /// is unmeasured).
 const FAST_FORWARD_TICKS: u32 = 3;
 /// Seconds for the game to reach normal speed after a pause, and again for
@@ -1032,9 +1042,9 @@ fn pause_keys(w: &mut World) {
 }
 
 fn step_simulation(w: &mut World) {
+    let backwards = w.backwards();
     let (options, scene) = (&w.opts, &mut w.scene);
     let keep_snapshots = w.settings.rewind;
-    let backwards = keep_snapshots && w.e.input.keys.pressed(KeyCode::Backspace);
     // A turner half given (one click) may be to a lemming not yet out then.
     if backwards {
         w.pending.0 = None;
@@ -1055,7 +1065,6 @@ fn step_simulation(w: &mut World) {
         terrain,
         fast_forward,
         speed,
-        tick_credit,
         prev_pos,
         replay,
         doors,
@@ -1073,8 +1082,9 @@ fn step_simulation(w: &mut World) {
         (false, false) => 1.0,
         (false, true) => FAST_FORWARD_TICKS as f32,
     };
-    let rise =
-        (FAST_FORWARD_TICKS - 1) as f32 / (SPEED_RAMP_SECONDS * l3d_sim::TICKS_PER_SECOND as f32);
+    // A step lasts a tick at the current pace.
+    let rise = (FAST_FORWARD_TICKS - 1) as f32
+        / (SPEED_RAMP_SECONDS * l3d_sim::TICKS_PER_SECOND as f32 * speed.max(1.0));
     // Out of a pause straight to normal speed (a gradual start showed
     // lemmings gliding while their poses stood still, owner).
     *speed = if target < *speed || *speed < 1.0 {
@@ -1082,9 +1092,8 @@ fn step_simulation(w: &mut World) {
     } else {
         (*speed + rise).min(target)
     };
-    // Where the lemmings stand before this step's ticks (all of them, so a
-    // fast-forward step of several is drawn over the whole step); paused,
-    // where they are, so that nothing drifts.
+    // Where the lemmings stand before this step's tick; paused, where they
+    // are, so that nothing drifts.
     prev_pos.clear();
     prev_pos.extend(sim.lemmings.iter().map(|l| l.pos));
     if !keep_snapshots {
@@ -1094,18 +1103,8 @@ fn step_simulation(w: &mut World) {
     // (ours), paused or not; a replay stops there and the player takes over.
     if backwards && sim.tick > snapshots.first().map_or(u64::MAX, |s| s.tick) {
         *replay = None;
-        *tick_credit += if *fast_forward {
-            FAST_FORWARD_TICKS as f32
-        } else {
-            1.0
-        };
-        let ticks = tick_credit.floor() as u64;
-        *tick_credit -= ticks as f32;
-        if ticks == 0 {
-            return;
-        }
         let before = sim.world.clone();
-        rewind(sim, snapshots, ticks);
+        rewind(sim, snapshots, 1);
         sim.world.take_changes();
         sim.world.take_bricks_changed();
         if before.same_terrain(&sim.world) && sim.tick > l3d_sim::HATCH_OPEN_TICKS as u64 {
@@ -1135,25 +1134,20 @@ fn step_simulation(w: &mut World) {
     if *paused {
         return;
     }
-    *tick_credit += *speed;
-    let ticks = tick_credit.floor() as u32;
-    *tick_credit -= ticks as f32;
-    for _ in 0..ticks {
-        if keep_snapshots
-            && sim.tick.is_multiple_of(SNAPSHOT_TICKS)
-            && snapshots.last().is_none_or(|s| s.tick < sim.tick)
-        {
-            snapshots.push(sim.clone());
-        }
-        if replay.as_mut().is_some_and(|r| !r.feed(sim)) {
-            *replay = None;
-        }
-        sim.step();
-        lemming_render::step_doors(doors, sim);
-        for &step in &options.assign {
-            if step.0 == sim.tick && replay.is_none() {
-                l3d_sim::demos::apply_step(sim, step);
-            }
+    if keep_snapshots
+        && sim.tick.is_multiple_of(SNAPSHOT_TICKS)
+        && snapshots.last().is_none_or(|s| s.tick < sim.tick)
+    {
+        snapshots.push(sim.clone());
+    }
+    if replay.as_mut().is_some_and(|r| !r.feed(sim)) {
+        *replay = None;
+    }
+    sim.step();
+    lemming_render::step_doors(doors, sim);
+    for &step in &options.assign {
+        if step.0 == sim.tick && replay.is_none() {
+            l3d_sim::demos::apply_step(sim, step);
         }
     }
     let changes = sim.world.take_changes();
@@ -1175,6 +1169,15 @@ fn step_simulation(w: &mut World) {
 }
 
 impl Game {
+    /// Ticks per normal tick at which the level runs, forwards or back.
+    fn pace(&self, backwards: bool) -> f32 {
+        match (backwards, self.fast_forward) {
+            (true, true) => FAST_FORWARD_TICKS as f32,
+            (true, false) => 1.0,
+            (false, _) => self.speed.max(1.0),
+        }
+    }
+
     /// How far the game is through its current step towards the next, 0
     /// to 1, for drawing lemmings between their places; 1 (where they are)
     /// in Original mode, which moves them in steps as the original did.
@@ -1333,7 +1336,7 @@ pub(crate) fn load_level(w: &mut World) {
     let preset = opts.camera.filter(|c| (1..=4).contains(c)).unwrap_or(1) - 1;
     w.preset.set(preset);
     game.fast_forward = false;
-    (game.speed, game.tick_credit) = (1.0, 0.0);
+    game.speed = 1.0;
     game.prev_pos.clear();
     game.yaws.clear();
     game.paused = false;
