@@ -13,6 +13,8 @@
 //!   block file `BLK.nnn` of the level written, which defines its blocks.
 //!   An edit `@OFFSET=B,B,...` writes raw bytes (hex) at a hex offset of the
 //!   unpacked level, e.g. a preset camera (`docs/spec/level.md`).
+//!   An edit `#ID=TILE:SHADE[:FLAGS]` redefines block ID in the slot's block
+//!   file: that tile and shading on all six faces.
 //!
 //! The copy holds game data: keep it under the git-ignored `temp/`.
 
@@ -46,6 +48,9 @@ fn level(dir: &Path, n: u32, from: u32, edits: &[String]) {
     let mut data = GameData::open(&locate_data_dir(None)).expect("game CD");
     let mut level = data.read(&format!("LEVELS/LEVEL.{from:03}")).unwrap();
     for e in edits {
+        if e.starts_with('#') {
+            continue;
+        }
         if let Some(raw) = e.strip_prefix('@') {
             // `@OFFSET=B,B,...`: bytes (hex) written at a hex offset.
             let (at, bytes) = raw.split_once('=').expect("@OFFSET=B,B,...");
@@ -71,7 +76,20 @@ fn level(dir: &Path, n: u32, from: u32, edits: &[String]) {
     // The level's own blocks go with it: a slot's BLK may lack blocks the
     // level uses (one-way blocks, splitters). Rerunning `N` puts its own
     // back.
-    let blk = data.read(&format!("LEVELS/BLK.{from:03}")).unwrap();
+    let mut blk = data.read(&format!("LEVELS/BLK.{from:03}")).unwrap();
+    // `#ID=TILE:SHADE[:FLAGS]`: block ID with that tile and shading on all
+    // six faces (`docs/spec/blk.md`).
+    for e in edits.iter().filter_map(|e| e.strip_prefix('#')) {
+        let (id, def) = e.split_once('=').expect("#ID=TILE:SHADE[:FLAGS]");
+        let id: usize = id.parse().unwrap();
+        let v: Vec<u8> = def.split(':').map(|v| v.parse().unwrap()).collect();
+        let d = &mut blk[id * 22..id * 22 + 22];
+        d[..4].copy_from_slice(&[0, 0, v.get(2).copied().unwrap_or(0), 0]);
+        for face in d[4..].chunks_mut(3) {
+            face.copy_from_slice(&[v[0], 0, v[1]]);
+        }
+        println!("block {id}: tile {} shading {}", v[0], v[1]);
+    }
     put(dir, &mut data, &format!("BLK.{n:03}"), &blk);
 }
 

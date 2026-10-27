@@ -50,7 +50,7 @@ Every file is exactly 1,408 bytes: 64 definitions × 22 bytes, uncompressed.
 |---|---|
 | 0 | Tile index in the level's `TEXTURE` file |
 | 1 | Modifiers |
-| 2 | Shading: 0 = unchanged, up to 8 = darkest [L3DEdit]. Each step darkens the colours by about 7 % (verified: the steel spire of `LEVEL.068`, shading 7, shows tile 67 at about 0.45 of its colour in the original, matched by 1 − 7 × 0.07 applied to the palette colours) |
+| 2 | Shading: 0 = unchanged, up to 8 = darkest [L3DEdit]. See [Face shading](#face-shading-measured) |
 
 A top face shows its tile with the tile's top edge along the block's +Z side
 and its left edge along +X at rotation 0, and turned a quarter at rotation 1
@@ -67,6 +67,35 @@ rotation 2; the keyboard of `LEVEL.007`, slabs of rotation 3; turning
 rotation 0 or 1 a half breaks the chips and lettering of `LEVEL.070`).
 Shaped blocks follow the same rule by their stored rotation (the keyboard's
 slabs; ramps unchecked).
+
+### Face shading (measured)
+
+The original darkens a face by moving each texel's colour down its palette
+ramp. `LM3D.PAL` holds eight ramps of 32 entries (0–31, …, 224–255), each its
+top colour scaled evenly towards black (the grey ramp 224–255: (227, 255,
+255) halving to (109, 125, 125) at 240 and ending at (8, 8, 8) and black).
+
+- **One step** takes 3 of the palette's 63 levels off a colour's brightest
+  channel, the others following in proportion: about 1½ entries down the
+  ramp.
+- **Steps:** the face's shading, plus 2 for any face that is not a top:
+  walls in all four directions, 45° slopes and undersides (an underside may
+  be a little darker still). 22.5° slopes are shaded as tops (Tricky 8's
+  long ramp, shading 2: slope at index ~246, its side ~249, the tile ~243), at most 8 in all (walls of
+  shading 6 and 7 look the same).
+- **Floor:** the grey ramp stops at index 254, (8, 8, 8), never black; other
+  ramps stop at their own darkest entry (the red ramp 64–95 at (65, 0, 0)).
+
+Measured 2026-10-26 on test copies of Tricky 8 (`cdcopy`, blocks redefined
+with `#ID=TILE:SHADE`): rows of cubes of shading 0–8 in tiles 68 and 69 (grey
+ramp) and 82 (red ramp), walls and tops, read back as palette indices; ramps
+in four rotations; a slab seen from below. Plain stone of shading 0 thus
+shows its walls at about ¾ of the texture's brightness (owner's report: the
+stone of Tricky 8 is darker in the original), and the bright steel of
+`LEVEL.068` (shading 5–7) only a little darker than 1 − 0.07 per step, the
+rule we used before, which was much too light on dark tiles. Distance,
+face direction and header bytes 0x0EC and 0x144–0x149 make no difference.
+Whether objects, signs and wall decals are shaded alike is unchecked.
 
 ### Flags (unverified, [L3DEdit])
 

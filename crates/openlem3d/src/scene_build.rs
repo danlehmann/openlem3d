@@ -73,7 +73,8 @@ fn glowing_rgba(
 struct Vertex {
     pos: [f32; 3],
     uv: [f32; 2],
-    brightness: f32,
+    /// How much darker than its texture ([`crate::level_mesh::SHADE_STEP`]).
+    shade: f32,
     cutout: bool,
     /// Billboard offset along camera-right and up.
     offset: [f32; 2],
@@ -84,11 +85,11 @@ struct Vertex {
 }
 
 impl Vertex {
-    fn fixed(pos: [f32; 3], uv: [f32; 2], brightness: f32, cutout: bool) -> Self {
+    fn fixed(pos: [f32; 3], uv: [f32; 2], shade: f32, cutout: bool) -> Self {
         Vertex {
             pos,
             uv,
-            brightness,
+            shade,
             cutout,
             offset: [0.0; 2],
             anim: [1.0, 0.0],
@@ -99,7 +100,7 @@ impl Vertex {
     fn push(&self, out: &mut Vec<f32>) {
         out.extend(self.pos);
         out.extend(self.uv);
-        out.extend([self.brightness, if self.cutout { 1.0 } else { 0.0 }]);
+        out.extend([self.shade, if self.cutout { 1.0 } else { 0.0 }]);
         out.extend(self.offset);
         out.extend(self.anim);
         out.extend(self.light);
@@ -189,7 +190,7 @@ impl LayerBuilder {
             Vertex {
                 pos: anchor,
                 uv,
-                brightness: 1.0,
+                shade: 0.0,
                 cutout: true,
                 offset: off,
                 anim,
@@ -204,19 +205,13 @@ impl LayerBuilder {
     /// Adds a fixed quad with corners bottom-left, bottom-right, top-right,
     /// top-left as seen from its front, showing texel rectangle `rect`
     /// (`[x, y, w, h]`) of a texture of `tex_size`.
-    pub fn quad(
-        &mut self,
-        corners: [[f32; 3]; 4],
-        rect: [f32; 4],
-        tex_size: [f32; 2],
-        brightness: f32,
-    ) {
+    pub fn quad(&mut self, corners: [[f32; 3]; 4], rect: [f32; 4], tex_size: [f32; 2], shade: f32) {
         let [x, y, w, h] = rect;
         let (u0, u1) = (x / tex_size[0], (x + w) / tex_size[0]);
         let (v0, v1) = (y / tex_size[1], (y + h) / tex_size[1]);
         let base = self.base();
         for (p, uv) in corners.iter().zip([[u0, v1], [u1, v1], [u1, v0], [u0, v0]]) {
-            Vertex::fixed(*p, uv, brightness, true).push(&mut self.vertices);
+            Vertex::fixed(*p, uv, shade, true).push(&mut self.vertices);
         }
         self.indices
             .extend([base, base + 1, base + 2, base, base + 2, base + 3]);
@@ -233,7 +228,7 @@ impl LayerBuilder {
         height: f32,
         rect: [f32; 4],
         tex: [f32; 2],
-        brightness: f32,
+        shade: f32,
     ) {
         // Right as seen from the front: +Y × normal.
         let right = [normal[1], -normal[0]];
@@ -241,7 +236,7 @@ impl LayerBuilder {
         let bl = [cx - right[0] * hw, cy, cz - right[1] * hw];
         let br = [cx + right[0] * hw, cy, cz + right[1] * hw];
         let up = |p: [f32; 3]| [p[0], p[1] + height, p[2]];
-        self.quad([bl, br, up(br), up(bl)], rect, tex, brightness);
+        self.quad([bl, br, up(br), up(bl)], rect, tex, shade);
     }
 
     fn finish(self, texture: RgbaImage) -> SceneLayer {
@@ -265,7 +260,7 @@ fn block_layer(
     for (part, cutout) in [(&mesh.opaque, false), (&mesh.cutout, true)] {
         let base = b.base();
         for i in 0..part.positions.len() {
-            let mut v = Vertex::fixed(part.positions[i], part.uvs[i], part.colors[i][0], cutout);
+            let mut v = Vertex::fixed(part.positions[i], part.uvs[i], part.shades[i], cutout);
             v.anim = part.anims[i];
             v.light = light::shine(lights, level, part.positions[i], part.normals[i]);
             v.push(&mut b.vertices);
@@ -302,7 +297,7 @@ fn plane_layer(y: f32, tile: f32, texture: RgbaImage, frames: u32, drift: [f32; 
             (x0 + size, z0 + size),
             (x0 + size, z0),
         ] {
-            let mut v = Vertex::fixed([x, y, z], [x / tile, z / tile], 1.0, false);
+            let mut v = Vertex::fixed([x, y, z], [x / tile, z / tile], 0.0, false);
             // A tiled surface (see `scene.wgsl`): frames, and the drift.
             v.anim = [frames as f32, -1.0];
             v.offset = drift;
@@ -360,12 +355,13 @@ fn land_layer(
             continue;
         }
         let base = b.base();
-        // The top 3 bits of the options byte darken the texture (unverified).
-        let brightness = 1.0 - (poly[0].options >> 5) as f32 * 0.07;
+        // The top 3 bits of the options byte shade the texture (unverified),
+        // taken as a flat top's shading.
+        let shade = crate::level_mesh::face_shade(poly[0].options >> 5, true);
         let y = GROUND_Y - 0.008 + 0.006 * i as f32 / (count - 1).max(1) as f32;
         let pts: Vec<[f32; 3]> = poly.iter().map(|v| [v.x as f32, y, v.z as f32]).collect();
         for p in &pts {
-            Vertex::fixed(*p, [p[0] / tile, p[2] / tile], brightness, false).push(&mut b.vertices);
+            Vertex::fixed(*p, [p[0] / tile, p[2] / tile], shade, false).push(&mut b.vertices);
         }
         // Fan triangulation, wound so the face points up (+Y).
         let up = {
@@ -464,7 +460,7 @@ fn trap_layer(data: &mut GameData, level: &Level, pal: &Palette) -> Option<Scene
             [[x0, y, z1], [x1, y, z1], [x1, y, z0], [x0, y, z0]],
             [0.0, frame * 64.0, 64.0, 64.0],
             tex,
-            1.0,
+            0.0,
         );
     }
     let trap = level.trap_type;
@@ -621,6 +617,13 @@ fn object_layers(data: &mut GameData, level: &Level, pal: &Palette) -> Vec<Scene
 /// Gap between a decal and the cell face it is painted on.
 const DECAL_OFFSET: f32 = 0.004;
 
+/// A wall decal on a side or an underside is shaded as the faces there are
+/// (`crate::level_mesh::SIDE_SHADE`; unverified for decals).
+const SIDE_DECAL_SHADE: f32 = crate::level_mesh::SIDE_SHADE as f32 * crate::level_mesh::SHADE_STEP;
+
+/// The half-height panels' darkening (ours).
+const PANEL_SHADE: f32 = SIDE_DECAL_SHADE + 0.1;
+
 /// Horizontal outward normals of a cell's sides in the order signs and walls
 /// number them: +X, −Z, −X, +Z.
 const SIDE_NORMALS: [[f32; 2]; 4] = [[1.0, 0.0], [0.0, -1.0], [-1.0, 0.0], [0.0, 1.0]];
@@ -670,7 +673,7 @@ fn decal_layers(data: &mut GameData, level: &Level, pal: &Palette) -> Vec<SceneL
                     fr[3] / 64.0,
                     fr,
                     sign_tex,
-                    1.0,
+                    0.0,
                 );
                 sign_b.vertical_quad(
                     at(0.5 - DECAL_OFFSET),
@@ -679,7 +682,7 @@ fn decal_layers(data: &mut GameData, level: &Level, pal: &Palette) -> Vec<SceneL
                     br[3] / 64.0,
                     br,
                     sign_tex,
-                    1.0,
+                    0.0,
                 );
             }
             0x70..=0xEF if walls.is_some() => {
@@ -710,7 +713,7 @@ fn decal_layers(data: &mut GameData, level: &Level, pal: &Palette) -> Vec<SceneL
                                 1.0,
                                 rect,
                                 wall_tex,
-                                1.0,
+                                SIDE_DECAL_SHADE,
                             );
                         }
                         if !own {
@@ -721,7 +724,7 @@ fn decal_layers(data: &mut GameData, level: &Level, pal: &Palette) -> Vec<SceneL
                                 1.0,
                                 rect,
                                 wall_tex,
-                                1.0,
+                                SIDE_DECAL_SHADE,
                             );
                         }
                     }
@@ -744,14 +747,14 @@ fn decal_layers(data: &mut GameData, level: &Level, pal: &Palette) -> Vec<SceneL
                                     [[x0, y, z0], [x0, y, z1], [x1, y, z1], [x1, y, z0]],
                                     rect,
                                     wall_tex,
-                                    1.0,
+                                    crate::level_mesh::face_shade(0, true),
                                 );
                             } else {
                                 b.quad(
                                     [[x0, y, z1], [x0, y, z0], [x1, y, z0], [x1, y, z1]],
                                     rect,
                                     wall_tex,
-                                    1.0,
+                                    SIDE_DECAL_SHADE,
                                 );
                             }
                         };
@@ -769,8 +772,16 @@ fn decal_layers(data: &mut GameData, level: &Level, pal: &Palette) -> Vec<SceneL
                         // cell: along Z (0xD) or along X (0xE), seen from both sides.
                         let n = if half == 0xD { [1.0, 0.0] } else { [0.0, 1.0] };
                         let c = [cx, base_y, cz];
-                        wall_b.vertical_quad(c, n, 1.0, 0.5, rect, wall_tex, 0.6);
-                        wall_b.vertical_quad(c, [-n[0], -n[1]], 1.0, 0.5, rect, wall_tex, 0.6);
+                        wall_b.vertical_quad(c, n, 1.0, 0.5, rect, wall_tex, PANEL_SHADE);
+                        wall_b.vertical_quad(
+                            c,
+                            [-n[0], -n[1]],
+                            1.0,
+                            0.5,
+                            rect,
+                            wall_tex,
+                            PANEL_SHADE,
+                        );
                     }
                     _ => {}
                 }
@@ -1063,15 +1074,16 @@ fn brick_layer(bricks: &[l3d_sim::Brick], texture: RgbaImage) -> SceneLayer {
             }
         };
         // The top and the underside, each counter-clockwise from outside,
-        // with its brightness.
+        // shaded as tops and undersides are.
         let faces = [
-            ([p(0, 1, 0), p(0, 1, 1), p(1, 1, 1), p(1, 1, 0)], 1.0),
-            ([p(0, 0, 0), p(1, 0, 0), p(1, 0, 1), p(0, 0, 1)], 0.5),
+            ([p(0, 1, 0), p(0, 1, 1), p(1, 1, 1), p(1, 1, 0)], true),
+            ([p(0, 0, 0), p(1, 0, 0), p(1, 0, 1), p(0, 0, 1)], false),
         ];
-        for (corners, brightness) in faces {
+        for (corners, top) in faces {
+            let shade = crate::level_mesh::face_shade(0, top);
             let base = b.base();
             for c in corners {
-                Vertex::fixed(c, uv(c), brightness, false).push(&mut b.vertices);
+                Vertex::fixed(c, uv(c), shade, false).push(&mut b.vertices);
             }
             b.indices
                 .extend([base, base + 1, base + 2, base, base + 2, base + 3]);

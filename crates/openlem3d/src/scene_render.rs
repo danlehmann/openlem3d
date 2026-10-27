@@ -14,7 +14,7 @@ use wgpu::util::DeviceExt;
 use crate::gpu::{Gpu, TARGET_FORMAT};
 use crate::profile::Stamp;
 
-/// Floats per vertex: position (3), uv (2), brightness (1), cutout flag (1),
+/// Floats per vertex: position (3), uv (2), shade (1), cutout flag (1),
 /// billboard offset (2), animation frame count and uv stride (2), light (3).
 pub const VERTEX_FLOATS: usize = 14;
 

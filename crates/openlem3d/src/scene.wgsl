@@ -35,7 +35,8 @@ struct Uniforms {
 struct VIn {
     @location(0) pos: vec3<f32>,
     @location(1) uv: vec2<f32>,
-    // x: brightness, y: 1 if palette index 0 is transparent.
+    // x: shade (`level_mesh::SHADE_STEP`), y: 1 if palette index 0 is
+    // transparent.
     @location(2) params: vec2<f32>,
     // Billboard corner offset from `pos`, in world units along the camera
     // right vector (x) and up (y). Zero for fixed geometry.
@@ -53,6 +54,10 @@ struct VIn {
 
 /// Alpha steps from a plain texel to a fully glowing one (`glow.rs`).
 const GLOW_STEPS: f32 = 120.0;
+
+/// The darkest a shade takes a colour's brightest channel to, in sRGB
+/// (palette index 254, the grey ramp's darkest but black).
+const SHADE_FLOOR: f32 = 8.0 / 255.0;
 
 /// A texel's glow (0–1) from its alpha (`glow.rs`).
 fn glow_of(a: f32) -> f32 {
@@ -145,11 +150,20 @@ fn fs(v: VOut) -> @location(0) vec4<f32> {
     if (v.params.y > 0.5 && c.a < 0.5) {
         discard;
     }
-    // Brightness darkens the palette colours as the original does, i.e. in
-    // sRGB space; the sampled colour is linear, so the factor is linearised.
-    // Glowing texels (alpha below 1) are lifted above white.
+    // The original shades a colour down its palette ramp, whose entries
+    // are the ramp's top colour scaled evenly towards black: the shade
+    // (`level_mesh::SHADE_STEP`) is taken off the brightest channel of the
+    // palette colour (sRGB; the sampled colour is linear) and the others
+    // follow in proportion, keeping the hue. It stops short of black, at
+    // the darkest grey the original shades to (palette index 254; other
+    // ramps end higher, unmodelled). Glowing texels (alpha below 1) are
+    // lifted above white.
+    let srgb = pow(c.rgb, vec3(1.0 / 2.2));
+    let top = max(srgb.r, max(srgb.g, srgb.b));
+    let lowered = max(top - v.params.x, min(top, SHADE_FLOOR));
+    let shaded = pow(srgb * (lowered / max(top, 1e-5)), vec3(2.2));
     let glow = glow_of(c.a);
-    return vec4(c.rgb * (pow(v.params.x, 2.2) + v.light) * (1.0 + glow * u.post.x), 1.0);
+    return vec4((shaded + c.rgb * v.light) * (1.0 + glow * u.post.x), 1.0);
 }
 
 // Sky: a full-screen triangle. Above the horizon the sky image is stretched

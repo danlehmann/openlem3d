@@ -387,7 +387,7 @@ fn beam(
         corners,
         [cx as f32, cy as f32, s * length, s / 2.0],
         tex,
-        1.0,
+        0.0,
     );
 }
 
@@ -466,7 +466,7 @@ fn objects(b: &mut LayerBuilder, sim: &Simulation, eye: Vec3, tex: [f32; 2]) {
                         [[x0, y, z1], [x1, y, z1], [x1, y, z0], [x0, y, z0]],
                         [cx as f32, cy as f32, s, s],
                         tex,
-                        1.0,
+                        0.0,
                     );
                 }
                 continue;
@@ -528,13 +528,13 @@ fn objects(b: &mut LayerBuilder, sim: &Simulation, eye: Vec3, tex: [f32; 2]) {
 const DOOR_OFFSET: f32 = 0.004;
 
 /// An exit's door: its cell, the doorway's outward normal `[x, z]`, its
-/// face's shading, and which of the [`DOOR_FRAMES`] pictures it shows (0:
+/// face's shade ([`crate::level_mesh::face_shade`]), and which of the [`DOOR_FRAMES`] pictures it shows (0:
 /// closed, as the block itself is textured; 3: open).
 #[derive(Clone, Copy, Debug)]
 pub struct Door {
     pub cell: [i32; 3],
     pub normal: [i32; 2],
-    pub brightness: f32,
+    pub shade: f32,
     pub frame: u32,
 }
 
@@ -552,7 +552,7 @@ pub fn doors(level: &l3d_formats::level::Level, blocks: &l3d_formats::blk::Block
             // The doorway is the +Z face turned with the block: 0 → +Z, 1 → +X,
             // 2 → −Z, 3 → −X (verified).
             normal: [[0, 1], [1, 0], [0, -1], [-1, 0]][(b.rotation % 4) as usize],
-            brightness: 1.0 - (shading.min(8) as f32) * 0.07,
+            shade: crate::level_mesh::face_shade(shading, false),
             frame: 0,
         })
         .collect()
@@ -822,7 +822,7 @@ fn side_cracks(
                     rh,
                 ],
                 tex,
-                1.0,
+                0.0,
             );
         }
     }
@@ -1016,7 +1016,7 @@ fn draw_bottom_cracks(
                     piece,
                 ],
                 tex,
-                1.0,
+                0.0,
             );
         }
     }
@@ -1093,7 +1093,7 @@ fn draw_top_cracks(
                     piece,
                 ],
                 tex,
-                1.0,
+                0.0,
             );
         }
     }
@@ -1423,7 +1423,7 @@ pub fn build(
             1.0,
             [cx as f32, cy as f32, 64.0, 64.0],
             tex,
-            d.brightness,
+            d.shade,
         );
     }
     // Trapped lemmings are shown by the trap's own animation, but for the

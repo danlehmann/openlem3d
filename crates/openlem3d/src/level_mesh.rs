@@ -10,14 +10,40 @@ use l3d_formats::level::{BlockCell, Level, SIZE_X, SIZE_Y, SIZE_Z};
 /// Number of 64×64 tiles in a `TEXTURE` file.
 pub const TILES: u32 = 100;
 
+/// One step of a face's shading: 3 of the palette's 63 levels taken off
+/// a colour's brightest channel, the others following in proportion (one
+/// and a half entries down its palette ramp), nearly down to black (measured in the original on test
+/// cubes of shading 0–8 in three tiles, `docs/spec/blk.md`).
+pub const SHADE_STEP: f32 = 3.0 / 63.0;
+
+/// The steps a face that is not a top is shaded beyond its own: walls,
+/// 45° slopes and undersides (measured, `docs/spec/blk.md`).
+pub const SIDE_SHADE: u8 = 2;
+
+/// The most steps a face is shaded, its own and [`SIDE_SHADE`] together
+/// (measured: walls of shading 6 and 7 look the same).
+pub const MAX_SHADE: u8 = 8;
+
+/// How far up a face's normal points, at least, for it to be shaded as a
+/// top: 22.5° slopes (0.92) are, 45° slopes (0.71) are not (measured).
+pub const TOP_MIN_UP: f32 = 0.8;
+
+/// The shade of a face with shading `steps` (`docs/spec/blk.md`) that is
+/// a top ([`TOP_MIN_UP`]) or not.
+pub fn face_shade(steps: u8, top: bool) -> f32 {
+    (steps + if top { 0 } else { SIDE_SHADE }).min(MAX_SHADE) as f32 * SHADE_STEP
+}
+
 /// Triangle geometry with per-vertex position, texture coordinate and
-/// brightness. `uv` addresses the whole 64×6400 texture strip.
+/// shade. `uv` addresses the whole 64×6400 texture strip.
 #[derive(Default, Debug)]
 pub struct MeshData {
     pub positions: Vec<[f32; 3]>,
     pub normals: Vec<[f32; 3]>,
     pub uvs: Vec<[f32; 2]>,
-    pub colors: Vec<[f32; 4]>,
+    /// How much darker than its texture each vertex is drawn (0–1, in the
+    /// palette's sRGB), see [`SHADE_STEP`].
+    pub shades: Vec<f32>,
     /// Per-vertex texture animation: frame count (negative for a
     /// ping-pong) and the uv step between frames; `[1, 0]` when still.
     pub anims: Vec<[f32; 2]>,
@@ -498,7 +524,7 @@ impl MeshData {
         &mut self,
         verts: &[[f32; 3]],
         uvs: &[[f32; 2]],
-        brightness: f32,
+        shading: u8,
         both_sides: bool,
         anim: [f32; 2],
     ) {
@@ -509,7 +535,7 @@ impl MeshData {
             return;
         }
         let n = n.map(|c| c / len);
-        let color = [brightness, brightness, brightness, 1.0];
+        let shade = face_shade(shading, n[1] > TOP_MIN_UP);
         for side in 0..if both_sides { 2 } else { 1 } {
             let base = self.positions.len() as u32;
             let normal = if side == 0 { n } else { n.map(|c| -c) };
@@ -517,7 +543,7 @@ impl MeshData {
                 self.positions.push(*p);
                 self.normals.push(normal);
                 self.uvs.push(*uv);
-                self.colors.push(color);
+                self.shades.push(shade);
                 self.anims.push(anim);
             }
             for i in 1..verts.len() as u32 - 1 {
@@ -725,7 +751,6 @@ pub fn build(
                         })
                         .collect()
                 };
-                let brightness = 1.0 - (face.shading.min(8) as f32) * 0.07;
                 let transparent =
                     face.modifiers & (modifiers::COLOR0_TRANSPARENT | modifiers::REVERSE_SIDE) != 0;
                 // An open hatch shows the inside of its walls too.
@@ -737,14 +762,14 @@ pub fn build(
                 } else {
                     &mut out.opaque
                 };
-                target.push_poly(&verts, &strip(front), brightness, false, anim);
+                target.push_poly(&verts, &strip(front), face.shading, false, anim);
                 if double {
                     // The inside of a double-sided face: same polygon, opposite
                     // winding, possibly another tile.
                     let (mut rv, mut ru) = (verts.clone(), strip(back));
                     rv.reverse();
                     ru.reverse();
-                    target.push_poly(&rv, &ru, brightness, false, anim);
+                    target.push_poly(&rv, &ru, face.shading, false, anim);
                 }
             }
         }
