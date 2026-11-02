@@ -88,6 +88,10 @@ struct SolidCell {
     /// Height in quarter units below which it has been blown away, leaving
     /// its shape above unchanged: 0 for a whole block.
     base: u8,
+    /// The block's segments as the level placed them, which give its
+    /// shape's runs: segments taken out later leave the shape around them
+    /// as it was.
+    placed: u8,
 }
 
 impl World {
@@ -106,6 +110,7 @@ impl World {
                 flags: def.flags,
                 cut: 4,
                 base: 0,
+                placed: b.segments,
             });
         }
         let land = level
@@ -237,6 +242,12 @@ impl World {
         self.cell(c[0], c[1], c[2]).map_or(0, |s| s.base)
     }
 
+    /// The segments the block in cell `c` was placed with, before any were
+    /// taken out: the runs its shape spans. 0 for an empty cell.
+    pub fn placed(&self, c: [i32; 3]) -> u8 {
+        self.cell(c[0], c[1], c[2]).map_or(0, |s| s.placed)
+    }
+
     /// The segments of the block in cell `c` that hold something: those
     /// present, below its cut. 0 for an empty cell.
     pub fn present(&self, c: [i32; 3]) -> u8 {
@@ -336,7 +347,19 @@ impl World {
             return false;
         };
         let l = [0, 1, 2].map(|i| (p[i] - c[i] * SUB) as f32 / SUB as f32);
-        (cell.base as f32..cell.cut as f32).contains(&(l[1] * 4.0)) && inside_shape(cell.block, l)
+        // A segment taken out leaves a gap in the shape, not a new shape in
+        // what is left (a basher through a 45° ramp leaves its top hanging,
+        // verified in a changed Practice "Basher", 2026-11-01).
+        let seg = ((l[1] * 4.0) as u32).min(3);
+        (cell.base as f32..cell.cut as f32).contains(&(l[1] * 4.0))
+            && cell.block.segments & (1 << seg) != 0
+            && inside_shape(
+                BlockCell {
+                    segments: cell.placed,
+                    ..cell.block
+                },
+                l,
+            )
     }
 
     /// For a point inside a 45° deflector wall (shape 7): the outward normal

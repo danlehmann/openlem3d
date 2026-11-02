@@ -398,6 +398,12 @@ fn segment_runs(segments: u8) -> Vec<(f32, f32)> {
     runs
 }
 
+/// The segments spanning heights `y0..y1` within the cell (quarter steps).
+fn segments_between(y0: f32, y1: f32) -> u8 {
+    let below = |y: f32| ((1u16 << (y * 4.0).round() as u32) - 1) as u8;
+    below(y1) & !below(y0)
+}
+
 /// The height within the cell of a shape's unit-cell point at height `v`
 /// (0–1), for the segment run `y0..y1`. Shapes are stretched to the run,
 /// except that ramps keep their slope: a 22.5° ramp's top falls ½ unit
@@ -568,13 +574,15 @@ impl MeshData {
 /// and 60). `hatch_open` (0–1) is how far the hatches' doors are open.
 /// `cut(x, y, z)` gives the heights within cell `(x, y, z)` below which its
 /// block has been blown away (0 for a whole block) and above which it has
-/// been dug away (1): the shape is sliced off flat there, unchanged between.
+/// been dug away (1): the shape is sliced off flat there, unchanged between;
+/// and the segments the block was placed with, whose runs give its shape
+/// (the level's segments are those still there).
 pub fn build(
     level: &Level,
     blocks: &BlockSet,
     art_on_top: &dyn Fn(u32) -> bool,
     hatch_open: f32,
-    cut: &dyn Fn(usize, usize, usize) -> (f32, f32),
+    cut: &dyn Fn(usize, usize, usize) -> (f32, f32, u8),
 ) -> LevelMesh {
     let grid = Grid { level, blocks };
     let mut out = LevelMesh::default();
@@ -591,9 +599,18 @@ pub fn build(
             *unsupported.entry(cell.shape).or_default() += 1;
             continue;
         };
-        let (base, top) = cut(x, y, z);
-        for (y0, y1) in segment_runs(cell.segments) {
-            if top <= y0 || base >= y1 {
+        let (base, top, placed) = cut(x, y, z);
+        // Each run of segments as placed keeps its shape; where segments have
+        // been taken out of it since, what is left is that shape sliced off
+        // flat (a basher through a 45° ramp leaves its top hanging).
+        let pieces = segment_runs(placed).into_iter().flat_map(|(y0, y1)| {
+            let run = segments_between(y0, y1);
+            segment_runs(cell.segments & run)
+                .into_iter()
+                .map(move |(a0, a1)| (y0, y1, base.max(a0), top.min(a1)))
+        });
+        for (y0, y1, base, top) in pieces {
+            if top <= base {
                 continue;
             }
             // A ramp in a shorter run keeps its slope (see `shape_y`) and is

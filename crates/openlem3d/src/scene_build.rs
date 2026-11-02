@@ -1024,6 +1024,7 @@ pub fn rebuild_blocks(
             (
                 sim.world.base(c) as f32 / 4.0,
                 sim.world.cut(c) as f32 / 4.0,
+                sim.world.placed(c),
             )
         }),
         texture,
@@ -1112,7 +1113,7 @@ pub fn build(data: &mut GameData, n: u32, show: Show) -> Result<BuiltLevel, l3d_
         &blocks,
         &|tile| art_on_top(|i| tex.get(i).is_some_and(|&p| p != 0), tile),
         0.0,
-        &|_, _, _| (0.0, 1.0),
+        &|x, y, z| (0.0, 1.0, level.block(x, y, z).segments),
     );
     let mut scene = SceneData::default();
 
