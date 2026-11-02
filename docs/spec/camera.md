@@ -169,7 +169,7 @@ How we verified it:
   - Verified visually in `LEVEL.000`: read this way, the sea shows the
     original's even noise pattern. Read as 64-wide frames, it showed a
     visible tile grid.
-  - **Scale (verified with marked textures, 2026-10-25):** the sea has the land's density whatever the half-scale flag `0x0800`, and every floor texture is 75/64 bigger than whole grid units: a 128×128 sea or land spans 4 × 75/64 units, a 64×64 one 2 × 75/64 (land with `0x0800`: half that). Painted with a grid and read off screenshots of the original and of ours from the same cameras, the tile lines then fell within a pixel or two at every depth (before: ours 2.34 times too fine for the sea, 1.17 for the land). 75/64 is half the sky's vertical stretch of 150/64.
+  - **Scale (verified with marked textures, 2026-10-25):** the sea is 75/64 bigger than whole grid units whatever the half-scale flag `0x0800`: a 128×128 sea spans 4 × 75/64 units, a 64×64 one 2 × 75/64. Land is not, except at half scale (see "Land polygons" below). Painted with a grid and read off screenshots of the original and of ours from the same cameras, the tile lines then fell within a pixel or two at every depth (before: ours 2.34 times too fine for the sea, 1.17 for the land). 75/64 is half the sky's vertical stretch of 150/64.
 - **Sea texture, without the flag:** a 64-wide strip of 64×64 animation
   frames, shown in order 0, 1, 2, 3, 0, … one per frame drawn, unless the
   level flag `0x0010` ("sea not animated") is set (**verified**, 2026-10-25:
@@ -190,14 +190,19 @@ How we verified it:
 - **Land polygons:** drawn at the same height with the `LAND` texture. Shape
   verified visually in `LEVEL.000`.
   - **Texture scale:** with the level flag `0x0100` ("128×128 land"), one
-    128×128 texture spans 4 grid units (times 75/64, see the sea's scale above). Verified visually: the circuit-board
+    128×128 texture spans 4 grid units, unlike the sea. Verified visually: the circuit-board
     floor of `LEVEL.065` and the grass of `LEVEL.000` match the original at
-    that scale; half of it was clearly too fine.
+    that scale; half of it was clearly too fine. **Verified with marked
+    textures** (2026-11-02, the levels cleared of blocks so the floor shows
+    whole, `cdcopy mark LAND=n:128`): on Fun 1 and Tricky 11 "A Head Above the
+    Rest" the marks fell where ours puts them at 4 units, and not at
+    4 × 75/64. Tricky 11's header flag `0x4000` made no difference to the floor.
   - **Without the flag:** the file is a strip of 64×64 textures, each
     spanning 2 grid units (the same texel density; provisional). Each polygon
     picks its texture with the low 3 bits of its options byte.
-  - **Flag `0x0800`:** halves the span. The Practice levels use 64×64 grass
-    at 1 grid unit per texture.
+  - **Flag `0x0800`:** half the span, times 75/64 (marked textures: the
+    Practice grass, 64×64, spans 1.17 units, and Fun 3 "The Bean Machine"'s
+    128×128 land 2.34).
 
 ## Collision
 

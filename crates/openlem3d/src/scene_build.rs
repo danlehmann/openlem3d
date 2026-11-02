@@ -29,9 +29,9 @@ mod level_flags {
 
 /// How far the sea plane extends beyond the grid, in grid units.
 const SEA_MARGIN: f32 = 4000.0;
-/// How much bigger the original draws the land and sea textures than whole
-/// grid units: 75/64 (measured with marked textures in the original,
-/// 2026-10-25: 2.34–2.36 times our old 2-unit sea on Fun 1, 1.17 times the
+/// How much bigger the original draws the sea texture, and land drawn at
+/// half scale, than whole grid units: 75/64 (measured with marked textures
+/// in the original, 2026-10-25: 2.34–2.36 times our old 2-unit sea on Fun 1, 1.17 times the
 /// Practice grass; half the sky's vertical stretch of 150/64).
 const FLOOR_SCALE: f32 = 75.0 / 64.0;
 
@@ -1171,15 +1171,17 @@ pub fn build(data: &mut GameData, n: u32, show: Show) -> Result<BuiltLevel, l3d_
     {
         // With the "128" flag the file is one 128×128 texture spanning 4 grid
         // units; without it, a strip of 64×64 textures, each spanning 2 units,
-        // chosen per polygon (`docs/spec/graphics.md`); both times
-        // [`FLOOR_SCALE`].
+        // chosen per polygon (`docs/spec/graphics.md`). Drawn at half scale,
+        // it spans half that times [`FLOOR_SCALE`] (measured with marked
+        // textures on levels cleared of blocks, 2026-11-02: 4 units on Fun 1
+        // and Tricky 11, 2.34 on Fun 3, 1.17 for the Practice grass).
         let (size, mut tile) = if flags & level_flags::LAND_128 != 0 {
-            (128, 4.0 * FLOOR_SCALE)
+            (128, 4.0)
         } else {
-            (64, 2.0 * FLOOR_SCALE)
+            (64, 2.0)
         };
         if flags & level_flags::LAND_HALF_SCALE != 0 {
-            tile /= 2.0;
+            tile *= FLOOR_SCALE / 2.0;
         }
         let count = (land.len() / (size * size)).max(1);
         for index in 0..count {
