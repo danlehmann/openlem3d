@@ -169,7 +169,7 @@ How we verified it:
   - Verified visually in `LEVEL.000`: read this way, the sea shows the
     original's even noise pattern. Read as 64-wide frames, it showed a
     visible tile grid.
-  - **Scale (verified with marked textures, 2026-10-25):** the sea is 75/64 bigger than whole grid units whatever the half-scale flag `0x0800`: a 128×128 sea spans 4 × 75/64 units, a 64×64 one 2 × 75/64. Land is not, except at half scale (see "Land polygons" below). Painted with a grid and read off screenshots of the original and of ours from the same cameras, the tile lines then fell within a pixel or two at every depth (before: ours 2.34 times too fine for the sea, 1.17 for the land). 75/64 is half the sky's vertical stretch of 150/64.
+  - **Scale (verified with marked textures, 2026-10-25):** a 128×128 sea is 75/64 bigger than whole grid units whatever the half-scale flag `0x0800`, spanning 4 × 75/64 units; a 64×64 frame spans 4 units (measured 2026-11-02 on Fun 2 and Tricky 11 with marked seas: the spacing of the marks down the screen matched ours within 2 % at 4 units, and was 1.67 times ours at 2 × 75/64, the scale assumed before). The flag `0x4000` doubles the sea's span. Land is not, except at half scale (see "Land polygons" below). Painted with a grid and read off screenshots of the original and of ours from the same cameras, the tile lines then fell within a pixel or two at every depth (before: ours 2.34 times too fine for the sea, 1.17 for the land). 75/64 is half the sky's vertical stretch of 150/64.
 - **Sea texture, without the flag:** a 64-wide strip of 64×64 animation
   frames, shown in order 0, 1, 2, 3, 0, … one per frame drawn, unless the
   level flag `0x0010` ("sea not animated") is set (**verified**, 2026-10-25:

@@ -133,7 +133,8 @@ lemming would die on release. Read Z-first, all of them are inside.
 | `0x0400` | Wall decals show the game screen (the "Lemmings Inside" monitor effect; [L3DEdit], unverified: the decals themselves hold a still of the game screen) |
 | `0x0800` | Land texture drawn at half scale |
 | `0x1000` | Minimap disabled: map and frame are both absent (observed on `LEVEL.019`, `044` and `062`, the only levels with the flag among those seen; levels without it showed the minimap) |
-| `0x2000`, `0x4000` | Unknown |
+| `0x2000` | Unknown |
+| `0x4000` | Sea texture drawn at double scale (**verified**, 2026-11-02, Tricky 11 "A Head Above the Rest" cleared of blocks, sea frozen and marked: set and cleared, only the sea changed, its tiles twice as big with the flag; nothing else on screen differed) |
 | `0x8000` | Liquid zaps lemmings instead of drowning them (verified for the sea on `LEVEL.070`) |
 
 ### Preset cameras

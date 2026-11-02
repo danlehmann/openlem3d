@@ -25,11 +25,12 @@ mod level_flags {
     pub const LAND_128: u16 = 0x0100;
     pub const SURROUND_SKY: u16 = 0x0200;
     pub const LAND_HALF_SCALE: u16 = 0x0800;
+    pub const SEA_DOUBLE_SCALE: u16 = 0x4000;
 }
 
 /// How far the sea plane extends beyond the grid, in grid units.
 const SEA_MARGIN: f32 = 4000.0;
-/// How much bigger the original draws the sea texture, and land drawn at
+/// How much bigger the original draws a 128×128 sea, and land drawn at
 /// half scale, than whole grid units: 75/64 (measured with marked textures
 /// in the original, 2026-10-25: 2.34–2.36 times our old 2-unit sea on Fun 1, 1.17 times the
 /// Practice grass; half the sky's vertical stretch of 150/64).
@@ -1129,9 +1130,9 @@ pub fn build(data: &mut GameData, n: u32, show: Show) -> Result<BuiltLevel, l3d_
         // With the "128×128" flag the 16 KB file is one 128×128 texture;
         // otherwise it is a 64-wide strip of 64×64 frames, which animate (one
         // per frame the original draws, `scene.wgsl`) unless the level says
-        // the sea is still. The sea has the land's
-        // density, whatever the half-scale flag, times [`FLOOR_SCALE`]
-        // (measured with marked textures, `docs/spec/camera.md`).
+        // the sea is still. A 128×128 sea spans 4 units times [`FLOOR_SCALE`]
+        // (Fun 1), a 64×64 frame 4 units (Fun 2 and Tricky 11), whatever the
+        // half-scale flag (measured with marked textures, `docs/spec/camera.md`).
         let (img, tile, size, frames) = if flags & level_flags::SEA_128 != 0 {
             (
                 indexed_to_rgba(&sea[..(128 * 128).min(sea.len())], 128, &pal),
@@ -1147,10 +1148,17 @@ pub fn build(data: &mut GameData, n: u32, show: Show) -> Result<BuiltLevel, l3d_
             };
             (
                 indexed_to_rgba(&sea[..(64 * 64 * frames as usize).min(sea.len())], 64, &pal),
-                2.0 * FLOOR_SCALE,
+                4.0,
                 64.0,
                 frames,
             )
+        };
+        // The flag `0x4000` draws it at twice that scale (measured with a
+        // marked sea on Tricky 11 "A Head Above the Rest", `docs/spec/camera.md`).
+        let tile = if flags & level_flags::SEA_DOUBLE_SCALE != 0 {
+            tile * 2.0
+        } else {
+            tile
         };
         // The header's water speeds, in texels per 1/17.5 s (measured with
         // a marked sea, `docs/spec/camera.md`).
