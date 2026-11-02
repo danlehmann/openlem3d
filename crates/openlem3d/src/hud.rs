@@ -189,7 +189,14 @@ pub(crate) fn assign_on_pointer(w: &mut World) {
     {
         pending.0 = None;
     }
-    if pending.0.is_some_and(|i| !sim.can_assign(i, Skill::Turner)) {
+    // The arrows stay while the lemming is briefly unable to take a turner,
+    // such as stepping off a builder's last brick onto the platform it
+    // reaches (owner, Tricky 12 "Dot to Dot": they went as it walked on); the
+    // second click is refused then.
+    if pending.0.is_some_and(|i| {
+        let l = &sim.lemmings[i];
+        l.gone || l.state.is_terminal() || sim.skills_left[Skill::Turner as usize] == 0
+    }) {
         pending.0 = None;
     }
     // Riding along, a click on another lemming takes effect when the button
