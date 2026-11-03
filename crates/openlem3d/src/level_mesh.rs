@@ -21,9 +21,9 @@ pub const SHADE_STEP: f32 = 3.0 / 63.0;
 pub const SIDE_SHADE: u8 = 2;
 
 /// The steps the 45° slopes of a half-height pyramid (shapes 1 and 2) that
-/// face ±X are shaded beyond their own; its ±Z slopes take [`SIDE_SHADE`]
-/// (measured on the rotation-0 pyramids of Tricky 15 "Chocolate Drop",
-/// `docs/spec/blk.md`).
+/// face the world's ±X are shaded beyond their own, whatever the block's
+/// rotation; its ±Z slopes take [`SIDE_SHADE`] (measured on Tricky 15
+/// "Chocolate Drop" at rotations 0 and 1, `docs/spec/blk.md`).
 pub const PYRAMID_X_SHADE: u8 = 1;
 
 /// The most steps a face is shaded, its own and [`SIDE_SHADE`] together
@@ -799,8 +799,9 @@ pub fn build(
                 } else {
                     &mut out.opaque
                 };
+                let world = rotate_dir(p.src, effective_rotation(cell.shape, cell.rotation));
                 let side = if matches!(cell.shape, 1 | 2)
-                    && matches!(p.src, FaceDir::PosX | FaceDir::NegX)
+                    && matches!(world, FaceDir::PosX | FaceDir::NegX)
                 {
                     PYRAMID_X_SHADE
                 } else {
