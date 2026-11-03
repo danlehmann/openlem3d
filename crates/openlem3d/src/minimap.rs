@@ -1,7 +1,8 @@
 //! The in-level minimap in the panel's top-left corner, like the original's
 //! (`docs/spec/ui-graphics.md`, "In-level panel"): a 64×64 top-down map,
 //! two pixels per cell, in a wooden frame at (0, 0)–(70, 70), closed and
-//! opened by the panel's red dot in its corner. Sea and land show their textures' average colour and each
+//! opened by the panel's red dot in its corner. Sea and land show their textures' average colour (a
+//! level without a sea its sky's first pixel) and each
 //! column its highest block's top colour; the exit is red, hatches orange,
 //! lemmings white and the camera a yellow dot (colours read off captures of
 //! the original). Clicking it moves the camera over that spot, as the
@@ -107,12 +108,18 @@ pub(crate) fn build_base(w: &mut World) {
         let s = t as usize * 64 * 64;
         tex.get(s..s + 64 * 64).map(|p| average(p, &pal))
     };
+    // Without a sea the map shows the colour of the sky picture's first
+    // pixel (measured: Tricky 15 "Chocolate Drop", sky 27, index 170; Tricky
+    // 12 "Dot to Dot", sky 8, index 90). Without either, unchecked.
+    let sky = (level.sky_gfx != 0xFF)
+        .then(|| d.gfx("SKY", level.sky_gfx).ok())
+        .flatten()
+        .and_then(|s| s.first().map(|&p| pal[p as usize]))
+        .map_or([0, 70, 200], |c| [c[0], c[1], c[2]]);
     let sea = (level.sea_gfx != 0xFF)
         .then(|| d.gfx("SEA", level.sea_gfx).ok())
         .flatten()
-        .map_or([0, 70, 200], |s| {
-            average(&s[..(64 * 64).min(s.len())], &pal)
-        });
+        .map_or(sky, |s| average(&s[..(64 * 64).min(s.len())], &pal));
     let land = (level.land_gfx != 0xFF)
         .then(|| d.gfx("LAND", level.land_gfx).ok())
         .flatten()

@@ -14,7 +14,8 @@
 //!   An edit `@OFFSET=B,B,...` writes raw bytes (hex) at a hex offset of the
 //!   unpacked level, e.g. a preset camera (`docs/spec/level.md`).
 //!   An edit `#ID=TILE:SHADE[:FLAGS]` redefines block ID in the slot's block
-//!   file: that tile and shading on all six faces.
+//!   file: that tile and shading on all six faces, or with `TILE` a list
+//!   `+Z,-Z,+X,-X,+Y,-Y`, one tile per face.
 //!
 //! The copy holds game data: keep it under the git-ignored `temp/`.
 
@@ -82,13 +83,16 @@ fn level(dir: &Path, n: u32, from: u32, edits: &[String]) {
     for e in edits.iter().filter_map(|e| e.strip_prefix('#')) {
         let (id, def) = e.split_once('=').expect("#ID=TILE:SHADE[:FLAGS]");
         let id: usize = id.parse().unwrap();
-        let v: Vec<u8> = def.split(':').map(|v| v.parse().unwrap()).collect();
+        let (tiles, rest) = def.split_once(':').expect("#ID=TILE:SHADE[:FLAGS]");
+        // TILE may list one tile per face, +Z,-Z,+X,-X,+Y,-Y.
+        let tiles: Vec<u8> = tiles.split(',').map(|v| v.parse().unwrap()).collect();
+        let v: Vec<u8> = rest.split(':').map(|v| v.parse().unwrap()).collect();
         let d = &mut blk[id * 22..id * 22 + 22];
-        d[..4].copy_from_slice(&[0, 0, v.get(2).copied().unwrap_or(0), 0]);
-        for face in d[4..].chunks_mut(3) {
-            face.copy_from_slice(&[v[0], 0, v[1]]);
+        d[..4].copy_from_slice(&[0, 0, v.get(1).copied().unwrap_or(0), 0]);
+        for (k, face) in d[4..].chunks_mut(3).enumerate() {
+            face.copy_from_slice(&[tiles[k.min(tiles.len() - 1)], 0, v[0]]);
         }
-        println!("block {id}: tile {} shading {}", v[0], v[1]);
+        println!("block {id}: tiles {tiles:?} shading {}", v[0]);
     }
     put(dir, &mut data, &format!("BLK.{n:03}"), &blk);
 }

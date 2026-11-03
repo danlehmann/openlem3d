@@ -174,7 +174,7 @@ assuming rotation 0.
 | Value | Shape |
 |---|---|
 | 0 | Cube |
-| 1 / 2 | Half-height square pyramid, apex up / down (special segment rules) |
+| 1 / 2 | Half-height square pyramid, apex up / down. Its faces are 45°: it rises from the bottom of its segments and peaks half a unit up, and in fewer segments is cut flat at their top, like a 45° ramp, rather than being squeezed into them (**measured** 2026-11-02 on Tricky 15 "Chocolate Drop", a test copy seen from the side: its fields of `0001` pyramids are frustums a quarter unit high with flat tops, and a cell changed to `0011` peaks twice as high, half a unit). Levels use `0011` (24 levels) and `0001` (levels 34, 53, 59, 71); shape 2 only as `1100` (level 46), assumed to hang from the top alike. Walkers go up and over both at these heights, across the flat top of a `0001` one and over the point of a `0011` one (**verified** 2026-11-02: both put in the path of Practice "Climber"'s demo, slot 87) |
 | 3 / 4 | Full-height square pyramid, apex up / down |
 | 5 / 6 | 45° ramp facing +Z/+Y, or +Z/−Y (uses the +Z face texture). A 5 with fewer segments keeps its 45° slope, rising from the bottom of the segments, and is flat where it reaches their top, rather than being squeezed into them (**verified** on Fun 17 "Hole in Ten": the half-height wedge atop the left ramp, segments `0011`, shows half a cell of slope and half of flat top in the original; walkers reaching it from the side turn there, and the owner's route bashes through it). Whether 6 does the same, falling from the top, is unchecked |
 | 7 | Vertical 45° deflector wall facing +Z/+X (uses the +Z face texture) |

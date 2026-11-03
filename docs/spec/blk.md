@@ -83,6 +83,13 @@ top colour scaled evenly towards black (the grey ramp 224–255: (227, 255,
   be a little darker still). 22.5° slopes are shaded as tops (Tricky 8's
   long ramp, shading 2: slope at index ~246, its side ~249, the tile ~243), at most 8 in all (walls of
   shading 6 and 7 look the same).
+- **Half-height pyramids** (shape 1) shade their ±Z slopes 2 steps but
+  their ±X slopes only 1, and a flat top left by a cut 0 (**measured**
+  2026-11-02 on Tricky 15 "Chocolate Drop", rotation 0, tile 67 at
+  (101, 56, 16): slopes at (77, 40, 4) and (89, 48, 8); giving the ±X faces
+  other tiles in a test copy took nearly all the (89, 48, 8) away, from views
+  along −Z, −X and +X). Whether this follows the face's own direction or the
+  world's at other rotations is unchecked (ours: its own).
 - **Floor:** the grey ramp stops at index 254, (8, 8, 8), never black; other
   ramps stop at their own darkest entry (the red ramp 64–95 at (65, 0, 0)).
 

@@ -580,8 +580,11 @@ pub fn inside_shape(block: BlockCell, l: [f32; 3]) -> bool {
     let cone = 1.0 - 2.0 * (x - 0.5).abs().max((z - 0.5).abs());
     match block.shape {
         0 => true,
-        1 => t < 0.5 * cone,
-        2 => 1.0 - t < 0.5 * cone,
+        // Half-height pyramids keep their 45° slope, rising from the run's
+        // bottom (or hanging from its top), and are flat where they leave
+        // it, as the renderer's (`level_mesh::shape_y`).
+        1 => y - lo < 0.5 * cone,
+        2 => hi - y < 0.5 * cone,
         3 => t < cone,
         4 => 1.0 - t < cone,
         // A 45° ramp in a shorter run keeps its slope, rising from the

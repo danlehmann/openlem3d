@@ -20,6 +20,12 @@ pub const SHADE_STEP: f32 = 3.0 / 63.0;
 /// 45° slopes and undersides (measured, `docs/spec/blk.md`).
 pub const SIDE_SHADE: u8 = 2;
 
+/// The steps the 45° slopes of a half-height pyramid (shapes 1 and 2) that
+/// face ±X are shaded beyond their own; its ±Z slopes take [`SIDE_SHADE`]
+/// (measured on the rotation-0 pyramids of Tricky 15 "Chocolate Drop",
+/// `docs/spec/blk.md`).
+pub const PYRAMID_X_SHADE: u8 = 1;
+
 /// The most steps a face is shaded, its own and [`SIDE_SHADE`] together
 /// (measured: walls of shading 6 and 7 look the same).
 pub const MAX_SHADE: u8 = 8;
@@ -419,8 +425,12 @@ fn shape_y(shape: u8, v: f32, y0: f32, y1: f32) -> f32 {
         8 => y1 - (1.0 - v),
         9 => y0 + v,
         // Rising from the run's bottom at full slope; `build` cuts it at the
-        // run's top.
-        5 => y0 + v,
+        // run's top. A half-height pyramid (1) is 45° too: it peaks half a
+        // unit up in a half-height run and is cut flat in a quarter-height
+        // one (Tricky 15 "Chocolate Drop", measured from the side in the
+        // original); upside down (2) it hangs from the run's top.
+        5 | 1 => y0 + v,
+        2 => y1 - (1.0 - v),
         _ => y0 + v * (y1 - y0),
     }
 }
@@ -535,6 +545,7 @@ impl MeshData {
         verts: &[[f32; 3]],
         uvs: &[[f32; 2]],
         shading: u8,
+        side: u8,
         both_sides: bool,
         anim: [f32; 2],
     ) {
@@ -545,7 +556,8 @@ impl MeshData {
             return;
         }
         let n = n.map(|c| c / len);
-        let shade = face_shade(shading, n[1] > TOP_MIN_UP);
+        let steps = shading + if n[1] > TOP_MIN_UP { 0 } else { side };
+        let shade = steps.min(MAX_SHADE) as f32 * SHADE_STEP;
         for side in 0..if both_sides { 2 } else { 1 } {
             let base = self.positions.len() as u32;
             let normal = if side == 0 { n } else { n.map(|c| -c) };
@@ -617,8 +629,8 @@ pub fn build(
             // cut flat where it leaves the run: a rising one at the run's
             // top, a falling one at its bottom.
             let short = y1 - y0 < 1.0;
-            let rises = short && matches!(cell.shape, 5 | 9);
-            let falls = short && cell.shape == 8;
+            let rises = short && matches!(cell.shape, 1 | 5 | 9);
+            let falls = short && matches!(cell.shape, 2 | 8);
             let top = if rises { top.min(y1) } else { top };
             let base = if falls { base.max(y0) } else { base };
             let (clip_top, clip_base) = (top < y1 || rises, base > y0 || falls);
@@ -787,14 +799,21 @@ pub fn build(
                 } else {
                     &mut out.opaque
                 };
-                target.push_poly(&verts, &strip(front), face.shading, false, anim);
+                let side = if matches!(cell.shape, 1 | 2)
+                    && matches!(p.src, FaceDir::PosX | FaceDir::NegX)
+                {
+                    PYRAMID_X_SHADE
+                } else {
+                    SIDE_SHADE
+                };
+                target.push_poly(&verts, &strip(front), face.shading, side, false, anim);
                 if double {
                     // The inside of a double-sided face: same polygon, opposite
                     // winding, possibly another tile.
                     let (mut rv, mut ru) = (verts.clone(), strip(back));
                     rv.reverse();
                     ru.reverse();
-                    target.push_poly(&rv, &ru, face.shading, false, anim);
+                    target.push_poly(&rv, &ru, face.shading, side, false, anim);
                 }
             }
         }
