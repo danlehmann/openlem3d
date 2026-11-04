@@ -49,7 +49,7 @@ Their *effects* in game are **unverified** unless stated.
 |---|---|---|
 | `0x000` | 1 | Time limit, seconds |
 | `0x001` | 1 | Time limit, minutes |
-| `0x002` | 8 | Unknown. A camera record like the presets below (y, z, x, rotation), e.g. `c0 fd 80 ff 80 0e 00 00` in `LEVEL.001` [L3DEdit]. In 55 levels it equals camera 1; in 28 more it faces the same way from a few cells off; in 17 it faces elsewhere. It is not where play starts: Tooten Lemming (`LEVEL.029`), where it stands 12 cells from camera 1 and faces −X instead of −Z, starts from camera 1 in the original (**verified** 2026-11-04). Perhaps the editor's last view, saved with the level |
+| `0x002` | 8 | Unknown. A camera record like the presets below (y, z, x, rotation), e.g. `c0 fd 80 ff 80 0e 00 00` in `LEVEL.001` [L3DEdit]. In 55 levels it equals camera 1; in 28 more it faces the same way from a few cells off; in 17 it faces elsewhere. It is not where play starts: Tooten Lemming (`LEVEL.029`), where it stands 12 cells from camera 1 and faces −X instead of −Z, starts from camera 1 in the original, and so does the Practice "Climber" demo with it set to camera 4's record (**verified** 2026-11-04). Perhaps the editor's last view, saved with the level |
 | `0x00A` | 18 | Skill set: 9 × (skill id, quantity) |
 | `0x022` | 192 | Land polygons: 8 polygons × 8 vertices × (z, x, options) |
 | `0x0E2` | 2 | Release rate (signed) |
@@ -87,7 +87,7 @@ many of them. Observed in the levels (2026-11-04):
   Perhaps engine budgets like `0x13F`.
 - `0x14A`–`0x14F` are 0 except in 13 levels, where they hold 1 or 2
   (`LEVEL.004`: `01 02 01 00 00 00`; `LEVEL.041`: `02 01 …`). No tie found to
-  skills, block flags, entrances, traps or slippery blocks.
+  skills, block flags, entrances, traps or slippery blocks. Not skills handed out at release: with all six set to 3 on Practice "Climber", no lemming climbed the wall in 28 s (2026-11-04).
 
 **Graphics-set fields:** the value `nnn` names the file `GFX/<KIND>.nnn`.
 `0xFF` means "none".
@@ -141,7 +141,7 @@ lemming would die on release. Read Z-first, all of them are inside.
 | `0x0400` | Wall decals show the game screen (the "Lemmings Inside" monitor effect; [L3DEdit], unverified: the decals themselves hold a still of the game screen) |
 | `0x0800` | Land texture drawn at half scale |
 | `0x1000` | Minimap disabled: map and frame are both absent (observed on `LEVEL.019`, `044` and `062`, the only levels with the flag among those seen; levels without it showed the minimap) |
-| `0x2000` | Unknown. Set on 17 levels (2, 11, 19, 20, 33, 36, 39, 47, 55, 57, 60, 61, 63, 65, 71, 73, 77) with no header field or theme in common. Clearing it on Fun 3 "The Bean Machine" changed nothing seen from camera 1 in the first 12 s (2026-11-04) |
+| `0x2000` | Unknown. Set on 17 levels (2, 11, 19, 20, 33, 36, 39, 47, 55, 57, 60, 61, 63, 65, 71, 73, 77) with no header field or theme in common. Clearing it on Fun 3 "The Bean Machine" changed nothing seen from camera 1 in the first 12 s, nor from any of the four cameras in turn over 30 s (recorded, 2026-11-04) |
 | `0x4000` | Sea texture drawn at double scale (**verified**, 2026-11-02, Tricky 11 "A Head Above the Rest" cleared of blocks, sea frozen and marked: set and cleared, only the sea changed, its tiles twice as big with the flag; nothing else on screen differed) |
 | `0x8000` | Liquid zaps lemmings instead of drowning them (verified for the sea on `LEVEL.070`) |
 
@@ -194,12 +194,15 @@ assuming rotation 0.
 ## Object grid (structure verified, semantics unverified)
 
 Each cell is two bytes, `(kind, extra)`, in the same order as the block grid.
-`extra`'s meaning is unknown. In 22 levels every object has 0; elsewhere it is mostly
-odd (`0x01`, `0x03`, `0x05`, `0x11`, `0x15`, `0x17`; `0x0c` once), usually one
-value for all of a level's objects of a kind. Not where an object stands or how
-it looks: with every extra cleared on Fun 1 "Take a Dive" (`LEVEL.000`), the
-barrels and the animated soldier showed alike from camera 1 (**verified**
-2026-11-04). Perhaps editor state saved with the object.
+`extra`'s meaning is unknown. In 22 levels every object has 0; elsewhere it is
+mostly odd (`0x01`, `0x03`, `0x05`, `0x11`, `0x15`, `0x17`; `0x0c` once),
+usually one value for all of a level's objects of a kind. Not where an object
+stands or how it looks: with every extra cleared on Fun 1 "Take a Dive"
+(`LEVEL.000`), the barrels and the animated soldier showed alike from camera 1
+(**verified** 2026-11-04). Not how a trampoline throws: on Practice
+"Trampoline" with `0x15` in place of `0x05`, the lemmings flew the same arcs
+(recordings lined up on the clock, 25 s, 2026-11-04). Perhaps editor state
+saved with the object.
 
 | `kind` | Graphic |
 |---|---|
