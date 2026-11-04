@@ -30,10 +30,10 @@ Every file is exactly 1,408 bytes: 64 definitions × 22 bytes, uncompressed.
 
 | Offset | Size | Field |
 |---|---|---|
-| 0 | 1 | Unknown (one of 0, 1, 3, 6, 9, 12, 15 [L3DEdit]; in the levels 0, 3, 6, 9, 12 and 15). Not the minimap colour: blocks with 0 and 6 show alike there (**verified**, see [ui-graphics.md](ui-graphics.md)) |
+| 0 | 1 | Unknown (one of 0, 1, 3, 6, 9, 12, 15 [L3DEdit]; in the levels 0, 3, 6, 9, 12 and 15, the offsets of the six faces, mostly 0 or 12, the top; no tie to the flags). Not the minimap colour: blocks with 0 and 6 show alike there (**verified**, see [ui-graphics.md](ui-graphics.md)). Not seen in the picture: on Fun 3 "The Bean Machine" with byte 0 set to 6 and byte 3 to 1 in all 64 blocks, camera 1 showed the same as unchanged for the first 12 s (2026-11-04). Perhaps the editor's last-picked face |
 | 1 | 1 | Unknown (always 0 [L3DEdit]) |
 | 2 | 1 | Flags |
-| 3 | 1 | Unknown |
+| 3 | 1 | Unknown. Only ever 1, and only on block 15: in 37 levels, among them all the Practice levels; in the others block 15 has 0, used or not. No effect seen (see byte 0) |
 | 4 | 3 | Face +Z |
 | 7 | 3 | Face −Z |
 | 10 | 3 | Face +X |

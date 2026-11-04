@@ -15,7 +15,8 @@
 //!   unpacked level, e.g. a preset camera (`docs/spec/level.md`).
 //!   An edit `#ID=TILE:SHADE[:FLAGS]` redefines block ID in the slot's block
 //!   file: that tile and shading on all six faces, or with `TILE` a list
-//!   `+Z,-Z,+X,-X,+Y,-Y`, one tile per face.
+//!   `+Z,-Z,+X,-X,+Y,-Y`, one tile per face. An edit `%OFFSET=B,B,...`
+//!   writes raw bytes (hex) at a hex offset of that block file.
 //!
 //! The copy holds game data: keep it under the git-ignored `temp/`.
 
@@ -49,7 +50,7 @@ fn level(dir: &Path, n: u32, from: u32, edits: &[String]) {
     let mut data = GameData::open(&locate_data_dir(None)).expect("game CD");
     let mut level = data.read(&format!("LEVELS/LEVEL.{from:03}")).unwrap();
     for e in edits {
-        if e.starts_with('#') {
+        if e.starts_with('#') || e.starts_with('%') {
             continue;
         }
         if let Some(raw) = e.strip_prefix('@') {
@@ -93,6 +94,16 @@ fn level(dir: &Path, n: u32, from: u32, edits: &[String]) {
             face.copy_from_slice(&[tiles[k.min(tiles.len() - 1)], 0, v[0]]);
         }
         println!("block {id}: tiles {tiles:?} shading {}", v[0]);
+    }
+    // `%OFFSET=B,B,...`: bytes (hex) written at a hex offset of the block
+    // file, after the `#` edits.
+    for e in edits.iter().filter_map(|e| e.strip_prefix('%')) {
+        let (at, bytes) = e.split_once('=').expect("%OFFSET=B,B,...");
+        let at = usize::from_str_radix(at.trim_start_matches("0x"), 16).unwrap();
+        for (k, b) in bytes.split(',').enumerate() {
+            blk[at + k] = u8::from_str_radix(b, 16).unwrap();
+        }
+        println!("block-file bytes at {at:#x}: {bytes}");
     }
     put(dir, &mut data, &format!("BLK.{n:03}"), &blk);
 }
