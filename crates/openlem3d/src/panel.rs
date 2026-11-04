@@ -602,7 +602,7 @@ fn buttons(w: &mut World) {
         &mut w.lemming_cam,
         &mut w.view,
     );
-    let (cameras, preset, sfx, highlight) = (&w.info, &mut w.preset, &mut w.sfx, &mut w.highlight);
+    let (preset, sfx, highlight) = (&w.preset, &mut w.sfx, &mut w.highlight);
     let (pending_turner, scene_camera, screen) = (&mut w.pending, &w.camera, &w.screen);
     let panel = &mut w.panel;
     let pressed: Vec<Action> = panel
@@ -613,6 +613,7 @@ fn buttons(w: &mut World) {
         .collect();
     let time = w.e.time.real;
     let _ = now;
+    let mut next_camera = None;
     for action in pressed {
         if let Action::Toggle(part) = action {
             if panel.is_open(part) {
@@ -678,14 +679,7 @@ fn buttons(w: &mut World) {
             }
             Action::FastForward => game.fast_forward = !game.fast_forward,
             Action::Pause => game.paused = !game.paused,
-            Action::Camera => {
-                if let Some(cams) = cameras {
-                    preset.set((preset.0 + 1) % 4);
-                    let (pos, yaw) = cams.slots[preset.0];
-                    view.glide_to(pos, yaw);
-                    *lemming_cam = LemmingCam::Off;
-                }
-            }
+            Action::Camera => next_camera = Some((preset.0 + 1) % 4),
             // The arrow arms highlighting (the next click on a lemming picks
             // it) and deselects the skill, as a skill button then gives its
             // skill to the highlighted lemming; clicked again, it disarms and
@@ -724,6 +718,9 @@ fn buttons(w: &mut World) {
             | Action::Faster
             | Action::Toggle(_) => {}
         }
+    }
+    if let Some(c) = next_camera {
+        crate::lemming_cam::switch_camera(w, c);
     }
 }
 

@@ -1,9 +1,9 @@
 //! The virtual-lemming camera: the view looks out of one lemming's eyes at
 //! its eye level, turning as it turns, as the original's face icon does.
-//! Arm it with the face button, V or I, then click or tap a lemming. V or I again,
-//! Esc or a preset camera key (1–4) returns to the previous view, as does
-//! the lemming going home; a lemming that dies passes the ride on to
-//! another.
+//! Arm it with the face button, V or I, then click or tap a lemming. V or I
+//! again or Esc returns to the previous view, as does the lemming going home;
+//! a lemming that dies passes the ride on to another. Each of the four
+//! cameras keeps its own ride while another camera is shown.
 
 use l3d_engine::prelude::*;
 use l3d_sim::SUB;
@@ -206,9 +206,46 @@ pub(crate) fn toggle_keys(w: &mut World) {
         // Esc leaves the lemming view, not the level.
         keys.clear_just_pressed(KeyCode::Escape);
         cam.turn_off(view);
-    } else if keys.any_just_pressed(presets) {
-        // The preset key itself places the camera.
-        *cam = LemmingCam::Off;
+    } else if let Some(i) = presets.iter().position(|&k| keys.just_pressed(k)) {
+        switch_camera(w, i);
+    }
+}
+
+/// Switches to camera `to` (0–3). Each camera either stands where it was
+/// left or rides along with a lemming: the camera left keeps its ride, and
+/// one that rides takes it up again, gliding into the lemming's eyes (ours;
+/// the original keeps a ride for its camera only until it has been taken up
+/// once, and a number key for another camera drops it, see
+/// `docs/spec/camera.md`). A lemming picked meanwhile stays unpicked; the
+/// current camera's own key leaves a ride on.
+pub(crate) fn switch_camera(w: &mut World, to: usize) {
+    let Some(info) = w.info.as_mut() else { return };
+    let (cam, view, highlight) = (&mut w.lemming_cam, &mut w.view, &mut w.highlight);
+    let from = w.preset.0;
+    if to == from && cam.following().is_some() {
+        return;
+    }
+    info.rides[from] = cam.following();
+    w.preset.set(to);
+    w.follow.entered = None;
+    view.roll = 0.0;
+    view.head = 0.0;
+    view.nod = 0.0;
+    match info.rides[to].take() {
+        Some(lemming) => {
+            *cam = LemmingCam::Following {
+                lemming,
+                saved: info.slots[to],
+            };
+            // As riding along always does.
+            highlight.on = true;
+            highlight.lemming = Some(lemming);
+        }
+        None => {
+            *cam = LemmingCam::Off;
+            let (pos, yaw) = info.slots[to];
+            view.glide_to(pos, yaw);
+        }
     }
 }
 

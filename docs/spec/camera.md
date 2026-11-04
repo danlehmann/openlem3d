@@ -110,7 +110,7 @@ and AUTOTYPE number keys, 14 runs):**
 - Two runs disagree: once the icon round to camera 1 showed the normal view,
   and once number keys during a fresh ride did nothing at all. Unexplained.
 
-Ours ends the ride on any preset key, and keeps nothing.
+Ours keeps a ride for each camera instead: switching away by key or icon leaves it with its camera, and switching back takes it up again, gliding into the lemming's eyes, as often as wanted.
 
 The virtual-lemming view does not tilt either, as far as observed: through
 about 3 minutes of lemming view in the Practice "Virtual Lemming" demo and

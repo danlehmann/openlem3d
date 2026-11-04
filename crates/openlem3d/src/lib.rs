@@ -625,6 +625,10 @@ impl PresetIndex {
 /// switches away, and comes back to them (verified).
 struct LevelInfo {
     slots: [(Vec3, f32); 4],
+    /// The lemming each camera other than the current one rides along with,
+    /// if any (ours; see `docs/spec/camera.md`). While a camera rides, its
+    /// slot keeps the view from before the ride.
+    rides: [Option<usize>; 4],
 }
 
 /// The player camera: free horizontal position and yaw; never pitches.
@@ -1362,6 +1366,7 @@ pub(crate) fn load_level(w: &mut World) {
     }
     w.info = Some(LevelInfo {
         slots: level.cameras.each_ref().map(preset_view),
+        rides: [None; 4],
     });
     game.sim = Some(l3d_sim::Simulation::new(&level, &blocks));
     game.snapshots.clear();
@@ -1457,21 +1462,13 @@ pub(crate) fn camera_controls(w: &mut World) {
         if !cam.smooth {
             cam.finish_glide();
         }
+        // The preset keys switch cameras in `lemming_cam::toggle_keys`.
         let presets = [
             KeyCode::Digit1,
             KeyCode::Digit2,
             KeyCode::Digit3,
             KeyCode::Digit4,
         ];
-        if let Some(info) = info.as_ref() {
-            for (i, k) in presets.iter().enumerate() {
-                if keys.just_pressed(*k) {
-                    let (pos, yaw) = info.slots[i];
-                    cam.glide_to(pos, yaw);
-                    preset.set(i);
-                }
-            }
-        }
         let gliding = cam.glide.is_some();
         let key = |k: KeyCode| keys.pressed(k) as i32 as f32;
         let held = |a: KeyCode, b: KeyCode| (keys.pressed(a) || keys.pressed(b)) as i32 as f32;
