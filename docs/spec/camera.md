@@ -87,6 +87,31 @@ points, the way it sends walkers (verified: riding with a "Turn right"
 turner in Practice "Turner", the view faced that side, away from the path it
 had walked along).
 
+**The lemming view belongs to the camera it was started on (measured
+2026-11-03, Practice "Claustrophobic" in a test slot; rides started with the
+highlight arrow and the face, cameras switched with the panel's camera icon
+and AUTOTYPE number keys, 14 runs):**
+
+- Leaving the ride with the **camera icon** shows the next camera's normal
+  view (arrow red) but keeps the ride: coming back to the camera it was
+  started on, by the icon (even round through all four) or by its number key,
+  shows the ride again, arrow green, the lemming having walked on meanwhile.
+  This holds for a ride started on camera 2 (key 2 brought it back) as well as
+  camera 1.
+- A **number key for another camera** drops it: pressed while riding (key 2,
+  then key 1 showed camera 1's normal view) or while it waits (ride on 2,
+  icon to 3, key 1, then key 2: both normal).
+- It comes back **once**: after a ride was brought back, leaving it again by
+  key or by icon and returning showed the normal view (4 runs).
+- Only one ride was seen kept: a second ride started on camera 2 or 3 while
+  one waited on camera 1 did not come back on its own camera, while camera 1
+  showed a ride again (2 runs; both rides may have been the same lemming,
+  picked by the highlight).
+- Two runs disagree: once the icon round to camera 1 showed the normal view,
+  and once number keys during a fresh ride did nothing at all. Unexplained.
+
+Ours ends the ride on any preset key, and keeps nothing.
+
 The virtual-lemming view does not tilt either, as far as observed: through
 about 3 minutes of lemming view in the Practice "Virtual Lemming" demo and
 an attract-mode demo (100–150 ms bursts), the sea horizon stayed level on
