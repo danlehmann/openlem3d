@@ -1,15 +1,16 @@
 //! The in-level minimap in the panel's top-left corner, like the original's
 //! (`docs/spec/ui-graphics.md`, "In-level panel"): a 64×64 top-down map,
 //! two pixels per cell, in a wooden frame at (0, 0)–(70, 70), closed and
-//! opened by the panel's red dot in its corner. Sea and land show their textures' average colour (a
-//! level without a sea its sky's first pixel) and each
-//! column its highest block's top colour; the exit is red, hatches orange,
-//! lemmings white and the camera a yellow dot (colours read off captures of
-//! the original). Clicking it moves the camera over that spot, as the
-//! original allows unless the level forbids it (flag `0x0008`).
+//! opened by the panel's red dot in its corner. The map is centred on the
+//! camera and turned with it, its view direction up. Sea and land show their
+//! textures' average colour (a level without a sea its sky's first pixel),
+//! each column the colour of its highest block's top height on a fixed
+//! brown–green–grey–white ramp; the exit is red, hatches orange, lemmings
+//! white and the camera a yellow dot (colours read off captures of the
+//! original). Clicking it moves the camera over that spot, as the original
+//! allows unless the level forbids it (flag `0x0008`).
 
 use l3d_engine::prelude::*;
-use l3d_formats::blk::FaceDir;
 use l3d_formats::gamedata::Palette;
 use l3d_formats::level::{SIZE_X, SIZE_Y, SIZE_Z};
 
@@ -18,8 +19,20 @@ use crate::texture::rgba_image;
 use crate::ui::NodeId;
 
 /// Map pixels per grid cell.
-const PX: usize = 2;
-const MAP: usize = SIZE_X * PX;
+const PX: f32 = 2.0;
+/// The map's side, pixels.
+const MAP: usize = 64;
+/// The map position (both axes, pixels) over the camera.
+const CENTRE: f32 = MAP as f32 / 2.0;
+
+/// `LM3D.PAL` indices of a column's colour by the height of its top, one
+/// entry per half unit: entry `k` covers tops above `k / 2` units, up to
+/// `(k + 1) / 2`, tops of ½ unit or less taking entry 0 too (measured on a
+/// test level with tops at every quarter unit from ¼ to 16, 2026-11-03).
+const HEIGHT_RAMP: [u8; 32] = [
+    157, 157, 157, 156, 155, 154, 153, 152, 151, 150, 149, 116, 115, 114, 113, 112, 110, 109, 108,
+    107, 106, 234, 232, 231, 230, 229, 227, 226, 225, 3, 2, 1,
+];
 
 /// Colours measured on the original's minimap (Practice levels).
 const EXIT: [u8; 3] = [247, 0, 0];
@@ -31,11 +44,12 @@ const CAMERA: [u8; 3] = [247, 231, 0];
 const FLAG_NO_MINIMAP: u16 = 0x1000;
 const FLAG_NO_MINIMAP_CLICK: u16 = 0x0008;
 
-/// The map without moving dots, the image it is drawn into, and whether
-/// clicks may move the camera.
+/// The map's colour per grid cell (`z * SIZE_X + x`) and beyond the grid,
+/// the image it is drawn into, and whether clicks may move the camera.
 pub struct Minimap {
     level: u32,
-    base: Vec<[u8; 3]>,
+    cells: Vec<[u8; 3]>,
+    background: [u8; 3],
     pub image: Handle<Image>,
     pub shown: bool,
     clickable: bool,
@@ -96,17 +110,12 @@ pub(crate) fn build_base(w: &mut World) {
     if existing.as_ref().is_some_and(|m| m.level == n) {
         return;
     }
-    let Some((level, blocks, _)) = &game.terrain else {
+    let Some((level, _, _)) = &game.terrain else {
         return;
     };
     let d = &mut data.0;
     let Ok(pal) = d.palette("GFX/LM3D.PAL") else {
         return;
-    };
-    let tex = d.gfx("TEXTURE", level.texture_set).unwrap_or_default();
-    let tile = |t: u8| -> Option<[u8; 3]> {
-        let s = t as usize * 64 * 64;
-        tex.get(s..s + 64 * 64).map(|p| average(p, &pal))
     };
     // Without a sea the map shows the colour of the sky picture's first
     // pixel (measured: Tricky 15 "Chocolate Drop", sky 27, index 170; Tricky
@@ -147,31 +156,27 @@ pub(crate) fn build_base(w: &mut World) {
             })
         })
     };
-    let mut base = vec![sea; MAP * MAP];
+    let mut cells = vec![sea; SIZE_X * SIZE_Z];
     for z in 0..SIZE_Z {
         for x in 0..SIZE_X {
-            let mut colour = if on_land(x as f32 + 0.5, z as f32 + 0.5) {
-                land
-            } else {
-                sea
-            };
+            let colour = &mut cells[z * SIZE_X + x];
+            if on_land(x as f32 + 0.5, z as f32 + 0.5) {
+                *colour = land;
+            }
             // A hatch or exit shows even under the blocks above it (Fun 16:
             // the hatch inside a tower).
-            let mut column = (0..SIZE_Y).rev().map(|y| level.block(x, y, z));
-            if let Some(b) = column.clone().find(|b| !b.is_empty() && b.id <= 1) {
-                colour = if b.id == 0 { HATCH } else { EXIT };
-            } else if let Some(b) = column.find(|b| !b.is_empty() && b.id != 3 && b.id != 4)
-                && let Some(c) = blocks
-                    .defs
-                    .get(b.id as usize)
-                    .and_then(|def| tile(def.face(FaceDir::PosY).texture))
-            {
-                colour = c;
-            }
-            for dz in 0..PX {
-                for dx in 0..PX {
-                    base[(z * PX + dz) * MAP + x * PX + dx] = colour;
-                }
+            let mut column = (0..SIZE_Y)
+                .rev()
+                .map(|y| (y, level.block(x, y, z)))
+                .filter(|(_, b)| !b.is_empty());
+            if let Some((_, b)) = column.clone().find(|(_, b)| b.id <= 1) {
+                *colour = if b.id == 0 { HATCH } else { EXIT };
+            } else if let Some((y, b)) = column.find(|(_, b)| b.id != 3 && b.id != 4) {
+                // The top in quarter units: above the cell's highest slice.
+                let quarters = y * 4 + 8 - b.segments.leading_zeros() as usize;
+                let entry = quarters.div_ceil(2).clamp(1, HEIGHT_RAMP.len()) - 1;
+                let [r, g, b] = pal[HEIGHT_RAMP[entry] as usize];
+                *colour = [r, g, b];
             }
         }
     }
@@ -185,7 +190,8 @@ pub(crate) fn build_base(w: &mut World) {
     };
     w.minimap = Some(Minimap {
         level: n,
-        base,
+        cells,
+        background: sea,
         image: handle,
         shown: level.flags & FLAG_NO_MINIMAP == 0,
         clickable: level.flags & FLAG_NO_MINIMAP_CLICK == 0,
@@ -200,12 +206,24 @@ pub(crate) fn draw(w: &mut World) {
     let Some(image) = w.e.images.get_mut(&map.image) else {
         return;
     };
+    let frame = MapFrame::of(&w.view);
     let px = &mut image.data;
-    for (i, c) in map.base.iter().enumerate() {
-        px[i * 4..i * 4 + 3].copy_from_slice(c);
+    for v in 0..MAP {
+        for u in 0..MAP {
+            let (x, z) = frame.to_world(u as f32 + 0.5, v as f32 + 0.5);
+            let inside = (0.0..SIZE_X as f32).contains(&x) && (0.0..SIZE_Z as f32).contains(&z);
+            let c = if inside {
+                map.cells[z as usize * SIZE_X + x as usize]
+            } else {
+                map.background
+            };
+            let i = (v * MAP + u) * 4;
+            px[i..i + 3].copy_from_slice(&c);
+        }
     }
     let mut dot = |x: f32, z: f32, c: [u8; 3]| {
-        let (u, v) = ((x * PX as f32) as isize, (z * PX as f32) as isize);
+        let (u, v) = frame.to_map(x, z);
+        let (u, v) = (u.floor() as isize, v.floor() as isize);
         if (0..MAP as isize).contains(&u) && (0..MAP as isize).contains(&v) {
             let i = (v as usize * MAP + u as usize) * 4;
             px[i..i + 3].copy_from_slice(&c);
@@ -215,6 +233,49 @@ pub(crate) fn draw(w: &mut World) {
         dot(crate::units(l.pos[0]), crate::units(l.pos[2]), LEMMING);
     }
     dot(w.view.pos.x, w.view.pos.z, CAMERA);
+}
+
+/// Where the map lies over the level: [`CENTRE`] over the camera, its
+/// up the camera's horizontal view direction.
+struct MapFrame {
+    /// The camera's `(x, z)`.
+    centre: (f32, f32),
+    /// The unit `(x, z)` direction the map's up shows.
+    up: (f32, f32),
+}
+
+impl MapFrame {
+    fn of(view: &crate::ViewCamera) -> Self {
+        let f = view.forward();
+        let len = f.x.hypot(f.z).max(1e-6);
+        Self {
+            centre: (view.pos.x, view.pos.z),
+            up: (f.x / len, f.z / len),
+        }
+    }
+
+    /// The level point `(x, z)` under map pixel position `(u, v)`.
+    fn to_world(&self, u: f32, v: f32) -> (f32, f32) {
+        let half = CENTRE;
+        let (right, down) = ((u - half) / PX, (v - half) / PX);
+        // The map's right is the up direction turned a quarter clockwise
+        // seen from above: −Z up puts +X right.
+        let (ux, uz) = self.up;
+        (
+            self.centre.0 - uz * right - ux * down,
+            self.centre.1 + ux * right - uz * down,
+        )
+    }
+
+    /// The map pixel position of the level point `(x, z)`.
+    fn to_map(&self, x: f32, z: f32) -> (f32, f32) {
+        let (dx, dz) = (x - self.centre.0, z - self.centre.1);
+        let (ux, uz) = self.up;
+        let half = CENTRE;
+        let right = -uz * dx + ux * dz;
+        let down = -(ux * dx + uz * dz);
+        (half + right * PX, half + down * PX)
+    }
 }
 
 /// The minimap's on-screen node (the panel's).
@@ -249,7 +310,8 @@ pub(crate) fn click(w: &mut World) {
         return;
     }
     // Keep the height and heading; stand a little back from the spot.
-    let target = Vec3::new(rel.x * SIZE_X as f32, view.pos.y, rel.y * SIZE_Z as f32);
+    let (x, z) = MapFrame::of(view).to_world(rel.x * MAP as f32, rel.y * MAP as f32);
+    let target = Vec3::new(x, view.pos.y, z);
     let back = Vec3::new(-view.yaw.cos(), 0.0, -view.yaw.sin()) * 4.0;
     view.pos = target - back;
 }

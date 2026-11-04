@@ -30,7 +30,7 @@ Every file is exactly 1,408 bytes: 64 definitions × 22 bytes, uncompressed.
 
 | Offset | Size | Field |
 |---|---|---|
-| 0 | 1 | Unknown (one of 0, 1, 3, 6, 9, 12, 15 [L3DEdit]) |
+| 0 | 1 | Unknown (one of 0, 1, 3, 6, 9, 12, 15 [L3DEdit]; in the levels 0, 3, 6, 9, 12 and 15). Not the minimap colour: blocks with 0 and 6 show alike there (**verified**, see [ui-graphics.md](ui-graphics.md)) |
 | 1 | 1 | Unknown (always 0 [L3DEdit]) |
 | 2 | 1 | Flags |
 | 3 | 1 | Unknown |
