@@ -113,7 +113,7 @@ Whether objects, signs and wall decals are shaded alike is unchecked.
 | `0x01` | Double-sided: faces are also drawn from inside |
 | `0x02` | Steel (indestructible) |
 | `0x04` | Liquid top: lemmings drown |
-| `0x08` | Unknown |
+| `0x08` | Unknown. Not blast-proof: on a changed Taxing 12 "Team Work" a bomber took slabs with and without it alike (**verified** 2026-11-04). Set on every entrance and exit (with `0x02`), on the blocks around exits, on one-way blocks (ids 5–8; two arrow blocks without it: `LEVEL.062` block 8, `LEVEL.078` block 7), on some liquids and on block 4 in some levels. Whether it is what makes a block one-way is untested |
 | `0x10` | Not solid for lemmings |
 | `0x20` | Lemmings never splat when landing on it |
 | `0x40` | Slippery top |
