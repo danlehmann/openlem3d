@@ -249,7 +249,12 @@ position, the camera path fitted to block silhouettes):
   the camera circles the point (x, z) taken as grid coordinates (not cell
   centres) at height y. With the pivot unset (all zero, 54 levels), it circles
   the middle of the x/z extent of the visible blocks (block definitions whose
-  six textures are all 255 excluded) at height 8.
+  six textures are all 255 excluded) at height 8. The parts are unset
+  separately (**verified** 2026-11-04, recordings of the Practice-slot
+  flyover beside ours): x and z both zero with a height set (Fun 15, Tricky
+  13, Tricky 19 "Stilt Walkers") circle the blocks' middle at that height;
+  a zero height with x and z set (Fun 16, Tricky 20 "King Coder's Tomb")
+  circles that point at height 8.
 - **Path.** Radius about 32 units (31.5 ± 0.5 with our projection), always
   looking at the centre, never pitching. It starts where camera 1 looks from
   and turns left without end (facing +Z, +X, −Z, −X in turn).

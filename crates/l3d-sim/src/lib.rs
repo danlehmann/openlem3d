@@ -569,6 +569,8 @@ pub struct Lemming {
     pub passing: Option<(usize, Dir)>,
     /// Has come down from a fall and not yet taken a walking step.
     pub landed: bool,
+    /// Still in its first fall, out of the hatch; it falls straight down.
+    pub from_hatch: bool,
     /// A skill given but not started yet: blockers, turners, bashers and
     /// miners walk on until they cross into the next cell along their
     /// heading, then take it up (measured in the original's Practice demos).
@@ -600,6 +602,7 @@ impl Lemming {
             teleported: false,
             passing: None,
             landed: false,
+            from_hatch: true,
             pending: None,
             bash_walk_ticks: 0,
             build_at_edge: false,
@@ -652,6 +655,7 @@ impl Lemming {
         self.state = s;
         self.state_ticks = 0;
         self.bash_walk_ticks = 0;
+        self.from_hatch = false;
     }
 
     /// Starts falling from where it is.
@@ -779,9 +783,14 @@ impl Simulation {
                 for _ in 0..b.rotation {
                     dir = dir.clockwise();
                 }
+                // Lemmings start in the bottom quarter of the hatch cell
+                // (verified with a changed Practice "Blocker", 2026-11-04:
+                // a hatch fall from the bottom quarter of the cell of 2.7
+                // units walks on (Tricky 19), 3 stuns, 3¾ survives, 4
+                // splats); we take the middle of that quarter.
                 let spawn = [
                     x as i32 * SUB + SUB / 2,
-                    y as i32 * SUB + SUB / 2 - 1,
+                    y as i32 * SUB + SUB / 8,
                     z as i32 * SUB + SUB / 2,
                 ];
                 entrances.push(Entrance { spawn, dir });
@@ -2133,8 +2142,11 @@ impl Simulation {
 
     fn fall(&mut self, l: &mut Lemming, from_y: i32) {
         // Drifting forward at walking speed for the first ticks, unless
-        // something solid is in the way.
-        let d = if l.state_ticks <= FALL_DRIFT_TICKS {
+        // something solid is in the way. Out of the hatch it falls straight:
+        // in the original, Mayhem 5's lemmings released over the diagonal of
+        // a deflector fall past its top (recorded 2026-11-04), which ours,
+        // drifting, landed on.
+        let d = if l.state_ticks <= FALL_DRIFT_TICKS && !l.from_hatch {
             l.dir.delta()
         } else {
             [0; 3]

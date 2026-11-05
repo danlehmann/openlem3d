@@ -251,12 +251,15 @@ const ORBIT_SPEED: f32 = std::f32::consts::FRAC_PI_4;
 const FLAG_PREVIEW_STATIC: u16 = 0x0040;
 
 /// The point the preview circles and its height: the level's pivot (y, z, x)
-/// as grid coordinates, or, when unset (all zero), the middle of the x/z
-/// extent of its visible blocks at height 8 (measured on Fun 2 and Fun 10).
+/// as grid coordinates. Its parts are unset separately: x and z both zero
+/// mean the middle of the x/z extent of the visible blocks (measured on Fun 2
+/// and Fun 10, and Tricky 19 "Stilt Walkers", pivot (14, 0, 0)), a zero
+/// height means 8 (Tricky 20 "King Coder's Tomb", pivot (0, 16, 15)).
 fn preview_centre(level: &l3d_formats::level::Level, blocks: &l3d_formats::blk::BlockSet) -> Vec3 {
     let [py, pz, px] = level.preview_pivot;
-    if [py, pz, px] != [0, 0, 0] {
-        return Vec3::new(px as f32, py as f32, pz as f32);
+    let y = if py == 0 { UNSET_HEIGHT } else { py as f32 };
+    if [pz, px] != [0, 0] {
+        return Vec3::new(px as f32, y, pz as f32);
     }
     let visible = |id: u8| {
         blocks
@@ -276,7 +279,7 @@ fn preview_centre(level: &l3d_formats::level::Level, blocks: &l3d_formats::blk::
     } else {
         Vec2::splat(16.0)
     };
-    Vec3::new(mid.x, UNSET_HEIGHT, mid.y)
+    Vec3::new(mid.x, y, mid.y)
 }
 
 pub(crate) fn preview(w: &mut World) {
