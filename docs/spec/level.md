@@ -124,23 +124,28 @@ the boundary is `[8, 8, 19, 27…30]` and the hatch sits at x ≈ 20–27,
 z ≈ 13.5. Read X-first, every hatch lies outside the boundary and every
 lemming would die on release. Read Z-first, all of them are inside.
 
-### Flags at `0x11B` (unverified, [L3DEdit])
+### Flags at `0x11B` ([L3DEdit]; each bit set or cleared in the original, 2026-11-04, unless noted)
+
+Tested on Fun 1 "Take a Dive" (flags `0x0130`) in Practice slot 84 with the
+sea drift stopped, one bit changed per run, screenshots of the briefing
+flyover and of play; texture sizes and scales with marked textures
+(`cdcopy mark`), the sea animation on Fun 2 with a recording.
 
 | Bit | Meaning |
 |---|---|
-| `0x0001` | Sea drawn as a solid colour |
-| `0x0002` | Sky drawn as a solid colour |
-| `0x0004` | Land invisible |
-| `0x0008` | Minimap click-drag camera placement disabled |
-| `0x0010` | Sea not animated |
-| `0x0020` | Sea texture 128×128 |
-| `0x0040` | Preview camera static |
-| `0x0080` | Whole level bottom is solid |
-| `0x0100` | Land texture 128×128; without it, 64×64 (consistent with the file sizes of every level's `LAND` file) |
-| `0x0200` | All-round sky (space levels); no sea |
-| `0x0400` | Wall decals show the game screen (the "Lemmings Inside" monitor effect; [L3DEdit], unverified: the decals themselves hold a still of the game screen) |
-| `0x0800` | Land texture drawn at half scale |
-| `0x1000` | Minimap disabled: map and frame are both absent (observed on `LEVEL.019`, `044` and `062`, the only levels with the flag among those seen; levels without it showed the minimap) |
+| `0x0001` | Sea drawn as a solid colour (**verified**: one flat blue, nothing else changed) |
+| `0x0002` | Sky drawn as a solid colour (**verified**: flat light blue) |
+| `0x0004` | Land invisible (**verified**: the islands gone, blocks and objects still drawn) |
+| `0x0008` | Minimap click-drag camera placement disabled (**verified**: the same drag over the map moved the camera without the flag and did nothing with it) |
+| `0x0010` | Sea not animated (**verified** on Fun 2's 64×64 sea strip: recorded, 1400–2200 sea pixels changed from frame to frame without the flag, about 220, the lemmings, with it). A 128×128 sea is one frame: clearing the flag on Fun 1 changed nothing |
+| `0x0020` | Sea texture 128×128 (**verified**: cleared, Fun 1's marked 128×128 sea was cut into smaller tiles, the marks repeating several times as densely) |
+| `0x0040` | Preview camera static (**verified**: the briefing view held camera 1's view instead of circling; also `LEVEL.062`) |
+| `0x0080` | Whole level bottom is solid (**verified**, one run: with it, a lemming walked out over Fun 1's sea past the grass; without it none was ever seen on the water) |
+| `0x0100` | Land texture 128×128; without it, 64×64 (**verified**: cleared, the marked land's tiles came out smaller and several times as many; consistent with the file sizes of every level's `LAND` file) |
+| `0x0200` | All-round sky (space levels); no sea (**verified**: the sky panorama also filled the view below the horizon, no sea drawn; the minimap shows the sky's first pixel, see `ui-graphics.md`) |
+| `0x0400` | Wall decals show the game screen (the "Lemmings Inside" monitor effect; [L3DEdit], unverified: the decals themselves hold a still of the game screen). Clearing it on Fun 8 "Lemmings Inside" changed nothing seen from camera 1 |
+| `0x0800` | Land texture drawn at half scale (**verified**: set, the marked land's tile lines came closer together) |
+| `0x1000` | Minimap disabled: map and frame are both absent (**verified**: set on Fun 1, map and frame gone; the only levels with it are `LEVEL.019`, `044` and `062`) |
 | `0x2000` | Unknown. Set on 17 levels (2, 11, 19, 20, 33, 36, 39, 47, 55, 57, 60, 61, 63, 65, 71, 73, 77) with no header field or theme in common. Clearing it on Fun 3 "The Bean Machine" changed nothing seen from camera 1 in the first 12 s, nor from any of the four cameras in turn over 30 s (recorded, 2026-11-04) |
 | `0x4000` | Sea texture drawn at double scale (**verified**, 2026-11-02, Tricky 11 "A Head Above the Rest" cleared of blocks, sea frozen and marked: set and cleared, only the sea changed, its tiles twice as big with the flag; nothing else on screen differed) |
 | `0x8000` | Liquid zaps lemmings instead of drowning them (verified for the sea on `LEVEL.070`) |

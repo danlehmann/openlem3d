@@ -3,7 +3,8 @@
 //! two pixels per cell, in a wooden frame at (0, 0)–(70, 70), closed and
 //! opened by the panel's red dot in its corner. The map is centred on the
 //! camera and turned with it, its view direction up. Sea and land show their
-//! textures' average colour (a level without a sea its sky's first pixel),
+//! textures' first pixel (a level without a sea, or with the all-round sky,
+//! its sky's first pixel),
 //! each column the colour of its highest block's top height on a fixed
 //! brown–green–grey–white ramp; the exit is red, hatches orange, lemmings
 //! white and the camera a yellow dot (colours read off captures of the
@@ -11,10 +12,10 @@
 //! allows unless the level forbids it (flag `0x0008`).
 
 use l3d_engine::prelude::*;
-use l3d_formats::gamedata::Palette;
 use l3d_formats::level::{SIZE_X, SIZE_Y, SIZE_Z};
 
 use crate::World;
+use crate::scene_build::level_flags::SURROUND_SKY;
 use crate::texture::rgba_image;
 use crate::ui::NodeId;
 
@@ -85,22 +86,6 @@ pub fn frame_image() -> Image {
     rgba_image(N as u32, N as u32, px)
 }
 
-/// Average colour of the non-transparent pixels.
-fn average(pixels: &[u8], pal: &Palette) -> [u8; 3] {
-    let (mut sum, mut n) = ([0u32; 3], 0u32);
-    for &p in pixels.iter().filter(|&&p| p != 0) {
-        for (s, c) in sum.iter_mut().zip(pal[p as usize]) {
-            *s += c as u32;
-        }
-        n += 1;
-    }
-    if n == 0 {
-        [0, 0, 0]
-    } else {
-        sum.map(|s| (s / n) as u8)
-    }
-}
-
 /// Builds the static map when a level has loaded.
 pub(crate) fn build_base(w: &mut World) {
     let (current, game, data) = (&w.current, &w.game, &mut w.data);
@@ -117,24 +102,26 @@ pub(crate) fn build_base(w: &mut World) {
     let Ok(pal) = d.palette("GFX/LM3D.PAL") else {
         return;
     };
-    // Without a sea the map shows the colour of the sky picture's first
-    // pixel (measured: Tricky 15 "Chocolate Drop", sky 27, index 170; Tricky
-    // 12 "Dot to Dot", sky 8, index 90). Without either, unchecked.
-    let sky = (level.sky_gfx != 0xFF)
-        .then(|| d.gfx("SKY", level.sky_gfx).ok())
-        .flatten()
-        .and_then(|s| s.first().map(|&p| pal[p as usize]))
-        .map_or([0, 70, 200], |c| [c[0], c[1], c[2]]);
-    let sea = (level.sea_gfx != 0xFF)
-        .then(|| d.gfx("SEA", level.sea_gfx).ok())
-        .flatten()
-        .map_or(sky, |s| average(&s[..(64 * 64).min(s.len())], &pal));
-    let land = (level.land_gfx != 0xFF)
-        .then(|| d.gfx("LAND", level.land_gfx).ok())
-        .flatten()
-        .map_or([40, 140, 40], |s| {
-            average(&s[..(64 * 64).min(s.len())], &pal)
-        });
+    // Sea, land and sky each show the colour of their picture's first pixel
+    // (measured to the RGB value: Practice sea 2 and land 15, Fun 1's sea
+    // 1, a marked sea whose first pixel is red turning the whole map red).
+    // Without a sea, or with the all-round sky (flag `0x0200`) even where
+    // the level names one, the map shows the sky's (Tricky 15, Tricky 12,
+    // Fun 8, Fun 1 with the flag set). Without either, unchecked.
+    let mut first = |kind: &str, n: u8| {
+        (n != 0xFF)
+            .then(|| d.gfx(kind, n).ok())
+            .flatten()
+            .and_then(|s| s.first().map(|&p| pal[p as usize]))
+            .map(|c| [c[0], c[1], c[2]])
+    };
+    let sky = first("SKY", level.sky_gfx).unwrap_or([0, 70, 200]);
+    let sea = if level.flags & SURROUND_SKY != 0 {
+        sky
+    } else {
+        first("SEA", level.sea_gfx).unwrap_or(sky)
+    };
+    let land = first("LAND", level.land_gfx).unwrap_or([40, 140, 40]);
     let polys: Vec<Vec<(f32, f32)>> = level
         .land_polygons
         .iter()

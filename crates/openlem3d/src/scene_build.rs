@@ -17,7 +17,7 @@ pub const GROUND_Y: f32 = 1.0;
 const SPRITE_TEXELS_PER_UNIT: f32 = 64.0;
 
 /// Level header flag bits (`docs/spec/level.md`).
-mod level_flags {
+pub(crate) mod level_flags {
     pub const SEA_SOLID_COLOUR: u16 = 0x0001;
     pub const LAND_INVISIBLE: u16 = 0x0004;
     pub const SEA_STILL: u16 = 0x0010;
