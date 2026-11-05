@@ -66,6 +66,40 @@ pub(crate) fn record_touch_starts(w: &mut World) {
     for t in touches.iter_just_pressed() {
         starts.0.insert(t.id(), (w.state, button));
     }
+    // Fingers of a three-finger time dial are no taps when they lift, though
+    // they may not have moved (counted as on a button).
+    if touches.iter().count() >= DIAL_FINGERS {
+        for start in starts.0.values_mut() {
+            start.1 = true;
+        }
+    }
+}
+
+/// Fingers that make the time dial.
+const DIAL_FINGERS: usize = 3;
+/// Sideways travel for each unit of speed on the time dial, and the dead
+/// zone where the fingers landed, as fractions of the screen height (ours).
+pub(crate) const DIAL_UNIT: f32 = 0.12;
+pub(crate) const DIAL_REST: f32 = 0.02;
+/// The fastest the dial runs time, forwards or back (fast-forward's pace).
+pub(crate) const DIAL_MAX: f32 = crate::FAST_FORWARD_TICKS as f32;
+
+/// Three fingers: a time dial (ours). Where they landed the level stands
+/// still; moved right it runs forward, slowly at first and up to
+/// fast-forward's pace, and moved left it runs back the same way.
+/// Lifting a finger leaves it to the usual pause and fast-forward.
+#[derive(Default)]
+pub struct TimeDial {
+    /// The fingers' mean x where the third landed, while the dial is held;
+    /// it stays set until every finger is up.
+    origin: Option<f32>,
+}
+
+/// The signed speed for fingers `dx` pixels right of where they landed.
+fn dial_speed(dx: f32, height: f32) -> f32 {
+    let rest = DIAL_REST * height;
+    let v = ((dx.abs() - rest).max(0.0) / (DIAL_UNIT * height)).min(DIAL_MAX);
+    v.copysign(dx)
 }
 
 /// Whether a finger that landed on this screen lifted. A finger that chose
@@ -82,9 +116,25 @@ pub fn lifted(w: &World) -> bool {
 /// Two fingers: as [`two_fingers`]. Riding along, any sideways drag turns the
 /// head, as an action-button drag does.
 pub(crate) fn touch_camera(w: &mut World) {
+    let active: Vec<_> = w.e.input.touches.iter().collect();
+    // Three fingers turn the time dial; after it, the camera waits until
+    // every finger is up.
+    if active.len() >= DIAL_FINGERS && !w.ui.any_pressed() {
+        let x = active.iter().map(|t| t.position().x).sum::<f32>() / active.len() as f32;
+        let origin = *w.time_dial.origin.get_or_insert(x);
+        w.game.dial = Some(dial_speed(x - origin, w.screen.size.y));
+        w.touch_twist = Twist::default();
+        return;
+    }
+    w.game.dial = None;
+    if w.time_dial.origin.is_some() {
+        if active.is_empty() {
+            w.time_dial.origin = None;
+        }
+        return;
+    }
     let (screen, camera) = (&w.screen, &w.camera);
     let twist = &mut w.touch_twist;
-    let active: Vec<_> = w.e.input.touches.iter().collect();
     if active.len() < 2 {
         *twist = Twist::default();
     }

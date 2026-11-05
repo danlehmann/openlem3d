@@ -36,6 +36,7 @@ mod settings;
 mod sfx;
 mod style;
 mod texture;
+mod time_dial;
 mod title;
 mod touch;
 mod trackpad;
@@ -325,12 +326,20 @@ pub struct World {
     touch_starts: touch::TouchStarts,
     touch_twist: touch::Twist,
     trackpad: trackpad::Trackpad,
+    time_dial: touch::TimeDial,
+    time_overlay: time_dial::Overlay,
 }
 
 impl World {
-    /// Backspace held with rewinding on: the level runs back.
+    /// The time control held now, in ticks per normal tick, negative
+    /// running the level back: the three-finger dial, or Backspace.
+    fn time_control(&self) -> Option<f32> {
+        self.game.dial.or_else(|| backspace_rewind(self))
+    }
+
+    /// The level runs back: Rewind is on and the time control says so.
     fn backwards(&self) -> bool {
-        self.settings.rewind && self.e.input.keys.pressed(KeyCode::Backspace)
+        self.settings.rewind && self.time_control().is_some_and(|v| v < 0.0)
     }
 
     fn new(mut e: Engine, opts: Options, data: Data, state: menu::AppState) -> Self {
@@ -403,6 +412,8 @@ impl World {
             touch_starts: touch::TouchStarts::default(),
             touch_twist: touch::Twist::default(),
             trackpad: trackpad::Trackpad::default(),
+            time_dial: touch::TimeDial::default(),
+            time_overlay: time_dial::Overlay::default(),
         }
     }
 
@@ -536,6 +547,7 @@ impl World {
                 minimap::draw(self);
                 minimap::click(self);
                 panel::update(self);
+                time_dial::update(self);
             }
         }
         if matches!(self.state, Title | Code | Options | Practice | Menu) {
@@ -579,7 +591,7 @@ impl l3d_engine::Game for World {
         self.change_state();
         // A step is one simulation tick, so fast-forward steps more often
         // and every sprite frame is still drawn.
-        let pace = self.game.pace(self.backwards());
+        let pace = self.game.pace(self.time_control());
         self.e
             .time
             .fixed
@@ -922,6 +934,9 @@ pub fn fresh_level(w: &World) -> bool {
 pub struct Game {
     pub sim: Option<l3d_sim::Simulation>,
     pub paused: bool,
+    /// The three-finger time dial's speed while it is held: ticks per tick,
+    /// negative running the level back (`touch::TimeDial`).
+    pub dial: Option<f32>,
     /// Fast-forward: the level runs [`FAST_FORWARD_TICKS`] times as fast.
     pub fast_forward: bool,
     /// The level's pace now, in ticks per normal tick: 0 paused, 1 normal, up to
@@ -950,6 +965,21 @@ pub struct Game {
 
 /// Ticks between rewind snapshots: two seconds, about 140 KB each.
 const SNAPSHOT_TICKS: u64 = 28;
+
+/// The speed Backspace runs the level back at while held, with Rewind on:
+/// as fast as forward, or twice that with Shift (ours).
+pub(crate) fn backspace_rewind(w: &World) -> Option<f32> {
+    let keys = &w.e.input.keys;
+    (w.settings.rewind && keys.pressed(KeyCode::Backspace)).then(|| {
+        if keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]) {
+            -2.0
+        } else if w.game.fast_forward {
+            -(FAST_FORWARD_TICKS as f32)
+        } else {
+            -1.0
+        }
+    })
+}
 
 /// The rating picked on the title screen is kept for the next start.
 fn keep_rating(w: &mut World) {
@@ -1029,6 +1059,8 @@ impl Replay {
     }
 }
 
+/// The slowest pace the time dial runs the level at, short of pausing.
+const MIN_PACE: f32 = 0.05;
 /// How many times as fast the level runs while fast-forwarding (the original's speed-up
 /// is unmeasured).
 const FAST_FORWARD_TICKS: u32 = 3;
@@ -1057,6 +1089,7 @@ fn pause_keys(w: &mut World) {
 }
 
 fn step_simulation(w: &mut World) {
+    let control = w.time_control();
     let backwards = w.backwards();
     let (options, scene) = (&w.opts, &mut w.scene);
     let keep_snapshots = w.settings.rewind;
@@ -1114,6 +1147,11 @@ fn step_simulation(w: &mut World) {
     if !keep_snapshots {
         snapshots.clear();
     }
+    // A time control held sets the pace, paused or not, running back too,
+    // so that lemmings turn to face their way at it.
+    if let Some(v) = control {
+        *speed = v.abs();
+    }
     // Backspace runs the level back at the pace it would run forward
     // (ours), paused or not; a replay stops there and the player takes over.
     if backwards && sim.tick > snapshots.first().map_or(u64::MAX, |s| s.tick) {
@@ -1146,7 +1184,12 @@ fn step_simulation(w: &mut World) {
         scene.data = Some(Arc::new(rebuilt));
         return;
     }
-    if *paused {
+    // The time dial runs the level at its own pace, paused or not.
+    if let Some(v) = control {
+        if v <= 0.0 {
+            return;
+        }
+    } else if *paused {
         return;
     }
     if keep_snapshots
@@ -1184,13 +1227,10 @@ fn step_simulation(w: &mut World) {
 }
 
 impl Game {
-    /// Ticks per normal tick at which the level runs, forwards or back.
-    fn pace(&self, backwards: bool) -> f32 {
-        match (backwards, self.fast_forward) {
-            (true, true) => FAST_FORWARD_TICKS as f32,
-            (true, false) => 1.0,
-            (false, _) => self.speed.max(1.0),
-        }
+    /// Ticks per normal tick at which the level runs, forwards or back:
+    /// as the time control held says, if any.
+    fn pace(&self, control: Option<f32>) -> f32 {
+        control.map_or(self.speed.max(1.0), |v| v.abs().max(MIN_PACE))
     }
 
     /// How far the game is through its current step towards the next, 0
@@ -1793,6 +1833,7 @@ fn key_code(name: &str) -> Option<KeyCode> {
         "Escape" => KeyCode::Escape,
         "Enter" => KeyCode::Enter,
         "Space" => KeyCode::Space,
+        "Backspace" => KeyCode::Backspace,
         "Tab" => KeyCode::Tab,
         "ArrowUp" => KeyCode::ArrowUp,
         "ArrowDown" => KeyCode::ArrowDown,
