@@ -1021,17 +1021,7 @@ pub fn rebuild_blocks(
     };
     out.layers[layer] = block_layer(
         &level_mesh::build(level, blocks, &on_top, hatch_open(sim.tick), &|x, y, z| {
-            let c = [x, y, z].map(|v| v as i32);
-            // Blocks lemmings pass through (the splitter's arch) are not in
-            // the world and never change: whole, as the level placed them.
-            if sim.world.placed(c) == 0 {
-                return (0.0, 1.0, level.block(x, y, z).segments);
-            }
-            (
-                sim.world.base(c) as f32 / 4.0,
-                sim.world.cut(c) as f32 / 4.0,
-                sim.world.placed(c),
-            )
+            world_cut(level, &sim.world, x, y, z)
         }),
         texture,
         &scene.lights,
@@ -1040,6 +1030,34 @@ pub fn rebuild_blocks(
     let brick_texture = out.layers[layer + 1].texture.clone();
     out.layers[layer + 1] = brick_layer(&sim.world.bricks, brick_texture);
     out
+}
+
+/// The cut of cell `(x, y, z)` as [`level_mesh::build`] takes it, for the
+/// level as it stands in `world`.
+fn world_cut(
+    level: &Level,
+    world: &l3d_sim::World,
+    x: usize,
+    y: usize,
+    z: usize,
+) -> (f32, f32, u8) {
+    let c = [x, y, z].map(|v| v as i32);
+    // Blocks lemmings pass through (the splitter's arch) are not in the
+    // world and never change: whole, as the level placed them.
+    if world.placed(c) == 0 {
+        return level_cut(level, x, y, z);
+    }
+    (
+        world.base(c) as f32 / 4.0,
+        world.cut(c) as f32 / 4.0,
+        world.placed(c),
+    )
+}
+
+/// The cut of cell `(x, y, z)` as [`level_mesh::build`] takes it, for the
+/// level as loaded: every block whole.
+fn level_cut(level: &Level, x: usize, y: usize, z: usize) -> (f32, f32, u8) {
+    (0.0, 1.0, level.block(x, y, z).segments)
 }
 
 /// How far a brick's underside lies below its top, in units: the original
@@ -1119,7 +1137,7 @@ pub fn build(data: &mut GameData, n: u32, show: Show) -> Result<BuiltLevel, l3d_
         &blocks,
         &|tile| art_on_top(|i| tex.get(i).is_some_and(|&p| p != 0), tile),
         0.0,
-        &|x, y, z| (0.0, 1.0, level.block(x, y, z).segments),
+        &|x, y, z| level_cut(&level, x, y, z),
     );
     let mut scene = SceneData::default();
 
@@ -1288,4 +1306,50 @@ pub fn build(data: &mut GameData, n: u32, show: Show) -> Result<BuiltLevel, l3d_
         mesh,
         block_layer: block_layer_index,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use l3d_formats::gamedata::DATA_ENV;
+
+    /// At the start of play every level's mesh, built from the simulation's
+    /// world, is the one built from the level as loaded (the briefing's).
+    #[test]
+    fn play_starts_with_the_loaded_level() {
+        let dir = std::env::var_os(DATA_ENV)
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../gamedata")
+            });
+        if !dir.is_dir() {
+            eprintln!("game data not found; skipping");
+            return;
+        }
+        let mut data = GameData::open(&dir).expect("open game data");
+        let on_top = |_: u32| false;
+        for n in 0..100 {
+            let level = data.level(n).expect("level");
+            let blocks = data.blocks(n).expect("blocks");
+            let sim = l3d_sim::Simulation::new(&level, &blocks);
+            let loaded = level_mesh::build(&level, &blocks, &on_top, 0.0, &|x, y, z| {
+                level_cut(&level, x, y, z)
+            });
+            let played = level_mesh::build(
+                &level,
+                &blocks,
+                &on_top,
+                hatch_open(sim.tick),
+                &|x, y, z| world_cut(&level, &sim.world, x, y, z),
+            );
+            for (a, b) in [
+                (&loaded.opaque, &played.opaque),
+                (&loaded.cutout, &played.cutout),
+            ] {
+                assert_eq!(a.positions, b.positions, "LEVEL.{n:03}");
+                assert_eq!(a.uvs, b.uvs, "LEVEL.{n:03}");
+                assert_eq!(a.indices, b.indices, "LEVEL.{n:03}");
+            }
+        }
+    }
 }
