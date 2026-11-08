@@ -859,6 +859,10 @@ const PICK_RANGE: f32 = 128.0;
 /// How close the camera may come to a block (grid units).
 const CAMERA_RADIUS: f32 = 0.2;
 
+/// The longest step the camera takes against blocks: less than its
+/// [`CAMERA_RADIUS`], so no step passes over a block's edge unseen.
+const CAMERA_STEP: f32 = 0.1;
+
 /// Vertical field of view of the scene camera.
 const DEFAULT_FOV_Y: f32 = 51.0;
 
@@ -1649,16 +1653,22 @@ pub(crate) fn camera_controls(w: &mut World) {
                 || lemming_cam.following().is_some()
                 || preview.active
                 || gliding;
+            // The way there is walked in short steps, so that a long move in
+            // one frame (a burst of wheel notches) can't pass through a wall.
             if let Some(free) = *last_free
                 && !jumped
-                && camera_blocked(level, blocks, cam.pos)
             {
+                let target = cam.pos;
+                let steps = ((target - free).length() / CAMERA_STEP).ceil().max(1.0) as usize;
                 let mut p = free;
-                for axis in 0..3 {
-                    let mut q = p;
-                    q[axis] = cam.pos[axis];
-                    if !camera_blocked(level, blocks, q) {
-                        p = q;
+                for i in 1..=steps {
+                    let goal = free.lerp(target, i as f32 / steps as f32);
+                    for axis in 0..3 {
+                        let mut q = p;
+                        q[axis] = goal[axis];
+                        if !camera_blocked(level, blocks, q) {
+                            p = q;
+                        }
                     }
                 }
                 cam.pos = p;
