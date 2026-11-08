@@ -1022,6 +1022,11 @@ pub fn rebuild_blocks(
     out.layers[layer] = block_layer(
         &level_mesh::build(level, blocks, &on_top, hatch_open(sim.tick), &|x, y, z| {
             let c = [x, y, z].map(|v| v as i32);
+            // Blocks lemmings pass through (the splitter's arch) are not in
+            // the world and never change: whole, as the level placed them.
+            if sim.world.placed(c) == 0 {
+                return (0.0, 1.0, level.block(x, y, z).segments);
+            }
             (
                 sim.world.base(c) as f32 / 4.0,
                 sim.world.cut(c) as f32 / 4.0,
