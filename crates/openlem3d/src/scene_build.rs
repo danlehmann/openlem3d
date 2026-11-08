@@ -400,12 +400,13 @@ fn obj_rect(n: u8) -> [f32; 4] {
     }
 }
 
-/// Height at which an object in a cell stands: the bottom of the cell, or the
-/// top of a partial block whose bottom slice is present ([L3DEdit]
-/// "Objects vs Blocks", unverified).
+/// Height at which an object in a cell stands: the top of the block's highest
+/// quarter when the top quarter is empty, otherwise the bottom of the cell
+/// (**verified** on a test level in the original: an object stands on a slab
+/// in the second or third quarter, as the jugglers of Taxing 2 "Picky
+/// Platform" do, but under a slab in the top quarter).
 fn object_base_y(y: usize, block: BlockCell) -> f32 {
-    let partial = block.segments != 0 && block.segments != 0xF;
-    if partial && block.segments & 1 != 0 {
+    if block.segments != 0 && block.segments & 0b1000 == 0 {
         y as f32 + (8 - block.segments.leading_zeros()) as f32 / 4.0
     } else {
         y as f32
