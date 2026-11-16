@@ -4,6 +4,7 @@ description = "The few engine pieces openlem3d needs: a window, input, clocks, p
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 glam = "0.32"

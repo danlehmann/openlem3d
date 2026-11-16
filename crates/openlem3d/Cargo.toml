@@ -4,6 +4,7 @@ description = "Open-source reimplementation of Lemmings 3D"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 l3d-formats.workspace = true
