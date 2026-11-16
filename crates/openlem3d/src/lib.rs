@@ -792,6 +792,27 @@ fn camera_blocked(level: &Level, blocks: &BlockSet, p: Vec3) -> bool {
     false
 }
 
+/// Where the camera gets to on its way from `from` (clear of blocks) to
+/// `to`: walked in steps of at most [`CAMERA_STEP`], each tried axis by axis,
+/// so that it slides along blocks. An axis that is stopped stays where it is
+/// (it is not carried on to where the move would have had it by then, which
+/// may be the far side of the block).
+fn camera_walk(level: &Level, blocks: &BlockSet, from: Vec3, to: Vec3) -> Vec3 {
+    let steps = ((to - from).length() / CAMERA_STEP).ceil().max(1.0);
+    let step = (to - from) / steps;
+    let mut p = from;
+    for _ in 0..steps as usize {
+        for axis in 0..3 {
+            let mut q = p;
+            q[axis] += step[axis];
+            if !camera_blocked(level, blocks, q) {
+                p = q;
+            }
+        }
+    }
+    p
+}
+
 /// The block at `p`, if it is there: a non-empty cell whose segment at
 /// that height is present.
 fn solid_cell(level: &Level, p: Vec3) -> Option<l3d_formats::level::BlockCell> {
@@ -1658,20 +1679,7 @@ pub(crate) fn camera_controls(w: &mut World) {
             if let Some(free) = *last_free
                 && !jumped
             {
-                let target = cam.pos;
-                let steps = ((target - free).length() / CAMERA_STEP).ceil().max(1.0) as usize;
-                let mut p = free;
-                for i in 1..=steps {
-                    let goal = free.lerp(target, i as f32 / steps as f32);
-                    for axis in 0..3 {
-                        let mut q = p;
-                        q[axis] = goal[axis];
-                        if !camera_blocked(level, blocks, q) {
-                            p = q;
-                        }
-                    }
-                }
-                cam.pos = p;
+                cam.pos = camera_walk(level, blocks, free, cam.pos);
             }
             if !camera_blocked(level, blocks, cam.pos) {
                 *last_free = Some(cam.pos);
@@ -1929,5 +1937,36 @@ mod tests {
         };
         let ray = screen_ray(&screen, &camera, Vec2::new(800.0, 450.0)).unwrap();
         assert!(ray.dot(forward) > 0.999, "{ray}");
+    }
+
+    /// A long move in one frame stops at a wall one block thick, on every
+    /// axis: Taxing 8 "Rescue Team" starts in a corridor one cell wide under
+    /// a ceiling one block thick, with nothing beyond either.
+    #[test]
+    fn camera_walk_stops_at_thin_walls() {
+        use l3d_formats::gamedata::{DATA_ENV, GameData};
+        let dir = std::env::var_os(DATA_ENV)
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../gamedata")
+            });
+        if !dir.is_dir() {
+            eprintln!("game data not found; skipping");
+            return;
+        }
+        let mut data = GameData::open(&dir).expect("open game data");
+        let level = data.level(47).expect("level");
+        let blocks = data.blocks(47).expect("blocks");
+        let (start, _) = preset_view(&level.cameras[0]);
+        assert!(!camera_blocked(&level, &blocks, start));
+        for dir in [Vec3::Y, Vec3::Z, Vec3::NEG_Z, Vec3::new(0.0, 1.0, 0.3)] {
+            for far in [1.5, 3.0, 8.0, 40.0] {
+                let p = camera_walk(&level, &blocks, start, start + dir * far);
+                assert!(p.y < 3.0 && p.z > 15.0 && p.z < 16.0, "{dir} by {far}: {p}");
+            }
+        }
+        // Along the corridor it moves freely.
+        let p = camera_walk(&level, &blocks, start, start + Vec3::X * 2.0);
+        assert!((p.x - start.x - 2.0).abs() < 1e-3, "{p}");
     }
 }
