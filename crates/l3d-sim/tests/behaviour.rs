@@ -231,6 +231,33 @@ fn bashing_removes_bricks() {
 }
 
 #[test]
+fn digger_on_its_stairs_digs_the_bricks_not_the_floor() {
+    let mut sim = open_level(1)
+        .skill(0, Skill::Builder, 1)
+        .skill(1, Skill::Digger, 1)
+        .sim();
+    run(&mut sim, 30);
+    assert!(sim.assign(0, Skill::Builder));
+    while sim.lemmings[0].state != (State::Building { bricks_left: 3 }) {
+        assert!(sim.tick < 600, "never laid three bricks");
+        sim.step();
+    }
+    let bricks = sim.world.bricks.len();
+    assert!(sim.assign(0, Skill::Digger));
+    let feet = sim.lemmings[0].pos;
+    assert!(feet[1] > 2 * SUB, "on its stairs");
+    let floor = [feet[0].div_euclid(SUB), 1, feet[2].div_euclid(SUB)];
+    // While it is up on the stairs, the floor under them stays whole and
+    // the bricks under it go.
+    while sim.lemmings[0].pos[1] > 2 * SUB {
+        assert!(sim.tick < 1200, "never dug down through its stairs");
+        assert_eq!(sim.world.present(floor), 0xF, "floor dug under the stairs");
+        sim.step();
+    }
+    assert!(sim.world.bricks.len() < bricks);
+}
+
+#[test]
 fn one_way_blocks_give_way_in_one_direction() {
     // Block 6 is one-way towards −X before rotation; rotation 1 turns −X to +Z.
     for (rotation, open, closed) in [(0, [-1, 0, 0], [1, 0, 0]), (1, [0, 0, 1], [0, 0, -1])] {

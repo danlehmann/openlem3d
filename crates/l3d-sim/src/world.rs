@@ -267,7 +267,7 @@ impl World {
 
     /// Removes the bricks overlapping the segments in `mask` of cell `c`;
     /// returns whether there were any.
-    fn remove_bricks(&mut self, c: [i32; 3], mask: u8) -> bool {
+    pub fn remove_bricks(&mut self, c: [i32; 3], mask: u8) -> bool {
         let before = self.bricks.len();
         let quarter = SUB / 4;
         self.bricks.retain(|b| {

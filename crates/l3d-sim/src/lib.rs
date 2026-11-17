@@ -2768,7 +2768,7 @@ impl Simulation {
     /// ticks since it started on them (0 to [`DIG_TICKS`] − 1). `None`
     /// otherwise or with nothing to dig.
     pub fn dig_target(&self, l: &Lemming) -> Option<([i32; 3], u8, u32)> {
-        if l.state != State::Digging {
+        if l.state != State::Digging || self.brick_underfoot(l) {
             return None;
         }
         let (c, b, _) = self.dig_cell(l)?;
@@ -2779,6 +2779,17 @@ impl Simulation {
             segments_between(b.segments, to, cut),
             l.state_ticks % DIG_TICKS,
         ))
+    }
+
+    /// Whether lemming `l` stands on a builder's brick: one whose top is at
+    /// its feet, under them or with an end at them (a builder stands where
+    /// one brick ends and the next begins).
+    fn brick_underfoot(&self, l: &Lemming) -> bool {
+        self.world.bricks.iter().any(|b| {
+            b.max[1] == l.pos[1]
+                && (b.min[0]..=b.max[0]).contains(&l.pos[0])
+                && (b.min[2]..=b.max[2]).contains(&l.pos[2])
+        })
     }
 
     /// The cell under a digger's feet and its block.
@@ -2812,9 +2823,28 @@ impl Simulation {
         // 2026-10-24: on a steel lane the digger count dropped and stayed
         // down, and the lemming never stopped walking).
         if l.state_ticks == 1
+            && !self.brick_underfoot(l)
             && !matches!(self.dig_cell(l), Some((_, _, f)) if f & flags::STEEL == 0)
         {
             l.set_state(State::Walking);
+            return;
+        }
+        // Standing on a builder's bricks, it digs through them before the
+        // terrain below them (owner's report on Fun 6 "Ricochet": a builder
+        // turned digger on its stairs cracked the stone under them instead).
+        if self.brick_underfoot(l) {
+            if l.state_ticks.is_multiple_of(DIG_TICKS) {
+                let below = [l.pos[0], l.pos[1] - 1, l.pos[2]];
+                let c = Self::cell_of(below);
+                let seg = (below[1] - c[1] * SUB) / (SUB / 4);
+                self.world.remove_bricks(c, 1 << seg);
+                let (ground, on_block) = self.world.surface_below(l.pos[0], l.pos[1], l.pos[2]);
+                if !on_block || ground < l.pos[1] - STEP_DOWN {
+                    l.start_falling();
+                } else {
+                    l.pos[1] = ground;
+                }
+            }
             return;
         }
         // Starting on segments another digger left part dug: as far on.
