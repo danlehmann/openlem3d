@@ -2617,13 +2617,18 @@ impl Simulation {
             } else if shallow && !above {
                 self.world.breakable_towards(cell, Some(d)) && self.world.shave(cell, low as u8)
             } else {
-                // The stroke takes the rest of the block above its cut
-                // too (verified, owner, Taxing 10 "It's the Name of the
-                // Game": the cracks covered the block's lower part, as
-                // ours, then the whole block went; ours left its top
-                // hanging over the lemmings).
-                let rest = 0xFu8.checked_shl(low).unwrap_or(0) & 0xF;
-                self.world.remove_segments_towards(cell, rest, Some(d))
+                // A single quarter left above the stroke goes with it;
+                // half a block or more stays (owner, Taxing 10 "It's the
+                // Name of the Game": bashing from bricks a quarter up, the
+                // block's last quarter vanished with the stroke; bashing
+                // from the floor, its top half stayed).
+                let over = present & !mask & 0xFu8.checked_shl(low).unwrap_or(0);
+                let take = if over.count_ones() == 1 {
+                    mask | over
+                } else {
+                    mask
+                };
+                self.world.remove_segments_towards(cell, take, Some(d))
             };
             if !cut {
                 l.set_state(State::Walking);
