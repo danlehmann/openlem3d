@@ -48,7 +48,10 @@ struct VIn {
     // is then a uv drift per second instead of a billboard offset.
     @location(4) anim: vec2<f32>,
     // Light from glowing things nearby, linear RGB (`light.rs`); used only
-    // while glowing.
+    // while glowing. On a tiled surface instead its waves (ours, enhanced
+    // mode, `scene_build::Waves`): x how strongly they shade it (0 for
+    // none, calm by the scenery), y how far they lift it (0 beyond the
+    // finely divided sea around the level).
     @location(5) light: vec3<f32>,
 };
 
@@ -82,6 +85,9 @@ struct VOut {
     // For tiled surfaces: frame count and current frame; x = 0 otherwise.
     @location(2) tile: vec2<f32>,
     @location(3) light: vec3<f32>,
+    // For a tiled surface with waves: its world x and z, and how strongly
+    // the waves shade it; zero otherwise.
+    @location(4) wave: vec3<f32>,
 };
 
 @vertex
@@ -102,8 +108,15 @@ fn vs(v: VIn) -> VOut {
     let t = u.sky.w;
     let flicker = 0.9 + 0.06 * sin(t * 7.3) + 0.04 * sin(t * 17.9 + 1.3);
     o.light = select(vec3(0.0), v.light * flicker, u.post.x > 0.0);
+    o.wave = vec3(0.0);
     if (v.anim.y < 0.0) {
-        o.clip = u.view_proj * vec4(v.pos, 1.0);
+        var p = v.pos;
+        if (v.light.y > 0.0) {
+            p.y += v.light.y * WAVE_HEIGHT * waves(p.xz, t, 0.0).x;
+        }
+        o.clip = u.view_proj * vec4(p, 1.0);
+        o.light = vec3(0.0);
+        o.wave = vec3(v.pos.x, v.pos.z, v.light.x);
         o.uv = v.uv + v.offset * u.sky.w;
         o.tile = vec2(max(v.anim.x, 1.0), frame);
         return o;
@@ -163,6 +176,9 @@ fn fs(v: VOut) -> @location(0) vec4<f32> {
     let lowered = max(top - v.params.x, min(top, SHADE_FLOOR));
     let shaded = pow(srgb * (lowered / max(top, 1e-5)), vec3(2.2));
     let glow = glow_of(c.a);
+    if (v.wave.z > 0.0) {
+        return vec4(shaded * wave_light(v.wave), 1.0);
+    }
     return vec4((shaded + c.rgb * v.light) * (1.0 + glow * u.post.x), 1.0);
 }
 
@@ -372,4 +388,54 @@ fn fs_bloom_down(v: PostOut) -> @location(0) vec4<f32> {
 @fragment
 fn fs_bloom_up(v: PostOut) -> @location(0) vec4<f32> {
     return vec4(up(v.uv), 1.0);
+}
+
+// Waves on the sea (ours, enhanced mode): a few travelling ripples summed,
+// lifting the finely divided sea near the level and shading all of it by
+// their slope. How strongly comes from the vertices (calm by the scenery,
+// `scene_build::Waves`).
+
+/// The highest a wave lifts the sea, in world units.
+const WAVE_HEIGHT: f32 = 0.22;
+/// How much a wave's slope lightens or darkens the sea.
+const WAVE_SHADE: f32 = 5.0;
+
+/// The ripples: direction (xy, unnormalised), wavelength in units (z) and
+/// relative height (w).
+const RIPPLES = array<vec4<f32>, 4>(
+    vec4(1.0, 0.35, 9.0, 0.45),
+    vec4(0.75, -0.7, 5.3, 0.27),
+    vec4(-0.3, 1.0, 3.7, 0.17),
+    vec4(0.95, 0.65, 2.3, 0.11),
+);
+
+/// The waves' height (x, about −1 to 1) and its slope along world x (y)
+/// and z (z) at `p`, `t` seconds in. Ripples shorter than about three
+/// times `blur` (the units a pixel covers there) fade out rather than
+/// shimmer.
+fn waves(p: vec2<f32>, t: f32, blur: f32) -> vec3<f32> {
+    var h = vec3(0.0);
+    for (var i = 0; i < 4; i++) {
+        let r = RIPPLES[i];
+        let k = 6.2832 / r.z;
+        let d = normalize(r.xy);
+        // Deep-water waves: their speed grows with the root of the length.
+        let w = sqrt(9.8 * k) * 0.55;
+        let a = r.w * (1.0 - smoothstep(r.z / 10.0, r.z / 3.0, blur));
+        let phase = k * dot(d, p) - w * t + f32(i) * 1.7;
+        h += a * vec3(sin(phase), k * d.x * cos(phase), k * d.y * cos(phase));
+    }
+    return h;
+}
+
+/// How much brighter (or darker) than its texture the sea is drawn where
+/// `wave` (world x, z and strength) is: lit from a fixed light by the
+/// waves' slope, crests a touch lighter.
+fn wave_light(wave: vec3<f32>) -> f32 {
+    let blur = length(fwidth(wave.xy));
+    let w = waves(wave.xy, u.sky.w, blur) * wave.z;
+    let slope = w.yz * WAVE_HEIGHT * WAVE_SHADE;
+    let n = normalize(vec3(-slope.x, 1.0, -slope.y));
+    let l = normalize(vec3(-0.5, 1.0, -0.35));
+    return dot(n, l) / dot(vec3(0.0, 1.0, 0.0), l) + 0.06 * w.x;
 }

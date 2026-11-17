@@ -281,7 +281,146 @@ fn block_layer(
 /// `frames` stacked frames animate the texture and `drift` scrolls it (uv
 /// per second). The texture is [`SceneLayer::smooth`], against the shimmer
 /// of the far plane.
-fn plane_layer(y: f32, tile: f32, texture: RgbaImage, frames: u32, drift: [f32; 2]) -> SceneLayer {
+/// The sea graphics that are water (the others are sand, grass, ice, earth
+/// and a red logo): the ones that get waves.
+const WATER_SEAS: [u8; 3] = [1, 2, 4];
+
+/// How far around the grid the sea is finely divided so waves can lift
+/// it, in units (a multiple of the fine tiles' 16), and how far in from
+/// that edge the lift fades in, so the divided sea meets the flat sea
+/// beyond without a gap.
+const WAVE_NEAR: f32 = 32.0;
+const WAVE_FADE: f32 = 16.0;
+/// How far from the scenery the waves reach their full height: calm at
+/// the shore, growing over this many units.
+const WAVE_CALM: f32 = 14.0;
+
+/// How strongly waves move the sea around a level (ours, enhanced mode):
+/// per unit square around the grid, the distance to the nearest scenery
+/// (a column holding blocks, or land), from which the sea is calm at the
+/// shore and rough further out.
+pub(crate) struct Waves {
+    /// Distances in units, `SIDE` × `SIDE` squares from `-WAVE_NEAR` on x
+    /// and z, x-major.
+    distance: Vec<f32>,
+}
+
+impl Waves {
+    const SIDE: usize = SIZE_X + 2 * WAVE_NEAR as usize;
+
+    /// The distances for `level`, its land polygons counted as scenery when
+    /// `land` (they are drawn).
+    fn new(level: &Level, land: bool) -> Self {
+        let n = Self::SIDE;
+        let far = f32::MAX / 4.0;
+        let mut d = vec![far; n * n];
+        for i in 0..n {
+            for k in 0..n {
+                let (x, z) = (i as f32 - WAVE_NEAR, k as f32 - WAVE_NEAR);
+                let (cx, cz) = (x + 0.5, z + 0.5);
+                let in_grid =
+                    (0.0..SIZE_X as f32).contains(&x) && (0.0..SIZE_Z as f32).contains(&z);
+                let blocks = in_grid
+                    && (0..l3d_formats::level::SIZE_Y)
+                        .any(|y| !level.block(x as usize, y, z as usize).is_empty());
+                let on_land = land && level.land_polygons.iter().any(|p| inside(p, cx, cz));
+                if blocks || on_land {
+                    d[i * n + k] = 0.0;
+                }
+            }
+        }
+        // Two passes of a chamfer distance (steps of 1 and √2).
+        let s2 = std::f32::consts::SQRT_2;
+        let idx = |i: usize, k: usize| i * n + k;
+        for i in 0..n {
+            for k in 0..n {
+                let mut v = d[idx(i, k)];
+                if i > 0 {
+                    v = v.min(d[idx(i - 1, k)] + 1.0);
+                    if k > 0 {
+                        v = v.min(d[idx(i - 1, k - 1)] + s2);
+                    }
+                    if k + 1 < n {
+                        v = v.min(d[idx(i - 1, k + 1)] + s2);
+                    }
+                }
+                if k > 0 {
+                    v = v.min(d[idx(i, k - 1)] + 1.0);
+                }
+                d[idx(i, k)] = v;
+            }
+        }
+        for i in (0..n).rev() {
+            for k in (0..n).rev() {
+                let mut v = d[idx(i, k)];
+                if i + 1 < n {
+                    v = v.min(d[idx(i + 1, k)] + 1.0);
+                    if k > 0 {
+                        v = v.min(d[idx(i + 1, k - 1)] + s2);
+                    }
+                    if k + 1 < n {
+                        v = v.min(d[idx(i + 1, k + 1)] + s2);
+                    }
+                }
+                if k + 1 < n {
+                    v = v.min(d[idx(i, k + 1)] + 1.0);
+                }
+                d[idx(i, k)] = v;
+            }
+        }
+        Self { distance: d }
+    }
+
+    /// How strongly the waves move the sea at `(x, z)`: 0 at the scenery,
+    /// 1 from [`WAVE_CALM`] away (and everywhere off the measured squares).
+    fn strength(&self, x: f32, z: f32) -> f32 {
+        // At a corner between squares, the nearest of the four.
+        let n = Self::SIDE as i32;
+        let (i, k) = ((x + WAVE_NEAR) as i32, (z + WAVE_NEAR) as i32);
+        let mut d = f32::MAX;
+        for (di, dk) in [(0, 0), (-1, 0), (0, -1), (-1, -1)] {
+            let (a, b) = (i + di, k + dk);
+            if (0..n).contains(&a) && (0..n).contains(&b) {
+                d = d.min(self.distance[(a * n + b) as usize]);
+            }
+        }
+        if d == f32::MAX {
+            return 1.0;
+        }
+        let s = ((d - 0.5) / WAVE_CALM).clamp(0.0, 1.0);
+        s * s * (3.0 - 2.0 * s)
+    }
+
+    /// How far the waves may lift the sea at `(x, z)`: fully up to
+    /// [`WAVE_FADE`] inside the finely divided sea's edge, nothing at it.
+    fn lift(x: f32, z: f32) -> f32 {
+        let out = |v: f32, size: usize| (-v).max(v - size as f32).max(0.0);
+        let beyond = out(x, SIZE_X).max(out(z, SIZE_Z));
+        ((WAVE_NEAR - beyond) / WAVE_FADE).clamp(0.0, 1.0)
+    }
+}
+
+/// Whether `(x, z)` is inside land polygon `p` (even–odd).
+fn inside(p: &[LandVertex], x: f32, z: f32) -> bool {
+    let mut odd = false;
+    for (i, a) in p.iter().enumerate() {
+        let b = &p[(i + 1) % p.len()];
+        let (ax, az, bx, bz) = (a.x as f32, a.z as f32, b.x as f32, b.z as f32);
+        if (az > z) != (bz > z) && x < ax + (z - az) / (bz - az) * (bx - ax) {
+            odd = !odd;
+        }
+    }
+    odd
+}
+
+fn plane_layer(
+    y: f32,
+    tile: f32,
+    texture: RgbaImage,
+    frames: u32,
+    drift: [f32; 2],
+    waves: Option<&Waves>,
+) -> SceneLayer {
     /// Size of the coarse tiles.
     const COARSE: f32 = 512.0;
     /// Size of the fine tiles used near the level.
@@ -289,6 +428,7 @@ fn plane_layer(y: f32, tile: f32, texture: RgbaImage, frames: u32, drift: [f32; 
     /// The region around the grid that gets fine tiles.
     const NEAR: f32 = 64.0;
     let near = (-NEAR, SIZE_X.max(SIZE_Z) as f32 + NEAR);
+    let divided = (-WAVE_NEAR, SIZE_X.max(SIZE_Z) as f32 + WAVE_NEAR);
     let mut b = LayerBuilder::default();
     let quad = |b: &mut LayerBuilder, x0: f32, z0: f32, size: f32| {
         let base = b.base();
@@ -299,13 +439,31 @@ fn plane_layer(y: f32, tile: f32, texture: RgbaImage, frames: u32, drift: [f32; 
             (x0 + size, z0),
         ] {
             let mut v = Vertex::fixed([x, y, z], [x / tile, z / tile], 0.0, false);
-            // A tiled surface (see `scene.wgsl`): frames, and the drift.
+            // A tiled surface (see `scene.wgsl`): frames, and the drift;
+            // with waves, how strongly they shade and lift it.
             v.anim = [frames as f32, -1.0];
             v.offset = drift;
+            if let Some(w) = waves {
+                let s = w.strength(x, z);
+                v.light = [s, s * Waves::lift(x, z), 0.0];
+            }
             v.push(&mut b.vertices);
         }
         b.indices
             .extend([base, base + 1, base + 2, base, base + 2, base + 3]);
+    };
+    // A fine tile, divided into unit squares where waves lift the sea.
+    let fine = |b: &mut LayerBuilder, x0: f32, z0: f32| {
+        let inside = |v: f32| v >= divided.0 && v + FINE <= divided.1;
+        if waves.is_some() && inside(x0) && inside(z0) {
+            for i in 0..FINE as i32 {
+                for k in 0..FINE as i32 {
+                    quad(b, x0 + i as f32, z0 + k as f32, 1.0);
+                }
+            }
+        } else {
+            quad(b, x0, z0, FINE);
+        }
     };
     let start = -(SEA_MARGIN / COARSE).floor() * COARSE;
     let steps = ((SEA_MARGIN * 2.0 + SIZE_X.max(SIZE_Z) as f32) / COARSE).ceil() as i32 + 1;
@@ -318,7 +476,7 @@ fn plane_layer(y: f32, tile: f32, texture: RgbaImage, frames: u32, drift: [f32; 
                 let n = (COARSE / FINE) as i32;
                 for fi in 0..n {
                     for fj in 0..n {
-                        quad(&mut b, x0 + fi as f32 * FINE, z0 + fj as f32 * FINE, FINE);
+                        fine(&mut b, x0 + fi as f32 * FINE, z0 + fj as f32 * FINE);
                     }
                 }
             } else {
@@ -1136,6 +1294,8 @@ pub struct Show {
     /// drawn (owner's comparison), as the floor plane level with the
     /// layer's top would hide them on a level with a sea.
     pub bottom_sides: bool,
+    /// A sea of water has waves (ours, in enhanced mode; see [`Waves`]).
+    pub waves: bool,
 }
 
 /// Builds everything drawn for level `n`.
@@ -1206,9 +1366,20 @@ pub fn build(data: &mut GameData, n: u32, show: Show) -> Result<BuiltLevel, l3d_
             level.water_speed_x as f32 * per_second,
             level.water_speed_z as f32 * per_second,
         ];
-        scene
-            .layers
-            .push(plane_layer(GROUND_Y - 0.01, tile, img, frames, drift));
+        let waves = (show.waves && WATER_SEAS.contains(&level.sea_gfx)).then(|| {
+            Waves::new(
+                &level,
+                flags & level_flags::LAND_INVISIBLE == 0 && show.land,
+            )
+        });
+        scene.layers.push(plane_layer(
+            GROUND_Y - 0.01,
+            tile,
+            img,
+            frames,
+            drift,
+            waves.as_ref(),
+        ));
     }
     if show.land
         && level.land_gfx != 0xFF

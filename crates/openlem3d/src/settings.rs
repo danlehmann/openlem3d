@@ -90,6 +90,7 @@ impl Settings {
             sea: self.sea,
             sky: self.sky,
             bottom_sides: self.enhanced,
+            waves: self.enhanced,
         }
     }
 
