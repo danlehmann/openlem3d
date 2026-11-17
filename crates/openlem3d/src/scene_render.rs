@@ -53,6 +53,11 @@ pub struct SceneSprites {
     /// Interleaved vertices, [`VERTEX_FLOATS`] per vertex.
     pub vertices: Vec<f32>,
     pub indices: Vec<u32>,
+    /// Soft round shadows darkening what is under them (ours, enhanced
+    /// mode), in the same layout: uv runs from −1 to 1 across each disc,
+    /// whose middle is darkened by the shade (0–1).
+    pub shadow_vertices: Vec<f32>,
+    pub shadow_indices: Vec<u32>,
 }
 
 /// Triangles sharing one texture.
@@ -165,6 +170,8 @@ pub struct SceneGpu {
     sprite_atlas: Option<wgpu::BindGroup>,
     /// Per-frame sprite geometry: buffers (grown as needed) and index count.
     sprites: Option<(wgpu::Buffer, wgpu::Buffer, u32)>,
+    /// The same for the shadows.
+    shadows: Option<(wgpu::Buffer, wgpu::Buffer, u32)>,
     /// The glowing scene's targets, made anew when the size changes.
     hdr: Option<HdrTargets>,
     /// Depth buffer and its size.
@@ -195,6 +202,8 @@ struct Pipelines {
     bloom_first: wgpu::RenderPipeline,
     bloom_down: wgpu::RenderPipeline,
     bloom_up: wgpu::RenderPipeline,
+    /// Shadows: multiplied onto what is drawn, behind what is in front.
+    shadow: wgpu::RenderPipeline,
 }
 
 /// The scene drawn in [`HDR_FORMAT`], and the bloom chain's levels, each
@@ -317,6 +326,7 @@ impl SceneGpu {
             sky: None,
             sprite_atlas: None,
             sprites: None,
+            shadows: None,
             hdr: None,
             depth: None,
             depth_format,
@@ -446,7 +456,53 @@ impl SceneGpu {
                 cache: None,
             })
         };
+        let shadow = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("scene shadows"),
+            layout: Some(&pl),
+            vertex: wgpu::VertexState {
+                module: &self.shader,
+                entry_point: Some("vs"),
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: (VERTEX_FLOATS * 4) as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &wgpu::vertex_attr_array![
+                        0 => Float32x3, 1 => Float32x2, 2 => Float32x2, 3 => Float32x2, 4 => Float32x2, 5 => Float32x3
+                    ],
+                }],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &self.shader,
+                entry_point: Some("fs_shadow"),
+                // What is there, times the shadow's colour.
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState {
+                        color: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::Zero,
+                            dst_factor: wgpu::BlendFactor::Src,
+                            operation: wgpu::BlendOperation::Add,
+                        },
+                        alpha: wgpu::BlendComponent::OVER,
+                    }),
+                    write_mask: wgpu::ColorWrites::COLOR,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: Default::default(),
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: self.depth_format,
+                depth_write_enabled: Some(false),
+                depth_compare: Some(wgpu::CompareFunction::Greater),
+                stencil: Default::default(),
+                bias: Default::default(),
+            }),
+            multisample: Default::default(),
+            multiview_mask: None,
+            cache: None,
+        });
         let pipelines = Pipelines {
+            shadow,
             geometry,
             sky,
             stretch: full_screen("scene stretch", "vs_sky", "fs_stretch", false, &pl),
@@ -722,7 +778,20 @@ fn prepare(
     uniforms.extend([sky[0], sky[1], x, y]);
     uniforms.extend([if glow { GLOW_GAIN } else { 0.0 }, headroom, 0.0, 0.0]);
     queue.write_buffer(&gpu.uniforms, 0, &f32_bytes(&uniforms));
-    upload_sprites(device, queue, gpu, sprites);
+    upload_dynamic(
+        device,
+        queue,
+        &mut gpu.sprites,
+        &sprites.vertices,
+        &sprites.indices,
+    );
+    upload_dynamic(
+        device,
+        queue,
+        &mut gpu.shadows,
+        &sprites.shadow_vertices,
+        &sprites.shadow_indices,
+    );
     if gpu.version == Some(content.version) {
         return;
     }
@@ -777,28 +846,25 @@ fn prepare(
         .map(|s| bind(gpu, s, false).plain);
 }
 
-/// Copies this frame's sprite geometry into GPU buffers, growing them when
-/// they are too small.
-fn upload_sprites(
+/// Copies this frame's geometry into the GPU buffers in `slot`, growing
+/// them when they are too small.
+fn upload_dynamic(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
-    gpu: &mut SceneGpu,
-    sprites: &SceneSprites,
+    slot: &mut Option<(wgpu::Buffer, wgpu::Buffer, u32)>,
+    vertices: &[f32],
+    indices: &[u32],
 ) {
-    let count = sprites.indices.len() as u32;
+    let count = indices.len() as u32;
     if count == 0 {
-        if let Some(s) = &mut gpu.sprites {
+        if let Some(s) = slot {
             s.2 = 0;
         }
         return;
     }
-    let vbytes = f32_bytes(&sprites.vertices);
-    let ibytes: Vec<u8> = sprites
-        .indices
-        .iter()
-        .flat_map(|i| i.to_le_bytes())
-        .collect();
-    let fits = gpu.sprites.as_ref().is_some_and(|(v, i, _)| {
+    let vbytes = f32_bytes(vertices);
+    let ibytes: Vec<u8> = indices.iter().flat_map(|i| i.to_le_bytes()).collect();
+    let fits = slot.as_ref().is_some_and(|(v, i, _)| {
         v.size() >= vbytes.len() as u64 && i.size() >= ibytes.len() as u64
     });
     if !fits {
@@ -810,13 +876,13 @@ fn upload_sprites(
                 mapped_at_creation: false,
             })
         };
-        gpu.sprites = Some((
+        *slot = Some((
             alloc(vbytes.len(), wgpu::BufferUsages::VERTEX),
             alloc(ibytes.len(), wgpu::BufferUsages::INDEX),
             0,
         ));
     }
-    let (v, i, n) = gpu.sprites.as_mut().unwrap();
+    let (v, i, n) = slot.as_mut().unwrap();
     queue.write_buffer(v, 0, &vbytes);
     queue.write_buffer(i, 0, &ibytes);
     *n = count;
@@ -953,6 +1019,17 @@ fn draw(
         pass.set_vertex_buffer(0, layer.vertices.slice(..));
         pass.set_index_buffer(layer.indices.slice(..), wgpu::IndexFormat::Uint32);
         pass.draw_indexed(0..layer.index_count, 0, 0..1);
+    }
+    // Shadows on what is drawn so far, before the sprites that cast them.
+    if let (Some(atlas), Some((v, i, n))) = (&gpu.sprite_atlas, &gpu.shadows)
+        && *n > 0
+    {
+        pass.set_pipeline(&scene_p.shadow);
+        pass.set_bind_group(0, atlas, &[]);
+        pass.set_vertex_buffer(0, v.slice(..));
+        pass.set_index_buffer(i.slice(..), wgpu::IndexFormat::Uint32);
+        pass.draw_indexed(0..*n, 0, 0..1);
+        pass.set_pipeline(&scene_p.geometry);
     }
     if let (Some(atlas), Some((v, i, n))) = (&gpu.sprite_atlas, &gpu.sprites)
         && *n > 0

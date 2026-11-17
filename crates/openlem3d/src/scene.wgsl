@@ -182,6 +182,19 @@ fn fs(v: VOut) -> @location(0) vec4<f32> {
     return vec4((shaded + c.rgb * v.light) * (1.0 + glow * u.post.x), 1.0);
 }
 
+// Shadows (ours, enhanced mode): soft round discs multiplied onto what is
+// drawn. uv runs from −1 to 1 across a disc; params.x is how much its
+// middle is darkened, fading out to nothing at its rim.
+@fragment
+fn fs_shadow(v: VOut) -> @location(0) vec4<f32> {
+    let d = length(v.uv);
+    if (d >= 1.0) {
+        discard;
+    }
+    let dark = v.params.x * (1.0 - smoothstep(0.55, 1.0, d));
+    return vec4(vec3(1.0 - dark), 1.0);
+}
+
 // Sky: a full-screen triangle. Above the horizon the sky image is stretched
 // so its full height spans the screen top to the horizon; horizontally each
 // sky texel covers two original-screen pixels, and the image wraps.

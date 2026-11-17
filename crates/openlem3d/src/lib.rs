@@ -1405,6 +1405,20 @@ fn update_lemming_sprites(w: &mut World) {
         highlight.lemming,
         &cameras,
     );
+    // Shadows under the lemmings (ours, enhanced mode), on the sea or land
+    // too where the level draws one.
+    if w.settings.enhanced {
+        let ground = game.terrain.as_ref().is_some_and(|(level, _, _)| {
+            use scene_build::level_flags::{LAND_INVISIBLE, SURROUND_SKY};
+            let sea = w.settings.sea && level.sea_gfx != 0xFF && level.flags & SURROUND_SKY == 0;
+            let land = w.settings.land
+                && level.flags & LAND_INVISIBLE == 0
+                && !level.land_polygons.is_empty();
+            sea || land
+        });
+        (sprites.shadow_vertices, sprites.shadow_indices) =
+            lemming_render::shadows(sim, &drawn, ground);
+    }
 }
 
 pub(crate) fn load_level(w: &mut World) {

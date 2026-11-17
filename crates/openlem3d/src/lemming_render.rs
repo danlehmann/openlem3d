@@ -1797,6 +1797,7 @@ pub fn build(
     SceneSprites {
         vertices: b.vertices,
         indices: b.indices,
+        ..SceneSprites::default()
     }
 }
 
@@ -1862,4 +1863,125 @@ mod tests {
         assert_eq!(cell_for(fall, ViewAngle::Left, 0), (411, false));
         assert_eq!(cell_for(fall, ViewAngle::Right, 0), (411, true));
     }
+}
+
+/// How far across a lemming's shadow is, in units, on the floor right under
+/// it (ours, enhanced mode).
+const SHADOW_RADIUS: f32 = 0.3;
+/// How much a shadow darkens the middle of what is under it, with its
+/// lemming on the floor.
+const SHADOW_DARK: f32 = 0.5;
+/// How high above the floor a falling lemming's shadow has faded to its
+/// faintest (a third) and shrunk to its smallest (half), in units.
+const SHADOW_FADE_HEIGHT: f32 = 8.0;
+/// How far below a lemming its floor is looked for, in units.
+const SHADOW_REACH: f32 = 16.0;
+
+/// The height of the floor under `(x, z)`, looking down from `top`: the
+/// top of the first solid part of the world below open space (where `top`
+/// is inside something solid, the floor under that is not taken), or the
+/// ground plane at [`crate::scene_build::GROUND_Y`] when `ground` (the level
+/// draws a sea or land there) and nothing is above it; `None` with nothing
+/// to fall on.
+fn floor_under(sim: &Simulation, x: f32, top: f32, z: f32, ground: bool) -> Option<f32> {
+    // Steps of 1/32 unit (8 sub-units).
+    const STEP: i32 = l3d_sim::SUB / 32;
+    let sub = |v: f32| (v * l3d_sim::SUB as f32).floor() as i32;
+    let (sx, sz) = (sub(x), sub(z));
+    let ground_y = crate::scene_build::GROUND_Y;
+    let lowest = sub((top - SHADOW_REACH).max(0.0));
+    let solid = |y: i32| sim.world.solid([sx, y, sz]);
+    let mut y = sub(top) - 1;
+    if solid(y) {
+        return None;
+    }
+    while y >= lowest {
+        if solid(y) {
+            // The surface is between here and the open step above: halve
+            // the gap down to a sub-unit.
+            let (mut lo, mut hi) = (y, y + STEP);
+            while hi - lo > 1 {
+                let mid = (lo + hi) / 2;
+                if solid(mid) {
+                    lo = mid;
+                } else {
+                    hi = mid;
+                }
+            }
+            return Some(crate::units(hi));
+        }
+        if ground && crate::units(y) < ground_y {
+            return Some(ground_y);
+        }
+        y -= STEP;
+    }
+    None
+}
+
+/// Soft round shadows on the floor under the lemmings (ours, enhanced
+/// mode): `drawn` gives where each is drawn; `ground` says the level has a
+/// sea or land to fall on. Each point of a shadow's 6×6 grid takes the
+/// floor's height under it, so the shadow lies along a ramp and over its
+/// edges, and fades out where that is far off (over a drop or against a
+/// wall). A falling lemming's shadow fades and shrinks as it gets higher.
+/// Not for lemmings gone, caught in a trap or dying (but for one walking
+/// out through the exit).
+pub fn shadows(sim: &Simulation, drawn: &[([f32; 3], f32)], ground: bool) -> (Vec<f32>, Vec<u32>) {
+    /// How far above its floor a shadow is drawn, against fighting it and
+    /// against the straight edges between its points dipping under a
+    /// ramp's crest.
+    const LIFT: f32 = 0.03;
+    /// How far a point's floor may be from the middle's and still be used:
+    /// as far as the point is from the middle, which takes in a ramp.
+    const STEP_LIMIT: f32 = SHADOW_RADIUS + 0.05;
+    /// Squares along each side of a shadow, each corner on the floor.
+    const GRID: u32 = 6;
+    let mut vertices = Vec::new();
+    let mut indices = Vec::new();
+    for (i, l) in sim.lemmings.iter().enumerate() {
+        if l.gone
+            || l.state == State::Trapped
+            || (l.state.is_terminal() && l.state != State::Exiting)
+        {
+            continue;
+        }
+        let Some(&(p, _)) = drawn.get(i) else {
+            continue;
+        };
+        // From above the highest a corner on a ramp can be (as high again
+        // as the shadow is wide), so as to start in open space.
+        let top = p[1] + 2.0 * SHADOW_RADIUS + 0.1;
+        let Some(floor) = floor_under(sim, p[0], top, p[2], ground) else {
+            continue;
+        };
+        let height = (p[1] - floor).max(0.0);
+        // Up high: fainter (to a third) and smaller (to half).
+        let up = (height / SHADOW_FADE_HEIGHT).min(1.0);
+        let dark = SHADOW_DARK * (1.0 - up * 2.0 / 3.0);
+        let r = SHADOW_RADIUS * (1.0 - up / 2.0);
+        let base = (vertices.len() / crate::scene_render::VERTEX_FLOATS) as u32;
+        for (j, k) in (0..=GRID).flat_map(|j| (0..=GRID).map(move |k| (j, k))) {
+            let u = j as f32 / GRID as f32 * 2.0 - 1.0;
+            let v = k as f32 / GRID as f32 * 2.0 - 1.0;
+            let (x, z) = (p[0] + u * r, p[2] + v * r);
+            // A point with no floor near the middle's (over a drop, or
+            // against a wall) stays at the middle's height and is clear, so
+            // the shadow fades out there rather than float.
+            let (y, dark) = match floor_under(sim, x, top, z, ground) {
+                Some(y) if (y - floor).abs() <= STEP_LIMIT => (y, dark),
+                _ => (floor, 0.0),
+            };
+            vertices.extend([x, y + LIFT, z, u, v, dark, 0.0]);
+            // No billboard offset, no animation, no light.
+            vertices.extend([0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0]);
+        }
+        let at = |j: u32, k: u32| base + j * (GRID + 1) + k;
+        for j in 0..GRID {
+            for k in 0..GRID {
+                let (a, b, c, d) = (at(j, k), at(j, k + 1), at(j + 1, k + 1), at(j + 1, k));
+                indices.extend([a, b, c, a, c, d]);
+            }
+        }
+    }
+    (vertices, indices)
 }
