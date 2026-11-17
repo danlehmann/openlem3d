@@ -675,7 +675,7 @@ struct Glide {
     from: (Vec3, f32),
     to: (Vec3, f32),
     t: f32,
-    route: Option<Vec<Vec3>>,
+    route: Option<camera_route::Route>,
     seconds: f32,
 }
 
@@ -764,9 +764,10 @@ impl ViewCamera {
     }
 
     /// Plans the way a glide just started takes, round the blocks of
-    /// `level` in the straight line's way, and how long it takes by the way's
-    /// length (see [`GLIDE_BASE_SECONDS`]). With no way round, the view cuts
-    /// to its destination at once rather than pass through blocks.
+    /// `level` in the straight line's way (or across a wall where the
+    /// destination is closed off), and how long it takes by the length
+    /// glided (see [`GLIDE_BASE_SECONDS`]). With no way at all, the view cuts
+    /// to its destination at once.
     fn plan_glide(&mut self, level: &Level, blocks: &BlockSet) {
         let Some(g) = self.glide.as_mut().filter(|g| g.route.is_none()) else {
             return;
@@ -775,7 +776,7 @@ impl ViewCamera {
             self.finish_glide();
             return;
         };
-        let length = camera_route::length(&route);
+        let length = route.length();
         g.seconds = (GLIDE_BASE_SECONDS + length * GLIDE_SECONDS_PER_UNIT).min(GLIDE_MAX_SECONDS);
         g.route = Some(route);
     }
@@ -789,7 +790,7 @@ impl ViewCamera {
         let turn = (g.to.1 - g.from.1 + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU)
             - std::f32::consts::PI;
         self.pos = match &g.route {
-            Some(r) => camera_route::along(r, camera_route::length(r) * s),
+            Some(r) => r.along(r.length() * s),
             None => g.from.0.lerp(g.to.0, s),
         };
         self.yaw = g.from.1 + turn * s;
@@ -2018,8 +2019,8 @@ mod tests {
         assert!((p.x - start.x - 2.0).abs() < 1e-3, "{p}");
     }
 
-    /// Glides between any two preset cameras of any level keep clear of
-    /// blocks wherever both ends are clear and a way round was found.
+    /// Glides between any two preset cameras of any level where both ends
+    /// are clear find a way round the blocks, never cutting across a wall.
     #[test]
     fn glides_between_presets_keep_clear_of_blocks() {
         use l3d_formats::gamedata::{DATA_ENV, GameData};
@@ -2034,6 +2035,7 @@ mod tests {
         }
         let mut data = GameData::open(&dir).expect("open game data");
         let (mut routed, mut straight, mut none) = (0, 0, 0);
+        let mut cuts = std::collections::BTreeSet::new();
         let started = std::time::Instant::now();
         for n in 0..100 {
             let level = data.level(n).expect("level");
@@ -2052,11 +2054,15 @@ mod tests {
                         continue;
                     };
                     assert!(
-                        r.windows(2)
-                            .all(|w| camera_route::clear_line(&level, &blocks, w[0], w[1])),
+                        r.legs()
+                            .all(|(p, q, cut)| cut
+                                || camera_route::clear_line(&level, &blocks, p, q)),
                         "LEVEL.{n:03}: route {a} to {b} touches a block"
                     );
-                    if r.len() == 2 {
+                    if r.cut.contains(&true) {
+                        cuts.insert(n);
+                    }
+                    if r.points.len() == 2 {
                         straight += 1;
                     } else {
                         routed += 1;
@@ -2068,14 +2074,16 @@ mod tests {
             "straight {straight}, round {routed}, no way found {none}, in {:?}",
             started.elapsed()
         );
-        assert_eq!(none, 0, "glides without a way round");
+        assert_eq!(none, 0, "glides without a way");
+        assert!(cuts.is_empty(), "glides cut across walls in {cuts:?}");
     }
 
     /// Glides from the preset cameras into the eyes of walking lemmings find
     /// a way in (eyes come closer to floors and walls than the camera may),
-    /// except where the lemmings walk in spaces closed off from the preset
-    /// cameras: the cells of Rescue Team (LEVEL.047), the centre of The
-    /// Prisoner (LEVEL.064) and the tunnels of Family Tree (LEVEL.065).
+    /// cutting across a wall only where the lemmings walk in spaces closed
+    /// off from the preset cameras: the cells of Rescue Team (LEVEL.047), the
+    /// centre of The Prisoner (LEVEL.064) and the tunnels of Family Tree
+    /// (LEVEL.065).
     #[test]
     fn glides_into_a_lemmings_eyes_find_a_way() {
         use l3d_formats::gamedata::{DATA_ENV, GameData};
@@ -2089,7 +2097,7 @@ mod tests {
             return;
         }
         let mut data = GameData::open(&dir).expect("open game data");
-        let (mut found, mut tried) = (0, 0);
+        let mut cuts = std::collections::BTreeSet::new();
         for n in 0..100 {
             let level = data.level(n).expect("level");
             let blocks = data.blocks(n).expect("blocks");
@@ -2117,16 +2125,24 @@ mod tests {
                     continue;
                 }
                 for &e in &eyes {
-                    tried += 1;
-                    let ok = camera_route::route(&level, &blocks, from, e).is_some();
+                    let r = camera_route::route(&level, &blocks, from, e)
+                        .unwrap_or_else(|| panic!("LEVEL.{n:03}: no way from {from} to {e}"));
                     assert!(
-                        ok || [47, 64, 65].contains(&n),
-                        "LEVEL.{n:03}: {from} to {e}"
+                        r.legs()
+                            .all(|(p, q, cut)| cut
+                                || camera_route::clear_line(&level, &blocks, p, q)),
+                        "LEVEL.{n:03}: route {from} to {e} touches a block"
                     );
-                    found += ok as u32;
+                    if r.cut.contains(&true) {
+                        cuts.insert(n);
+                    }
                 }
             }
         }
-        assert!(found * 10 >= tried * 9, "{found} of {tried}");
+        assert_eq!(
+            cuts,
+            [47, 64, 65].into(),
+            "levels whose glides cut across walls"
+        );
     }
 }

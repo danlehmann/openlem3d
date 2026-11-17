@@ -2,7 +2,9 @@
 //! a glide between two views goes straight when nothing is in the way, and
 //! otherwise round what is, along a path found over a half-unit grid of the
 //! places the camera may be, shortened where it can see further along and
-//! rounded at its corners.
+//! rounded at its corners. Where the destination is closed off (a lemming
+//! in a sealed cell), the path crosses the least wall it can, and the glide
+//! cuts across that wall from one face to the other.
 
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
@@ -23,11 +25,68 @@ const HEIGHT: f32 = 20.0;
 const NX: usize = (SIZE_X as f32 + 2.0 * MARGIN) as usize * 2;
 const NY: usize = HEIGHT as usize * 2;
 const NZ: usize = (SIZE_Z as f32 + 2.0 * MARGIN) as usize * 2;
-/// The most grid points a search looks at before giving up.
-const SEARCH_LIMIT: usize = 200_000;
 /// How far from the glide's ends (in grid points along each axis) a free
 /// grid point to start or finish the search at is looked for.
 const END_REACH: i32 = 3;
+/// How many times a step through a wall costs a step through open space:
+/// enough that any way round, however long, is taken first, and a wall is
+/// crossed only where the destination is closed off.
+const WALL_COST: u64 = 1000;
+/// The most grid points a closed-off space has (a sealed room of some
+/// 2,500 cubic units).
+const SMALL_SPACE: usize = 20_000;
+
+/// The way a glide takes: the points it passes through, `points[0]` its
+/// start and the last its end, and per leg between two points (`cut[i]`
+/// for `points[i]` to `points[i + 1]`) whether the leg crosses a wall,
+/// which the view does at once rather than glide through it.
+#[derive(Clone, Debug)]
+pub(crate) struct Route {
+    pub points: Vec<Vec3>,
+    pub cut: Vec<bool>,
+}
+
+impl Route {
+    fn straight(from: Vec3, to: Vec3) -> Self {
+        Self {
+            points: vec![from, to],
+            cut: vec![false],
+        }
+    }
+
+    /// The length glided along, leaving out the legs cut across walls.
+    pub(crate) fn length(&self) -> f32 {
+        self.legs()
+            .filter(|(_, _, cut)| !cut)
+            .map(|(a, b, _)| a.distance(b))
+            .sum()
+    }
+
+    /// The point `d` units glided along the way (the legs cut across walls
+    /// passed at once).
+    pub(crate) fn along(&self, d: f32) -> Vec3 {
+        let mut left = d.max(0.0);
+        for (a, b, cut) in self.legs() {
+            if cut {
+                continue;
+            }
+            let leg = a.distance(b);
+            if left <= leg && leg > 0.0 {
+                return a.lerp(b, left / leg);
+            }
+            left -= leg;
+        }
+        *self.points.last().unwrap()
+    }
+
+    /// The legs: their ends and whether each is cut across a wall.
+    pub(crate) fn legs(&self) -> impl Iterator<Item = (Vec3, Vec3, bool)> + '_ {
+        self.points
+            .windows(2)
+            .zip(&self.cut)
+            .map(|(w, &c)| (w[0], w[1], c))
+    }
+}
 
 /// Whether the camera can move in a straight line from `a` to `b` without
 /// passing through a block (checked in steps of at most [`CAMERA_STEP`]).
@@ -48,76 +107,85 @@ pub(crate) fn clear_line(level: &Level, blocks: &BlockSet, a: Vec3, b: Vec3) -> 
     !blocked[first..=last].contains(&true)
 }
 
-/// The position of grid point `(i, j, k)`.
-fn point(i: usize, j: usize, k: usize) -> Vec3 {
+type Cell = [i32; 3];
+
+/// The position of grid point `g`.
+fn point(g: Cell) -> Vec3 {
     Vec3::new(
-        (i as f32 + 0.5) * SPACING - MARGIN,
-        (j as f32 + 0.5) * SPACING,
-        (k as f32 + 0.5) * SPACING - MARGIN,
+        (g[0] as f32 + 0.5) * SPACING - MARGIN,
+        (g[1] as f32 + 0.5) * SPACING,
+        (g[2] as f32 + 0.5) * SPACING - MARGIN,
     )
 }
 
-fn index(i: usize, j: usize, k: usize) -> usize {
-    (i * NY + j) * NZ + k
+fn index(g: Cell) -> usize {
+    (g[0] as usize * NY + g[1] as usize) * NZ + g[2] as usize
 }
 
-/// The grid points the camera may be at: clear of blocks and above the
-/// ground plane, each found out when first asked about.
-struct Free<'a> {
+/// What is at a grid point.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Spot {
+    /// The camera may be there.
+    Free,
+    /// Too close to a block, or inside one.
+    Wall,
+    /// Off the grid or below the ground plane: never passed.
+    Never,
+}
+
+/// The grid's spots, each found out when first asked about.
+struct Grid<'a> {
     level: &'a Level,
     blocks: &'a BlockSet,
-    /// Per grid point: 0 not yet known, 1 free, 2 not.
-    known: std::cell::RefCell<Vec<u8>>,
+    known: std::cell::RefCell<Vec<Option<Spot>>>,
 }
 
-impl<'a> Free<'a> {
+impl<'a> Grid<'a> {
     fn new(level: &'a Level, blocks: &'a BlockSet) -> Self {
         Self {
             level,
             blocks,
-            known: std::cell::RefCell::new(vec![0; NX * NY * NZ]),
+            known: std::cell::RefCell::new(vec![None; NX * NY * NZ]),
         }
     }
 
-    fn at(&self, i: i32, j: i32, k: i32) -> bool {
-        if !((0..NX as i32).contains(&i)
-            && (0..NY as i32).contains(&j)
-            && (0..NZ as i32).contains(&k))
-        {
-            return false;
+    fn at(&self, g: Cell) -> Spot {
+        let on_grid = (0..NX as i32).contains(&g[0])
+            && (0..NY as i32).contains(&g[1])
+            && (0..NZ as i32).contains(&g[2]);
+        if !on_grid {
+            return Spot::Never;
         }
-        let (i, j, k) = (i as usize, j as usize, k as usize);
-        let mut known = self.known.borrow_mut();
-        let slot = &mut known[index(i, j, k)];
-        if *slot == 0 {
-            let p = point(i, j, k);
-            let floor = crate::scene_build::GROUND_Y + CAMERA_RADIUS;
-            *slot = if p.y >= floor && !camera_blocked(self.level, self.blocks, p) {
-                1
+        *self.known.borrow_mut()[index(g)].get_or_insert_with(|| {
+            let p = point(g);
+            if p.y < crate::scene_build::GROUND_Y + CAMERA_RADIUS {
+                Spot::Never
+            } else if camera_blocked(self.level, self.blocks, p) {
+                Spot::Wall
             } else {
-                2
-            };
-        }
-        *slot == 1
+                Spot::Free
+            }
+        })
     }
 }
 
-/// The grid point nearest `p` that is free and in plain view of it, if one
-/// is within [`END_REACH`].
-fn nearest_free(free: &Free, level: &Level, blocks: &BlockSet, p: Vec3) -> Option<[i32; 3]> {
+/// The free grid point nearest `p` in plain view of it, if one is within
+/// [`END_REACH`].
+fn nearest_free(grid: &Grid, p: Vec3) -> Option<Cell> {
     let c = ((p + Vec3::new(MARGIN, 0.0, MARGIN)) / SPACING - 0.5).round();
     let c = [c.x as i32, c.y as i32, c.z as i32];
-    let mut best: Option<([i32; 3], f32)> = None;
+    let mut best: Option<(Cell, f32)> = None;
     for di in -END_REACH..=END_REACH {
         for dj in -END_REACH..=END_REACH {
             for dk in -END_REACH..=END_REACH {
                 let g = [c[0] + di, c[1] + dj, c[2] + dk];
-                if !free.at(g[0], g[1], g[2]) {
+                if grid.at(g) != Spot::Free {
                     continue;
                 }
-                let q = point(g[0] as usize, g[1] as usize, g[2] as usize);
-                let d = q.distance(p);
-                if best.is_none_or(|(_, b)| d < b) && clear_line(level, blocks, p, q) {
+                let d = point(g).distance(p);
+                if best.is_none_or(|(_, b)| d < b)
+                    && clear_line(grid.level, grid.blocks, p, point(g))
+                {
                     best = Some((g, d));
                 }
             }
@@ -126,52 +194,107 @@ fn nearest_free(free: &Free, level: &Level, blocks: &BlockSet, p: Vec3) -> Optio
     best.map(|(g, _)| g)
 }
 
-/// A route for the camera from `from` to `to` that keeps clear of blocks:
-/// the points to pass through, `from` first and `to` last (the two alone
-/// when the straight line between them is clear); `None` when blocks are in
-/// the way and no way round them is found.
-pub(crate) fn route(level: &Level, blocks: &BlockSet, from: Vec3, to: Vec3) -> Option<Vec<Vec3>> {
+/// The way for the camera from `from` to `to`: straight when the straight
+/// line is clear; otherwise round the blocks in the way, crossing the least wall it can
+/// (cut) only where the destination is closed off. `None` when either end
+/// has no open space near it.
+pub(crate) fn route(level: &Level, blocks: &BlockSet, from: Vec3, to: Vec3) -> Option<Route> {
     if clear_line(level, blocks, from, to) {
-        return Some(vec![from, to]);
+        return Some(Route::straight(from, to));
     }
-    let free = Free::new(level, blocks);
-    let start = nearest_free(&free, level, blocks, from)?;
-    let goal = nearest_free(&free, level, blocks, to)?;
-    let cells = search(&free, level, blocks, start, goal)?;
-    let mut path = vec![from];
-    path.extend(
-        cells
-            .iter()
-            .map(|g| point(g[0] as usize, g[1] as usize, g[2] as usize)),
-    );
-    path.push(to);
-    let path = shorten(level, blocks, &path);
-    Some(round(level, blocks, path))
+    let grid = Grid::new(level, blocks);
+    let start = nearest_free(&grid, from)?;
+    let goal = nearest_free(&grid, to)?;
+    // Searched from the end in a small closed-off space, if one is: a
+    // search from outside it would cover all the open space before trying
+    // a wall.
+    let cells = if !closed_off(&grid, start) && closed_off(&grid, goal) {
+        let mut c = search(&grid, goal, start)?;
+        c.reverse();
+        c
+    } else {
+        search(&grid, start, goal)?
+    };
+    // Split into stretches through open space, each from a free point to a
+    // free point, with the walls between them cut across.
+    let mut stretches: Vec<Vec<Vec3>> = vec![vec![from]];
+    let mut in_wall = false;
+    for &g in &cells {
+        if grid.at(g) == Spot::Free {
+            if in_wall {
+                stretches.push(Vec::new());
+                in_wall = false;
+            }
+            stretches.last_mut().unwrap().push(point(g));
+        } else {
+            in_wall = true;
+        }
+    }
+    stretches.last_mut().unwrap().push(to);
+    let mut out = Route {
+        points: Vec::new(),
+        cut: Vec::new(),
+    };
+    for s in stretches {
+        let s = round(level, blocks, shorten(level, blocks, &s));
+        if !out.points.is_empty() {
+            out.cut.push(true);
+        }
+        for (i, p) in s.into_iter().enumerate() {
+            if i > 0 {
+                out.cut.push(false);
+            }
+            out.points.push(p);
+        }
+    }
+    Some(out)
 }
 
-/// A* from grid point `start` to `goal` over free points, each step to one
-/// of the 26 neighbours along a clear line.
-fn search(
-    free: &Free,
-    level: &Level,
-    blocks: &BlockSet,
-    start: [i32; 3],
-    goal: [i32; 3],
-) -> Option<Vec<[i32; 3]>> {
-    let key = |g: [i32; 3]| index(g[0] as usize, g[1] as usize, g[2] as usize);
-    let dist = |a: [i32; 3], b: [i32; 3]| {
+/// Whether the open space grid point `g` is in is small: fewer than
+/// [`SMALL_SPACE`] free points, reached from each other along the axes.
+fn closed_off(grid: &Grid, g: Cell) -> bool {
+    let mut seen = vec![false; NX * NY * NZ];
+    seen[index(g)] = true;
+    let mut count = 1;
+    let mut todo = vec![g];
+    while let Some(c) = todo.pop() {
+        for a in 0..3 {
+            for s in [-1, 1] {
+                let mut n = c;
+                n[a] += s;
+                if grid.at(n) == Spot::Free && !std::mem::replace(&mut seen[index(n)], true) {
+                    count += 1;
+                    if count >= SMALL_SPACE {
+                        return false;
+                    }
+                    todo.push(n);
+                }
+            }
+        }
+    }
+    true
+}
+
+/// A* from grid point `start` to `goal` over the 26 neighbours of each
+/// point: free points (diagonally only where the points between are free
+/// too, so as not to clip a block's edge), and walls at [`WALL_COST`] times
+/// the cost.
+fn search(grid: &Grid, start: Cell, goal: Cell) -> Option<Vec<Cell>> {
+    let dist = |a: Cell, b: Cell| {
         let d = [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
         ((d[0] * d[0] + d[1] * d[1] + d[2] * d[2]) as f32).sqrt()
     };
     // Costs in thousandths of a grid step, for the heap's ordering.
-    let milli = |d: f32| (d * 1000.0) as u32;
-    let mut cost = vec![u32::MAX; NX * NY * NZ];
+    let milli = |d: f32| (d * 1000.0) as u64;
+    let mut cost = vec![u64::MAX; NX * NY * NZ];
     let mut came = vec![usize::MAX; NX * NY * NZ];
     let mut open = BinaryHeap::new();
-    cost[key(start)] = 0;
-    open.push(Reverse((milli(dist(start, goal)), key(start), start)));
-    let mut seen = 0;
-    while let Some(Reverse((_, at, g))) = open.pop() {
+    cost[index(start)] = 0;
+    open.push(Reverse((milli(dist(start, goal)), index(start), start)));
+    while let Some(Reverse((f, at, g))) = open.pop() {
+        if f > cost[at].saturating_add(milli(dist(g, goal))) {
+            continue;
+        }
         if g == goal {
             let mut path = vec![g];
             let mut i = at;
@@ -183,11 +306,7 @@ fn search(
             path.reverse();
             return Some(path);
         }
-        seen += 1;
-        if seen > SEARCH_LIMIT {
-            return None;
-        }
-        let here = point(g[0] as usize, g[1] as usize, g[2] as usize);
+        let here = grid.at(g);
         for di in -1..=1 {
             for dj in -1..=1 {
                 for dk in -1..=1 {
@@ -195,22 +314,26 @@ fn search(
                         continue;
                     }
                     let n = [g[0] + di, g[1] + dj, g[2] + dk];
-                    if !free.at(n[0], n[1], n[2]) {
+                    let there = grid.at(n);
+                    let step = match there {
+                        Spot::Never => continue,
+                        Spot::Wall => milli(dist(g, n)) * WALL_COST,
+                        Spot::Free => milli(dist(g, n)),
+                    };
+                    let c = cost[at] + step;
+                    if c >= cost[index(n)] {
                         continue;
                     }
-                    let c = cost[at] + milli(dist(g, n));
-                    if c >= cost[key(n)] {
-                        continue;
-                    }
-                    let there = point(n[0] as usize, n[1] as usize, n[2] as usize);
-                    if (di != 0) as i32 + (dj != 0) as i32 + (dk != 0) as i32 > 1
-                        && !clear_line(level, blocks, here, there)
+                    if here == Spot::Free
+                        && there == Spot::Free
+                        && !between([di, dj, dk])
+                            .all(|o| grid.at([g[0] + o[0], g[1] + o[1], g[2] + o[2]]) == Spot::Free)
                     {
                         continue;
                     }
-                    cost[key(n)] = c;
-                    came[key(n)] = at;
-                    open.push(Reverse((c + milli(dist(n, goal)), key(n), n)));
+                    cost[index(n)] = c;
+                    came[index(n)] = at;
+                    open.push(Reverse((c + milli(dist(n, goal)), index(n), n)));
                 }
             }
         }
@@ -260,20 +383,12 @@ fn round(level: &Level, blocks: &BlockSet, path: Vec<Vec3>) -> Vec<Vec3> {
     p
 }
 
-/// The length of the route through `points`.
-pub(crate) fn length(points: &[Vec3]) -> f32 {
-    points.windows(2).map(|w| w[0].distance(w[1])).sum()
-}
-
-/// The point `d` units along the route through `points`.
-pub(crate) fn along(points: &[Vec3], d: f32) -> Vec3 {
-    let mut left = d.max(0.0);
-    for w in points.windows(2) {
-        let leg = w[0].distance(w[1]);
-        if left <= leg && leg > 0.0 {
-            return w[0].lerp(w[1], left / leg);
-        }
-        left -= leg;
-    }
-    *points.last().unwrap()
+/// The steps from a grid point to the points between it and its neighbour
+/// `d` steps away: along any non-empty choice of the axes `d` moves along
+/// (the neighbour itself included).
+fn between(d: [i32; 3]) -> impl Iterator<Item = [i32; 3]> {
+    let moved: u8 = (0..3).filter(|&a| d[a] != 0).map(|a| 1 << a).sum();
+    (1..8u8)
+        .filter(move |s| s & !moved == 0)
+        .map(move |s| [0, 1, 2].map(|a| if s & (1 << a) != 0 { d[a] } else { 0 }))
 }
