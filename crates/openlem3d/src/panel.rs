@@ -798,12 +798,18 @@ fn height_at(y: f32) -> f32 {
     ((BAR_TOP - y.clamp(*KNOB_RANGE.start(), *KNOB_RANGE.end())) / BAR_SLOPE).powf(2.0 / 3.0)
 }
 
-/// A hold on the height bar: by which button, and, when it took the knob,
-/// how far below the knob's centre (original pixels).
+/// A hold on the height bar: by which button or finger, and, when it took
+/// the knob, how far below the knob's centre (original pixels).
 #[derive(Clone, Copy)]
 struct BarDrag {
-    button: MouseButton,
+    by: Holder,
     knob: Option<f32>,
+}
+
+#[derive(Clone, Copy)]
+enum Holder {
+    Button(MouseButton),
+    Finger(u64),
 }
 
 /// Camera speed while the height bar is held off the knob: the Shift keys'
@@ -818,12 +824,15 @@ const KNOB_CATCH_UP: f32 = 30.0;
 /// button is let go, wherever the pointer goes. Held off the knob, the
 /// camera climbs or sinks until the knob reaches the pointer (verified: so
 /// does the original's; its left button does nothing there); the knob
-/// itself, taken, follows the pointer at once (ours).
+/// itself, taken, follows the pointer at once (ours). A finger landing on
+/// the bar holds it the same way until it lifts.
 fn height_bar(w: &mut World) {
     let (window, screen, mouse) = (&w.e.window, &w.screen, &w.e.input.mouse);
+    let touches = &w.e.input.touches;
     let (settings, time, lemming_cam) = (&w.settings, w.e.time.game, &w.lemming_cam);
     let view = &mut w.view;
     let panel = &mut w.panel;
+    let to_bar = |p: Vec2| screen.on_screen(p).y / scale(screen);
     let pointer = screen.cursor(window).map(|p| p.y / scale(screen));
     let on_bar = panel
         .bar
@@ -832,27 +841,38 @@ fn height_bar(w: &mut World) {
         Some(settings.turn_button()),
         settings.enhanced().then(|| settings.action_button()),
     ];
-    if let Some(button) = buttons
+    let pressed = buttons
         .into_iter()
         .flatten()
         .find(|&b| mouse.just_pressed(b))
+        .and_then(|b| Some((Holder::Button(b), pointer?)))
+        .or_else(|| {
+            let t = touches.iter_just_pressed().next()?;
+            Some((Holder::Finger(t.id()), to_bar(t.position())))
+        });
+    if let Some((by, y)) = pressed
         && on_bar
-        && let Some(y) = pointer
     {
         // The knob's yellow square, a row either side to spare.
         let centre = knob_at(view.pos.y) + KNOB_CENTRE;
         let knob = (y - centre).abs() <= KNOB_CENTRE + 1.0;
         panel.bar_drag = Some(BarDrag {
-            button,
+            by,
             knob: knob.then_some(y - centre),
         });
     }
-    if panel.bar_drag.is_some_and(|d| !mouse.pressed(d.button)) || lemming_cam.following().is_some()
-    {
+    let held = |d: BarDrag| match d.by {
+        Holder::Button(b) => mouse.pressed(b),
+        Holder::Finger(id) => touches.get_pressed(id).is_some(),
+    };
+    if panel.bar_drag.is_some_and(|d| !held(d)) || lemming_cam.following().is_some() {
         panel.bar_drag = None;
     }
     if let Some(drag) = panel.bar_drag
-        && let Some(y) = pointer
+        && let Some(y) = match drag.by {
+            Holder::Button(_) => pointer,
+            Holder::Finger(id) => touches.get_pressed(id).map(|t| to_bar(t.position())),
+        }
     {
         let target = height_at(y - drag.knob.unwrap_or(0.0) - KNOB_CENTRE);
         let dt = time.delta_secs();
