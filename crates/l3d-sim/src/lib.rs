@@ -2855,13 +2855,14 @@ impl Simulation {
     }
 
     fn dig(&mut self, l: &mut Lemming) {
-        // Nothing it can dig under it (steel, or nothing at all): it walks
+        // Nothing it can dig under it (steel, the bottom layer, a block
+        // holding an object, or nothing at all): it walks
         // straight on, the skill used up (verified on a changed "Team Work",
         // 2026-10-24: on a steel lane the digger count dropped and stayed
         // down, and the lemming never stopped walking).
         if l.state_ticks == 1
             && !self.brick_underfoot(l)
-            && !matches!(self.dig_cell(l), Some((_, _, f)) if f & flags::STEEL == 0)
+            && !matches!(self.dig_cell(l), Some((c, _, _)) if self.world.breakable_towards(c, None))
         {
             l.set_state(State::Walking);
             return;
@@ -2898,7 +2899,7 @@ impl Simulation {
             self.world.dig_wear.retain(|w| w.0 != c);
         }
         match self.dig_cell(l) {
-            Some((c, b, f)) if f & flags::STEEL == 0 => {
+            Some((c, b, _)) if self.world.breakable_towards(c, None) => {
                 let cut = self.world.cut(c);
                 let feet = l.pos[1] - c[1] * SUB;
                 let to = dig_cut(b, cut, feet);

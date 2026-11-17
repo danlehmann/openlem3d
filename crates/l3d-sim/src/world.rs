@@ -92,12 +92,15 @@ struct SolidCell {
     /// shape's runs: segments taken out later leave the shape around them
     /// as it was.
     placed: u8,
+    /// The level puts an interactive object (a trap, trampoline, spring,
+    /// teleporter or rope-slide end) in this cell.
+    holds_object: bool,
 }
 
 impl World {
     pub fn new(level: &Level, blocks: &BlockSet) -> Self {
         let mut cells = vec![None; SIZE_X * SIZE_Y * SIZE_Z];
-        for (x, y, z, b, _) in level.cells() {
+        for (x, y, z, b, o) in level.cells() {
             if b.is_empty() {
                 continue;
             }
@@ -111,6 +114,7 @@ impl World {
                 cut: 4,
                 base: 0,
                 placed: b.segments,
+                holds_object: (0x60..=0x67).contains(&o.kind),
             });
         }
         let land = level
@@ -178,8 +182,15 @@ impl World {
 
     /// Whether the terrain block in cell `c` gives way to digging in
     /// direction `toward` (as for [`World::remove_segments_towards`]): not
-    /// steel, not in the bottom layer, and not a one-way block facing
-    /// elsewhere. Empty cells do.
+    /// steel, not in the bottom layer, not holding an interactive object,
+    /// and not a one-way block facing elsewhere. Empty cells do.
+    ///
+    /// A block holding an interactive object holds like steel (**verified**,
+    /// owner, Tricky 9 "It's the Name of the Game": a bomber beside a
+    /// trampoline took the next block but left the plain one under the pad,
+    /// where ours left the pad floating for walkers to pass through; a miner
+    /// and a digger there used up their skill and did nothing; bashers
+    /// assumed alike).
     ///
     /// The bottom layer holds like steel, whatever its blocks (**verified** in
     /// Tricky 7 "Rescue Team", whose corridor floors are invisible
@@ -191,6 +202,7 @@ impl World {
     pub fn breakable_towards(&self, c: [i32; 3], toward: Option<[i32; 3]>) -> bool {
         self.cell(c[0], c[1], c[2]).is_none_or(|cell| {
             c[1] > 0
+                && !cell.holds_object
                 && cell.flags & flags::STEEL == 0
                 && (!(5..=8).contains(&cell.block.id)
                     || toward == Some(one_way_direction(cell.block)))

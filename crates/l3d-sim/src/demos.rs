@@ -1327,23 +1327,20 @@ pub const SOLUTIONS: &[Solution] = &[
             (1116, 6, 1, Some(true)),
         ],
     ),
-    // Taxing 10 "It's the Name of the Game" by a route of our own, found once
-    // the trampolines were measured (re-timed for the counted hops).
+    // Taxing 10 "It's the Name of the Game", after the published strategy.
     at(
         49,
         &[
-            (188, 0, 4, None),
-            (442, 0, 7, None),
-            (518, 0, 3, None),
-            (862, 0, 6, None),
-            (1389, 5, 2, None),
-            (1549, 6, 4, None),
-            (1741, 6, 5, None),
-            (2201, 6, 1, Some(true)),
-            (2370, 37, 1, Some(true)),
-            (2476, 38, 1, Some(false)),
-            (2656, 13, 1, Some(false)),
-            (2768, 17, 1, Some(true)),
+            (14, 0, 3, None),
+            (230, 0, 1, Some(true)),
+            (262, 5, 1, Some(false)),
+            (722, 6, 4, None),
+            (915, 6, 5, None),
+            (1030, 6, 1, Some(true)),
+            (1232, 7, 0, None),
+            (1456, 16, 1, Some(true)),
+            (1602, 15, 2, None),
+            (1750, 18, 4, None),
         ],
     ),
     // Mayhem 14 "Jelly Belly Islands" by a route of our own, after the
@@ -1395,7 +1392,7 @@ pub const SOLUTIONS: &[Solution] = &[
             (1148, 4, 1, Some(true)),
             (1189, 6, 0, None),
             (1229, 7, 0, None),
-            (2249, 7, 2, None),
+            (2246, 7, 2, None),
             (2360, 8, 1, Some(false)),
             (2439, 9, 1, Some(true)),
         ],
