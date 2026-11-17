@@ -350,6 +350,9 @@ impl HdrLayer {
             }
             // SAFETY: a live JNI environment and Surface.
             let native = unsafe { ANativeWindow_fromSurface(env.get_raw(), surface.as_raw()) };
+            if let Some(window) = std::ptr::NonNull::new(native) {
+                full_frame_rate(window);
+            }
             Ok(std::ptr::NonNull::new(native).map(|window| HdrLayer { window }))
         })
     }
@@ -487,4 +490,76 @@ fn sdk(env: &mut JNIEnv) -> jni::errors::Result<i32> {
 fn inset_type(env: &mut JNIEnv, name: &str) -> jni::errors::Result<i32> {
     env.call_static_method("android/view/WindowInsets$Type", name, "()I", &[])?
         .i()
+}
+
+/// Asks for the display's top refresh rate for `window` (Android 11 and
+/// later). Android holds an app marked as a game to 60 Hz on a faster display
+/// (the Pixel 11 Pro's 120 Hz) unless it asks for more.
+pub fn full_frame_rate(window: std::ptr::NonNull<std::ffi::c_void>) {
+    static RATE: std::sync::OnceLock<Option<f32>> = std::sync::OnceLock::new();
+    let rate = *RATE.get_or_init(|| {
+        with_activity(top_refresh_rate).unwrap_or_else(|e| {
+            warn!("could not read the display's refresh rates: {e}");
+            None
+        })
+    });
+    let Some(rate) = rate else {
+        return;
+    };
+    type SetFrameRate = unsafe extern "C" fn(*mut std::ffi::c_void, f32, i8) -> i32;
+    unsafe extern "C" {
+        fn dlopen(name: *const std::ffi::c_char, flags: i32) -> *mut std::ffi::c_void;
+        fn dlsym(
+            handle: *mut std::ffi::c_void,
+            name: *const std::ffi::c_char,
+        ) -> *mut std::ffi::c_void;
+    }
+    const RTLD_NOW: i32 = 2;
+    // Looked up at run time, as Android before 11 lacks it.
+    // SAFETY: null-terminated names; libandroid stays loaded (the game links
+    // it), and the function has the NDK's signature.
+    let result = unsafe {
+        let lib = dlopen(c"libandroid.so".as_ptr(), RTLD_NOW);
+        let f = if lib.is_null() {
+            std::ptr::null_mut()
+        } else {
+            dlsym(lib, c"ANativeWindow_setFrameRate".as_ptr())
+        };
+        if f.is_null() {
+            return;
+        }
+        let f: SetFrameRate = std::mem::transmute(f);
+        // ANATIVEWINDOW_FRAME_RATE_COMPATIBILITY_DEFAULT
+        f(window.as_ptr(), rate, 0)
+    };
+    if result != 0 {
+        warn!("could not ask for {rate} Hz: {result}");
+    }
+}
+
+/// The highest refresh rate among the display's modes (Android 11 and
+/// later, where `Activity.getDisplay` is).
+fn top_refresh_rate(env: &mut JNIEnv, activity: &JObject) -> jni::errors::Result<Option<f32>> {
+    if sdk(env)? < 30 {
+        return Ok(None);
+    }
+    let display = env
+        .call_method(activity, "getDisplay", "()Landroid/view/Display;", &[])?
+        .l()?;
+    let modes: JObjectArray = env
+        .call_method(
+            &display,
+            "getSupportedModes",
+            "()[Landroid/view/Display$Mode;",
+            &[],
+        )?
+        .l()?
+        .into();
+    let mut top: Option<f32> = None;
+    for i in 0..env.get_array_length(&modes)? {
+        let mode = env.get_object_array_element(&modes, i)?;
+        let rate = env.call_method(&mode, "getRefreshRate", "()F", &[])?.f()?;
+        top = Some(top.map_or(rate, |t: f32| t.max(rate)));
+    }
+    Ok(top)
 }

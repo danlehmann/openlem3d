@@ -125,6 +125,15 @@ impl HdrLayer {
     }
 }
 
+/// Asks the system to show the game at the display's top refresh rate
+/// (Android: see `android::full_frame_rate`); elsewhere it already does.
+pub fn full_frame_rate() {
+    #[cfg(target_os = "android")]
+    if let Some(w) = android::app().native_window() {
+        android::full_frame_rate(w.ptr().cast());
+    }
+}
+
 /// How far the system draws over each edge of the window, in physical pixels:
 /// left, top, right, bottom. On Android these are the caption bar of a
 /// desktop window, the status and navigation bars, the on-screen keyboard,

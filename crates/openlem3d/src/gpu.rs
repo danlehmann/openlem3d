@@ -178,6 +178,7 @@ fn attach(
             Err(e) => warn!("could not draw into the HDR layer: {e}"),
         }
     }
+    crate::platform::full_frame_rate();
     let window = window_surface.unwrap_or_else(|| create_surface(&gpu.instance, handle));
     // Android shows a window's own float pixels only up to white.
     Surface::new(gpu, window, hdr && !cfg!(target_os = "android"))
