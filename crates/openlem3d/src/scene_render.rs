@@ -74,6 +74,10 @@ pub struct SceneLayer {
     /// sampled trilinearly and anisotropically when shrunk (the sea and the
     /// land, seen far off).
     pub smooth: bool,
+    /// The layer shows the last frame drawn, the whole screen stretched
+    /// over uv 0–1 (top left to bottom right), in place of `texture`,
+    /// which stands in until there is one.
+    pub screen: bool,
 }
 
 /// RGBA8 sRGB texels, row-major.
@@ -125,6 +129,8 @@ pub struct SceneInput<'a> {
     /// How far above white the screen shows (an HDR target), or 0 (SDR:
     /// glowing things clip at white).
     pub headroom: f32,
+    /// The last frame drawn, for [`SceneLayer::screen`] layers.
+    pub screen: Option<&'a wgpu::TextureView>,
 }
 
 /// The scene's colour format while glowing: room above white.
@@ -239,6 +245,8 @@ struct UploadedLayer {
     indices: wgpu::Buffer,
     index_count: u32,
     bind_group: Bound,
+    /// Shows the last frame drawn ([`SceneLayer::screen`]).
+    screen: bool,
 }
 
 /// An uploaded texture's bind groups: sampled nearest at full size, and,
@@ -940,6 +948,7 @@ fn prepare(
             }),
             index_count: l.indices.len() as u32,
             bind_group,
+            screen: l.screen,
         });
     }
     gpu.layers = layers;
@@ -1058,6 +1067,11 @@ fn draw(
         .as_ref()
         .is_some_and(|d| d.mirror.is_some());
     let reflection = mirror.then(|| gpu.reflection_target(&device, depth_size, scene_format));
+    // The last frame, for layers showing the screen.
+    let screen = input
+        .screen
+        .filter(|_| gpu.layers.iter().any(|l| l.screen))
+        .map(|view| gpu.bind_view(&device, view, &gpu.linear));
     let gpu = &*gpu;
     if gpu.layers.is_empty() && gpu.sky.is_none() && gpu.sprites.is_none() {
         profile.stamp(encoder, Stamp::Geometry);
@@ -1114,7 +1128,12 @@ fn draw(
                 .filtered
                 .as_ref()
                 .filter(|_| camera.filtered);
-            pass.set_bind_group(0, filtered.unwrap_or(&layer.bind_group.plain), &[]);
+            let own = filtered.unwrap_or(&layer.bind_group.plain);
+            let bind = match &screen {
+                Some(s) if layer.screen => s,
+                _ => own,
+            };
+            pass.set_bind_group(0, bind, &[]);
             pass.set_vertex_buffer(0, layer.vertices.slice(..));
             pass.set_index_buffer(layer.indices.slice(..), wgpu::IndexFormat::Uint32);
             pass.draw_indexed(0..layer.index_count, 0, instance.clone());

@@ -40,6 +40,10 @@ pub(crate) struct Renderer {
     gpu: Option<Gpu>,
     surface: Option<Surface>,
     target: Option<Target>,
+    /// A copy of the last frame drawn, while the scene has a layer showing
+    /// the screen (`SceneLayer::screen`): its size and format, the texture
+    /// and its view.
+    previous: Option<(UVec2, wgpu::TextureFormat, wgpu::Texture, wgpu::TextureView)>,
     copy: Option<Copy>,
     scene: Option<SceneGpu>,
     ui: Option<UiGpu>,
@@ -438,6 +442,7 @@ pub(crate) fn render(w: &mut World) {
         gpu,
         surface,
         target,
+        previous,
         copy,
         scene,
         ui,
@@ -552,6 +557,34 @@ pub(crate) fn render(w: &mut World) {
         *target = Some(copy.target(device, size, format));
     }
     let target = target.as_ref().expect("made above");
+    let shows_screen = w
+        .scene
+        .data
+        .as_ref()
+        .is_some_and(|d| d.layers.iter().any(|l| l.screen));
+    if !shows_screen {
+        *previous = None;
+    } else if previous
+        .as_ref()
+        .is_none_or(|p| p.0 != size || p.1 != format)
+    {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("previous frame"),
+            size: wgpu::Extent3d {
+                width: size.x,
+                height: size.y,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&Default::default());
+        *previous = Some((size, format, texture, view));
+    }
     let mut encoder = device.create_command_encoder(&Default::default());
     profile.stamp(&mut encoder, Stamp::Start);
     let c = clear.0.to_linear();
@@ -590,6 +623,7 @@ pub(crate) fn render(w: &mut World) {
                 profile,
                 format,
                 headroom,
+                screen: previous.as_ref().map(|p| &p.3),
             },
         );
     profile.stamp(&mut encoder, Stamp::Scene);
@@ -605,6 +639,18 @@ pub(crate) fn render(w: &mut World) {
         &mut w.e.images,
     );
     profile.stamp(&mut encoder, Stamp::Ui);
+    // This frame, for the next one's screen.
+    if let Some((_, _, texture, _)) = previous.as_ref() {
+        encoder.copy_texture_to_texture(
+            target.texture.as_image_copy(),
+            texture.as_image_copy(),
+            wgpu::Extent3d {
+                width: size.x,
+                height: size.y,
+                depth_or_array_layers: 1,
+            },
+        );
+    }
     let s = surface.as_ref().expect("checked above");
     if let Some(frame) = &frame {
         let view = frame.texture.create_view(&wgpu::TextureViewDescriptor {

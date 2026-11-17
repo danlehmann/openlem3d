@@ -153,7 +153,7 @@ flyover and of play; texture sizes and scales with marked textures
 | `0x0080` | Whole level bottom is solid (**verified**, one run: with it, a lemming walked out over Fun 1's sea past the grass; without it none was ever seen on the water) |
 | `0x0100` | Land texture 128×128; without it, 64×64 (**verified**: cleared, the marked land's tiles came out smaller and several times as many; consistent with the file sizes of every level's `LAND` file) |
 | `0x0200` | All-round sky (space levels); no sea (**verified**: the sky panorama also filled the view below the horizon, no sea drawn; the minimap shows the sky's first pixel, see `ui-graphics.md`) |
-| `0x0400` | Wall decals show the game screen (the "Lemmings Inside" monitor effect; [L3DEdit], unverified: the decals themselves hold a still of the game screen). Clearing it on Fun 8 "Lemmings Inside" changed nothing seen from camera 1 |
+| `0x0400` | Wall decals show the game screen, the "Lemmings Inside" monitor effect ([L3DEdit]); only `LEVEL.007` sets it. **Verified** (owner's screenshot of the original, 2026-11-17): the monitor shows the live screen, panel and all, so seen from in front it shows itself endlessly; the still in the decals is never seen. Clearing the flag changed nothing seen from camera 1, which looks at the monitor's back |
 | `0x0800` | Land texture drawn at half scale (**verified**: set, the marked land's tile lines came closer together) |
 | `0x1000` | Minimap disabled: map and frame are both absent (**verified**: set on Fun 1, map and frame gone; the only levels with it are `LEVEL.019`, `044` and `062`) |
 | `0x2000` | Unknown. Set on 17 levels (2, 11, 19, 20, 33, 36, 39, 47, 55, 57, 60, 61, 63, 65, 71, 73, 77) with no header field or theme in common. Clearing it on Fun 3 "The Bean Machine" changed nothing seen from camera 1 in the first 12 s, nor from any of the four cameras in turn over 30 s (recorded, 2026-11-04) |
@@ -242,7 +242,10 @@ which we draw on both sides. Verified by the picture: on `LEVEL.007` ("Lemmings
 Inside") graphics 0–14 of `WALLS.008` form a 5×3 monitor screen (a bezel
 around a still of the game screen) in empty cells in front of the
 monitor's body, and they only read left to right facing into those cells.
-Whether level flag `0x0400` makes that screen live is unknown.
+With level flag `0x0400` the screen is live (see the flags above): the
+whole game screen shows inside the bezel, which leaves the graphics' pixels
+30–289 across and 30–191 down of the monitor's 320×192 (measured in the
+graphics); ours stretches the screen over that whatever the window's shape.
 
 **Top and underside decals** (high nibble C: top, B: underside) follow the
 same rule against the cell above or below. Verified by the picture: on

@@ -26,6 +26,7 @@ pub(crate) mod level_flags {
     pub const SEA_128: u16 = 0x0020;
     pub const LAND_128: u16 = 0x0100;
     pub const SURROUND_SKY: u16 = 0x0200;
+    pub const DECALS_SHOW_SCREEN: u16 = 0x0400;
     pub const LAND_HALF_SCALE: u16 = 0x0800;
     pub const SEA_DOUBLE_SCALE: u16 = 0x4000;
 }
@@ -248,6 +249,7 @@ impl LayerBuilder {
             indices: self.indices,
             texture,
             smooth: false,
+            screen: false,
         }
     }
 }
@@ -829,6 +831,13 @@ const PANEL_SHADE: f32 = SIDE_DECAL_SHADE + 0.1;
 /// number them: +X, −Z, −X, +Z.
 const SIDE_NORMALS: [[f32; 2]; 4] = [[1.0, 0.0], [0.0, -1.0], [-1.0, 0.0], [0.0, 1.0]];
 
+/// Where the screen is inside the bezel of a monitor of 5 × 3 wall
+/// graphics (`level_flags::DECALS_SHOW_SCREEN`), in the monitor's pixels
+/// (64 per graphic): x, y, width, height (measured in the graphics of
+/// "Lemmings Inside", where the bezel surrounds a still of the screen on
+/// three sides and the screen runs to the bottom edge).
+const MONITOR_SCREEN: [f32; 4] = [30.0, 30.0, 260.0, 162.0];
+
 /// Texel rectangle of sign graphic `g` (0–15) in a 64×768 `SIGNS` sheet:
 /// graphics 0–7 are 64×32, 8–15 are 64×64.
 fn sign_rect(g: u8) -> [f32; 4] {
@@ -851,6 +860,7 @@ fn decal_layers(data: &mut GameData, level: &Level, pal: &Palette) -> Vec<SceneL
     let sign_tex = [64.0, signs.as_ref().map_or(768, |s| s.len() / 64) as f32];
     let wall_tex = [64.0, walls.as_ref().map_or(1024, |w| w.len() / 64) as f32];
     let (mut sign_b, mut wall_b) = (LayerBuilder::default(), LayerBuilder::default());
+    let mut screen_b = LayerBuilder::default();
     for (x, y, z, block, o) in level.cells() {
         let base_y = object_base_y(y, block);
         let (cx, cz) = (x as f32 + 0.5, z as f32 + 0.5);
@@ -906,27 +916,66 @@ fn decal_layers(data: &mut GameData, level: &Level, pal: &Palette) -> Vec<SceneL
                         };
                         let (own, next) = (!block.is_empty(), solid(n[0] as i32, n[1] as i32));
                         let face = |d: f32| [cx + n[0] * (0.5 + d), base_y, cz + n[1] * (0.5 + d)];
-                        if own || !next {
-                            wall_b.vertical_quad(
-                                face(DECAL_OFFSET),
-                                n,
-                                1.0,
-                                1.0,
-                                rect,
-                                wall_tex,
-                                SIDE_DECAL_SHADE,
-                            );
+                        let sides = [(own || !next, 1.0), (!own, -1.0)];
+                        for (shown, s) in sides {
+                            if shown {
+                                let normal = [n[0] * s, n[1] * s];
+                                let at = face(DECAL_OFFSET * s);
+                                wall_b.vertical_quad(
+                                    at,
+                                    normal,
+                                    1.0,
+                                    1.0,
+                                    rect,
+                                    wall_tex,
+                                    SIDE_DECAL_SHADE,
+                                );
+                            }
                         }
-                        if !own {
-                            wall_b.vertical_quad(
-                                face(-DECAL_OFFSET),
-                                [-n[0], -n[1]],
-                                1.0,
-                                1.0,
-                                rect,
-                                wall_tex,
-                                SIDE_DECAL_SHADE,
-                            );
+                        // With the level's flag, the first 15 graphics are
+                        // a monitor of 5 × 3, and the game screen shows in
+                        // its bezel, the whole screen stretched over the
+                        // still there (verified on "Lemmings Inside",
+                        // 2026-11-17: the original shows the live screen,
+                        // panel and all, endlessly within itself; the still
+                        // is of another level, never seen).
+                        let tile = (o.kind & 0xF) as u32;
+                        if level.flags & level_flags::DECALS_SHOW_SCREEN == 0 || tile >= 15 {
+                            continue;
+                        }
+                        // The part of the screen on this graphic, in the
+                        // monitor's pixels.
+                        let (gx, gy) = ((tile % 5) as f32 * 64.0, (tile / 5) as f32 * 64.0);
+                        let [sx, sy, sw, sh] = MONITOR_SCREEN;
+                        let (x0, x1) = (sx.max(gx), (sx + sw).min(gx + 64.0));
+                        let (y0, y1) = (sy.max(gy), (sy + sh).min(gy + 64.0));
+                        if x0 >= x1 || y0 >= y1 {
+                            continue;
+                        }
+                        let rect = [x0 - sx, y0 - sy, x1 - x0, y1 - y0];
+                        // How far across the face from its middle towards
+                        // the graphic's right edge, and up.
+                        let along = ((x0 + x1) / 2.0 - gx) / 64.0 - 0.5;
+                        let up = (gy + 64.0 - y1) / 64.0;
+                        for (shown, s) in sides {
+                            if shown {
+                                let normal = [n[0] * s, n[1] * s];
+                                // The graphic's right on this side, as
+                                // `vertical_quad` lays it out.
+                                let right = [normal[1], -normal[0]];
+                                let p = face(2.0 * DECAL_OFFSET * s);
+                                let at =
+                                    [p[0] + right[0] * along, p[1] + up, p[2] + right[1] * along];
+                                screen_b.vertical_quad(
+                                    at,
+                                    normal,
+                                    (x1 - x0) / 64.0,
+                                    (y1 - y0) / 64.0,
+                                    rect,
+                                    [sw, sh],
+                                    0.0,
+                                );
+                            }
                         }
                     }
                     flat @ (0xB | 0xC) => {
@@ -1000,6 +1049,18 @@ fn decal_layers(data: &mut GameData, level: &Level, pal: &Palette) -> Vec<SceneL
         && !wall_b.indices.is_empty()
     {
         layers.push(wall_b.finish(indexed_to_rgba(&w, 64, pal)));
+    }
+    if !screen_b.indices.is_empty() {
+        // Black until the first frame is drawn.
+        let black = RgbaImage {
+            width: 1,
+            height: 1,
+            texels: vec![0, 0, 0, 255].into(),
+        };
+        layers.push(SceneLayer {
+            screen: true,
+            ..screen_b.finish(black)
+        });
     }
     layers
 }
