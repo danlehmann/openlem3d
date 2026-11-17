@@ -823,17 +823,17 @@ pub const SOLUTIONS: &[Solution] = &[
             (662, 14, 1, Some(false)),
         ],
     ),
+    // Mayhem 10 "The Hanger" by our own route (the published one needs
+    // bashers to take out builder's bricks, which ours can't yet).
     Solution {
         level: 69,
         plan: Plan::Rated(
-            &[(300, 64)],
+            &[(100, 64)],
             &[
-                (46, 0, 0, None),
-                (145, 1, 1, Some(false)),
-                (314, 2, 3, None),
-                (960, 2, 1, Some(true)),
-                (1080, 4, 0, None),
-                (2120, 8, 3, None),
+                (44, 0, 3, None),
+                (180, 0, 3, None),
+                (722, 2, 1, Some(false)),
+                (730, 40, 1, Some(true)),
             ],
         ),
         saves: 0,

@@ -156,12 +156,11 @@ pub const EXPLODE_TICKS: u32 = 35;
 /// weird trap ([`WEIRD_TRAP_BUSY_TICKS`]) (provisional).
 pub const TRAP_BUSY_TICKS: u32 = 28;
 /// How long a weird trap (the mud pit) stays busy after taking a lemming
-/// (**measured**, owner: Tricky 7 "Rescue Team" at release rate 99 without
-/// skills, the first stream of walkers lost 4 lemmings, evenly spaced, at
-/// the first mud pit and 4 more at the second, which 12–14 ticks give; the
-/// stored route of Mayhem 10 "The Hanger", whose lemmings cross weird traps,
-/// saves enough only from 14 on).
-pub const WEIRD_TRAP_BUSY_TICKS: u32 = 14;
+/// (**measured** in the original on Tricky 7 "Rescue Team" without skills,
+/// deaths counted off the OUT counter at release rates 87–98: 9 ticks gives
+/// 15 deaths at rate 98, 10 gives 13, 11 gives 12, the original 14; at rate
+/// 99 the owner saw 4, evenly spaced, at the first pit, which favours 10).
+pub const WEIRD_TRAP_BUSY_TICKS: u32 = 10;
 
 /// How long a killing trap of `kind` stays busy after taking a lemming.
 pub fn trap_busy_ticks(kind: Option<objects::ObjectKind>) -> u32 {
