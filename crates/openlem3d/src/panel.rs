@@ -830,7 +830,7 @@ fn height_bar(w: &mut World) {
         .is_some_and(|b| w.ui.interaction(b) != Interaction::None);
     let buttons = [
         Some(settings.turn_button()),
-        settings.enhanced.then(|| settings.action_button()),
+        settings.enhanced().then(|| settings.action_button()),
     ];
     if let Some(button) = buttons
         .into_iter()

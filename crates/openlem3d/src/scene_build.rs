@@ -12,6 +12,8 @@ use crate::scene_render::{RgbaImage, SceneData, SceneLayer, VERTEX_FLOATS};
 
 /// Height of the ground plane (sea and land): the top of grid layer 0.
 pub const GROUND_Y: f32 = 1.0;
+/// The sea's height, just under the ground.
+const SEA_Y: f32 = GROUND_Y - 0.01;
 
 /// Texels per grid unit for sprites (same density as block faces).
 const SPRITE_TEXELS_PER_UNIT: f32 = 64.0;
@@ -294,6 +296,8 @@ const WAVE_FADE: f32 = 16.0;
 /// How far from the scenery the waves reach their full height: calm at
 /// the shore, growing over this many units.
 const WAVE_CALM: f32 = 14.0;
+/// How far surf reaches out from the scenery, in units.
+const FOAM_REACH: f32 = 2.5;
 
 /// How strongly waves move the sea around a level (ours, enhanced mode):
 /// per unit square around the grid, the distance to the nearest scenery
@@ -374,7 +378,47 @@ impl Waves {
     /// How strongly the waves move the sea at `(x, z)`: 0 at the scenery,
     /// 1 from [`WAVE_CALM`] away (and everywhere off the measured squares).
     fn strength(&self, x: f32, z: f32) -> f32 {
-        // At a corner between squares, the nearest of the four.
+        let Some(d) = self.shore(x, z) else {
+            return 1.0;
+        };
+        let s = ((d - 0.5) / WAVE_CALM).clamp(0.0, 1.0);
+        s * s * (3.0 - 2.0 * s)
+    }
+
+    /// How much surf there is at `(x, z)`: 1 at the scenery, falling
+    /// evenly to 0 at [`FOAM_REACH`] away, by the straight distance from
+    /// the point to the nearest scenery square (smooth along the shore,
+    /// where the distances between squares go in steps).
+    fn surf(&self, x: f32, z: f32) -> f32 {
+        let n = Self::SIDE as i32;
+        let reach = FOAM_REACH.ceil() as i32 + 1;
+        let (i0, k0) = (
+            (x + WAVE_NEAR).floor() as i32,
+            (z + WAVE_NEAR).floor() as i32,
+        );
+        let mut nearest = f32::MAX;
+        for a in i0 - reach..=i0 + reach {
+            for b in k0 - reach..=k0 + reach {
+                if !(0..n).contains(&a)
+                    || !(0..n).contains(&b)
+                    || self.distance[(a * n + b) as usize] != 0.0
+                {
+                    continue;
+                }
+                // From the point to the square [a, a + 1] × [b, b + 1].
+                let (sx, sz) = (a as f32 - WAVE_NEAR, b as f32 - WAVE_NEAR);
+                let dx = (sx - x).max(x - sx - 1.0).max(0.0);
+                let dz = (sz - z).max(z - sz - 1.0).max(0.0);
+                nearest = nearest.min(dx.hypot(dz));
+            }
+        }
+        (1.0 - nearest / FOAM_REACH).max(0.0)
+    }
+
+    /// The distance from the corner `(x, z)` to the scenery: that of the
+    /// nearest of the four squares meeting there, or `None` off the
+    /// measured squares.
+    fn shore(&self, x: f32, z: f32) -> Option<f32> {
         let n = Self::SIDE as i32;
         let (i, k) = ((x + WAVE_NEAR) as i32, (z + WAVE_NEAR) as i32);
         let mut d = f32::MAX;
@@ -384,11 +428,7 @@ impl Waves {
                 d = d.min(self.distance[(a * n + b) as usize]);
             }
         }
-        if d == f32::MAX {
-            return 1.0;
-        }
-        let s = ((d - 0.5) / WAVE_CALM).clamp(0.0, 1.0);
-        s * s * (3.0 - 2.0 * s)
+        (d != f32::MAX).then_some(d)
     }
 
     /// How far the waves may lift the sea at `(x, z)`: fully up to
@@ -440,12 +480,13 @@ fn plane_layer(
         ] {
             let mut v = Vertex::fixed([x, y, z], [x / tile, z / tile], 0.0, false);
             // A tiled surface (see `scene.wgsl`): frames, and the drift;
-            // with waves, how strongly they shade and lift it.
+            // with waves, how strongly they shade and lift it, and that it
+            // is water, with its surf.
             v.anim = [frames as f32, -1.0];
             v.offset = drift;
             if let Some(w) = waves {
                 let s = w.strength(x, z);
-                v.light = [s, s * Waves::lift(x, z), 0.0];
+                v.light = [s, s * Waves::lift(x, z), 1.0 + w.surf(x, z)];
             }
             v.push(&mut b.vertices);
         }
@@ -1296,6 +1337,8 @@ pub struct Show {
     pub bottom_sides: bool,
     /// A sea of water has waves (ours, in enhanced mode; see [`Waves`]).
     pub waves: bool,
+    /// A sea of water with waves mirrors the level (ours, in Ultra mode).
+    pub mirror: bool,
 }
 
 /// Builds everything drawn for level `n`.
@@ -1372,14 +1415,12 @@ pub fn build(data: &mut GameData, n: u32, show: Show) -> Result<BuiltLevel, l3d_
                 flags & level_flags::LAND_INVISIBLE == 0 && show.land,
             )
         });
-        scene.layers.push(plane_layer(
-            GROUND_Y - 0.01,
-            tile,
-            img,
-            frames,
-            drift,
-            waves.as_ref(),
-        ));
+        if waves.is_some() && show.mirror {
+            scene.mirror = Some(SEA_Y);
+        }
+        scene
+            .layers
+            .push(plane_layer(SEA_Y, tile, img, frames, drift, waves.as_ref()));
     }
     if show.land
         && level.land_gfx != 0xFF

@@ -44,6 +44,9 @@ pub struct SceneData {
     /// The bottom layer's blocks show their sides and undersides too, not
     /// only their tops (see [`crate::scene_build::Show::bottom_sides`]).
     pub bottom_sides: bool,
+    /// The height of a sea of water that mirrors the level (ours, enhanced
+    /// mode), if any.
+    pub mirror: Option<f32>,
 }
 
 /// Geometry rebuilt every frame (moving sprites such as lemmings), textured
@@ -126,7 +129,7 @@ pub struct SceneInput<'a> {
 
 /// The scene's colour format while glowing: room above white.
 const HDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
-const UNIFORM_SIZE: u64 = 144;
+const UNIFORM_SIZE: u64 = 160;
 /// How much brighter than its palette colour a fully glowing texel is drawn
 /// (ours, tuned by eye).
 const GLOW_GAIN: f32 = 3.0;
@@ -176,6 +179,17 @@ pub struct SceneGpu {
     hdr: Option<HdrTargets>,
     /// Depth buffer and its size.
     depth: Option<((u32, u32), wgpu::TextureView)>,
+    /// The level mirrored in the sea: its size and format, and the picture
+    /// and its bind group (sampled smooth), made anew when either changes.
+    reflection: Option<(
+        (u32, u32),
+        wgpu::TextureFormat,
+        wgpu::TextureView,
+        wgpu::BindGroup,
+    )>,
+    /// A one-texel picture bound in place of the reflection when there is
+    /// none.
+    blank: wgpu::BindGroup,
     /// Floats where the GPU can draw into them, for reversed depth's
     /// precision; otherwise (the Nexus 6P's Adreno 430 on Vulkan) 24 bits.
     depth_format: wgpu::TextureFormat,
@@ -190,6 +204,8 @@ pub struct SceneGpu {
 
 struct Pipelines {
     geometry: wgpu::RenderPipeline,
+    /// The geometry mirrored in the sea (drawn as its second instance).
+    mirrored: wgpu::RenderPipeline,
     sky: wgpu::RenderPipeline,
     /// Copies an offscreen scene onto the screen: stretched, or glowing.
     stretch: wgpu::RenderPipeline,
@@ -312,7 +328,43 @@ impl SceneGpu {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        let blank = device
+            .create_texture(&wgpu::TextureDescriptor {
+                label: Some("scene blank"),
+                size: wgpu::Extent3d {
+                    width: 1,
+                    height: 1,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            })
+            .create_view(&Default::default());
+        let blank = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("scene blank"),
+            layout: &layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: uniforms.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&blank),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&linear),
+                },
+            ],
+        });
         SceneGpu {
+            reflection: None,
+            blank,
             layout,
             shader,
             sampler,
@@ -353,15 +405,16 @@ impl SceneGpu {
             ..Default::default()
         });
         // Presenting the glowing scene also samples the bloom chain's top
-        // level, bound second.
-        let pl_glow = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("scene present glow"),
+        // level, bound second; drawing the scene, the reflection.
+        let pl_two = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("scene two pictures"),
             bind_group_layouts: &[Some(&self.layout), Some(&self.layout)],
             ..Default::default()
         });
-        let geometry = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("scene geometry"),
-            layout: Some(&pl),
+        let geometry = |label, cull| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some(label),
+            layout: Some(&pl_two),
             vertex: wgpu::VertexState {
                 module: &self.shader,
                 entry_point: Some("vs"),
@@ -380,7 +433,7 @@ impl SceneGpu {
                 targets: &[Some(format.into())],
                 compilation_options: Default::default(),
             }),
-            primitive: wgpu::PrimitiveState { cull_mode: Some(wgpu::Face::Back), ..Default::default() },
+            primitive: wgpu::PrimitiveState { cull_mode: Some(cull), ..Default::default() },
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: self.depth_format,
                 depth_write_enabled: Some(true),
@@ -391,10 +444,11 @@ impl SceneGpu {
             multisample: Default::default(),
             multiview_mask: None,
             cache: None,
-        });
+        })
+        };
         let sky = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("scene sky"),
-            layout: Some(&pl),
+            layout: Some(&pl_two),
             vertex: wgpu::VertexState {
                 module: &self.shader,
                 entry_point: Some("vs_sky"),
@@ -458,7 +512,7 @@ impl SceneGpu {
         };
         let shadow = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("scene shadows"),
-            layout: Some(&pl),
+            layout: Some(&pl_two),
             vertex: wgpu::VertexState {
                 module: &self.shader,
                 entry_point: Some("vs"),
@@ -503,7 +557,9 @@ impl SceneGpu {
         });
         let pipelines = Pipelines {
             shadow,
-            geometry,
+            geometry: geometry("scene geometry", wgpu::Face::Back),
+            // Mirrored, the faces turn over.
+            mirrored: geometry("scene mirrored", wgpu::Face::Front),
             sky,
             stretch: full_screen("scene stretch", "vs_sky", "fs_stretch", false, &pl),
             present: full_screen("scene present", "vs_sky", "fs_present", false, &pl),
@@ -512,7 +568,7 @@ impl SceneGpu {
                 "vs_sky",
                 "fs_present_glow",
                 false,
-                &pl_glow,
+                &pl_two,
             ),
             bloom_first: full_screen("bloom first", "vs_post", "fs_bloom_first", false, &pl),
             bloom_down: full_screen("bloom down", "vs_post", "fs_bloom_down", false, &pl),
@@ -631,6 +687,43 @@ impl SceneGpu {
             self.low = Some((size, format, view, bind));
         }
         let (_, _, view, bind) = self.low.as_ref().unwrap();
+        (view.clone(), bind.clone())
+    }
+
+    /// The picture of the level mirrored in the sea, of `size` in `format`,
+    /// made anew when either changes.
+    fn reflection_target(
+        &mut self,
+        device: &wgpu::Device,
+        size: (u32, u32),
+        format: wgpu::TextureFormat,
+    ) -> (wgpu::TextureView, wgpu::BindGroup) {
+        if self
+            .reflection
+            .as_ref()
+            .is_none_or(|(s, f, ..)| *s != size || *f != format)
+        {
+            let view = device
+                .create_texture(&wgpu::TextureDescriptor {
+                    label: Some("scene reflection"),
+                    size: wgpu::Extent3d {
+                        width: size.0,
+                        height: size.1,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                        | wgpu::TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
+                })
+                .create_view(&Default::default());
+            let bind = self.bind_view(device, &view, &self.linear);
+            self.reflection = Some((size, format, view, bind));
+        }
+        let (_, _, view, bind) = self.reflection.as_ref().unwrap();
         (view.clone(), bind.clone())
     }
 
@@ -776,7 +869,18 @@ fn prepare(
     let glow = camera.glow && !small;
     let sky = if small || glow { [0.0, 0.0] } else { [x, y] };
     uniforms.extend([sky[0], sky[1], x, y]);
-    uniforms.extend([if glow { GLOW_GAIN } else { 0.0 }, headroom, 0.0, 0.0]);
+    let mirror = content.data.as_ref().and_then(|d| d.mirror);
+    uniforms.extend([
+        if glow { GLOW_GAIN } else { 0.0 },
+        headroom,
+        if mirror.is_some() { 1.0 } else { 0.0 },
+        0.0,
+    ]);
+    // The camera's position: the point the projection takes to infinity
+    // in every direction.
+    let eye = camera.view_proj.inverse() * Vec4::new(0.0, 0.0, 1.0, 0.0);
+    let eye = eye.truncate() / eye.w;
+    uniforms.extend([eye.x, eye.y, eye.z, mirror.unwrap_or(0.0)]);
     queue.write_buffer(&gpu.uniforms, 0, &f32_bytes(&uniforms));
     upload_dynamic(
         device,
@@ -941,14 +1045,19 @@ fn draw(
     gpu.pipelines(&device, scene_format);
     gpu.pipelines(&device, HDR_FORMAT);
     gpu.pipelines(&device, format);
-    let depth = gpu.depth_view(
-        &device,
-        match (&low, &hdr) {
-            (Some(l), _) => l.0,
-            (_, Some(h)) => h.size,
-            _ => (full.x, full.y),
-        },
-    );
+    let depth_size = match (&low, &hdr) {
+        (Some(l), _) => l.0,
+        (_, Some(h)) => h.size,
+        _ => (full.x, full.y),
+    };
+    let depth = gpu.depth_view(&device, depth_size);
+    // The reflection is drawn at the same size, in the same place.
+    let mirror = input
+        .content
+        .data
+        .as_ref()
+        .is_some_and(|d| d.mirror.is_some());
+    let reflection = mirror.then(|| gpu.reflection_target(&device, depth_size, scene_format));
     let gpu = &*gpu;
     if gpu.layers.is_empty() && gpu.sky.is_none() && gpu.sprites.is_none() {
         profile.stamp(encoder, Stamp::Geometry);
@@ -982,6 +1091,76 @@ fn draw(
             store: wgpu::StoreOp::Store,
         },
     };
+    // The sky, the geometry and the sprites, either mirrored in the sea
+    // (their second instance, without shadows) or as they are, with
+    // `second` bound as the reflection.
+    let scene = |pass: &mut wgpu::RenderPass, mirrored: bool, second: &wgpu::BindGroup| {
+        let instance = if mirrored { 1..2 } else { 0..1 };
+        let geometry = if mirrored {
+            &scene_p.mirrored
+        } else {
+            &scene_p.geometry
+        };
+        pass.set_bind_group(1, second, &[]);
+        if let Some(sky) = &gpu.sky {
+            pass.set_pipeline(&scene_p.sky);
+            pass.set_bind_group(0, sky, &[]);
+            pass.draw(0..3, instance.clone());
+        }
+        pass.set_pipeline(geometry);
+        for layer in &gpu.layers {
+            let filtered = layer
+                .bind_group
+                .filtered
+                .as_ref()
+                .filter(|_| camera.filtered);
+            pass.set_bind_group(0, filtered.unwrap_or(&layer.bind_group.plain), &[]);
+            pass.set_vertex_buffer(0, layer.vertices.slice(..));
+            pass.set_index_buffer(layer.indices.slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed(0..layer.index_count, 0, instance.clone());
+        }
+        // Shadows on what is drawn so far, before the sprites that cast them.
+        if let (false, Some(atlas), Some((v, i, n))) = (mirrored, &gpu.sprite_atlas, &gpu.shadows)
+            && *n > 0
+        {
+            pass.set_pipeline(&scene_p.shadow);
+            pass.set_bind_group(0, atlas, &[]);
+            pass.set_vertex_buffer(0, v.slice(..));
+            pass.set_index_buffer(i.slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed(0..*n, 0, 0..1);
+            pass.set_pipeline(geometry);
+        }
+        if let (Some(atlas), Some((v, i, n))) = (&gpu.sprite_atlas, &gpu.sprites)
+            && *n > 0
+        {
+            pass.set_bind_group(0, atlas, &[]);
+            pass.set_vertex_buffer(0, v.slice(..));
+            pass.set_index_buffer(i.slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed(0..*n, 0, instance);
+        }
+    };
+    let depth_attachment = || {
+        Some(wgpu::RenderPassDepthStencilAttachment {
+            view: &depth,
+            depth_ops: Some(wgpu::Operations {
+                load: wgpu::LoadOp::Clear(0.0),
+                store: wgpu::StoreOp::Discard,
+            }),
+            stencil_ops: None,
+        })
+    };
+    if let Some((view, _)) = &reflection {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("scene reflection"),
+            color_attachments: &[Some(offscreen(view))],
+            depth_stencil_attachment: depth_attachment(),
+            ..Default::default()
+        });
+        if low.is_none() && hdr.is_none() {
+            set_viewport(&mut pass, viewport);
+        }
+        scene(&mut pass, true, &gpu.blank);
+    }
     let color = match (&low, &hdr) {
         (Some((_, (view, _))), _) => offscreen(view),
         (_, Some(h)) => offscreen(&h.view),
@@ -990,55 +1169,14 @@ fn draw(
     let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
         label: Some("scene"),
         color_attachments: &[Some(color)],
-        depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-            view: &depth,
-            depth_ops: Some(wgpu::Operations {
-                load: wgpu::LoadOp::Clear(0.0),
-                store: wgpu::StoreOp::Discard,
-            }),
-            stencil_ops: None,
-        }),
+        depth_stencil_attachment: depth_attachment(),
         ..Default::default()
     });
     if low.is_none() && hdr.is_none() {
         set_viewport(&mut pass, viewport);
     }
-    if let Some(sky) = &gpu.sky {
-        pass.set_pipeline(&scene_p.sky);
-        pass.set_bind_group(0, sky, &[]);
-        pass.draw(0..3, 0..1);
-    }
-    pass.set_pipeline(&scene_p.geometry);
-    for layer in &gpu.layers {
-        let filtered = layer
-            .bind_group
-            .filtered
-            .as_ref()
-            .filter(|_| camera.filtered);
-        pass.set_bind_group(0, filtered.unwrap_or(&layer.bind_group.plain), &[]);
-        pass.set_vertex_buffer(0, layer.vertices.slice(..));
-        pass.set_index_buffer(layer.indices.slice(..), wgpu::IndexFormat::Uint32);
-        pass.draw_indexed(0..layer.index_count, 0, 0..1);
-    }
-    // Shadows on what is drawn so far, before the sprites that cast them.
-    if let (Some(atlas), Some((v, i, n))) = (&gpu.sprite_atlas, &gpu.shadows)
-        && *n > 0
-    {
-        pass.set_pipeline(&scene_p.shadow);
-        pass.set_bind_group(0, atlas, &[]);
-        pass.set_vertex_buffer(0, v.slice(..));
-        pass.set_index_buffer(i.slice(..), wgpu::IndexFormat::Uint32);
-        pass.draw_indexed(0..*n, 0, 0..1);
-        pass.set_pipeline(&scene_p.geometry);
-    }
-    if let (Some(atlas), Some((v, i, n))) = (&gpu.sprite_atlas, &gpu.sprites)
-        && *n > 0
-    {
-        pass.set_bind_group(0, atlas, &[]);
-        pass.set_vertex_buffer(0, v.slice(..));
-        pass.set_index_buffer(i.slice(..), wgpu::IndexFormat::Uint32);
-        pass.draw_indexed(0..*n, 0, 0..1);
-    }
+    let second = reflection.as_ref().map_or(&gpu.blank, |(_, bind)| bind);
+    scene(&mut pass, false, second);
     drop(pass);
     profile.stamp(encoder, Stamp::Geometry);
     // Bloom: halve the glow above white down the chain, then blur each

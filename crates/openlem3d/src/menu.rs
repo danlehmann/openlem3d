@@ -381,7 +381,7 @@ pub(crate) fn back_to_menu(w: &mut World) {
     }
     if game.replay.is_some() {
         w.next_state = Some(level_menu(current.number));
-    } else if w.settings.enhanced && game.sim.is_some() {
+    } else if w.settings.enhanced() && game.sim.is_some() {
         confirm.question = Some(game.paused);
         game.paused = true;
     } else {

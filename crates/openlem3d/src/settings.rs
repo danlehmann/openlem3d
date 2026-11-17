@@ -18,9 +18,11 @@ pub struct Settings {
     /// turns the camera.
     pub left_handed: bool,
     pub fullscreen: bool,
-    /// Enhanced presentation (smooth camera moves); off, the
-    /// game looks and moves as the original.
-    pub enhanced: bool,
+    /// How the game is presented: as the original, or with our
+    /// improvements (`Mode`).
+    pub mode: Mode,
+    /// Show the frames per second in a corner (ours).
+    pub fps: bool,
     /// In Enhanced mode, bright things glow (ours); off, they are drawn
     /// plainly, which spares a slow GPU most of its work.
     pub glow: bool,
@@ -40,6 +42,53 @@ pub struct Settings {
     pub best: std::collections::BTreeMap<u32, (u32, u32)>,
 }
 
+/// How the game is presented.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Mode {
+    /// As the original: its 3D view at 320×200, its camera cuts.
+    Original,
+    /// Ours: full resolution, smooth camera moves, glow, waves, shadows.
+    Enhanced,
+    /// Enhanced, with effects a slower GPU may not keep up with: the
+    /// level mirrored in the sea.
+    Ultra,
+}
+
+impl Mode {
+    /// Its name as shown.
+    pub fn name(self) -> &'static str {
+        match self {
+            Mode::Original => "Original",
+            Mode::Enhanced => "Enhanced",
+            Mode::Ultra => "Ultra",
+        }
+    }
+
+    /// Its name in the settings file.
+    fn key(self) -> &'static str {
+        match self {
+            Mode::Original => "original",
+            Mode::Enhanced => "enhanced",
+            Mode::Ultra => "ultra",
+        }
+    }
+
+    pub fn from_name(key: &str) -> Option<Self> {
+        [Mode::Original, Mode::Enhanced, Mode::Ultra]
+            .into_iter()
+            .find(|m| m.key() == key)
+    }
+
+    /// The mode after this one, round from Ultra to Original.
+    pub fn next(self) -> Self {
+        match self {
+            Mode::Original => Mode::Enhanced,
+            Mode::Enhanced => Mode::Ultra,
+            Mode::Ultra => Mode::Original,
+        }
+    }
+}
+
 /// Steps on each slider.
 pub const SLIDER_STEPS: u8 = 10;
 
@@ -51,7 +100,8 @@ impl Default for Settings {
             sky: true,
             left_handed: false,
             fullscreen: false,
-            enhanced: true,
+            mode: Mode::Enhanced,
+            fps: false,
             glow: true,
             rewind: true,
             music: 8,
@@ -83,14 +133,21 @@ impl Settings {
         completed || new != old
     }
 
+    /// Whether the game is presented with our improvements (Enhanced or
+    /// Ultra), rather than as the original.
+    pub fn enhanced(&self) -> bool {
+        self.mode != Mode::Original
+    }
+
     /// The scene parts and style to draw.
     pub fn show(&self) -> crate::scene_build::Show {
         crate::scene_build::Show {
             land: self.land,
             sea: self.sea,
             sky: self.sky,
-            bottom_sides: self.enhanced,
-            waves: self.enhanced,
+            bottom_sides: self.enhanced(),
+            waves: self.enhanced(),
+            mirror: self.mode == Mode::Ultra,
         }
     }
 
@@ -152,7 +209,10 @@ impl Settings {
                 "sky" => s.sky = flag,
                 "left_handed" => s.left_handed = flag,
                 "fullscreen" => s.fullscreen = flag,
-                "enhanced" => s.enhanced = flag,
+                "mode" => s.mode = Mode::from_name(v).unwrap_or(s.mode),
+                // Before there were three modes.
+                "enhanced" => s.mode = if flag { Mode::Enhanced } else { Mode::Original },
+                "fps" => s.fps = flag,
                 "glow" => s.glow = flag,
                 "rewind" => s.rewind = flag,
                 "music" => s.music = level.unwrap_or(s.music),
@@ -189,13 +249,14 @@ impl Settings {
         let Some(path) = Self::path() else { return };
         let on = |b: bool| if b { "on" } else { "off" };
         let text = format!(
-            "land = {}\nsea = {}\nsky = {}\nleft_handed = {}\nfullscreen = {}\nenhanced = {}\nglow = {}\nrewind = {}\nmusic = {}\neffects = {}\ncamera = {}\nrating = {}\ncompleted = {}\nbest = {}\n",
+            "land = {}\nsea = {}\nsky = {}\nleft_handed = {}\nfullscreen = {}\nmode = {}\nfps = {}\nglow = {}\nrewind = {}\nmusic = {}\neffects = {}\ncamera = {}\nrating = {}\ncompleted = {}\nbest = {}\n",
             on(self.land),
             on(self.sea),
             on(self.sky),
             on(self.left_handed),
             on(self.fullscreen),
-            on(self.enhanced),
+            self.mode.key(),
+            on(self.fps),
             on(self.glow),
             on(self.rewind),
             self.music,

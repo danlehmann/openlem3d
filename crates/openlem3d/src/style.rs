@@ -1,13 +1,14 @@
-//! The presentation mode: Original (the game as it was, its 3D view at
-//! 320×200) or Enhanced (ours: full resolution, smooth camera moves, a
-//! question before Esc restarts a level). A label at the top right of the
-//! title screen shows it and switches it when clicked; Tab switches it on
-//! the title and during a level, where the new mode is named briefly.
+//! The presentation mode (`settings::Mode`): Original (the game as it was,
+//! its 3D view at 320×200), Enhanced (ours: full resolution, smooth camera
+//! moves, a question before Esc restarts a level) or Ultra (Enhanced with
+//! costlier effects). A label at the top right of the title screen shows
+//! it and switches it when clicked; Tab steps through them on the title
+//! and during a level, where the new mode is named briefly.
 
 use l3d_engine::prelude::*;
 
 use crate::World;
-use crate::settings::Settings;
+use crate::settings::{Mode, Settings};
 use crate::ui::{Node, NodeId, UiNode, percent};
 
 /// The title canvas, in the original's pixels.
@@ -19,12 +20,8 @@ const NOTICE_Y: f32 = 60.0;
 /// How long the notice shows, in seconds.
 const NOTICE_SECONDS: f32 = 1.5;
 
-fn name(enhanced: bool) -> &'static str {
-    if enhanced { "Enhanced" } else { "Original" }
-}
-
 fn switch(settings: &mut Settings) {
-    settings.enhanced = !settings.enhanced;
+    settings.mode = settings.mode.next();
     settings.save();
 }
 
@@ -32,7 +29,7 @@ fn switch(settings: &mut Settings) {
 /// the mode it shows, and the notice in a level with when it was switched.
 #[derive(Default)]
 pub(crate) struct Style {
-    label: Option<(NodeId, bool)>,
+    label: Option<(NodeId, Mode)>,
     notice: Option<(NodeId, f32)>,
 }
 
@@ -51,14 +48,14 @@ pub(crate) fn title_label(w: &mut World) {
     let Some(canvas) = w.title.canvas.filter(|&c| w.ui.contains(c)) else {
         return;
     };
-    let enhanced = w.settings.enhanced;
+    let mode = w.settings.mode;
     if let Some((id, shown)) = w.style.label {
-        if w.ui.contains(id) && shown == enhanced {
+        if w.ui.contains(id) && shown == mode {
             return;
         }
         w.ui.remove(id);
     }
-    let (glyphs, width) = font.layout(&format!("Mode: {}", name(enhanced)));
+    let (glyphs, width) = font.layout(&format!("Mode: {}", mode.name()));
     let left = TITLE_SCREEN.x - 2.0 - width;
     let ui = &mut w.ui;
     let label = ui.child(
@@ -71,7 +68,7 @@ pub(crate) fn title_label(w: &mut World) {
             UiNode::image(image).at(x, 0.0, font.size.x, font.size.y),
         );
     }
-    w.style.label = Some((label, enhanced));
+    w.style.label = Some((label, mode));
 }
 
 /// Leaving the level takes the notice away.
@@ -107,7 +104,7 @@ pub(crate) fn toggle_in_level(w: &mut World) {
     }));
     w.style.notice = Some((root, now));
     let canvas = ui.child(root, UiNode::new().canvas(NOTICE_SCREEN));
-    let (glyphs, width) = font.layout(name(w.settings.enhanced));
+    let (glyphs, width) = font.layout(w.settings.mode.name());
     let left = (NOTICE_SCREEN.x - width * NOTICE_SCALE) / 2.0;
     // A dark shadow, then the text.
     for (shade, d) in [(Some(Color::srgba(0.0, 0.0, 0.0, 0.7)), 2.0), (None, 0.0)] {

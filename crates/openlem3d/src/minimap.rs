@@ -366,7 +366,7 @@ fn refresh_detail(map: &mut Minimap, world: &l3d_sim::World) {
 /// Redraws the map with the lemmings and the camera: the original's, or in
 /// enhanced mode the detailed one.
 pub(crate) fn draw(w: &mut World) {
-    let enhanced = w.settings.enhanced;
+    let enhanced = w.settings.enhanced();
     let side = if enhanced { MAP * HI } else { MAP };
     let (Some(map), Some(sim)) = (&mut w.minimap, &w.game.sim) else {
         return;

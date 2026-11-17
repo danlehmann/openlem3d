@@ -10,6 +10,7 @@ mod camera_route;
 mod codes;
 mod confirm;
 mod fade;
+mod fps;
 mod glow;
 mod gpu;
 mod hdr_blink;
@@ -113,6 +114,8 @@ pub struct Options {
     hdr: bool,
     /// HDR and clipped at white by turns, labelled (`--hdr-blink`).
     hdr_blink: bool,
+    /// The presentation mode for this run, not saved (`--mode original|enhanced|ultra`).
+    mode: Option<settings::Mode>,
 }
 
 fn parse_args() -> Options {
@@ -140,6 +143,7 @@ fn parse_args() -> Options {
         backend: None,
         hdr: false,
         hdr_blink: false,
+        mode: None,
     };
     let mut args = platform::args().into_iter();
     while let Some(a) = args.next() {
@@ -172,6 +176,12 @@ fn parse_args() -> Options {
             "--profile" => o.profile = true,
             "--hdr" => o.hdr = true,
             "--hdr-blink" => (o.hdr, o.hdr_blink) = (true, true),
+            "--mode" => {
+                o.mode = Some(
+                    settings::Mode::from_name(&val())
+                        .expect("--mode takes original, enhanced or ultra"),
+                )
+            }
             "--backend" => o.backend = Some(wgpu::Backends::from_comma_list(&val())),
             "--screen" => {
                 o.screen = match val().as_str() {
@@ -291,7 +301,6 @@ pub struct World {
     scripted: Scripted,
     screen: screen::Screen,
     insets: Option<(f32, [u32; 4])>,
-    pixelation: pixels::Pixelation,
     ui: Ui,
     art: Option<title::Art>,
     title: title::Title,
@@ -318,6 +327,7 @@ pub struct World {
     confirm: confirm::Confirm,
     fade: fade::Fade,
     style: style::Style,
+    fps: fps::Fps,
     hdr_blink: hdr_blink::HdrBlink,
     key_buttons: key_buttons::KeyButtons,
     muted: music::MusicMuted,
@@ -346,7 +356,10 @@ impl World {
     fn new(mut e: Engine, opts: Options, data: Data, state: menu::AppState) -> Self {
         e.time.fixed.set_hz(l3d_sim::TICKS_PER_SECOND as f64);
         let profile = profile::Profile::new(opts.profile);
-        let settings = settings::Settings::load();
+        let mut settings = settings::Settings::load();
+        if let Some(mode) = opts.mode {
+            settings.mode = mode;
+        }
         let rating = settings.rating;
         World {
             e,
@@ -377,7 +390,6 @@ impl World {
             scripted: Scripted::default(),
             screen: screen::Screen::default(),
             insets: None,
-            pixelation: pixels::Pixelation::default(),
             ui: Ui::default(),
             art: None,
             title: title::Title::default(),
@@ -404,6 +416,7 @@ impl World {
             confirm: confirm::Confirm::default(),
             fade: fade::Fade::default(),
             style: style::Style::default(),
+            fps: fps::Fps::default(),
             hdr_blink: hdr_blink::HdrBlink::default(),
             key_buttons: key_buttons::KeyButtons::default(),
             muted: music::MusicMuted::default(),
@@ -559,6 +572,7 @@ impl World {
         music::toggle_mute(self);
         options::apply_window(self);
         pixels::update(self);
+        fps::update(self);
         pointer::update(self);
         key_buttons::hover(self);
         key_buttons::level_button(self);
@@ -1159,9 +1173,9 @@ fn step_simulation(w: &mut World) {
     if backwards {
         w.pending.0 = None;
     }
-    // The level waits while the camera glides to a preset view, or the
-    // picture changes resolution, so neither costs the player time.
-    if w.pixelation.changing() || w.view.glide.is_some() {
+    // The level waits while the camera glides to a preset view, so it
+    // costs the player no time.
+    if w.view.glide.is_some() {
         // Waiting, lemmings are drawn where they stand.
         if let Some(sim) = &w.game.sim {
             w.game.prev_pos.clear();
@@ -1354,10 +1368,10 @@ impl Game {
 
 fn update_lemming_sprites(w: &mut World) {
     let dt = w.e.time.real.delta_secs();
-    w.game.turn_yaws(w.settings.enhanced, dt);
+    w.game.turn_yaws(w.settings.enhanced(), dt);
     let f = w
         .game
-        .tick_progress(w.settings.enhanced, w.e.time.fixed.overstep_fraction());
+        .tick_progress(w.settings.enhanced(), w.e.time.fixed.overstep_fraction());
     let (game, lemming_cam, highlight) = (&w.game, &w.lemming_cam, &w.highlight);
     let (info, preset, sprites) = (&w.info, &w.preset, &mut w.sprites);
     let Some(sim) = &game.sim else { return };
@@ -1407,7 +1421,7 @@ fn update_lemming_sprites(w: &mut World) {
     );
     // Shadows under the lemmings (ours, enhanced mode), on the sea or land
     // too where the level draws one.
-    if w.settings.enhanced {
+    if w.settings.enhanced() {
         let ground = game.terrain.as_ref().is_some_and(|(level, _, _)| {
             use scene_build::level_flags::{LAND_INVISIBLE, SURROUND_SKY};
             let sea = w.settings.sea && level.sea_gfx != 0xFF && level.flags & SURROUND_SKY == 0;
@@ -1555,7 +1569,7 @@ pub(crate) fn camera_controls(w: &mut World) {
         held.is_some_and(|d| d > DRAG_SLOP)
     };
     let [held_drag, action_drag] = held;
-    let enhanced = settings.enhanced;
+    let enhanced = settings.enhanced();
     let dragging = track(held_drag, settings.turn_button()) && enhanced;
     let action_dragging = track(action_drag, settings.action_button()) && enhanced;
     // Enhanced (ours, as touch): an action-button drag turns the view and
@@ -1579,7 +1593,7 @@ pub(crate) fn camera_controls(w: &mut World) {
         time.delta_secs()
     };
     for cam in std::iter::once(&mut w.view) {
-        cam.smooth = settings.enhanced;
+        cam.smooth = settings.enhanced();
         if !cam.smooth {
             cam.finish_glide();
         }

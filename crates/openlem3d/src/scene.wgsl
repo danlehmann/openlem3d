@@ -21,16 +21,21 @@ struct Uniforms {
     origin: vec4<f32>,
     // x: how much brighter than its palette colour a fully glowing texel is
     // drawn; 0 when glow is off. y: how far above white the screen shows
-    // (an HDR target, linear with 1 at white), or 0.
+    // (an HDR target, linear with 1 at white), or 0. z: 1 when the sea
+    // mirrors the level (`second_tex` holds the reflection), else 0.
     post: vec4<f32>,
+    // xyz: the camera's position. w: the height of the sea the level is
+    // mirrored in.
+    eye: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> u: Uniforms;
 @group(0) @binding(1) var tex: texture_2d<f32>;
 @group(0) @binding(2) var samp: sampler;
-// The bloom chain's top level, for presenting the glowing scene.
-@group(1) @binding(1) var bloom_tex: texture_2d<f32>;
-@group(1) @binding(2) var bloom_samp: sampler;
+// A second picture: the bloom chain's top level while presenting the
+// glowing scene; the level mirrored in the sea while drawing the scene.
+@group(1) @binding(1) var second_tex: texture_2d<f32>;
+@group(1) @binding(2) var second_samp: sampler;
 
 struct VIn {
     @location(0) pos: vec3<f32>,
@@ -51,7 +56,8 @@ struct VIn {
     // while glowing. On a tiled surface instead its waves (ours, enhanced
     // mode, `scene_build::Waves`): x how strongly they shade it (0 for
     // none, calm by the scenery), y how far they lift it (0 beyond the
-    // finely divided sea around the level).
+    // finely divided sea around the level), z 0 for no water, else 1 plus
+    // the surf there (1 at the shore, 0 from `FOAM_REACH` out).
     @location(5) light: vec3<f32>,
 };
 
@@ -85,14 +91,28 @@ struct VOut {
     // For tiled surfaces: frame count and current frame; x = 0 otherwise.
     @location(2) tile: vec2<f32>,
     @location(3) light: vec3<f32>,
-    // For a tiled surface with waves: its world x and z, and how strongly
-    // the waves shade it; zero otherwise.
-    @location(4) wave: vec3<f32>,
+    // For a tiled surface with waves: its world x and z, how strongly the
+    // waves shade it, and its water and surf (`VIn::light`'s z); zero
+    // otherwise.
+    @location(4) wave: vec4<f32>,
+    // x: 1 when drawn mirrored in the sea, y: the height above the sea.
+    @location(5) mirror: vec2<f32>,
 };
 
+/// `p` mirrored in the sea when `mirrored`.
+fn mirror_of(p: vec3<f32>, mirrored: bool) -> vec3<f32> {
+    return select(p, vec3(p.x, 2.0 * u.eye.w - p.y, p.z), mirrored);
+}
+
+/// What the mirrored level leaves out: whatever lies this close above the
+/// sea or below it (the sea itself, and the land on it).
+const MIRROR_CLIP: f32 = 0.009;
+
 @vertex
-fn vs(v: VIn) -> VOut {
+fn vs(v: VIn, @builtin(instance_index) instance: u32) -> VOut {
     var o: VOut;
+    // The second instance is the level mirrored in the sea.
+    let mirrored = instance == 1u;
     var frame = 0.0;
     let step = floor(u.sky.w * select(ANIM_FPS, SEA_FPS, v.anim.y < 0.0));
     if (v.anim.x > 1.0) {
@@ -108,21 +128,23 @@ fn vs(v: VIn) -> VOut {
     let t = u.sky.w;
     let flicker = 0.9 + 0.06 * sin(t * 7.3) + 0.04 * sin(t * 17.9 + 1.3);
     o.light = select(vec3(0.0), v.light * flicker, u.post.x > 0.0);
-    o.wave = vec3(0.0);
+    o.wave = vec4(0.0);
+    o.mirror = vec2(select(0.0, 1.0, mirrored), 0.0);
     if (v.anim.y < 0.0) {
         var p = v.pos;
         if (v.light.y > 0.0) {
             p.y += v.light.y * WAVE_HEIGHT * waves(p.xz, t, 0.0).x;
         }
-        o.clip = u.view_proj * vec4(p, 1.0);
+        o.clip = u.view_proj * vec4(mirror_of(p, mirrored), 1.0);
         o.light = vec3(0.0);
-        o.wave = vec3(v.pos.x, v.pos.z, v.light.x);
+        o.wave = vec4(v.pos.x, v.pos.z, v.light.x, v.light.z);
         o.uv = v.uv + v.offset * u.sky.w;
         o.tile = vec2(max(v.anim.x, 1.0), frame);
         return o;
     }
     let world = v.pos + u.right.xyz * v.offset.x + vec3(0.0, v.offset.y, 0.0);
-    o.clip = u.view_proj * vec4(world, 1.0);
+    o.mirror.y = world.y - u.eye.w;
+    o.clip = u.view_proj * vec4(mirror_of(world, mirrored), 1.0);
     // A billboard is hidden only by what is in front of its middle (a
     // quarter unit above its anchor), all of it at that depth: a lemming
     // turning in a deflector's cell, half inside the block, is drawn whole,
@@ -132,7 +154,8 @@ fn vs(v: VIn) -> VOut {
     // than fighting it for depth.
     if (any(v.offset != vec2(0.0))) {
         let towards = vec3(-u.right.z, 0.0, u.right.x) * BILLBOARD_DEPTH_PULL;
-        let mid = u.view_proj * vec4(v.pos + vec3(0.0, 0.25, 0.0) + towards, 1.0);
+        let mid = u.view_proj
+            * vec4(mirror_of(v.pos + vec3(0.0, 0.25, 0.0) + towards, mirrored), 1.0);
         o.clip.z = mid.z / mid.w * o.clip.w;
     }
     o.uv = v.uv + vec2(0.0, frame * v.anim.y);
@@ -142,13 +165,17 @@ fn vs(v: VIn) -> VOut {
 
 @fragment
 fn fs(v: VOut) -> @location(0) vec4<f32> {
+    if (v.mirror.x > 0.5 && (v.mirror.y < MIRROR_CLIP || v.tile.x > 0.0)) {
+        discard;
+    }
     var uv = v.uv;
     // The sea's and the land's textures are mipmapped (`SceneLayer::smooth`).
     // A tiled surface's level of detail comes from the footprint of the uv
     // before wrapping into a frame, which would otherwise jump at each
     // repeat's edge. Magnified, the uv is snapped to texel centres, so up
     // close the texels stay sharp squares, as everywhere else (for the
-    // other textures, sampled nearest, the snap changes nothing).
+    // other textures, sampled nearest, the snap changes nothing). Water
+    // with waves (ours) is not snapped: it stays smooth up close.
     let size = vec2<f32>(textureDimensions(tex));
     let frames = max(v.tile.x, 1.0);
     let gx = dpdx(v.uv) / vec2(1.0, frames);
@@ -156,7 +183,7 @@ fn fs(v: VOut) -> @location(0) vec4<f32> {
     if (v.tile.x > 0.0) {
         uv = vec2(uv.x, (fract(uv.y) + v.tile.y) / v.tile.x);
     }
-    if (max(length(gx * size), length(gy * size)) < 1.0) {
+    if (v.wave.w <= 0.0 && max(length(gx * size), length(gy * size)) < 1.0) {
         uv = (floor(uv * size) + 0.5) / size;
     }
     let c = textureSampleGrad(tex, samp, uv, gx, gy);
@@ -176,8 +203,8 @@ fn fs(v: VOut) -> @location(0) vec4<f32> {
     let lowered = max(top - v.params.x, min(top, SHADE_FLOOR));
     let shaded = pow(srgb * (lowered / max(top, 1e-5)), vec3(2.2));
     let glow = glow_of(c.a);
-    if (v.wave.z > 0.0) {
-        return vec4(shaded * wave_light(v.wave), 1.0);
+    if (v.wave.z > 0.0 || v.wave.w > 0.0) {
+        return vec4(sea(v, shaded), 1.0);
     }
     return vec4((shaded + c.rgb * v.light) * (1.0 + glow * u.post.x), 1.0);
 }
@@ -201,13 +228,16 @@ fn fs_shadow(v: VOut) -> @location(0) vec4<f32> {
 
 struct SkyOut {
     @builtin(position) clip: vec4<f32>,
+    // 1 for the sky mirrored in the sea (seen below the horizon), else 0.
+    @location(0) @interpolate(flat) mirrored: f32,
 };
 
 @vertex
-fn vs_sky(@builtin(vertex_index) i: u32) -> SkyOut {
+fn vs_sky(@builtin(vertex_index) i: u32, @builtin(instance_index) instance: u32) -> SkyOut {
     let p = vec2(f32((i << 1u) & 2u), f32(i & 2u));
     var o: SkyOut;
     o.clip = vec4(p * 2.0 - 1.0, 0.0, 1.0);
+    o.mirrored = select(0.0, 1.0, instance == 1u);
     return o;
 }
 
@@ -221,7 +251,10 @@ fn fs_sky(v: SkyOut) -> @location(0) vec4<f32> {
     let d = (v.clip.xy - u.origin.xy) * u.view.zw - pivot;
     let c = cos(u.view.x);
     let s = sin(u.view.x);
-    let p = pivot + vec2(c * d.x - s * d.y, s * d.x + c * d.y);
+    var p = pivot + vec2(c * d.x - s * d.y, s * d.x + c * d.y);
+    if (v.mirrored > 0.5) {
+        p.y = 2.0 * u.sky.y - p.y;
+    }
     let col = u.sky.x + p.x / (2.0 * u.sky.z);
     if (u.right.w > 0.5) {
         // All-round sky: a horizontally wrapping panorama stretched over the
@@ -242,8 +275,15 @@ fn fs_sky(v: SkyOut) -> @location(0) vec4<f32> {
     }
     let row = clamp(p.y / u.sky.y, 0.0, 1.0) * dims.y;
     let uv = vec2(col / dims.x, min(row, dims.y - 0.5) / dims.y);
-    return vec4(textureSampleLevel(tex, samp, uv, 0.0).rgb, 1.0);
+    // Mirrored, the image runs out above its top: towards there its alpha
+    // fades to 0, and the sea shows that much less of it.
+    let kept = select(1.0, smoothstep(0.0, SKY_MIRROR_FADE, p.y / u.sky.y), v.mirrored > 0.5);
+    return vec4(textureSampleLevel(tex, samp, uv, 0.0).rgb, kept);
 }
+
+/// How much of the sky's height, from its top, the mirrored sky fades out
+/// over.
+const SKY_MIRROR_FADE: f32 = 0.4;
 
 // Stretch: the scene rendered small (bound as `tex`) drawn over the whole
 // screen, each rendered pixel a block of screen pixels (nearest sampling).
@@ -312,11 +352,11 @@ fn fs_present(v: SkyOut) -> @location(0) vec4<f32> {
 @fragment
 fn fs_present_glow(v: SkyOut) -> @location(0) vec4<f32> {
     let at = (v.clip.xy - u.origin.zw) / vec2<f32>(textureDimensions(tex));
-    let o = 1.0 / vec2<f32>(textureDimensions(bloom_tex));
-    let taps = textureSampleLevel(bloom_tex, bloom_samp, at + o, 0.0).rgb
-        + textureSampleLevel(bloom_tex, bloom_samp, at - o, 0.0).rgb
-        + textureSampleLevel(bloom_tex, bloom_samp, at + vec2(o.x, -o.y), 0.0).rgb
-        + textureSampleLevel(bloom_tex, bloom_samp, at + vec2(-o.x, o.y), 0.0).rgb;
+    let o = 1.0 / vec2<f32>(textureDimensions(second_tex));
+    let taps = textureSampleLevel(second_tex, second_samp, at + o, 0.0).rgb
+        + textureSampleLevel(second_tex, second_samp, at - o, 0.0).rgb
+        + textureSampleLevel(second_tex, second_samp, at + vec2(o.x, -o.y), 0.0).rgb
+        + textureSampleLevel(second_tex, second_samp, at + vec2(-o.x, o.y), 0.0).rgb;
     let glow = finite(taps / 4.0) * BLOOM_STRENGTH;
     return present(textureSampleLevel(tex, samp, at, 0.0).rgb + glow, v.clip.xy);
 }
@@ -431,9 +471,18 @@ const RIPPLES = array<vec3<f32>, 8>(
     vec3(-1.40, 1.9, 0.06),
 );
 
-/// Pseudo-random 0–1 for the lattice point `p`.
+/// Pseudo-random 0–1 for the lattice point `p` (whole numbers), mixed in
+/// integers: the same for a point however it was reached, which a hash of
+/// a large sine is not once the compiler reorders its arithmetic (seams
+/// along the lattice).
 fn hash2(p: vec2<f32>) -> f32 {
-    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+    var h = bitcast<u32>(i32(p.x)) * 73856093u ^ bitcast<u32>(i32(p.y)) * 19349663u;
+    h ^= h >> 16u;
+    h *= 0x7feb352du;
+    h ^= h >> 15u;
+    h *= 0x846ca68bu;
+    h ^= h >> 16u;
+    return f32(h) / 4294967295.0;
 }
 
 /// Smooth value noise, 0–1, varying over about a unit.
@@ -477,14 +526,83 @@ fn waves(p: vec2<f32>, t: f32, blur: f32) -> vec3<f32> {
     return h;
 }
 
-/// How much brighter (or darker) than its texture the sea is drawn where
-/// `wave` (world x, z and strength) is: lit from a fixed light by the
-/// waves' slope, crests a touch lighter.
-fn wave_light(wave: vec3<f32>) -> f32 {
-    let blur = length(fwidth(wave.xy));
-    let w = waves(wave.xy, u.sky.w, blur) * wave.z;
+/// How much of the mirrored level the sea shows looking straight down, and
+/// looking along it towards the horizon (ours, tuned by eye).
+const REFLECT_DOWN: f32 = 0.08;
+const REFLECT_GRAZING: f32 = 0.45;
+/// How far the waves' slope shifts the reflection, in screen heights per
+/// unit of slope.
+const REFLECT_RIPPLE: f32 = 0.025;
+/// The surf's colour, linear.
+const FOAM_COLOUR: vec3<f32> = vec3(0.85, 0.9, 0.92);
+
+/// Surf at `p`, `t` seconds in, `shore` (0–1) being how near the scenery
+/// it is: how much froth covers it (x), the froth's height (y, 0–1, for
+/// its shading) and how much froth there would be a little further out
+/// (z, for the darkening around it).
+fn surf(p: vec2<f32>, t: f32, shore: f32) -> vec3<f32> {
+    let froth = 0.6 * value_noise(p * 3.1 + vec2(t * 0.21, -t * 0.17))
+        + 0.4 * value_noise(p * 7.3 - vec2(t * 0.13, t * 0.29));
+    let reach = shore + (froth - 0.5) * 0.35;
+    let wash = 0.5 + 0.22 * sin(t * 0.8 + value_noise(p * 0.25) * 6.0);
+    return vec3(
+        froth_cover(reach, wash, froth, 0.0),
+        froth,
+        froth_cover(reach, wash, froth, 0.12),
+    );
+}
+
+/// How much froth covers the sea `reach` (0–1) towards the shore, with the
+/// washing line at `wash` and the froth there `froth` (0–1); `widen`
+/// grows it outwards.
+fn froth_cover(reach: f32, wash: f32, froth: f32, widen: f32) -> f32 {
+    let r = reach + widen;
+    let line = smoothstep(wash - 0.1, wash, r) * (1.0 - smoothstep(wash, wash + 0.06, reach));
+    let rim = smoothstep(0.78, 0.98, r);
+    let gate = smoothstep(0.3 - widen, 0.6 - widen, froth);
+    return max(rim * 0.95 * mix(0.6, 1.0, gate), line * 0.7 * gate);
+}
+
+/// The sea's colour where `v` lies on it, from its texture's `shaded`
+/// colour: lit by the waves' slope from a fixed light, crests a touch
+/// lighter; on water, mirroring the level more towards the horizon,
+/// rippled by the waves, and surf by the shore washing in and out.
+fn sea(v: VOut, shaded: vec3<f32>) -> vec3<f32> {
+    let p = v.wave.xy;
+    let t = u.sky.w;
+    let blur = length(fwidth(p));
+    let w = waves(p, t, blur) * v.wave.z;
     let slope = w.yz * WAVE_HEIGHT * WAVE_SHADE;
     let n = normalize(vec3(-slope.x, 1.0, -slope.y));
     let l = normalize(vec3(-0.5, 1.0, -0.35));
-    return dot(n, l) / dot(vec3(0.0, 1.0, 0.0), l) + 0.06 * w.x;
+    var c = shaded * (dot(n, l) / dot(vec3(0.0, 1.0, 0.0), l) + 0.06 * w.x);
+    let water = v.wave.w > 0.0;
+    if (water && u.post.z > 0.0) {
+        let to_eye = normalize(u.eye.xyz - vec3(p.x, u.eye.w, p.y));
+        let facing = clamp(dot(n, to_eye), 0.0, 1.0);
+        let amount = mix(REFLECT_DOWN, REFLECT_GRAZING, pow(1.0 - facing, 3.0));
+        let dims = vec2<f32>(textureDimensions(second_tex));
+        let at = (v.clip.xy + n.xz * REFLECT_RIPPLE * dims.y) / dims;
+        let mirrored = textureSampleLevel(second_tex, second_samp, at, 0.0);
+        c = mix(c, mirrored.rgb, amount * clamp(mirrored.a, 0.0, 1.0));
+    }
+    if (water) {
+        // Surf: froth at the shore, and a line of it washing in and out,
+        // both frayed and torn by drifting noise; faded out where a pixel
+        // spans much of a unit. The froth is lit as a bumpy surface from
+        // the waves' light, thin froth lets the sea through, and the water
+        // just around it is darkened, as if it stood a little proud.
+        let shore = clamp(v.wave.w - 1.0, 0.0, 1.0);
+        let fade = 1.0 - smoothstep(0.3, 0.8, blur);
+        let here = surf(p, t, shore);
+        // The same a little towards the light, for the froth's slope.
+        let towards = surf(p + l.xz * 0.06, t, shore);
+        let bump = clamp((towards.y - here.y) * 6.0, -1.0, 1.0);
+        let foam = here.x * fade;
+        let around = clamp(here.z - here.x, 0.0, 1.0) * fade;
+        c *= 1.0 - 0.35 * around;
+        let lit = FOAM_COLOUR * (0.82 + 0.3 * bump) * (0.85 + 0.15 * here.y);
+        c = mix(c, lit, foam);
+    }
+    return c;
 }

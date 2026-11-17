@@ -107,7 +107,7 @@ pub(crate) fn update(w: &mut World) {
             BRACKET
         } else if lemming_cam.following().is_some() {
             CROSS_HAIR
-        } else if w.settings.enhanced {
+        } else if w.settings.enhanced() {
             // Enhanced mode has no moves by holding still, so no arrows.
             CROSS_HAIR
         } else {
