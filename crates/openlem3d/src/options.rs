@@ -2,16 +2,10 @@
 //! is described in `docs/spec/ui-graphics.md`): large-font labels in boxes,
 //! toggles shown as a yellow (on) or red (off) light, sliders as ten
 //! lights, "Default Config" and "Exit and Save" along the bottom. Only
-<<<<<<< Updated upstream
-//! settings that mean something here are offered, and some of ours: Glow,
-//! Rewind, FPS and the mode, named in its box and switched by clicking it.
+//! settings that mean something here are offered, and some of ours: Rewind,
+//! FPS and the mode, named in its box and switched by clicking it.
 //! Esc, or a four-finger tap, also saves and leaves; F12 or a four-finger
 //! tap opens it from the title or a level.
-=======
-//! settings that mean something here are offered, and one of ours,
-//! Rewind.
-//! Esc also saves and leaves.
->>>>>>> Stashed changes
 
 use l3d_engine::prelude::*;
 use l3d_formats::icons::Icons;
@@ -94,23 +88,14 @@ const SLIDER_COLUMNS: [(f32, f32); 2] = [(0.0, 64.0), (160.0, 224.0)];
 const BOX_HEIGHT: f32 = 14.0;
 const TEXT_SCALE: f32 = 1.0;
 
-<<<<<<< Updated upstream
-const TOGGLES: [(Item, &str, usize, usize); 8] = [
-=======
-const TOGGLES: [(Item, &str, usize, usize); 6] = [
->>>>>>> Stashed changes
+const TOGGLES: [(Item, &str, usize, usize); 7] = [
     (Item::Land, "Land", 0, 0),
     (Item::Sea, "Sea", 0, 1),
     (Item::Sky, "Sky", 0, 2),
     (Item::LeftHanded, "Left Handed", 0, 3),
     (Item::Fullscreen, "Fullscreen", 1, 0),
-<<<<<<< Updated upstream
-    (Item::Glow, "Glow", 1, 1),
-    (Item::Rewind, "Rewind", 1, 2),
-    (Item::Fps, "FPS", 1, 3),
-=======
     (Item::Rewind, "Rewind", 1, 1),
->>>>>>> Stashed changes
+    (Item::Fps, "FPS", 1, 2),
 ];
 /// The mode's box, in the slider rows' free place, and where its name
 /// starts in it.
