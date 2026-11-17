@@ -265,18 +265,26 @@ impl World {
             .map_or(0, |s| s.block.segments & between(s.base, s.cut))
     }
 
+    /// Whether `brick` overlaps any of the segments in `mask` of cell `c`.
+    fn brick_overlaps(brick: &Brick, c: [i32; 3], mask: u8) -> bool {
+        let quarter = SUB / 4;
+        (0..4).any(|seg| {
+            let min = [c[0] * SUB, c[1] * SUB + seg * quarter, c[2] * SUB];
+            let max = [min[0] + SUB, min[1] + quarter, min[2] + SUB];
+            mask & (1 << seg) != 0 && (0..3).all(|i| brick.min[i] < max[i] && min[i] < brick.max[i])
+        })
+    }
+
+    /// Whether any brick overlaps the segments in `mask` of cell `c`.
+    pub fn bricks_in(&self, c: [i32; 3], mask: u8) -> bool {
+        self.bricks.iter().any(|b| Self::brick_overlaps(b, c, mask))
+    }
+
     /// Removes the bricks overlapping the segments in `mask` of cell `c`;
     /// returns whether there were any.
     pub fn remove_bricks(&mut self, c: [i32; 3], mask: u8) -> bool {
         let before = self.bricks.len();
-        let quarter = SUB / 4;
-        self.bricks.retain(|b| {
-            !(0..4).any(|seg| {
-                let min = [c[0] * SUB, c[1] * SUB + seg * quarter, c[2] * SUB];
-                let max = [min[0] + SUB, min[1] + quarter, min[2] + SUB];
-                mask & (1 << seg) != 0 && (0..3).all(|i| b.min[i] < max[i] && min[i] < b.max[i])
-            })
-        });
+        self.bricks.retain(|b| !Self::brick_overlaps(b, c, mask));
         let removed = self.bricks.len() != before;
         self.bricks_changed |= removed;
         removed

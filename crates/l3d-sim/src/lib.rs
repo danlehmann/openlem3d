@@ -2651,14 +2651,20 @@ impl Simulation {
         Self::mine_plan(l.pos[1], [c[0] + d[0], c[2] + d[2]])
     }
 
-    /// Of a miner's plan: the cells and segments with terrain in them, and
-    /// whether all of it gives way to mining towards `d` (no steel, no
+    /// Of a miner's plan: the cells and segments with terrain or builder's
+    /// bricks in them (a cell holding only bricks: all its planned segments),
+    /// and whether all of it gives way to mining towards `d` (no steel, no
     /// one-way block facing elsewhere).
     fn mine_present(&self, cells: &[([i32; 3], u8)], d: [i32; 3]) -> (MineCells, bool) {
         let present: Vec<_> = cells
             .iter()
             .filter_map(|&(c, mask)| {
                 let m = self.world.block(c).map_or(0, |(b, _)| b.segments) & mask;
+                let m = if m == 0 && self.world.bricks_in(c, mask) {
+                    mask
+                } else {
+                    m
+                };
                 (m != 0).then_some((c, m))
             })
             .collect();

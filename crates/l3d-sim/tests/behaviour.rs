@@ -258,6 +258,29 @@ fn digger_on_its_stairs_digs_the_bricks_not_the_floor() {
 }
 
 #[test]
+fn miner_on_its_stairs_mines_the_bricks_ahead() {
+    let mut sim = open_level(1)
+        .skill(0, Skill::Builder, 1)
+        .skill(1, Skill::Miner, 1)
+        .sim();
+    run(&mut sim, 30);
+    assert!(sim.assign(0, Skill::Builder));
+    while sim.lemmings[0].state != (State::Building { bricks_left: 3 }) {
+        assert!(sim.tick < 600, "never laid three bricks");
+        sim.step();
+    }
+    let bricks = sim.world.bricks.len();
+    assert!(sim.assign(0, Skill::Miner));
+    // Bricks are all there is ahead of it: it mines them rather than
+    // walking on with the skill used up.
+    for _ in 0..80 {
+        sim.step();
+        assert_ne!(sim.lemmings[0].state, State::Walking, "walked off");
+    }
+    assert!(sim.world.bricks.len() < bricks);
+}
+
+#[test]
 fn one_way_blocks_give_way_in_one_direction() {
     // Block 6 is one-way towards −X before rotation; rotation 1 turns −X to +Z.
     for (rotation, open, closed) in [(0, [-1, 0, 0], [1, 0, 0]), (1, [0, 0, 1], [0, 0, -1])] {
