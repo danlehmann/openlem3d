@@ -41,6 +41,9 @@ pub struct SceneData {
     /// The level's lights, kept to light the blocks again when they are
     /// rebuilt (not drawn themselves).
     pub lights: Vec<crate::light::Light>,
+    /// The bottom layer's blocks show their sides and undersides too, not
+    /// only their tops (see [`crate::scene_build::Show::bottom_sides`]).
+    pub bottom_sides: bool,
 }
 
 /// Geometry rebuilt every frame (moving sprites such as lemmings), textured

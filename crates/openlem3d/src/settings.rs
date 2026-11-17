@@ -89,6 +89,7 @@ impl Settings {
             land: self.land,
             sea: self.sea,
             sky: self.sky,
+            bottom_sides: self.enhanced,
         }
     }
 

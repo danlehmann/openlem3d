@@ -1021,9 +1021,14 @@ pub fn rebuild_blocks(
         )
     };
     out.layers[layer] = block_layer(
-        &level_mesh::build(level, blocks, &on_top, hatch_open(sim.tick), &|x, y, z| {
-            world_cut(level, &sim.world, x, y, z)
-        }),
+        &level_mesh::build(
+            level,
+            blocks,
+            &on_top,
+            hatch_open(sim.tick),
+            &|x, y, z| world_cut(level, &sim.world, x, y, z),
+            scene.bottom_sides,
+        ),
         texture,
         &scene.lights,
         level,
@@ -1125,6 +1130,12 @@ pub struct Show {
     pub land: bool,
     pub sea: bool,
     pub sky: bool,
+    /// The bottom layer's blocks show their sides and undersides (ours, in
+    /// enhanced mode). The original shows only their tops: on "Motherboard"
+    /// the transistors hanging under the board in the bottom layer are not
+    /// drawn (owner's comparison), as the floor plane level with the
+    /// layer's top would hide them on a level with a sea.
+    pub bottom_sides: bool,
 }
 
 /// Builds everything drawn for level `n`.
@@ -1139,8 +1150,12 @@ pub fn build(data: &mut GameData, n: u32, show: Show) -> Result<BuiltLevel, l3d_
         &|tile| art_on_top(|i| tex.get(i).is_some_and(|&p| p != 0), tile),
         0.0,
         &|x, y, z| level_cut(&level, x, y, z),
+        show.bottom_sides,
     );
-    let mut scene = SceneData::default();
+    let mut scene = SceneData {
+        bottom_sides: show.bottom_sides,
+        ..SceneData::default()
+    };
 
     let flags = level.flags;
     let surround = flags & level_flags::SURROUND_SKY != 0;
@@ -1333,15 +1348,21 @@ mod tests {
             let level = data.level(n).expect("level");
             let blocks = data.blocks(n).expect("blocks");
             let sim = l3d_sim::Simulation::new(&level, &blocks);
-            let loaded = level_mesh::build(&level, &blocks, &on_top, 0.0, &|x, y, z| {
-                level_cut(&level, x, y, z)
-            });
+            let loaded = level_mesh::build(
+                &level,
+                &blocks,
+                &on_top,
+                0.0,
+                &|x, y, z| level_cut(&level, x, y, z),
+                true,
+            );
             let played = level_mesh::build(
                 &level,
                 &blocks,
                 &on_top,
                 hatch_open(sim.tick),
                 &|x, y, z| world_cut(&level, &sim.world, x, y, z),
+                true,
             );
             for (a, b) in [
                 (&loaded.opaque, &played.opaque),

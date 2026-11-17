@@ -588,13 +588,15 @@ impl MeshData {
 /// block has been blown away (0 for a whole block) and above which it has
 /// been dug away (1): the shape is sliced off flat there, unchanged between;
 /// and the segments the block was placed with, whose runs give its shape
-/// (the level's segments are those still there).
+/// (the level's segments are those still there). Without `bottom_sides`
+/// the bottom layer's blocks show only their tops.
 pub fn build(
     level: &Level,
     blocks: &BlockSet,
     art_on_top: &dyn Fn(u32) -> bool,
     hatch_open: f32,
     cut: &dyn Fn(usize, usize, usize) -> (f32, f32, u8),
+    bottom_sides: bool,
 ) -> LevelMesh {
     let grid = Grid { level, blocks };
     let mut out = LevelMesh::default();
@@ -764,6 +766,14 @@ pub fn build(
                 if n[0] * out_dir[0] + n[1] * out_dir[1] + n[2] * out_dir[2] < 0.0 {
                     verts.reverse();
                     uvs.reverse();
+                }
+                // In the bottom layer only tops show, unless its sides are wanted.
+                if y == 0 && !bottom_sides {
+                    let out = polygon_normal(&verts);
+                    let len = (out[0] * out[0] + out[1] * out[1] + out[2] * out[2]).sqrt();
+                    if out[1] < TOP_MIN_UP * len {
+                        continue;
+                    }
                 }
                 let (mut front, mut back) = face_tiles(face.texture, face.modifiers);
                 let anim = match face_animation(face.texture, face.modifiers) {
