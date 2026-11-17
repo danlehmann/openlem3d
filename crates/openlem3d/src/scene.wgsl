@@ -390,39 +390,75 @@ fn fs_bloom_up(v: PostOut) -> @location(0) vec4<f32> {
     return vec4(up(v.uv), 1.0);
 }
 
-// Waves on the sea (ours, enhanced mode): a few travelling ripples summed,
+// Waves on the sea (ours, enhanced mode): travelling ripples summed,
 // lifting the finely divided sea near the level and shading all of it by
 // their slope. How strongly comes from the vertices (calm by the scenery,
-// `scene_build::Waves`).
+// `scene_build::Waves`). So that no pattern repeats, the ripples have
+// unrelated lengths and directions, each swells and fades in its own slow
+// patches over the sea, and their crests are bent by a slow warp.
 
-/// The highest a wave lifts the sea, in world units.
-const WAVE_HEIGHT: f32 = 0.22;
+/// The highest a wave lifts the sea, in world units (about; patches where
+/// several ripples swell together go higher).
+const WAVE_HEIGHT: f32 = 0.18;
 /// How much a wave's slope lightens or darkens the sea.
-const WAVE_SHADE: f32 = 5.0;
+const WAVE_SHADE: f32 = 8.0;
+/// Ripples summed.
+const RIPPLE_COUNT: i32 = 8;
 
-/// The ripples: direction (xy, unnormalised), wavelength in units (z) and
-/// relative height (w).
-const RIPPLES = array<vec4<f32>, 4>(
-    vec4(1.0, 0.35, 9.0, 0.45),
-    vec4(0.75, -0.7, 5.3, 0.27),
-    vec4(-0.3, 1.0, 3.7, 0.17),
-    vec4(0.95, 0.65, 2.3, 0.11),
+/// The ripples: direction in radians (x), wavelength in units (y) and
+/// relative height (z).
+const RIPPLES = array<vec3<f32>, 8>(
+    vec3(0.0, 13.0, 0.30),
+    vec3(0.65, 9.1, 0.25),
+    vec3(-0.49, 7.3, 0.21),
+    vec3(1.24, 5.2, 0.16),
+    vec3(-0.96, 4.1, 0.13),
+    vec3(0.26, 3.0, 0.10),
+    vec3(1.78, 2.4, 0.08),
+    vec3(-1.40, 1.9, 0.06),
 );
+
+/// Pseudo-random 0–1 for the lattice point `p`.
+fn hash2(p: vec2<f32>) -> f32 {
+    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+}
+
+/// Smooth value noise, 0–1, varying over about a unit.
+fn value_noise(p: vec2<f32>) -> f32 {
+    let i = floor(p);
+    let f = fract(p);
+    let s = f * f * (3.0 - 2.0 * f);
+    return mix(
+        mix(hash2(i), hash2(i + vec2(1.0, 0.0)), s.x),
+        mix(hash2(i + vec2(0.0, 1.0)), hash2(i + vec2(1.0, 1.0)), s.x),
+        s.y,
+    );
+}
 
 /// The waves' height (x, about −1 to 1) and its slope along world x (y)
 /// and z (z) at `p`, `t` seconds in. Ripples shorter than about three
 /// times `blur` (the units a pixel covers there) fade out rather than
-/// shimmer.
+/// shimmer. The slope leaves out the slow patches and warp, which change
+/// it little.
 fn waves(p: vec2<f32>, t: f32, blur: f32) -> vec3<f32> {
+    // The warp: up to about 2 units, over some 15.
+    let warp = vec2(
+        value_noise(p * 0.065 + vec2(3.1, 7.7) + t * 0.03),
+        value_noise(p * 0.065 + vec2(11.3, 1.9) - t * 0.03),
+    ) * 4.0 - 2.0;
+    let q = p + warp;
     var h = vec3(0.0);
-    for (var i = 0; i < 4; i++) {
+    for (var i = 0; i < RIPPLE_COUNT; i++) {
         let r = RIPPLES[i];
-        let k = 6.2832 / r.z;
-        let d = normalize(r.xy);
+        let k = 6.2832 / r.y;
+        let d = vec2(cos(r.x), sin(r.x));
         // Deep-water waves: their speed grows with the root of the length.
         let w = sqrt(9.8 * k) * 0.55;
-        let a = r.w * (1.0 - smoothstep(r.z / 10.0, r.z / 3.0, blur));
-        let phase = k * dot(d, p) - w * t + f32(i) * 1.7;
+        // Each ripple's own patches, some 20 units across, drifting slowly.
+        let swell = value_noise(p * 0.05 + vec2(f32(i) * 17.3, f32(i) * 5.1) + t * 0.02);
+        let a = r.z * (0.25 + 1.5 * swell * swell)
+            * (1.0 - smoothstep(r.y / 10.0, r.y / 3.0, blur));
+        let phase = k * dot(d, q) - w * t + f32(i) * 1.7;
         h += a * vec3(sin(phase), k * d.x * cos(phase), k * d.y * cos(phase));
     }
     return h;
