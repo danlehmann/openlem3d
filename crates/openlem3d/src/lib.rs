@@ -1451,15 +1451,20 @@ pub(crate) fn load_level(w: &mut World) {
         music::volume(muted, settings),
     );
     game.terrain = Some((level, blocks, block_layer));
+    // A new level: the camera's last free spot was in the old one.
+    w.camera_controls.last_free = None;
     panel::select_first_skill(w);
 }
 
 /// What the camera controls keep between frames: where the camera last
-/// stood clear of blocks, the pointer travel of the two buttons held, the
-/// keys' eased moves and the spot a middle-button drag turns about.
+/// stood clear of blocks (in this level, since the camera was last placed
+/// by the game), whether the preview was showing, the pointer travel of the
+/// two buttons held, the keys' eased moves and the spot a middle-button drag
+/// turns about.
 #[derive(Default)]
 struct CameraControls {
     last_free: Option<Vec3>,
+    previewing: bool,
     held: [Option<f32>; 2],
     eased: Vec4,
     pivot: Option<[f32; 2]>,
@@ -1666,7 +1671,11 @@ pub(crate) fn camera_controls(w: &mut World) {
         // it); it slides along them. Preset jumps and glides, the lemming
         // view and the preview are exempt; after a glide the camera moves
         // freely until it is clear of blocks.
-        if gliding {
+        // Where the game places the camera (the preview handing over to
+        // play) it starts afresh: a walk from where it was before would run
+        // into this level's blocks and stop there (owner: the camera was
+        // stuck at the start of "Birthday Cake").
+        if gliding || std::mem::replace(&mut cc.previewing, preview.active) != preview.active {
             *last_free = None;
         }
         if let Some((level, blocks, _)) = &game.terrain {
