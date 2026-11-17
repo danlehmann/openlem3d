@@ -6,6 +6,7 @@
 //! of `parse_args`. Without `--level` the game starts at the title screen.
 
 mod briefing;
+mod camera_route;
 mod codes;
 mod confirm;
 mod fade;
@@ -666,12 +667,16 @@ struct ViewCamera {
 }
 
 /// A smooth move from one view (position and yaw) to another, `t` seconds
-/// in; it turns the short way round.
-#[derive(Clone, Copy)]
+/// in; it turns the short way round. `route` is the way it takes, round
+/// blocks in the way (planned once the level is at hand; straight until
+/// then), and `seconds` how long it takes.
+#[derive(Clone)]
 struct Glide {
     from: (Vec3, f32),
     to: (Vec3, f32),
     t: f32,
+    route: Option<Vec<Vec3>>,
+    seconds: f32,
 }
 
 /// Another camera nearer the view than this (units) is not drawn.
@@ -744,20 +749,44 @@ impl ViewCamera {
             from: (self.pos, self.yaw),
             to: (pos, yaw),
             t: 0.0,
+            route: None,
+            seconds: GLIDE_SECONDS,
         });
+    }
+
+    /// Plans the way a glide just started takes, round the blocks of
+    /// `level` in the straight line's way; a longer way takes a little
+    /// longer (by the square root of how much longer it is, at most twice
+    /// as long). With no way round, the view cuts to its destination at once
+    /// rather than pass through blocks.
+    fn plan_glide(&mut self, level: &Level, blocks: &BlockSet) {
+        let Some(g) = self.glide.as_mut().filter(|g| g.route.is_none()) else {
+            return;
+        };
+        let Some(route) = camera_route::route(level, blocks, g.from.0, g.to.0) else {
+            self.finish_glide();
+            return;
+        };
+        let straight = g.from.0.distance(g.to.0).max(1e-3);
+        let longer = (camera_route::length(&route) / straight).max(1.0);
+        g.seconds = GLIDE_SECONDS * longer.sqrt().min(2.0);
+        g.route = Some(route);
     }
 
     /// Moves a glide on by `dt` seconds, ending it on arrival.
     fn advance_glide(&mut self, dt: f32) {
         let Some(g) = self.glide.as_mut() else { return };
         g.t += dt;
-        let s = (g.t / GLIDE_SECONDS).min(1.0);
+        let s = (g.t / g.seconds).min(1.0);
         let s = s * s * (3.0 - 2.0 * s);
         let turn = (g.to.1 - g.from.1 + std::f32::consts::PI).rem_euclid(std::f32::consts::TAU)
             - std::f32::consts::PI;
-        self.pos = g.from.0.lerp(g.to.0, s);
+        self.pos = match &g.route {
+            Some(r) => camera_route::along(r, camera_route::length(r) * s),
+            None => g.from.0.lerp(g.to.0, s),
+        };
         self.yaw = g.from.1 + turn * s;
-        if g.t >= GLIDE_SECONDS {
+        if g.t >= g.seconds {
             self.glide = None;
         }
     }
@@ -1663,6 +1692,9 @@ pub(crate) fn camera_controls(w: &mut World) {
         if manual {
             cam.glide = None;
         } else {
+            if let Some((level, blocks, _)) = &game.terrain {
+                cam.plan_glide(level, blocks);
+            }
             cam.advance_glide(time.delta_secs());
         }
         // Never below the ground plane (the sea and land).
@@ -1977,5 +2009,58 @@ mod tests {
         // Along the corridor it moves freely.
         let p = camera_walk(&level, &blocks, start, start + Vec3::X * 2.0);
         assert!((p.x - start.x - 2.0).abs() < 1e-3, "{p}");
+    }
+
+    /// Glides between any two preset cameras of any level keep clear of
+    /// blocks wherever both ends are clear and a way round was found.
+    #[test]
+    fn glides_between_presets_keep_clear_of_blocks() {
+        use l3d_formats::gamedata::{DATA_ENV, GameData};
+        let dir = std::env::var_os(DATA_ENV)
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../gamedata")
+            });
+        if !dir.is_dir() {
+            eprintln!("game data not found; skipping");
+            return;
+        }
+        let mut data = GameData::open(&dir).expect("open game data");
+        let (mut routed, mut straight, mut none) = (0, 0, 0);
+        let started = std::time::Instant::now();
+        for n in 0..100 {
+            let level = data.level(n).expect("level");
+            let blocks = data.blocks(n).expect("blocks");
+            let views: Vec<Vec3> = level.cameras.iter().map(|c| preset_view(c).0).collect();
+            for a in &views {
+                for b in &views {
+                    if a == b
+                        || camera_blocked(&level, &blocks, *a)
+                        || camera_blocked(&level, &blocks, *b)
+                    {
+                        continue;
+                    }
+                    let Some(r) = camera_route::route(&level, &blocks, *a, *b) else {
+                        none += 1;
+                        continue;
+                    };
+                    assert!(
+                        r.windows(2)
+                            .all(|w| camera_route::clear_line(&level, &blocks, w[0], w[1])),
+                        "LEVEL.{n:03}: route {a} to {b} touches a block"
+                    );
+                    if r.len() == 2 {
+                        straight += 1;
+                    } else {
+                        routed += 1;
+                    }
+                }
+            }
+        }
+        eprintln!(
+            "straight {straight}, round {routed}, no way found {none}, in {:?}",
+            started.elapsed()
+        );
+        assert_eq!(none, 0, "glides without a way round");
     }
 }
