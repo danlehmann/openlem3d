@@ -178,10 +178,20 @@ impl World {
 
     /// Whether the terrain block in cell `c` gives way to digging in
     /// direction `toward` (as for [`World::remove_segments_towards`]): not
-    /// steel, and not a one-way block facing elsewhere. Empty cells do.
+    /// steel, not in the bottom layer, and not a one-way block facing
+    /// elsewhere. Empty cells do.
+    ///
+    /// The bottom layer holds like steel, whatever its blocks (**verified** in
+    /// Tricky 7 "Rescue Team", whose corridor floors are invisible
+    /// bottom-layer blocks without the steel flag: a digger and a miner there
+    /// used up their skill and did nothing, and walkers crossed a bomber's
+    /// blast spot unharmed; on a changed copy a digger did the same on a
+    /// visible plain block in the bottom layer, while a basher went through an
+    /// invisible plain block one layer up).
     pub fn breakable_towards(&self, c: [i32; 3], toward: Option<[i32; 3]>) -> bool {
         self.cell(c[0], c[1], c[2]).is_none_or(|cell| {
-            cell.flags & flags::STEEL == 0
+            c[1] > 0
+                && cell.flags & flags::STEEL == 0
                 && (!(5..=8).contains(&cell.block.id)
                     || toward == Some(one_way_direction(cell.block)))
         })
