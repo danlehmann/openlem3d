@@ -156,11 +156,11 @@ pub const EXPLODE_TICKS: u32 = 35;
 /// measured ([`WEIRD_TRAP_BUSY_TICKS`], [`BEAR_TRAP_BUSY_TICKS`])
 /// (provisional).
 pub const TRAP_BUSY_TICKS: u32 = 28;
-/// How long a bear trap stays busy after taking a lemming (**measured** in
-/// the original on a test lane, Practice "Blocker" changed, one trap before
-/// the exit, 20 lemmings: 4, 7, 10 and 20 killed at release rates 99, 96, 91
-/// and 81; 19 or 20 ticks give 3, 6, 10 and 20, 21 lets lemmings by at 81,
-/// 18 kills 12 at 91).
+/// How long a bear trap or a squasher stays busy after taking a lemming
+/// (**measured** in the original on a test lane, Practice "Blocker" changed,
+/// one trap before the exit, 20 lemmings: for both, 4, 7, 10 and 20 killed
+/// at release rates 99, 96, 91 and 81; 19 or 20 ticks give 3, 6, 10 and 20,
+/// 21 lets lemmings by at 81, 18 kills 12 at 91).
 pub const BEAR_TRAP_BUSY_TICKS: u32 = 20;
 /// How long a weird trap (the mud pit) stays busy after taking a lemming
 /// (**measured** in the original on Tricky 7 "Rescue Team" without skills,
@@ -173,7 +173,7 @@ pub const WEIRD_TRAP_BUSY_TICKS: u32 = 10;
 pub fn trap_busy_ticks(kind: Option<objects::ObjectKind>) -> u32 {
     match kind {
         Some(objects::ObjectKind::WeirdTrap) => WEIRD_TRAP_BUSY_TICKS,
-        Some(objects::ObjectKind::BearTrap) => BEAR_TRAP_BUSY_TICKS,
+        Some(objects::ObjectKind::BearTrap | objects::ObjectKind::Squasher) => BEAR_TRAP_BUSY_TICKS,
         _ => TRAP_BUSY_TICKS,
     }
 }
