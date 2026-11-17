@@ -62,11 +62,15 @@ pub struct Object {
 }
 
 impl Object {
-    /// Whether a lemming with its feet at `p` is on the object.
+    /// Whether a lemming with its feet at `p` is on the object: in its cell,
+    /// with its feet less than a segment above the surface. Feet a whole
+    /// segment up stand on something else, such as a builder's brick laid
+    /// across the object (owner's play of Tricky 7 "Rescue Team": a builder
+    /// on its first brick over the mud trap must not be caught).
     pub fn touches(&self, p: [i32; 3]) -> bool {
         p[0].div_euclid(SUB) == self.cell[0]
             && p[2].div_euclid(SUB) == self.cell[2]
-            && (self.surface - SUB / 8..=self.surface + SUB / 4).contains(&p[1])
+            && (self.surface - SUB / 8..self.surface + SUB / 4).contains(&p[1])
     }
 
     /// The middle of the surface it sits on, as a feet position.
