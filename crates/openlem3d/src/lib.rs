@@ -1545,6 +1545,7 @@ pub(crate) fn camera_controls(w: &mut World) {
     let input = &w.e.input;
     let (keys, mouse, motion, scroll) = (&input.keys, &input.mouse, &input.motion, &input.scroll);
     let time = w.e.time.game;
+    let real_dt = w.e.time.real.delta_secs();
     let info = &mut w.info;
     let (window, screen) = (&w.e.window, &w.screen);
     let scene_cam = &mut w.camera;
@@ -1787,7 +1788,41 @@ pub(crate) fn camera_controls(w: &mut World) {
         scene_cam.time = time.elapsed_secs();
         scene_cam.sky_column = sky_left_column(cam.yaw);
         scene_cam.right = right;
+        // Weather fades out over a moment as the camera goes under cover.
+        let sheltered = game
+            .terrain
+            .as_ref()
+            .map_or(0.0, |(level, ..)| shelter(level, cam.pos));
+        let ease = 1.0 - (-real_dt * SHELTER_RATE).exp();
+        scene_cam.shelter += (sheltered - scene_cam.shelter) * ease;
     }
+}
+
+/// How quickly weather fades as the camera goes under cover or comes out:
+/// the share of the way per second, roughly (ours).
+const SHELTER_RATE: f32 = 4.0;
+
+/// How enclosed a camera at `eye` is: 0 in the open, 1 with a roof above
+/// it and walls on most sides (a tunnel, a room), as found by looking a few
+/// units straight up and in eight directions around.
+fn shelter(level: &Level, eye: Vec3) -> f32 {
+    const ROOF: f32 = 6.0;
+    const WALLS: f32 = 4.0;
+    let blocked = |dir: Vec3, range: f32| {
+        (1..=(range / 0.1) as usize)
+            .any(|i| solid_cell(level, eye + dir * i as f32 * 0.1).is_some())
+    };
+    if !blocked(Vec3::Y, ROOF) {
+        return 0.0;
+    }
+    let walls = (0..8)
+        .filter(|&k| {
+            let a = k as f32 * std::f32::consts::FRAC_PI_4;
+            blocked(Vec3::new(a.cos(), 0.0, a.sin()), WALLS)
+        })
+        .count();
+    // A tunnel's two open ends leave six of eight walled.
+    ((walls as f32 - 3.0) / 3.0).clamp(0.0, 1.0)
 }
 
 /// With `--screenshot`, saves one frame `--wait` seconds after the level has

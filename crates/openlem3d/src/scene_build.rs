@@ -1408,7 +1408,12 @@ pub struct Show {
     pub waves: bool,
     /// A sea of water with waves mirrors the level (ours, in Ultra mode).
     pub mirror: bool,
+    /// A desert (a sea of sand) has a sandstorm (ours, in Ultra mode).
+    pub storm: bool,
 }
+
+/// The sea graphics that are sand.
+const SAND_SEAS: [u8; 1] = [0];
 
 /// Builds everything drawn for level `n`.
 pub fn build(data: &mut GameData, n: u32, show: Show) -> Result<BuiltLevel, l3d_formats::Error> {
@@ -1431,6 +1436,7 @@ pub fn build(data: &mut GameData, n: u32, show: Show) -> Result<BuiltLevel, l3d_
 
     let flags = level.flags;
     let surround = flags & level_flags::SURROUND_SKY != 0;
+    scene.storm = show.storm && !surround && SAND_SEAS.contains(&level.sea_gfx);
 
     if show.sea
         && level.sea_gfx != 0xFF

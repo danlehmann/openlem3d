@@ -47,6 +47,8 @@ pub struct SceneData {
     /// The height of a sea of water that mirrors the level (ours, enhanced
     /// mode), if any.
     pub mirror: Option<f32>,
+    /// A sandstorm blows over the level (ours, Ultra mode).
+    pub storm: bool,
 }
 
 /// Geometry rebuilt every frame (moving sprites such as lemmings), textured
@@ -118,6 +120,9 @@ pub struct SceneCamera {
     /// Draw [`SceneLayer::screen`] layers as the glass of a cathode-ray
     /// tube (ours).
     pub crt: bool,
+    /// How enclosed the camera is, 0 (open air) to 1 (inside a tunnel):
+    /// the grains and dust blowing past it stay outside.
+    pub shelter: f32,
 }
 
 /// What a frame draws of the scene.
@@ -138,7 +143,7 @@ pub struct SceneInput<'a> {
 
 /// The scene's colour format while glowing: room above white.
 const HDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
-const UNIFORM_SIZE: u64 = 160;
+const UNIFORM_SIZE: u64 = 176;
 /// How much brighter than its palette colour a fully glowing texel is drawn
 /// (ours, tuned by eye).
 const GLOW_GAIN: f32 = 3.0;
@@ -229,6 +234,8 @@ struct Pipelines {
     bloom_up: wgpu::RenderPipeline,
     /// Shadows: multiplied onto what is drawn, behind what is in front.
     shadow: wgpu::RenderPipeline,
+    /// Sand grains blown past the camera in a sandstorm.
+    grains: wgpu::RenderPipeline,
 }
 
 /// The scene drawn in [`HDR_FORMAT`], and the bloom chain's levels, each
@@ -457,6 +464,46 @@ impl SceneGpu {
             cache: None,
         })
         };
+        // A full-screen triangle over the scene, ignoring its depth:
+        // replacing what is there, or blended over it by alpha.
+        let over_scene = |label, fragment, blend: Option<wgpu::BlendState>| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(label),
+                layout: Some(&pl_two),
+                vertex: wgpu::VertexState {
+                    module: &self.shader,
+                    entry_point: Some("vs_sky"),
+                    buffers: &[],
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &self.shader,
+                    entry_point: Some(fragment),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format,
+                        blend,
+                        write_mask: wgpu::ColorWrites::COLOR,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                primitive: Default::default(),
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: self.depth_format,
+                    depth_write_enabled: Some(false),
+                    depth_compare: Some(wgpu::CompareFunction::Always),
+                    stencil: Default::default(),
+                    bias: Default::default(),
+                }),
+                multisample: Default::default(),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+        let grains = over_scene(
+            "scene grains",
+            "fs_grains",
+            Some(wgpu::BlendState::ALPHA_BLENDING),
+        );
         let sky = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("scene sky"),
             layout: Some(&pl_two),
@@ -567,6 +614,7 @@ impl SceneGpu {
             cache: None,
         });
         let pipelines = Pipelines {
+            grains,
             shadow,
             geometry: geometry("scene geometry", wgpu::Face::Back),
             // Mirrored, the faces turn over.
@@ -892,6 +940,17 @@ fn prepare(
     let eye = camera.view_proj.inverse() * Vec4::new(0.0, 0.0, 1.0, 0.0);
     let eye = eye.truncate() / eye.w;
     uniforms.extend([eye.x, eye.y, eye.z, mirror.unwrap_or(0.0)]);
+    let storm = content.data.as_ref().is_some_and(|d| d.storm);
+    // The storm, and how much of it reaches the camera: none under cover.
+    let (storm, around) = if storm {
+        (1.0, 1.0 - camera.shelter)
+    } else {
+        (0.0, 0.0)
+    };
+    // Heat shimmer goes with the storm, over the same deserts; it is kept
+    // in the alpha of the glowing scene, so only while that is drawn.
+    let heat = if glow { storm } else { 0.0 };
+    uniforms.extend([storm, around, heat, 0.0]);
     queue.write_buffer(&gpu.uniforms, 0, &f32_bytes(&uniforms));
     upload_dynamic(
         device,
@@ -1070,6 +1129,7 @@ fn draw(
         .as_ref()
         .is_some_and(|d| d.mirror.is_some());
     let reflection = mirror.then(|| gpu.reflection_target(&device, depth_size, scene_format));
+    let storm = input.content.data.as_ref().is_some_and(|d| d.storm);
     // The last frame, for layers showing the screen.
     let screen = input
         .screen
@@ -1159,6 +1219,12 @@ fn draw(
             pass.set_vertex_buffer(0, v.slice(..));
             pass.set_index_buffer(i.slice(..), wgpu::IndexFormat::Uint32);
             pass.draw_indexed(0..*n, 0, instance);
+        }
+        // Sand grains blown past the camera, over everything.
+        if storm && !mirrored {
+            pass.set_pipeline(&scene_p.grains);
+            pass.set_bind_group(0, &gpu.blank, &[]);
+            pass.draw(0..3, 0..1);
         }
     };
     let depth_attachment = || {

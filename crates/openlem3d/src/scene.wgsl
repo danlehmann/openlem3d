@@ -28,6 +28,10 @@ struct Uniforms {
     // xyz: the camera's position. w: the height of the sea the level is
     // mirrored in.
     eye: vec4<f32>,
+    // x: 1 when a sandstorm blows over the level (ours), else 0. y: how
+    // much of it blows past the camera, 0–1: less under cover. z: 1 when
+    // distant things shimmer in the heat (ours), else 0.
+    weather: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> u: Uniforms;
@@ -101,6 +105,8 @@ struct VOut {
     @location(5) mirror: vec2<f32>,
     // 1 on a screen showing the game, else 0.
     @location(6) screen: f32,
+    // Where it is in the world, before mirroring.
+    @location(7) world: vec3<f32>,
 };
 
 /// `p` mirrored in the sea when `mirrored`.
@@ -143,12 +149,14 @@ fn vs(v: VIn, @builtin(instance_index) instance: u32) -> VOut {
         o.clip = u.view_proj * vec4(mirror_of(p, mirrored), 1.0);
         o.light = vec3(0.0);
         o.wave = vec4(v.pos.x, v.pos.z, v.light.x, v.light.z);
+        o.world = p;
         o.uv = v.uv + v.offset * u.sky.w;
         o.tile = vec2(max(v.anim.x, 1.0), frame);
         return o;
     }
     let world = v.pos + u.right.xyz * v.offset.x + vec3(0.0, v.offset.y, 0.0);
     o.mirror.y = world.y - u.eye.w;
+    o.world = world;
     o.clip = u.view_proj * vec4(mirror_of(world, mirrored), 1.0);
     // A billboard is hidden only by what is in front of its middle (a
     // quarter unit above its anchor), all of it at that depth: a lemming
@@ -217,7 +225,15 @@ fn fs(v: VOut) -> @location(0) vec4<f32> {
     if (v.wave.z > 0.0 || v.wave.w > 0.0) {
         return vec4(sea(v, shaded), 1.0);
     }
-    return vec4((shaded + c.rgb * v.light) * (1.0 + glow * u.post.x), 1.0);
+    var lit = (shaded + c.rgb * v.light) * (1.0 + glow * u.post.x);
+    if (u.weather.x > 0.0) {
+        // Sand drifting over the desert floor, then the dust in the air.
+        if (v.tile.x > 0.0) {
+            lit *= drift(v.world.xz);
+        }
+        lit = dust(lit, v.world);
+    }
+    return vec4(lit, heat_of(v.world));
 }
 
 // Shadows (ours, enhanced mode): soft round discs multiplied onto what is
@@ -289,7 +305,12 @@ fn fs_sky(v: SkyOut) -> @location(0) vec4<f32> {
     // Mirrored, the image runs out above its top: towards there its alpha
     // fades to 0, and the sea shows that much less of it.
     let kept = select(1.0, smoothstep(0.0, SKY_MIRROR_FADE, p.y / u.sky.y), v.mirrored > 0.5);
-    return vec4(textureSampleLevel(tex, samp, uv, 0.0).rgb, kept);
+    var sky = textureSampleLevel(tex, samp, uv, 0.0).rgb;
+    if (u.weather.x > 0.0) {
+        sky = dusty_sky(sky, p, col);
+    }
+    // With heat shimmer the alpha is how much the sky shimmers instead.
+    return vec4(sky, select(kept, heat_of_sky(p), u.weather.z > 0.5));
 }
 
 /// How much of the sky's height, from its top, the mirrored sky fades out
@@ -353,7 +374,7 @@ fn present(c: vec3<f32>, clip: vec2<f32>) -> vec4<f32> {
 @fragment
 fn fs_present(v: SkyOut) -> @location(0) vec4<f32> {
     let at = (v.clip.xy - u.origin.zw) / vec2<f32>(textureDimensions(tex));
-    return present(textureSampleLevel(tex, samp, at, 0.0).rgb, v.clip.xy);
+    return present(textureSampleLevel(tex, samp, shimmer(at), 0.0).rgb, v.clip.xy);
 }
 
 /// With the bloom chain's top level blurred up and added: four diagonal
@@ -369,7 +390,7 @@ fn fs_present_glow(v: SkyOut) -> @location(0) vec4<f32> {
         + textureSampleLevel(second_tex, second_samp, at + vec2(o.x, -o.y), 0.0).rgb
         + textureSampleLevel(second_tex, second_samp, at + vec2(-o.x, o.y), 0.0).rgb;
     let glow = finite(taps / 4.0) * BLOOM_STRENGTH;
-    return present(textureSampleLevel(tex, samp, at, 0.0).rgb + glow, v.clip.xy);
+    return present(textureSampleLevel(tex, samp, shimmer(at), 0.0).rgb + glow, v.clip.xy);
 }
 
 // Bloom: a full-screen triangle with texture coordinates over the target.
@@ -672,4 +693,161 @@ fn crt(at: vec2<f32>, footprint: vec2<f32>) -> vec3<f32> {
     c *= 1.0 + 0.05 * smoothstep(0.0, 0.08, band) * (1.0 - smoothstep(0.08, 0.3, band));
     c += vec3(0.05) * (1.0 - smoothstep(0.0, 0.45, length(at - vec2(0.28, 0.22))));
     return c * glass;
+}
+
+// A sandstorm over a desert (ours, Ultra mode): dust in the air, thicker
+// with distance and near the ground and billowing as the wind carries it;
+// streaks of sand racing over the floor; the sky dusty down to the
+// horizon, with bands blowing past; and grains flying past the camera.
+// The whole storm swells and eases in gusts.
+
+/// The wind's direction over the ground (world x and z).
+const WIND: vec2<f32> = vec2(0.944, 0.330);
+/// The dust's colour, linear, and the sky's where the dust hides it.
+const DUST_COLOUR: vec3<f32> = vec3(0.60, 0.43, 0.25);
+const DUST_SKY: vec3<f32> = vec3(0.78, 0.58, 0.34);
+/// How thick the dust is: the share of light it takes per unit, at an
+/// average gust.
+const DUST_DENSITY: f32 = 0.06;
+const GRAIN_COLOUR: vec3<f32> = vec3(0.85, 0.68, 0.45);
+/// How far from the eye the air is clear of dust, in units, so that what
+/// is close stays clear.
+const DUST_CLEAR: f32 = 3.0;
+
+/// How strong the gusts are `t` seconds in, about 0.3 to 1.
+fn gust(t: f32) -> f32 {
+    return clamp(0.65 + 0.25 * sin(t * 0.31) + 0.15 * sin(t * 0.83 + 1.7), 0.3, 1.0);
+}
+
+/// How strong the storm is `t` seconds in: the gusts.
+fn storm(t: f32) -> f32 {
+    return gust(t) * u.weather.x;
+}
+
+/// How much brighter the desert floor is at `p` (world x, z) under the sand
+/// blowing over it.
+fn drift(p: vec2<f32>) -> f32 {
+    let t = u.sky.w;
+    let along = dot(p, WIND);
+    let across = dot(p, vec2(-WIND.y, WIND.x));
+    let n = value_noise(vec2(along * 0.35 - t * 2.2, across * 2.5))
+        * value_noise(vec2(along * 0.9 - t * 3.1, across * 1.3 + 5.0));
+    return 1.0 + 0.6 * smoothstep(0.2, 0.55, n) * storm(t);
+}
+
+/// `c`, seen through the dust between the eye and `world`.
+fn dust(c: vec3<f32>, world: vec3<f32>) -> vec3<f32> {
+    let t = u.sky.w;
+    let d = max(distance(world, u.eye.xyz) - DUST_CLEAR, 0.0);
+    let low = exp(-max(world.y - 1.0, 0.0) / 5.0);
+    let billow = value_noise((world.xz - WIND * t * 3.0) * 0.08);
+    let density = DUST_DENSITY * storm(t) * (0.5 + billow) * (0.5 + 0.5 * low);
+    let fog = 1.0 - exp(-d * density);
+    return mix(c, DUST_COLOUR, fog * 0.92);
+}
+
+/// The sky `sky` behind the dust, at `p` (screen pixels, the horizon at
+/// `u.sky.y`) and sky column `col`.
+fn dusty_sky(sky: vec3<f32>, p: vec2<f32>, col: f32) -> vec3<f32> {
+    let t = u.sky.w;
+    let r = p.y / max(u.sky.y, 1.0);
+    let near = smoothstep(0.1, 1.0, r);
+    let bands = value_noise(vec2(col * 0.02 - t * 0.6, r * 7.0));
+    let amount = storm(t) * (0.55 + 0.45 * near) * (0.85 + 0.3 * bands);
+    // Desaturated first, so blue sky and brown dust do not mix to purple.
+    let grey = vec3(dot(sky, vec3(0.3, 0.55, 0.15)));
+    return mix(mix(sky, grey, min(1.2 * storm(t), 1.0)), DUST_SKY, clamp(amount, 0.0, 0.97));
+}
+
+/// Grains of sand flying past the camera, in three layers, nearer ones
+/// bigger and faster: streaks along the wind as it crosses the screen.
+@fragment
+fn fs_grains(v: SkyOut) -> @location(0) vec4<f32> {
+    let t = u.sky.w;
+    let g = storm(t) * u.weather.y;
+    let s = u.sky.z;
+    let side = dot(WIND, normalize(u.right.xz + vec2(1e-5, 0.0)));
+    let dir = normalize(vec2(select(-1.0, 1.0, side >= 0.0) * max(abs(side), 0.35), 0.12));
+    var alpha = 0.0;
+    for (var i = 0; i < 3; i++) {
+        let depth = 1.0 + f32(i);
+        let cell = 26.0 * s / depth;
+        let speed = 1100.0 * s / depth * (0.4 + 0.6 * abs(side));
+        let q = (v.clip.xy - dir * speed * t) / cell;
+        let id = floor(q);
+        let f = q - id;
+        let layer = vec2(f32(i) * 101.0, 0.0);
+        if (hash2(id + layer) > 0.14 * g) {
+            continue;
+        }
+        let centre = vec2(hash2(id + layer + vec2(7.0, 0.0)), hash2(id + layer + vec2(19.0, 3.0)))
+            * 0.4 + 0.3;
+        let half_len = min(speed / 60.0 / cell, 0.9) * 0.25;
+        let a = centre - dir * half_len;
+        let ba = dir * half_len * 2.0;
+        let h = clamp(dot(f - a, ba) / dot(ba, ba), 0.0, 1.0);
+        let dist = length(f - a - ba * h) * cell;
+        let width = 1.8 * s / depth;
+        alpha += (1.0 - smoothstep(0.0, width, dist)) * 0.6 / depth;
+    }
+    let grains = min(alpha * g, 0.85);
+    // Sheets of dust sweeping across the view, long along the wind.
+    let p = v.clip.xy / s;
+    let along = dot(p, dir);
+    let across = dot(p, vec2(-dir.y, dir.x));
+    let sheet = value_noise(vec2(along * 0.006 - t * 1.4, across * 0.02))
+        * value_noise(vec2(along * 0.013 - t * 2.3, across * 0.045 + 9.0));
+    let sheets = smoothstep(0.15, 0.5, sheet) * 0.2 * g;
+    let a = grains + sheets * (1.0 - grains);
+    let colour = mix(DUST_SKY, GRAIN_COLOUR, grains / max(a, 1e-4));
+    return vec4(colour, a);
+}
+
+// Heat shimmer over a desert (ours, Ultra mode): what is far off and near
+// the ground wavers, in waves rising slowly up the screen. While drawing,
+// the scene keeps in each pixel's alpha how much it shimmers; the picture
+// is then shifted by that much as it is presented.
+
+/// Where the shimmer starts and where it is full, in units from the eye.
+const HEAT_NEAR: f32 = 8.0;
+const HEAT_FAR: f32 = 30.0;
+/// How far the picture shifts at full shimmer, in the original's pixels.
+const HEAT_PIXELS: f32 = 1.2;
+
+/// The alpha kept for what is drawn at `world`: how much it shimmers, or 1
+/// without heat.
+fn heat_of(world: vec3<f32>) -> f32 {
+    if (u.weather.z <= 0.5) {
+        return 1.0;
+    }
+    let far = smoothstep(HEAT_NEAR, HEAT_FAR, distance(world, u.eye.xyz));
+    let low = exp(-max(world.y - 1.0, 0.0) / 4.0);
+    return far * (0.35 + 0.65 * low);
+}
+
+/// How much the sky shimmers at `p` (screen pixels, the horizon at
+/// `u.sky.y`): only just above the horizon.
+fn heat_of_sky(p: vec2<f32>) -> f32 {
+    return smoothstep(0.8, 1.0, p.y / max(u.sky.y, 1.0));
+}
+
+/// Where to take the picture from for the point `at` (0–1 over it), shifted
+/// by the shimmer kept in its alpha.
+fn shimmer(at: vec2<f32>) -> vec2<f32> {
+    if (u.weather.z <= 0.5) {
+        return at;
+    }
+    let dims = vec2<f32>(textureDimensions(tex));
+    let amount = clamp(textureSampleLevel(tex, samp, at, 0.0).a, 0.0, 1.0);
+    let p = at * dims / u.sky.z;
+    let t = u.sky.w;
+    let wobble = 0.6 * sin(p.y * 0.9 + t * 7.0 + 2.0 * sin(p.x * 0.05 + t))
+        + 0.4 * sin(p.y * 2.3 + t * 11.0 + p.x * 0.11);
+    let offset = vec2(wobble, 0.25 * sin(p.x * 0.7 + t * 5.0)) * HEAT_PIXELS * u.sky.z * amount;
+    // Kept inside the picture: the sampler would wrap round its edges.
+    let shifted = clamp(at + offset / dims, vec2(0.5) / dims, vec2(1.0) - vec2(0.5) / dims);
+    // Only shifted onto what shimmers as much: else, beside something near
+    // (a wall's edge), that would be pulled into what is far behind it.
+    let there = clamp(textureSampleLevel(tex, samp, shifted, 0.0).a, 0.0, 1.0);
+    return mix(at, shifted, smoothstep(amount - 0.3, amount - 0.05, there));
 }
