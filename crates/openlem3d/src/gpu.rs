@@ -66,6 +66,8 @@ impl Gpu {
         profile: bool,
         backend: Option<wgpu::Backends>,
     ) -> (Gpu, wgpu::Surface<'static>) {
+        #[cfg(windows)]
+        follow_dynamic_refresh();
         let mut desc = wgpu::InstanceDescriptor::new_without_display_handle_from_env();
         // Vulkan on Windows-on-ARM (Adreno) loses the device after a few
         // seconds, so Windows defaults to DX12. `WGPU_BACKEND` overrides.
@@ -769,4 +771,35 @@ mod edr {
         let space = CGColorSpace::with_name(Some(unsafe { kCGColorSpaceExtendedLinearSRGB }));
         hal.render_layer().lock().setColorspace(space.as_deref());
     }
+}
+
+/// Lets the swap chains see the display's own refresh rate under Windows
+/// 11's dynamic refresh rate, which otherwise shows them a steady fraction
+/// of it (60 Hz on a 120 Hz display), whenever the system raises it.
+/// Looked up at run time, as Windows before build 22502 lacks it; there,
+/// and on a second call, it does nothing.
+#[cfg(windows)]
+fn follow_dynamic_refresh() {
+    use windows_sys::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let name: Vec<u16> = "dxgi.dll\0".encode_utf16().collect();
+        // SAFETY: a null-terminated name; dxgi.dll stays loaded (wgpu uses
+        // it), and the function takes nothing and returns an HRESULT.
+        unsafe {
+            let dxgi = LoadLibraryW(name.as_ptr());
+            if dxgi.is_null() {
+                return;
+            }
+            let Some(f) = GetProcAddress(dxgi, c"DXGIDisableVBlankVirtualization".as_ptr().cast())
+            else {
+                return;
+            };
+            let f: unsafe extern "system" fn() -> i32 = std::mem::transmute(f);
+            let result = f();
+            if result < 0 {
+                warn!("could not follow the dynamic refresh rate: {result:#x}");
+            }
+        }
+    });
 }
