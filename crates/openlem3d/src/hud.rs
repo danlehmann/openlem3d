@@ -62,15 +62,17 @@ pub(crate) fn skill_keys(w: &mut World) {
 
 /// During a replay, a click or tap on the view hands control back to the
 /// player ("Click to Play"); the click itself does nothing else (skills are
-/// only given from the next one).
+/// only given from the next one). A finger that landed on a button (the
+/// level button's "Menu", say) is no tap on the view, though it lifts when
+/// that button is no longer pressed.
 pub(crate) fn take_over(w: &mut World) {
     let (mouse, touches) = (&mut w.e.input.mouse, &w.e.input.touches);
-    let (settings, game) = (&w.settings, &mut w.game);
+    let (settings, game, starts) = (&w.settings, &mut w.game, &w.touch_starts);
     let button = settings.action_button();
     let clicked = mouse.just_pressed(button)
         || touches
             .iter_just_released()
-            .any(|t| t.distance().length() < crate::touch::TAP_SLOP);
+            .any(|t| t.distance().length() < crate::touch::TAP_SLOP && !starts.on_button(t.id()));
     if game.replay.is_none() || !clicked || w.ui.any_active() {
         return;
     }

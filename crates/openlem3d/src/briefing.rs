@@ -33,14 +33,19 @@ pub(crate) struct Briefing {
     root: Option<NodeId>,
     overlay: Option<NodeId>,
     choices: Vec<(NodeId, Choice)>,
+    held: crate::touch::HeldChoices,
     cache: HashMap<u8, Option<ScenePics>>,
     centre: Option<(u32, Vec3, bool)>,
 }
 
 impl Briefing {
-    /// Whether `c` is pressed.
-    fn on(&self, ui: &Ui, c: Choice) -> bool {
-        self.choices.iter().any(|&(id, k)| k == c && ui.pressed(id))
+    /// Whether `c` was clicked, or a finger lifted on it (a touch picks on
+    /// lifting, so that the choice shows held until then).
+    fn on(w: &World, c: Choice) -> bool {
+        let click = w.e.input.mouse.just_pressed(MouseButton::Left);
+        w.briefing.choices.iter().any(|&(id, k)| {
+            k == c && ((click && w.ui.pressed(id)) || crate::touch::lifted_over(w, id))
+        })
     }
 
     /// Whether the pointer is on a choice.
@@ -180,6 +185,7 @@ pub(crate) fn spawn_briefing(w: &mut World) {
     text("Menu", 561.0, LABEL_Y, false);
     // Clicking or tapping a prompt picks it; anywhere else continues.
     for (choice, x, width) in [
+        (Choice::Continue, 25.0, 150.0),
         (Choice::Preview, 268.0, 150.0),
         (Choice::Menu, 522.0, 110.0),
     ] {
@@ -191,25 +197,42 @@ pub(crate) fn spawn_briefing(w: &mut World) {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Choice {
+    Continue,
     Preview,
     Menu,
 }
 
+/// Grows the choice a finger holds; Continue too while one is held off
+/// the choices, as lifting it there continues.
+fn show_held(w: &mut World) {
+    let off = crate::touch::held_off_buttons(w);
+    for i in 0..w.briefing.choices.len() {
+        let (id, c) = w.briefing.choices[i];
+        let held = crate::touch::held_over(w, id) || (c == Choice::Continue && off);
+        w.briefing.held.show(&mut w.ui, id, held);
+    }
+}
+
 pub(crate) fn briefing_input(w: &mut World) {
-    let lifted = crate::touch::lifted(w);
-    let b = &mut w.briefing;
-    b.choices.retain(|&(id, _)| w.ui.contains(id));
+    w.briefing.choices.retain(|&(id, _)| w.ui.contains(id));
+    show_held(w);
+    let lifted = crate::touch::lifted_off_buttons(w);
+    let (back_on, show_on, go_on) = (
+        Briefing::on(w, Choice::Menu),
+        Briefing::on(w, Choice::Preview),
+        Briefing::on(w, Choice::Continue),
+    );
+    let b = &w.briefing;
     let (keys, mouse) = (&w.e.input.keys, &w.e.input.mouse);
     let on_prompt = b.on_prompt(&w.ui);
-    let back = mouse.just_pressed(MouseButton::Right)
-        || keys.just_pressed(KeyCode::Escape)
-        || b.on(&w.ui, Choice::Menu);
-    let show = keys.just_pressed(KeyCode::Enter)
-        || keys.just_pressed(KeyCode::NumpadEnter)
-        || b.on(&w.ui, Choice::Preview);
+    let back =
+        mouse.just_pressed(MouseButton::Right) || keys.just_pressed(KeyCode::Escape) || back_on;
+    let show =
+        keys.just_pressed(KeyCode::Enter) || keys.just_pressed(KeyCode::NumpadEnter) || show_on;
     let go = (mouse.just_pressed(MouseButton::Left) && !on_prompt)
+        || go_on
         || keys.just_pressed(KeyCode::Space)
-        || (lifted && !on_prompt)
+        || lifted
         || keys
             .get_just_pressed()
             .any(|k| !matches!(k, KeyCode::Escape | KeyCode::Enter | KeyCode::NumpadEnter));
@@ -287,15 +310,18 @@ pub(crate) fn preview(w: &mut World) {
         return;
     }
     w.briefing.choices.retain(|&(id, _)| w.ui.contains(id));
-    let lifted = crate::touch::lifted(w);
-    let (on_menu, on_preview, on_prompt) = (
-        w.briefing.on(&w.ui, Choice::Menu),
-        w.briefing.on(&w.ui, Choice::Preview),
+    show_held(w);
+    let lifted = crate::touch::lifted_off_buttons(w);
+    let (on_menu, on_preview, on_continue, on_prompt) = (
+        Briefing::on(w, Choice::Menu),
+        Briefing::on(w, Choice::Preview),
+        Briefing::on(w, Choice::Continue),
         w.briefing.on_prompt(&w.ui),
     );
     let on = |c: Choice| match c {
         Choice::Menu => on_menu,
         Choice::Preview => on_preview,
+        Choice::Continue => on_continue,
     };
     let time = w.e.time.game;
     let (keys, mouse) = (&mut w.e.input.keys, &mut w.e.input.mouse);
@@ -337,7 +363,8 @@ pub(crate) fn preview(w: &mut World) {
     }
     let any = keys.get_just_pressed().next().is_some()
         || (mouse.get_just_pressed().next().is_some() && !on_prompt)
-        || (lifted && !on_prompt);
+        || on(Choice::Continue)
+        || lifted;
     // The level starts from camera 1: the camera glides there from where
     // the flyover left it, the level still waiting; input meanwhile skips
     // the rest.
@@ -503,11 +530,15 @@ pub(crate) fn preview_overlay(w: &mut World) {
     // Clicking or tapping a prompt picks it; anywhere else continues.
     let buttons: &[(Choice, f32, f32)] = if practice {
         &[
+            (Choice::Continue, 25.0, 150.0),
             (Choice::Preview, 268.0, 150.0),
             (Choice::Menu, 522.0, 110.0),
         ]
     } else {
-        &[(Choice::Menu, 522.0, 110.0)]
+        &[
+            (Choice::Continue, 25.0, 150.0),
+            (Choice::Menu, 522.0, 110.0),
+        ]
     };
     for &(choice, x, width) in buttons {
         let id = ui.child(canvas, UiNode::new().button().at(x, PROMPT_Y, width, 32.0));

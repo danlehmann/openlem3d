@@ -146,6 +146,79 @@ pub fn lifted(w: &World) -> bool {
         .any(|t| w.touch_starts.0.get(&t.id()).map(|s| s.0) == Some(w.state))
 }
 
+/// Fingers now down (`down`) or just lifted that landed on this screen, and
+/// whether they landed on a button, with where they are as [`Ui::focus`]
+/// measures it.
+fn fingers(w: &World, down: bool) -> impl Iterator<Item = (bool, Vec2)> + '_ {
+    let touches = &w.e.input.touches;
+    let all: Box<dyn Iterator<Item = _>> = if down {
+        Box::new(touches.iter())
+    } else {
+        Box::new(touches.iter_just_released())
+    };
+    all.filter_map(move |t| {
+        let &(state, button) = w.touch_starts.0.get(&t.id())?;
+        let p = w.screen.on_screen(t.position()) * w.e.window.scale_factor();
+        (state == w.state).then_some((button, p))
+    })
+}
+
+/// Whether a finger is down on `id`, having landed on a button.
+pub fn held_over(w: &World, id: crate::ui::NodeId) -> bool {
+    fingers(w, true).any(|(button, p)| button && w.ui.over(id, p))
+}
+
+/// Whether a finger that landed on a button just lifted on `id`: a tap on
+/// it, or a press slid onto it. Slid off, it picks nothing.
+pub fn lifted_over(w: &World, id: crate::ui::NodeId) -> bool {
+    fingers(w, false).any(|(button, p)| button && w.ui.over(id, p))
+}
+
+/// Whether a finger is down that landed off the buttons.
+pub fn held_off_buttons(w: &World) -> bool {
+    fingers(w, true).any(|(button, _)| !button)
+}
+
+/// Whether a finger that landed off the buttons just lifted.
+pub fn lifted_off_buttons(w: &World) -> bool {
+    fingers(w, false).any(|(button, _)| !button)
+}
+
+/// How much bigger a choice's prompt and label are drawn while a finger
+/// holds it (ours).
+const HELD_SCALE: f32 = 1.2;
+
+/// Choices' pictures (by the choice's button) and where they were placed,
+/// to grow while held and put back.
+#[derive(Default)]
+pub struct HeldChoices(HashMap<crate::ui::NodeId, Vec<(crate::ui::NodeId, Rect)>>);
+
+impl HeldChoices {
+    /// Draws the choice `id`'s pictures grown about their middle while
+    /// `held`, as placed otherwise.
+    pub fn show(&mut self, ui: &mut crate::ui::Ui, id: crate::ui::NodeId, held: bool) {
+        self.0.retain(|&k, _| ui.contains(k));
+        let parts = self.0.entry(id).or_insert_with(|| ui.pictures_within(id));
+        let Some(bounds) = parts
+            .iter()
+            .map(|&(_, r)| r)
+            .reduce(|a, b| Rect::from_corners(a.min.min(b.min), a.max.max(b.max)))
+        else {
+            return;
+        };
+        let c = bounds.center();
+        let k = if held { HELD_SCALE } else { 1.0 };
+        for &(part, r) in parts.iter() {
+            if let Some(n) = ui.get_mut(part) {
+                n.at = Some(Rect::from_center_size(
+                    c + (r.center() - c) * k,
+                    r.size() * k,
+                ));
+            }
+        }
+    }
+}
+
 /// One finger: horizontal drag turns, vertical drag moves forward/back.
 /// Two fingers: as [`two_fingers`]. Riding along, any sideways drag turns the
 /// head, as an action-button drag does.

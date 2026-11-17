@@ -416,6 +416,33 @@ impl Ui {
         self.get(id).is_some_and(|n| n.interaction != n.previous)
     }
 
+    /// Whether `p` (in pixels from the screen's corner, as [`Ui::focus`]
+    /// measures the pointer) is on the node.
+    pub fn over(&self, id: NodeId, p: Vec2) -> bool {
+        self.get(id).is_some_and(|n| {
+            let c = n.computed;
+            c.visible && c.pixels.contains(p) && c.clip.is_none_or(|clip| clip.contains(p))
+        })
+    }
+
+    /// The pictures beside `id` (its parent's other children, not buttons)
+    /// whose middles lie in its rectangle, with their rectangles: a choice's
+    /// prompt and label, say.
+    pub fn pictures_within(&self, id: NodeId) -> Vec<(NodeId, Rect)> {
+        let Some((Some(parent), Some(area))) = self.get(id).map(|n| (n.parent, n.at)) else {
+            return Vec::new();
+        };
+        self.children(parent)
+            .iter()
+            .filter_map(|&c| {
+                let n = self.get(c)?;
+                let at = n.at?;
+                (c != id && !n.button && n.image.is_some() && area.contains(at.center()))
+                    .then_some((c, at))
+            })
+            .collect()
+    }
+
     /// Whether any node is pressed.
     pub fn any_pressed(&self) -> bool {
         self.nodes()

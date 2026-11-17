@@ -37,6 +37,7 @@ pub(crate) struct Results {
     outcome: Option<Outcome>,
     root: Option<NodeId>,
     choices: Vec<(NodeId, Choice)>,
+    held: crate::touch::HeldChoices,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -195,13 +196,26 @@ pub(crate) fn spawn_results(w: &mut World) {
 /// Esc: the level list.
 pub(crate) fn results_input(w: &mut World) {
     let Some(o) = w.results.outcome else { return };
-    let lifted = crate::touch::lifted(w);
+    w.results.choices.retain(|&(id, _)| w.ui.contains(id));
+    // The choice a finger holds grows, Next too while one is held off the
+    // choices, as lifting it there goes on; a touch picks on lifting.
+    let off = crate::touch::held_off_buttons(w);
+    for i in 0..w.results.choices.len() {
+        let (id, c) = w.results.choices[i];
+        let held = crate::touch::held_over(w, id) || (c == Choice::Next && off);
+        w.results.held.show(&mut w.ui, id, held);
+    }
+    let lifted = crate::touch::lifted_off_buttons(w);
+    let click = w.e.input.mouse.just_pressed(MouseButton::Left);
+    let picked: Vec<Choice> = w
+        .results
+        .choices
+        .iter()
+        .filter(|&&(id, _)| (click && w.ui.pressed(id)) || crate::touch::lifted_over(w, id))
+        .map(|&(_, c)| c)
+        .collect();
     let (ui, choices) = (&w.ui, &w.results.choices);
-    let on = |c: Choice| {
-        choices
-            .iter()
-            .any(|&(id, k)| ui.interaction(id) == Interaction::Pressed && k == c)
-    };
+    let on = |c: Choice| picked.contains(&c);
     let on_prompt = choices
         .iter()
         .any(|&(id, _)| ui.interaction(id) != Interaction::None);
@@ -211,7 +225,7 @@ pub(crate) fn results_input(w: &mut World) {
         || on(Choice::Menu);
     let go = on(Choice::Next)
         || (mouse.just_pressed(MouseButton::Left) && !on_prompt)
-        || (lifted && !on_prompt)
+        || lifted
         || keys.any_just_pressed([KeyCode::Space, KeyCode::Enter, KeyCode::NumpadEnter]);
     // A passed level moves the title screen's and the level list's rating
     // on to the next level's: after Fun 20, Tricky (owner).

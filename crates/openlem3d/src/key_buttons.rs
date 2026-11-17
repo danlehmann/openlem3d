@@ -49,11 +49,20 @@ impl KeyButtons {
 }
 
 /// Sends a pressed button's key as keyboard input, released the next frame.
-/// The key's state changes at once too, as a real key's does.
+/// The key's state changes at once too, as a real key's does. A click
+/// presses it at once; a finger when it lifts on it, so that it shows held
+/// (in the hover colour) until then, and sliding off picks nothing.
 pub(crate) fn press(w: &mut World) {
-    let ui = &w.ui;
+    w.key_buttons.buttons.retain(|(id, _)| w.ui.contains(*id));
+    let click = w.e.input.mouse.just_pressed(MouseButton::Left);
+    let pressed: Vec<KeyCode> = w
+        .key_buttons
+        .buttons
+        .iter()
+        .filter(|&&(id, _)| (click && w.ui.just_pressed(id)) || crate::touch::lifted_over(w, id))
+        .map(|&(_, b)| b.key)
+        .collect();
     let kb = &mut w.key_buttons;
-    kb.buttons.retain(|(id, _)| ui.contains(*id));
     let input = &mut w.e.input;
     let mut send = |key: KeyCode, state: ButtonState| {
         input.keyboard.push(KeyboardInput {
@@ -71,11 +80,9 @@ pub(crate) fn press(w: &mut World) {
     for key in kb.held.drain(..) {
         send(key, ButtonState::Released);
     }
-    for (id, b) in &kb.buttons {
-        if ui.just_pressed(*id) {
-            send(b.key, ButtonState::Pressed);
-            kb.held.push(b.key);
-        }
+    for key in pressed {
+        send(key, ButtonState::Pressed);
+        kb.held.push(key);
     }
 }
 
