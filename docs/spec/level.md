@@ -124,6 +124,10 @@ the boundary is `[8, 8, 19, 27…30]` and the hatch sits at x ≈ 20–27,
 z ≈ 13.5. Read X-first, every hatch lies outside the boundary and every
 lemming would die on release. Read Z-first, all of them are inside.
 
+The maximum is exclusive: a lemming is zapped on entering the cell numbered
+max (**verified** 2026-11-16: Practice "Blocker" with max X 23, a walker heading
++X was zapped at x = 23.0). The minimum is assumed inclusive.
+
 ### Flags at `0x11B` ([L3DEdit]; each bit set or cleared in the original, 2026-11-04, unless noted)
 
 Tested on Fun 1 "Take a Dive" (flags `0x0130`) in Practice slot 84 with the

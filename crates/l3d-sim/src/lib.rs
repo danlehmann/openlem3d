@@ -18,16 +18,16 @@ pub const TICKS_PER_SECOND: u32 = 14;
 /// Walking speed, sub-units per tick (verified: 1/32 unit per tick).
 const WALK_SPEED: i32 = SUB / 32;
 /// Falling: the speed grows by [`FALL_ACCEL`] sub-units per tick each tick up
-/// to [`FALL_SPEED`] (¼ unit per tick); the lemming drifts on at walking
+/// to [`FALL_SPEED`] (Â¼ unit per tick); the lemming drifts on at walking
 /// speed for the first [`FALL_DRIFT_TICKS`] ticks (measured tick by tick on
 /// Practice "Trampoline", four identical falls).
 const FALL_ACCEL: i32 = 8;
 const FALL_SPEED: i32 = SUB / 4;
 const FALL_DRIFT_TICKS: u32 = 12;
-/// Floating speed with an open umbrella (verified ±5%: the walking speed).
+/// Floating speed with an open umbrella (verified Â±5%: the walking speed).
 const FLOAT_SPEED: i32 = SUB / 32;
 /// Distance fallen before a floater opens the umbrella (verified, rough:
-/// about 1½ units, ~7 ticks).
+/// about 1Â½ units, ~7 ticks).
 const FLOAT_OPEN: i32 = 3 * SUB / 2;
 /// Climbing speed (rough measurement: about 0.04 unit per tick).
 const CLIMB_SPEED: i32 = SUB / 25;
@@ -39,17 +39,17 @@ const STEP_UP: i32 = SUB / 4;
 const STEP_SLACK: i32 = SUB / 32;
 /// Lowest drop a walker steps down without falling (provisional).
 const STEP_DOWN: i32 = SUB / 4;
-/// Falls of this height or more splat (owner's observations: 3¾ units
+/// Falls of this height or more splat (owner's observations: 3Â¾ units
 /// survived and 4 killed out of a miner's tunnel in Practice "Miner", and
 /// lemmings dropping 4 units into a hole dug on Fun 4's castle die).
 const SPLAT_HEIGHT: i32 = 4 * SUB;
 /// How far a lemming falls before it screams (recorded in the original,
-/// 2026-10-24: falls of 5½ and 4½ units both screamed 17 ticks in, about
-/// 3½ units down, whenever they would land).
+/// 2026-10-24: falls of 5Â½ and 4Â½ units both screamed 17 ticks in, about
+/// 3Â½ units down, whenever they would land).
 const SCREAM_HEIGHT: i32 = 7 * SUB / 2;
 /// Shorter falls of this height or more leave the lemming on its back for
-/// [`STUN_TICKS`] (owner's observation: falls of 3, 3¼ and 3¾ units from a
-/// miner's tunnel in Practice "Miner" stun, 2¾ does not; the time is ours).
+/// [`STUN_TICKS`] (owner's observation: falls of 3, 3Â¼ and 3Â¾ units from a
+/// miner's tunnel in Practice "Miner" stun, 2Â¾ does not; the time is ours).
 const STUN_HEIGHT: i32 = 3 * SUB;
 pub const STUN_TICKS: u32 = 28;
 /// Clearance a walker needs above the surface it walks onto: openings exactly
@@ -59,12 +59,12 @@ const HEAD_HEIGHT: i32 = SUB / 2;
 /// How far ahead of its centre a walker probes for walls.
 const REACH: i32 = SUB / 4;
 /// Half-size of the area around a blocker or turner that redirects walkers
-/// (verified along the path: 0.48 ± 0.05 unit; across the path assumed equal).
+/// (verified along the path: 0.48 Â± 0.05 unit; across the path assumed equal).
 const BLOCK_RADIUS: i32 = 123;
 /// Ticks per countdown digit shown over a bomber (verified: about 8).
 pub const FUSE_DIGIT_TICKS: u32 = 8;
 /// Bomber fuse length from assignment to explosion (verified: about 3.6 s,
-/// a 5…1 countdown of 8-tick digits followed by the swelling animation).
+/// a 5â€¦1 countdown of 8-tick digits followed by the swelling animation).
 pub const FUSE_TICKS: u32 = 50;
 /// The last ticks of a fuse, after the countdown: the bomber holds its nose
 /// and swells (observed: about 10 ticks after the last countdown digit).
@@ -76,7 +76,7 @@ pub const HATCH_OPEN_TICKS: u32 = 10;
 /// How far below and above the bomber's feet the blast reaches.
 const BLAST_BELOW: i32 = SUB / 4;
 const BLAST_ABOVE: i32 = SUB / 2;
-/// Ticks per segment dug (measured: 3.0 ± 0.1 s per quarter unit through
+/// Ticks per segment dug (measured: 3.0 Â± 0.1 s per quarter unit through
 /// Practice "Digger"'s bridge, seen side-on, with the first quarter gone
 /// one period after the assignment).
 pub const DIG_TICKS: u32 = 42;
@@ -86,7 +86,7 @@ const DIG_SOUND_TICKS: u32 = 4;
 const PICK_SOUND_TICKS: u32 = 4;
 const CLIMB_SOUND_TICKS: u32 = 8;
 const UMBRELLA_SOUND_TICKS: u32 = 19;
-/// Ticks per brick laid by a builder (verified: 25 ± 1).
+/// Ticks per brick laid by a builder (verified: 25 Â± 1).
 pub const BUILD_TICKS: u32 = 25;
 /// Ticks from the assignment to the first brick: the builder stands still
 /// with its sack until then (measured: 8 in the Practice "Builder" demo).
@@ -97,11 +97,11 @@ const BRICKS: u8 = 6;
 /// walking speed.
 pub const BRICK_WALK_TICKS: i32 = (BRICK_RUN + WALK_SPEED - 1) / WALK_SPEED;
 /// How long a builder out of bricks stands on its last brick before walking
-/// off along it (cells 474–488; verified on a changed "Team Work",
+/// off along it (cells 474â€“488; verified on a changed "Team Work",
 /// 2026-10-22: about 1.1 s at the start of the last brick, then about 17
 /// ticks walking to its end, and the fall).
 const SHRUG_TICKS: u32 = 15;
-/// Each brick moves the builder this far forward, ½ unit, and ¼ unit up;
+/// Each brick moves the builder this far forward, Â½ unit, and Â¼ unit up;
 /// bricks reach from [`BRICK_START`] to [`BRICK_END`] ahead of the feet, so
 /// consecutive bricks meet end to end (verified on a changed "Team Work",
 /// 2026-10-23: twelve bricks from mid-cell, side-on against a reference
@@ -150,14 +150,14 @@ pub const ELECTROCUTE_TICKS: u32 = 13;
 pub const DROWN_TICKS: u32 = 12;
 /// How long an exploding bomber's pieces fly before it is gone (measured in
 /// the original, 2026-10-23: they rise about 2 units and rain down for about
-/// 2½ s).
+/// 2Â½ s).
 pub const EXPLODE_TICKS: u32 = 35;
 /// How long a killing trap stays busy after taking a lemming, but for the
 /// weird trap ([`WEIRD_TRAP_BUSY_TICKS`]) (provisional).
 pub const TRAP_BUSY_TICKS: u32 = 28;
 /// How long a weird trap (the mud pit) stays busy after taking a lemming
 /// (**measured** in the original on Tricky 7 "Rescue Team" without skills,
-/// deaths counted off the OUT counter at release rates 87–98: 9 ticks gives
+/// deaths counted off the OUT counter at release rates 87â€“98: 9 ticks gives
 /// 15 deaths at rate 98, 10 gives 13, 11 gives 12, the original 14; at rate
 /// 99 the owner saw 4, evenly spaced, at the first pit, which favours 10).
 pub const WEIRD_TRAP_BUSY_TICKS: u32 = 10;
@@ -202,7 +202,7 @@ const SPRING_ARC: f32 = 0.3;
 /// Trampoline hops, measured tick by tick in the original's Practice
 /// "Trampoline" and Fun 5 "Bounce Bounce" (`docs/spec/behaviour.md`): forward
 /// speed in the air, sub-units per tick (none on the tick a pad is touched).
-/// A hop of `N` ticks from pad to pad rises `120·k·(N − k)/(N + 1)` sub-units
+/// A hop of `N` ticks from pad to pad rises `120Â·kÂ·(N âˆ’ k)/(N + 1)` sub-units
 /// above its take-off height `k` ticks in; [`MAX_HOP_TICKS`] bounds a chain.
 const BOUNCE_VX: i32 = 32;
 const MAX_HOP_TICKS: u32 = 486;
@@ -228,10 +228,10 @@ fn hop_height(ticks: u32, k: i32) -> i32 {
 /// Ticks of the hop off a red pad after dropping `fallen` sub-units onto it:
 /// [`MIN_HOP_TICKS`] and [`HOP_STEP_TICKS`] more per unit dropped, to the
 /// nearest tick, or [`WALK_ON_HOP_TICKS`] after none. Measured on Fun 5
-/// "Bounce Bounce": about 14 and 18 ticks after drops of ½ and 1 unit;
-/// Practice "Trampoline": 14 after its ½-unit drop. Fits the published
+/// "Bounce Bounce": about 14 and 18 ticks after drops of Â½ and 1 unit;
+/// Practice "Trampoline": 14 after its Â½-unit drop. Fits the published
 /// solutions of Fun 1 "Take a Dive" (a 10-unit drop must carry lemmings
-/// about 11–12 units on: 90 ticks) and Tricky 2 "Which Exit?".
+/// about 11â€“12 units on: 90 ticks) and Tricky 2 "Which Exit?".
 fn hop_after_drop(fallen: i32) -> u32 {
     if fallen <= 0 {
         return WALK_ON_HOP_TICKS;
@@ -246,7 +246,7 @@ fn hop_after_drop(fallen: i32) -> u32 {
 /// Fun 5 "Bounce Bounce" drops of 3, 2 and 1 unit give hops of about 16
 /// ticks (landing before the middle of the cell beyond the water), about 10
 /// ticks, and no bounce; on a test level (`docs/spec/behaviour.md`), drops
-/// of 3 and 4¼ units splash down about 3 and 3.5 units on (17 and 26–27
+/// of 3 and 4Â¼ units splash down about 3 and 3.5 units on (17 and 26â€“27
 /// ticks).
 fn blue_hop_after_drop(fallen: i32) -> Option<u32> {
     let ticks = (7 * fallen.max(0) + SUB / 2) / SUB - 4;
@@ -261,7 +261,7 @@ const HOP_FALL_MILLITICKS: i64 = 8085;
 /// Counting [`HOP_FALL_MILLITICKS`] for each unit fallen from the hop's
 /// apex, to the nearest tick: a red pad adds [`MIN_HOP_TICKS`], but throws
 /// at most [`HOP_STEP_TICKS`] more than the hop, and as many again per unit
-/// it lies below the take-off; a blue pad takes off 5½. Measured in the
+/// it lies below the take-off; a blue pad takes off 5Â½. Measured in the
 /// original by counting ticks: the red row of Practice "Trampoline" hops 14,
 /// 22, 30, 38, 45 and 52 ticks; on test levels, red pads level with a path
 /// 9, 17, 24, 32 and 40 (ours 9, 17, 25, 33, 40), a red pad after a hop of
@@ -286,10 +286,10 @@ fn hops_after_hop(ticks: u32, below: i32) -> (u32, Option<u32>) {
 /// Speed on slippery blocks, sub-units per tick.
 const ICE_SPEED: i32 = WALK_SPEED * 3;
 
-/// The 22.5° ramp's shape (`docs/spec/level.md`).
+/// The 22.5Â° ramp's shape (`docs/spec/level.md`).
 const SHALLOW_RAMP: u8 = 8;
 
-/// The 45° deflector wall's shape (`docs/spec/level.md`).
+/// The 45Â° deflector wall's shape (`docs/spec/level.md`).
 const DEFLECTOR: u8 = 7;
 
 /// Block ids with hard-coded meaning (`docs/spec/blk.md`).
@@ -338,7 +338,7 @@ fn mid(v: i32) -> i32 {
     v.div_euclid(SUB) * SUB + SUB / 2
 }
 
-/// Whether a step from `from` to `to` along an axis heading `step` (±1)
+/// Whether a step from `from` to `to` along an axis heading `step` (Â±1)
 /// reaches `centre`, having started short of it.
 fn crosses(from: i32, to: i32, centre: i32, step: i32) -> bool {
     (centre - from) * step > 0 && (centre - to) * step <= 0
@@ -388,7 +388,7 @@ impl Dir {
         }
     }
 
-    /// Quarter turn clockwise seen from above (+Z → −X → −Z → +X).
+    /// Quarter turn clockwise seen from above (+Z â†’ âˆ’X â†’ âˆ’Z â†’ +X).
     pub fn clockwise(self) -> Dir {
         match self {
             Dir::PosZ => Dir::NegX,
@@ -399,7 +399,7 @@ impl Dir {
     }
 
     /// Quarter turn anticlockwise seen from above; the block-rotation sense
-    /// (+X → −Z → −X → +Z).
+    /// (+X â†’ âˆ’Z â†’ âˆ’X â†’ +Z).
     pub fn anticlockwise(self) -> Dir {
         self.clockwise().reverse()
     }
@@ -418,7 +418,7 @@ impl Dir {
     }
 
     /// Heading as an angle for rendering: radians in the same convention as
-    /// camera yaw (0 = −X, π/2 = −Z, π = +X, 3π/2 = +Z).
+    /// camera yaw (0 = âˆ’X, Ï€/2 = âˆ’Z, Ï€ = +X, 3Ï€/2 = +Z).
     pub fn yaw(self) -> f32 {
         use std::f32::consts::{FRAC_PI_2, PI};
         match self {
@@ -805,8 +805,8 @@ impl Simulation {
             // Entrances only work with the top two segments present and the
             // bottom two absent; at most four are active ([L3DEdit], unverified).
             if b.id == ENTRANCE_ID && b.segments == 0b1100 && entrances.len() < 4 {
-                // Release direction by rotation: 0 → −Z, 1 → +X, 2 → +Z,
-                // 3 → −X, i.e. clockwise steps from −Z (verified in the
+                // Release direction by rotation: 0 â†’ âˆ’Z, 1 â†’ +X, 2 â†’ +Z,
+                // 3 â†’ âˆ’X, i.e. clockwise steps from âˆ’Z (verified in the
                 // original for all four rotations; [L3DEdit]'s +Z start is
                 // wrong).
                 let mut dir = Dir::NegZ;
@@ -816,7 +816,7 @@ impl Simulation {
                 // Lemmings start in the bottom quarter of the hatch cell
                 // (verified with a changed Practice "Blocker", 2026-11-04:
                 // a hatch fall from the bottom quarter of the cell of 2.7
-                // units walks on (Tricky 19), 3 stuns, 3¾ survives, 4
+                // units walks on (Tricky 19), 3 stuns, 3Â¾ survives, 4
                 // splats); we take the middle of that quarter.
                 let spawn = [
                     x as i32 * SUB + SUB / 2,
@@ -864,7 +864,7 @@ impl Simulation {
         }
     }
 
-    /// Ticks between releases (verified: `101 − rate`).
+    /// Ticks between releases (verified: `101 âˆ’ rate`).
     fn release_interval(&self) -> u32 {
         (101 - self.release_rate) as u32
     }
@@ -1315,10 +1315,7 @@ impl Simulation {
     /// outside of), in units, as `[x, z]`.
     pub fn centre(&self) -> [f32; 2] {
         let [min_x, min_z, max_x, max_z] = self.border;
-        [
-            (min_x + max_x + 1) as f32 / 2.0,
-            (min_z + max_z + 1) as f32 / 2.0,
-        ]
+        [(min_x + max_x) as f32 / 2.0, (min_z + max_z) as f32 / 2.0]
     }
 
     /// Lemmings still in play.
@@ -1326,10 +1323,16 @@ impl Simulation {
         self.lemmings.iter().filter(|l| !l.gone).count()
     }
 
+    /// Whether `p` is inside the kill boundary: cells from its minimum up to,
+    /// but not including, its maximum (**verified** with a walker heading +X
+    /// on Practice "Blocker" with maximum X 23: it was zapped entering cell
+    /// 23; the owner saw ours zap a cell too far out on "Motherboard"),
+    /// and not above the kill ceiling. The minimum is assumed
+    /// inclusive.
     fn in_bounds(&self, p: [i32; 3]) -> bool {
         let c = p.map(|v| v.div_euclid(SUB));
         let [min_x, min_z, max_x, max_z] = self.border;
-        c[0] >= min_x && c[0] <= max_x && c[2] >= min_z && c[2] <= max_z && c[1] <= self.ceiling
+        c[0] >= min_x && c[0] < max_x && c[2] >= min_z && c[2] < max_z && c[1] <= self.ceiling
     }
 
     fn update(&mut self, l: &mut Lemming, me: usize, obstacles: &[Obstacle]) {
@@ -1858,7 +1861,7 @@ impl Simulation {
     /// stepping down onto the first pad of Practice "Trampoline" stands there
     /// two ticks); from a longer drop it bounces straight off as from a hop
     /// (observed in the lemming view on Tricky 2 "Which Exit?": after its
-    /// 1¾-unit drop the view rests on the pad one tick). A lemming walking
+    /// 1Â¾-unit drop the view rests on the pad one tick). A lemming walking
     /// onto a pad level with its path walks to the pad's middle first
     /// (measured on Fun 5 "Bounce Bounce"; lemmings stepping or dropping
     /// onto a pad bounce where they touch it). Returns whether it bounced.
@@ -1993,7 +1996,7 @@ impl Simulation {
                     .copied();
                 if let Some(pad) = pad {
                     self.press_pad(l.pos);
-                    // Red pads are 0x60–0x63, blue ones 0x64–0x67.
+                    // Red pads are 0x60â€“0x63, blue ones 0x64â€“0x67.
                     let (red, blue) = hops_after_hop(ticks, y0 - ground);
                     let next = if pad.value >= 0x64 { blue } else { Some(red) };
                     match next {
@@ -2096,7 +2099,7 @@ impl Simulation {
                     let high = 8 - mask.leading_zeros();
                     // A shaped block losing its top is shaved flat and keeps
                     // its slopes below the cut, as for the digger (blasts on
-                    // a hill of 45° ramps in the original left flat steps
+                    // a hill of 45Â° ramps in the original left flat steps
                     // with vertical faces, no shallower slope). One losing
                     // its bottom keeps its shape above, cut off flat
                     // underneath, rather than squeezed into what is left
@@ -2249,7 +2252,7 @@ impl Simulation {
             {
                 // At the top edge with no room for the body: let go and fall
                 // back (verified with a changed level: Practice "Climber"
-                // with a block ¼ unit above its first wall's top; the
+                // with a block Â¼ unit above its first wall's top; the
                 // climbers fell back off at the gap).
                 l.dir = l.dir.reverse();
                 l.start_falling();
@@ -2452,7 +2455,7 @@ impl Simulation {
 
     /// For a basher at work: the cell it is bashing, the segments it will
     /// remove there (the lower half-unit from its feet up), and the ticks
-    /// since that stroke's cracks began (0 to [`BASH_TICKS`] − 1), once they
+    /// since that stroke's cracks began (0 to [`BASH_TICKS`] âˆ’ 1), once they
     /// have. `None` before the first crack or when nothing is there to bash.
     pub fn bash_target(&self, l: &Lemming) -> Option<([i32; 3], u8, u32)> {
         if l.state != State::Bashing || l.state_ticks < BASH_CRACK_START {
@@ -2494,7 +2497,7 @@ impl Simulation {
         self.world.present(cell) & mask != 0 || self.world.bricks_in(cell, mask)
     }
 
-    /// Whether the block a basher works on is a 22.5° ramp, which it cuts
+    /// Whether the block a basher works on is a 22.5Â° ramp, which it cuts
     /// level at its feet instead of walking up it.
     fn bash_cell_shallow_ramp(&self, l: &Lemming) -> bool {
         let (cell, _) = Self::bash_cell(l);
@@ -2503,7 +2506,7 @@ impl Simulation {
             .is_some_and(|(b, _)| b.shape == SHALLOW_RAMP)
     }
 
-    /// Whether the block a basher works on is a 45° deflector wall turning
+    /// Whether the block a basher works on is a 45Â° deflector wall turning
     /// its diagonal face towards the basher (open just inside the cell's
     /// near side, where a square back would be solid).
     fn bash_cell_deflector_facing(&self, l: &Lemming) -> bool {
@@ -2599,7 +2602,7 @@ impl Simulation {
             return;
         }
         if self.bash_cell_full(l) {
-            // A 22.5° ramp is cut level at the feet (observed in a
+            // A 22.5Â° ramp is cut level at the feet (observed in a
             // Practice "Basher" changed to have one before the crate: a
             // notch with a vertical face, the basher standing in it);
             // a shaped block keeps its slope below the cut.
@@ -2650,7 +2653,7 @@ impl Simulation {
     /// walker's headroom above them; and its feet afterwards.
     fn mine_plan(feet: i32, ahead: [i32; 2]) -> (MineCells, i32) {
         // Feet are on a quarter-unit step. The cut's top: in Practice "Miner"
-        // a miner starting on the plank (top 5¼) on the tower (top 5) leaves
+        // a miner starting on the plank (top 5Â¼) on the tower (top 5) leaves
         // ground above from its fourth block on (owner's observation).
         let feet = (feet + SUB / 8).div_euclid(SUB / 4) * (SUB / 4);
         let (bottom, top) = (feet - MINE_DROP, feet + HEAD_HEIGHT);
@@ -2701,7 +2704,7 @@ impl Simulation {
 
     /// For a miner cracking the block ahead: the cells and segments being
     /// broken there, and the ticks since the cracks began (0 to
-    /// [`MINE_CRACK_TICKS`] − 2). `None` otherwise.
+    /// [`MINE_CRACK_TICKS`] âˆ’ 2). `None` otherwise.
     pub fn mine_target(&self, l: &Lemming) -> Option<(MineCells, u32)> {
         if l.state != State::Mining || !(1..MINE_CRACK_TICKS).contains(&l.state_ticks) {
             return None;
@@ -2796,7 +2799,7 @@ impl Simulation {
 
     /// For a digger: the cell under it, the segments it is digging out there
     /// (for a shaped block, the quarters its cut passes through), and the
-    /// ticks since it started on them (0 to [`DIG_TICKS`] − 1). `None`
+    /// ticks since it started on them (0 to [`DIG_TICKS`] âˆ’ 1). `None`
     /// otherwise or with nothing to dig.
     pub fn dig_target(&self, l: &Lemming) -> Option<([i32; 3], u8, u32)> {
         if l.state != State::Digging || self.brick_underfoot(l) {
@@ -2942,7 +2945,7 @@ impl Simulation {
         // +Z face, rotated with the block).
         // Probe as far ahead as the wall check below (one step plus REACH), so a
         // doorway is recognised before the walker would bounce off it.
-        // On ice lemmings move about 3× as fast (observed: 3.1 ± 0.3).
+        // On ice lemmings move about 3Ã— as fast (observed: 3.1 Â± 0.3).
         let speed = if l.state == State::Sliding {
             ICE_SPEED
         } else {
@@ -2950,7 +2953,7 @@ impl Simulation {
         };
         let reach = REACH + speed;
         // At the feet, or a step up (Taxing 4 "Poles Apart" has an exit
-        // floor ¼ above the path leading to it).
+        // floor Â¼ above the path leading to it).
         let exit = [SUB / 8, STEP_UP + SUB / 8].into_iter().find_map(|h| {
             self.world
                 .block_at([
@@ -3014,7 +3017,7 @@ impl Simulation {
                 // is lost (measured in the original's Practice "Turner" at
                 // release rate 99). One landing past the centre is turned
                 // where it lands (measured on a test level: hatch lemmings
-                // landing about ¼ past the centre of a turner's cell). One
+                // landing about Â¼ past the centre of a turner's cell). One
                 // just turned at the centre by something else is turned
                 // again (verified on a changed "Team Work", 2026-10-23: with
                 // a turner in a deflector's cell, the deflected walkers were
@@ -3039,7 +3042,7 @@ impl Simulation {
             }
         }
         let ahead = [next[0] + d[0] * REACH, next[2] + d[2] * REACH];
-        // Deflectors: a walker meeting the diagonal face of a 45° wall turns a
+        // Deflectors: a walker meeting the diagonal face of a 45Â° wall turns a
         // quarter, as if reflected, once its centre reaches the face
         // (provisional). Their square backs are ordinary walls.
         let facing = |n: [i32; 2]| d[0] * n[0] + d[2] * n[1] < 0;
@@ -3086,7 +3089,7 @@ impl Simulation {
         }
         // The surface where the feet will be after this step: a step up of
         // more than STEP_UP there is a wall. (Probing further ahead would
-        // read a 45° ramp as a wall.)
+        // read a 45Â° ramp as a wall.)
         let (surface, _) =
             self.world
                 .surface_below(next[0], l.pos[1] + STEP_UP + STEP_SLACK + 1, next[2]);
@@ -3106,7 +3109,7 @@ impl Simulation {
             surface
         };
         // A ceiling turns the walker only where its head would touch it, on
-        // the next step: under a 45° overhang a walker gets as far as the
+        // the next step: under a 45Â° overhang a walker gets as far as the
         // middle of the cell, where the underside is half a unit up
         // (verified on a changed "Team Work", 2026-10-22: a climber that
         // climbed a cube with an upside-down ramp on top walked in under the
@@ -3116,7 +3119,7 @@ impl Simulation {
             .terrain_solid([next[0], body + HEAD_HEIGHT - 1, next[2]]);
         // A walker going up a slope looks only at its next step: it steps
         // onto a ledge a step above the slope's top (verified on a changed
-        // "Team Work", 2026-10-23: walkers came up a 22.5° slope from the
+        // "Team Work", 2026-10-23: walkers came up a 22.5Â° slope from the
         // floor to half a unit and stepped onto a slab a quarter above it).
         let rising = surface > l.pos[1] && surface - l.pos[1] <= WALK_SPEED;
         // Only terrain reaching down to step height is a wall; terrain above
