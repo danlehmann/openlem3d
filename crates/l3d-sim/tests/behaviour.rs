@@ -307,6 +307,29 @@ fn digger_under_an_overhang_digs_down() {
 }
 
 #[test]
+fn basher_bashes_a_wall_of_bricks() {
+    // Two bricks stacked across the path, half a unit high, in an empty cell.
+    let mut sim = open_level(1).skill(0, Skill::Basher, 1).sim();
+    let floor = 2 * SUB;
+    for bottom in [0, SUB / 4] {
+        assert!(sim.world.add_brick(l3d_sim::Brick {
+            min: [20 * SUB, floor + bottom, 15 * SUB],
+            max: [21 * SUB, floor + bottom + SUB / 4, 18 * SUB],
+            id: 9,
+        }));
+    }
+    // Given the basher as it nears the wall.
+    while sim.lemmings.is_empty() || sim.lemmings[0].pos[0] < 19 * SUB + SUB / 2 {
+        assert!(sim.tick < 400, "never reached the wall");
+        sim.step();
+    }
+    assert!(sim.assign(0, Skill::Basher));
+    run(&mut sim, 300);
+    assert!(sim.world.bricks.is_empty(), "bricks left");
+    assert!(sim.lemmings[0].pos[0] > 21 * SUB, "never got through");
+}
+
+#[test]
 fn one_way_blocks_give_way_in_one_direction() {
     // Block 6 is one-way towards −X before rotation; rotation 1 turns −X to +Z.
     for (rotation, open, closed) in [(0, [-1, 0, 0], [1, 0, 0]), (1, [0, 0, 1], [0, 0, -1])] {

@@ -2486,10 +2486,12 @@ impl Simulation {
         (cell, (0b11u8 << first) & 0xF)
     }
 
-    /// Whether anything is left in the segments a basher works on.
+    /// Whether anything is left in the segments a basher works on: terrain
+    /// or builder's bricks (a ramp of bricks over open ground is bashed
+    /// like a wall).
     fn bash_cell_full(&self, l: &Lemming) -> bool {
         let (cell, mask) = Self::bash_cell(l);
-        self.world.present(cell) & mask != 0
+        self.world.present(cell) & mask != 0 || self.world.bricks_in(cell, mask)
     }
 
     /// Whether the block a basher works on is a 22.5° ramp, which it cuts
@@ -2552,7 +2554,7 @@ impl Simulation {
     /// works on.
     fn bash_more_ahead(&self, l: &Lemming) -> bool {
         let (next, mask) = Self::bash_cell_at(l, SUB / 2 + SUB);
-        self.world.present(next) & mask != 0
+        (self.world.present(next) & mask != 0 || self.world.bricks_in(next, mask))
             && self.world.breakable_towards(next, Some(l.dir.delta()))
     }
 
@@ -2596,45 +2598,44 @@ impl Simulation {
         if !Self::bash_stroke_ends(l.state_ticks) {
             return;
         }
-        match self.world.block(cell) {
-            Some(_) if self.world.present(cell) & mask != 0 => {
-                // A 22.5° ramp is cut level at the feet (observed in a
-                // Practice "Basher" changed to have one before the crate: a
-                // notch with a vertical face, the basher standing in it);
-                // a shaped block keeps its slope below the cut.
-                // With more of it above the stroke (the sloped top of a ramp
-                // against a wall, bashed into at its foot), that stays, cut
-                // off flat underneath (owner, Fun 15: the cracks showed the
-                // lower half, then the whole ramp went).
-                let present = self.world.present(cell);
-                let low = mask.trailing_zeros();
-                let above = present & !mask & 0xFu8.checked_shl(low).unwrap_or(0) != 0;
-                let below = present & !mask & !0xFu8.checked_shl(low).unwrap_or(0) != 0;
-                let cut = if shallow && above && !below {
-                    self.world.breakable_towards(cell, Some(d))
-                        && self.world.lift(cell, (8 - mask.leading_zeros()) as u8)
-                } else if shallow && !above {
-                    self.world.breakable_towards(cell, Some(d)) && self.world.shave(cell, low as u8)
-                } else {
-                    // The stroke takes the rest of the block above its cut
-                    // too (verified, owner, Taxing 10 "It's the Name of the
-                    // Game": the cracks covered the block's lower part, as
-                    // ours, then the whole block went; ours left its top
-                    // hanging over the lemmings).
-                    let rest = 0xFu8.checked_shl(low).unwrap_or(0) & 0xF;
-                    self.world.remove_segments_towards(cell, rest, Some(d))
-                };
-                if !cut {
-                    l.set_state(State::Walking);
-                    return;
-                }
-                l.pos[0] += d[0] * (SUB / 4);
-                l.pos[2] += d[2] * (SUB / 4);
-                if self.settle(l) && !self.bash_cell_full(l) && !self.bash_more_ahead(l) {
-                    l.set_state(State::Walking);
-                }
+        if self.bash_cell_full(l) {
+            // A 22.5° ramp is cut level at the feet (observed in a
+            // Practice "Basher" changed to have one before the crate: a
+            // notch with a vertical face, the basher standing in it);
+            // a shaped block keeps its slope below the cut.
+            // With more of it above the stroke (the sloped top of a ramp
+            // against a wall, bashed into at its foot), that stays, cut
+            // off flat underneath (owner, Fun 15: the cracks showed the
+            // lower half, then the whole ramp went).
+            let present = self.world.present(cell);
+            let low = mask.trailing_zeros();
+            let above = present & !mask & 0xFu8.checked_shl(low).unwrap_or(0) != 0;
+            let below = present & !mask & !0xFu8.checked_shl(low).unwrap_or(0) != 0;
+            let cut = if shallow && above && !below {
+                self.world.breakable_towards(cell, Some(d))
+                    && self.world.lift(cell, (8 - mask.leading_zeros()) as u8)
+            } else if shallow && !above {
+                self.world.breakable_towards(cell, Some(d)) && self.world.shave(cell, low as u8)
+            } else {
+                // The stroke takes the rest of the block above its cut
+                // too (verified, owner, Taxing 10 "It's the Name of the
+                // Game": the cracks covered the block's lower part, as
+                // ours, then the whole block went; ours left its top
+                // hanging over the lemmings).
+                let rest = 0xFu8.checked_shl(low).unwrap_or(0) & 0xF;
+                self.world.remove_segments_towards(cell, rest, Some(d))
+            };
+            if !cut {
+                l.set_state(State::Walking);
+                return;
             }
-            _ => l.set_state(State::Walking),
+            l.pos[0] += d[0] * (SUB / 4);
+            l.pos[2] += d[2] * (SUB / 4);
+            if self.settle(l) && !self.bash_cell_full(l) && !self.bash_more_ahead(l) {
+                l.set_state(State::Walking);
+            }
+        } else {
+            l.set_state(State::Walking);
         }
     }
 
