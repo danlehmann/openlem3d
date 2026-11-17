@@ -286,10 +286,27 @@ fn open_flap(p: [f32; 3], src: FaceDir, y0: f32, open: f32) -> [f32; 3] {
 /// The quarter turns actually applied to a cell: the stored rotation plus a
 /// per-shape correction to our base shapes. The outer-corner pieces (10, 11)
 /// need one extra quarter turn to match the original (verified visually on
-/// the pyramids of `LEVEL.029`).
+/// the pyramids of `LEVEL.029`; without it they grow spikes).
 pub fn effective_rotation(shape: u8, rotation: u8) -> u8 {
     let correction = if matches!(shape, 10 | 11) { 1 } else { 0 };
     (rotation + correction) % 4
+}
+
+/// The block-definition face whose tile, modifiers and shading a polygon of
+/// shape `shape` made from base face `src` shows. The outer-corner pieces
+/// (10, 11), turned an extra quarter by [`effective_rotation`], show the
+/// face their polygon looks towards after that turn, at rotation 0
+/// (**verified** on a test level in the original, one corner with a
+/// different tile per face seen from all four sides at rotations 0 and 1:
+/// each face showed the tile of the direction it faced; ours showed its
+/// neighbour's, so the corridors of Tricky 7 "Rescue Team" had the wrong
+/// tiles and shading on their corner pieces, owner).
+fn tile_face(shape: u8, src: FaceDir) -> FaceDir {
+    if matches!(shape, 10 | 11) {
+        rotate_dir(src, 1)
+    } else {
+        src
+    }
 }
 
 /// Rotates a local point about the cell's vertical centre line, matching
@@ -749,7 +766,7 @@ pub fn build(
                         continue;
                     }
                 }
-                let face = def.face(p.src);
+                let face = def.face(tile_face(cell.shape, p.src));
                 if face.texture == 0xFF || face.texture as u32 >= TILES {
                     continue;
                 }
