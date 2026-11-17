@@ -98,6 +98,12 @@ Computer, Army, Maze, Circus, Lemgo. **Unverified.**
 **Skill ids:** these follow the order of the in-game skill panel [L3DEdit].
 **Unverified**; the order is still to be confirmed in game.
 
+In every level the nine entries are in panel order, entry k naming skill k.
+A changed copy whose first entry was (basher, 20) showed the 20 under the
+first panel icon, the blocker's, and that icon then gave out bashers
+(**observed**, owner, 2026-11-16, Practice "Basher" slot): the panel places
+each count by the entry's position, the skill given comes from its id.
+
 ### Land polygons
 
 Each of the 8 polygons has up to 8 vertices `(z, x, options)`. A vertex with
