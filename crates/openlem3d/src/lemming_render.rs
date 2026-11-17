@@ -1244,11 +1244,15 @@ fn bash_effects(b: &mut LayerBuilder, sim: &Simulation, blocks: Option<&BlockSet
 /// and rain down past the ground (seen in the original side-on, 2026-10-23:
 /// about a dozen, half size, rising about 2 units in 0.8 s, gone after
 /// about 2½ s; speeds ours, read from those frames). A splat bursts the
-/// same way into about eight (recorded, 2026-10-24).
+/// same way into about eight (recorded, 2026-10-24). The pieces fly
+/// between the ticks too, `progress` (as in `build`) of the way from the
+/// tick before.
+#[allow(clippy::too_many_arguments)]
 fn burst(
     b: &mut LayerBuilder,
     i: usize,
     t: u32,
+    progress: f32,
     at: [f32; 3],
     rect: [f32; 4],
     tex: [f32; 2],
@@ -1258,7 +1262,7 @@ fn burst(
         b.sprite_scaled(at, rect, tex, 1, 0.0, LEMMING_TEXELS_PER_UNIT / BURST_SWELL);
         return;
     }
-    let age = (t - BURST_SWELL_TICKS) as f32;
+    let age = ((t - BURST_SWELL_TICKS) as f32 - 1.0 + progress).max(0.0);
     for k in 0..pieces {
         let r = |salt: u32| noise([i as u32, 0xB0B, k, salt, 0]);
         let angle = r(0) * std::f32::consts::TAU;
@@ -1390,7 +1394,9 @@ const RIDE_DIGIT_DISTANCE: f32 = 0.2;
 /// leaving out lemming `eyes`, the one the view looks out of, and marking
 /// lemming `highlight` with an arrow; and the other cameras' markers.
 /// `drawn` is where each lemming is drawn, in units, and the way it faces
-/// (see `Game::drawn_pos` and `Game::turn_yaws`).
+/// (see `Game::drawn_pos` and `Game::turn_yaws`); `progress` is how far
+/// (0–1) the drawing has come from the tick before the last to the last,
+/// as `drawn` (1 when drawn at the ticks themselves).
 #[allow(clippy::too_many_arguments)]
 pub fn build(
     sim: &Simulation,
@@ -1403,6 +1409,7 @@ pub fn build(
     eyes: Option<usize>,
     highlight: Option<usize>,
     cameras: &[CameraMarker],
+    progress: f32,
 ) -> SceneSprites {
     let lemmings = &sim.lemmings;
     let mut b = LayerBuilder::default();
@@ -1614,7 +1621,16 @@ pub fn build(
             } else {
                 (SPLAT_PIECES, SPLAT_OUT, SPLAT_SCALE)
             };
-            burst(&mut b, i, l.state_ticks, anchor, rect, tex, pieces);
+            burst(
+                &mut b,
+                i,
+                l.state_ticks,
+                progress,
+                anchor,
+                rect,
+                tex,
+                pieces,
+            );
             continue;
         }
         if l.state == State::Zapped

@@ -301,8 +301,8 @@ const FOAM_REACH: f32 = 2.5;
 
 /// How strongly waves move the sea around a level (ours, enhanced mode):
 /// per unit square around the grid, the distance to the nearest scenery
-/// (a column holding blocks, or land), from which the sea is calm at the
-/// shore and rough further out.
+/// (a block in the bottom layer, standing in the sea, or land), from which
+/// the sea is calm at the shore and rough further out.
 pub(crate) struct Waves {
     /// Distances in units, `SIDE` × `SIDE` squares from `-WAVE_NEAR` on x
     /// and z, x-major.
@@ -324,9 +324,9 @@ impl Waves {
                 let (cx, cz) = (x + 0.5, z + 0.5);
                 let in_grid =
                     (0.0..SIZE_X as f32).contains(&x) && (0.0..SIZE_Z as f32).contains(&z);
-                let blocks = in_grid
-                    && (0..l3d_formats::level::SIZE_Y)
-                        .any(|y| !level.block(x as usize, y, z as usize).is_empty());
+                // Only the bottom layer stands in the sea: blocks above it
+                // float clear of the water.
+                let blocks = in_grid && !level.block(x as usize, 0, z as usize).is_empty();
                 let on_land = land && level.land_polygons.iter().any(|p| inside(p, cx, cz));
                 if blocks || on_land {
                     d[i * n + k] = 0.0;

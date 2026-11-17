@@ -1418,6 +1418,7 @@ fn update_lemming_sprites(w: &mut World) {
         eyes,
         highlight.lemming,
         &cameras,
+        f,
     );
     // Shadows under the lemmings (ours, enhanced mode), on the sea or land
     // too where the level draws one.
