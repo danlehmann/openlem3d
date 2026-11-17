@@ -2,26 +2,29 @@
 //! is described in `docs/spec/ui-graphics.md`): large-font labels in boxes,
 //! toggles shown as a yellow (on) or red (off) light, sliders as ten
 //! lights, "Default Config" and "Exit and Save" along the bottom. Only
-//! settings that mean something here are offered, and two of ours, Glow and
-//! Rewind.
-//! Esc also saves and leaves.
+//! settings that mean something here are offered, and some of ours: Glow,
+//! Rewind, FPS and the mode, named in its box and switched by clicking it.
+//! Esc, or a four-finger tap, also saves and leaves; F12 or a four-finger
+//! tap opens it from the title or a level.
 
 use l3d_engine::prelude::*;
 use l3d_formats::icons::Icons;
 
 use crate::World;
 use crate::menu::AppState;
-use crate::settings::{SLIDER_STEPS, Settings};
+use crate::settings::{Mode, SLIDER_STEPS, Settings};
 use crate::texture::indexed_image;
 use crate::ui::{NodeId, Ui, UiNode, px};
 
 /// The lights' pictures and the small font, the screen's buttons and its
-/// lights, and the fullscreen setting last applied.
+/// lights, the mode's name with the mode it shows, and the fullscreen
+/// setting last applied.
 #[derive(Default)]
 pub(crate) struct OptionsScreen {
     lights: Option<Lights>,
     targets: Vec<(NodeId, Target)>,
     shown: Vec<(NodeId, Light)>,
+    mode: Option<(NodeId, Mode)>,
     fullscreen: Option<bool>,
 }
 
@@ -61,6 +64,8 @@ enum Item {
     Fullscreen,
     Glow,
     Rewind,
+    Fps,
+    Mode,
     Music,
     Effects,
     Camera,
@@ -84,7 +89,7 @@ const SLIDER_COLUMNS: [(f32, f32); 2] = [(0.0, 64.0), (160.0, 224.0)];
 const BOX_HEIGHT: f32 = 14.0;
 const TEXT_SCALE: f32 = 1.0;
 
-const TOGGLES: [(Item, &str, usize, usize); 7] = [
+const TOGGLES: [(Item, &str, usize, usize); 8] = [
     (Item::Land, "Land", 0, 0),
     (Item::Sea, "Sea", 0, 1),
     (Item::Sky, "Sky", 0, 2),
@@ -92,7 +97,12 @@ const TOGGLES: [(Item, &str, usize, usize); 7] = [
     (Item::Fullscreen, "Fullscreen", 1, 0),
     (Item::Glow, "Glow", 1, 1),
     (Item::Rewind, "Rewind", 1, 2),
+    (Item::Fps, "FPS", 1, 3),
 ];
+/// The mode's box, in the slider rows' free place, and where its name
+/// starts in it.
+const MODE_BOX: (f32, f32) = (160.0, 117.0);
+const MODE_NAME_X: f32 = 224.0;
 const SLIDERS: [(Item, &str, usize, usize); 3] = [
     (Item::Music, "CD Music", 0, 0),
     (Item::Effects, "Effects", 1, 0),
@@ -180,6 +190,14 @@ pub(crate) fn spawn_options(w: &mut World) {
             w.options.targets.push((l, Target::Light(item, i)));
         }
     }
+    let (x, y) = MODE_BOX;
+    let b = panel_box(ui, canvas, x, y, 160.0, BOX_HEIGHT);
+    if let Some(n) = ui.get_mut(b) {
+        *n = std::mem::take(n).button();
+    }
+    w.options.targets.push((b, Target::Toggle(Item::Mode)));
+    text(ui, "MODE", x + 5.0, y + 3.0);
+    w.options.mode = None;
     for (target, label, x) in [
         (Target::Default, "Default Config", 0.0),
         (Target::Exit, "Exit and Save", 240.0),
@@ -202,6 +220,8 @@ fn toggle(s: &mut Settings, item: Item) {
         Item::Fullscreen => s.fullscreen = !s.fullscreen,
         Item::Glow => s.glow = !s.glow,
         Item::Rewind => s.rewind = !s.rewind,
+        Item::Fps => s.fps = !s.fps,
+        Item::Mode => crate::style::switch(s),
         _ => {}
     }
 }
@@ -236,7 +256,8 @@ pub(crate) fn options_input(w: &mut World) {
             }
         }
     }
-    if w.e.input.keys.just_pressed(KeyCode::Escape) {
+    if w.e.input.keys.just_pressed(KeyCode::Escape) || crate::touch::four_finger_tap(w) {
+        let settings = &mut w.settings;
         settings.save();
         w.next_state = Some(std::mem::take(&mut w.options_from.0));
     }
@@ -256,10 +277,50 @@ pub(crate) fn show_lights(w: &mut World) {
             Item::Fullscreen => s.fullscreen,
             Item::Glow => s.glow,
             Item::Rewind => s.rewind,
+            Item::Fps => s.fps,
             item => level(&mut s, item).is_some_and(|v| *v >= l.1),
         };
         w.ui.set_image(id, if on { &lights.on } else { &lights.off });
     }
+    show_mode(w);
+}
+
+/// Names the mode in its box, again when it changes.
+fn show_mode(w: &mut World) {
+    let (Some(lights), Some(screen)) = (&w.options.lights, &w.screen_ui) else {
+        return;
+    };
+    let mode = w.settings.mode;
+    if let Some((id, shown)) = w.options.mode {
+        if shown == mode && w.ui.contains(id) {
+            return;
+        }
+        w.ui.remove(id);
+    }
+    let font = &lights.font;
+    let (glyphs, width) = font.layout(&mode.name().to_uppercase());
+    let (_, y) = MODE_BOX;
+    let name = w.ui.child(
+        screen.canvas,
+        UiNode::new().at(
+            MODE_NAME_X,
+            y + 3.0,
+            width * TEXT_SCALE,
+            font.size.y * TEXT_SCALE,
+        ),
+    );
+    for (gx, image) in glyphs {
+        w.ui.child(
+            name,
+            UiNode::image(image).at(
+                gx * TEXT_SCALE,
+                0.0,
+                font.size.x * TEXT_SCALE,
+                font.size.y * TEXT_SCALE,
+            ),
+        );
+    }
+    w.options.mode = Some((name, mode));
 }
 
 /// Puts the window into full screen or back as the setting says.
@@ -281,8 +342,16 @@ pub(crate) fn apply_window(w: &mut World) {
 #[derive(Default)]
 pub struct OptionsFrom(pub AppState);
 
+/// A four-finger tap on the title opens the configuration, as F12 does.
+pub(crate) fn open_on_title(w: &mut World) {
+    if crate::touch::four_finger_tap(w) {
+        w.options_from.0 = AppState::Title;
+        w.next_state = Some(AppState::Options);
+    }
+}
+
 pub(crate) fn open_in_level(w: &mut World) {
-    if w.e.input.keys.just_pressed(KeyCode::F12) {
+    if w.e.input.keys.just_pressed(KeyCode::F12) || crate::touch::four_finger_tap(w) {
         w.options_from.0 = AppState::Playing;
         w.next_state = Some(AppState::Options);
     }

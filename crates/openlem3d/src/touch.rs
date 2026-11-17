@@ -77,6 +77,40 @@ pub(crate) fn record_touch_starts(w: &mut World) {
 
 /// Fingers that make the time dial.
 const DIAL_FINGERS: usize = 3;
+/// Fingers that, tapped together, open or close the configuration (ours).
+const SETTINGS_FINGERS: usize = 4;
+
+/// The fingers down since the last time none were: the most at once, and
+/// whether any left the tap radius. Set `tapped` the frame the last of a
+/// four-finger tap lifts.
+#[derive(Default)]
+pub struct FourFingerTap {
+    most: usize,
+    moved: bool,
+    tapped: bool,
+}
+
+/// Whether four fingers were just tapped together.
+pub fn four_finger_tap(w: &World) -> bool {
+    w.four_finger_tap.tapped
+}
+
+pub(crate) fn watch_four_finger_tap(w: &mut World) {
+    let touches = &w.e.input.touches;
+    let tap = &mut w.four_finger_tap;
+    tap.tapped = false;
+    let down = touches.iter().count();
+    tap.most = tap.most.max(down);
+    tap.moved |= touches
+        .iter()
+        .chain(touches.iter_just_released())
+        .any(|t| t.distance().length() >= TAP_SLOP);
+    if down == 0 && touches.any_just_released() {
+        tap.tapped = tap.most == SETTINGS_FINGERS && !tap.moved;
+        tap.most = 0;
+        tap.moved = false;
+    }
+}
 /// Sideways travel for each unit of speed on the time dial, and the dead
 /// zone where the fingers landed, as fractions of the screen height (ours).
 pub(crate) const DIAL_UNIT: f32 = 0.12;
@@ -118,8 +152,8 @@ pub fn lifted(w: &World) -> bool {
 pub(crate) fn touch_camera(w: &mut World) {
     let active: Vec<_> = w.e.input.touches.iter().collect();
     // Three fingers turn the time dial; after it, the camera waits until
-    // every finger is up.
-    if active.len() >= DIAL_FINGERS && !w.ui.any_pressed() {
+    // every finger is up. A fourth leaves the dial for a four-finger tap.
+    if active.len() == DIAL_FINGERS && !w.ui.any_pressed() {
         let x = active.iter().map(|t| t.position().x).sum::<f32>() / active.len() as f32;
         let origin = *w.time_dial.origin.get_or_insert(x);
         w.game.dial = Some(dial_speed(x - origin, w.screen.size.y));

@@ -335,6 +335,7 @@ pub struct World {
     sfx: sfx::Sounds,
     cells: Option<pointer::Cells>,
     touch_starts: touch::TouchStarts,
+    four_finger_tap: touch::FourFingerTap,
     touch_twist: touch::Twist,
     trackpad: trackpad::Trackpad,
     time_dial: touch::TimeDial,
@@ -424,6 +425,7 @@ impl World {
             sfx: sfx::Sounds::default(),
             cells: None,
             touch_starts: touch::TouchStarts::default(),
+            four_finger_tap: touch::FourFingerTap::default(),
             touch_twist: touch::Twist::default(),
             trackpad: trackpad::Trackpad::default(),
             time_dial: touch::TimeDial::default(),
@@ -505,6 +507,7 @@ impl World {
                 title::attract(self);
                 title::update_title(self);
                 style::toggle_on_title(self);
+                options::open_on_title(self);
                 style::title_label(self);
                 sfx::watch_rating(self);
                 keep_rating(self);
@@ -602,6 +605,7 @@ impl l3d_engine::Game for World {
         scripted_presses(self);
         self.ui.focus(&self.e.input, &self.e.window, &self.screen);
         touch::record_touch_starts(self);
+        touch::watch_four_finger_tap(self);
         key_buttons::press(self);
         self.change_state();
         // A step is one simulation tick, so fast-forward steps more often

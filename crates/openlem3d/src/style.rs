@@ -20,7 +20,7 @@ const NOTICE_Y: f32 = 60.0;
 /// How long the notice shows, in seconds.
 const NOTICE_SECONDS: f32 = 1.5;
 
-fn switch(settings: &mut Settings) {
+pub(crate) fn switch(settings: &mut Settings) {
     settings.mode = settings.mode.next();
     settings.save();
 }
