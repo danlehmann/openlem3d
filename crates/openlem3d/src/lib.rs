@@ -2070,4 +2070,63 @@ mod tests {
         );
         assert_eq!(none, 0, "glides without a way round");
     }
+
+    /// Glides from the preset cameras into the eyes of walking lemmings find
+    /// a way in (eyes come closer to floors and walls than the camera may),
+    /// except where the lemmings walk in spaces closed off from the preset
+    /// cameras: the cells of Rescue Team (LEVEL.047), the centre of The
+    /// Prisoner (LEVEL.064) and the tunnels of Family Tree (LEVEL.065).
+    #[test]
+    fn glides_into_a_lemmings_eyes_find_a_way() {
+        use l3d_formats::gamedata::{DATA_ENV, GameData};
+        let dir = std::env::var_os(DATA_ENV)
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../gamedata")
+            });
+        if !dir.is_dir() {
+            eprintln!("game data not found; skipping");
+            return;
+        }
+        let mut data = GameData::open(&dir).expect("open game data");
+        let (mut found, mut tried) = (0, 0);
+        for n in 0..100 {
+            let level = data.level(n).expect("level");
+            let blocks = data.blocks(n).expect("blocks");
+            // Where walking lemmings' eyes are, every 100 ticks of the level
+            // left to play itself.
+            let mut sim = l3d_sim::Simulation::new(&level, &blocks);
+            let mut eyes = Vec::new();
+            for t in 0..400 {
+                if sim.finished() {
+                    break;
+                }
+                sim.step();
+                if t % 100 == 0 {
+                    eyes.extend(
+                        sim.lemmings
+                            .iter()
+                            .filter(|l| l.state == l3d_sim::State::Walking)
+                            .map(|l| Vec3::from_array(l.pos.map(units)) + Vec3::Y * 0.4),
+                    );
+                }
+            }
+            for c in &level.cameras {
+                let (from, _) = preset_view(c);
+                if camera_blocked(&level, &blocks, from) {
+                    continue;
+                }
+                for &e in &eyes {
+                    tried += 1;
+                    let ok = camera_route::route(&level, &blocks, from, e).is_some();
+                    assert!(
+                        ok || [47, 64, 65].contains(&n),
+                        "LEVEL.{n:03}: {from} to {e}"
+                    );
+                    found += ok as u32;
+                }
+            }
+        }
+        assert!(found * 10 >= tried * 9, "{found} of {tried}");
+    }
 }

@@ -30,10 +30,22 @@ const SEARCH_LIMIT: usize = 200_000;
 const END_REACH: i32 = 3;
 
 /// Whether the camera can move in a straight line from `a` to `b` without
-/// touching a block (checked in steps of at most [`CAMERA_STEP`]).
+/// passing through a block (checked in steps of at most [`CAMERA_STEP`]).
+/// An end that touches a block (a lemming's eyes close to the floor or a
+/// wall) may: the line is blocked then only while still leaving the start
+/// or already reaching the end, never between two clear stretches. A line
+/// blocked all along is clear only when short (both ends in one tight
+/// spot).
 pub(crate) fn clear_line(level: &Level, blocks: &BlockSet, a: Vec3, b: Vec3) -> bool {
     let steps = ((b - a).length() / CAMERA_STEP).ceil().max(1.0) as usize;
-    (0..=steps).all(|i| !camera_blocked(level, blocks, a.lerp(b, i as f32 / steps as f32)))
+    let blocked: Vec<bool> = (0..=steps)
+        .map(|i| camera_blocked(level, blocks, a.lerp(b, i as f32 / steps as f32)))
+        .collect();
+    let Some(first) = blocked.iter().position(|b| !b) else {
+        return a.distance(b) <= 2.0 * CAMERA_RADIUS;
+    };
+    let last = blocked.iter().rposition(|b| !b).unwrap();
+    !blocked[first..=last].contains(&true)
 }
 
 /// The position of grid point `(i, j, k)`.
