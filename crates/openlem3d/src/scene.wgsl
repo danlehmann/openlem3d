@@ -30,8 +30,13 @@ struct Uniforms {
     eye: vec4<f32>,
     // x: 1 when a sandstorm blows over the level (ours), else 0. y: how
     // much of it blows past the camera, 0–1: less under cover. z: 1 when
-    // distant things shimmer in the heat (ours), else 0.
+    // distant things shimmer in the heat (ours), else 0. w: 1 when the
+    // all-round sky is a night sky of stars shown with our touches, else 0.
     weather: vec4<f32>,
+    // x: 1 when the floor shines with the level mirrored at `eye.w` (ours),
+    // else 0. y: the circuit board's signal field's texels per unit, z: 1
+    // when that field is bound as `field_tex` (`crate::signals`), else 0.
+    gloss: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> u: Uniforms;
@@ -41,6 +46,9 @@ struct Uniforms {
 // glowing scene; the level mirrored in the sea while drawing the scene.
 @group(1) @binding(1) var second_tex: texture_2d<f32>;
 @group(1) @binding(2) var second_samp: sampler;
+// While drawing the scene, the circuit board's signal field
+// (`crate::signals`), or a blank texel.
+@group(1) @binding(3) var field_tex: texture_2d<f32>;
 
 struct VIn {
     @location(0) pos: vec3<f32>,
@@ -63,7 +71,9 @@ struct VIn {
     // none, calm by the scenery), y how far they lift it (0 beyond the
     // finely divided sea around the level), z 0 for no water, else 1 plus
     // the surf there (1 at the shore, 0 from `FOAM_REACH` out). A negative z
-    // marks a screen showing the game (`SceneLayer::screen`), uv 0–1 over it.
+    // marks a screen showing the game (`SceneLayer::screen`), uv 0–1 over it,
+    // and -2 a circuit board, which the lemmings' signals light
+    // (`crate::signals`).
     @location(5) light: vec3<f32>,
 };
 
@@ -107,6 +117,8 @@ struct VOut {
     @location(6) screen: f32,
     // Where it is in the world, before mirroring.
     @location(7) world: vec3<f32>,
+    // 1 on a circuit board, else 0.
+    @location(8) circuit: f32,
 };
 
 /// `p` mirrored in the sea when `mirrored`.
@@ -114,9 +126,11 @@ fn mirror_of(p: vec3<f32>, mirrored: bool) -> vec3<f32> {
     return select(p, vec3(p.x, 2.0 * u.eye.w - p.y, p.z), mirrored);
 }
 
-/// What the mirrored level leaves out: whatever lies this close above the
-/// sea or below it (the sea itself, and the land on it).
+/// What the mirrored level leaves out: whatever lies this close above a sea
+/// or below it (the sea itself, and the land on it); under a glossy floor,
+/// which lies just below its mirror, only what is below the mirror.
 const MIRROR_CLIP: f32 = 0.009;
+const GLOSS_CLIP: f32 = -0.001;
 
 @vertex
 fn vs(v: VIn, @builtin(instance_index) instance: u32) -> VOut {
@@ -140,7 +154,8 @@ fn vs(v: VIn, @builtin(instance_index) instance: u32) -> VOut {
     o.light = select(vec3(0.0), v.light * flicker, u.post.x > 0.0);
     o.wave = vec4(0.0);
     o.mirror = vec2(select(0.0, 1.0, mirrored), 0.0);
-    o.screen = select(0.0, 1.0, v.light.z < 0.0);
+    o.screen = select(0.0, 1.0, v.light.z < 0.0 && v.light.z > -1.5);
+    o.circuit = select(0.0, 1.0, v.light.z < -1.5);
     if (v.anim.y < 0.0) {
         var p = v.pos;
         if (v.light.y > 0.0) {
@@ -178,7 +193,10 @@ fn vs(v: VIn, @builtin(instance_index) instance: u32) -> VOut {
 
 @fragment
 fn fs(v: VOut) -> @location(0) vec4<f32> {
-    if (v.mirror.x > 0.5 && (v.mirror.y < MIRROR_CLIP || v.tile.x > 0.0)) {
+    // A glossy floor lies just under its mirror, which leaves out only what
+    // is below it, so that blocks meet their reflections.
+    let clip = select(MIRROR_CLIP, GLOSS_CLIP, u.gloss.x > 0.5);
+    if (v.mirror.x > 0.5 && (v.mirror.y < clip || v.tile.x > 0.0)) {
         discard;
     }
     var uv = v.uv;
@@ -219,6 +237,9 @@ fn fs(v: VOut) -> @location(0) vec4<f32> {
     // Taken here, where every fragment still runs: how much of the screen
     // one pixel spans.
     let footprint = fwidth(v.uv);
+    // Which way the surface faces, from how its position changes across
+    // the screen.
+    let facing = normalize(cross(dpdx(v.world), dpdy(v.world)));
     if (v.screen > 0.5 && u.post.w > 0.5) {
         return vec4(crt(v.uv, footprint), 1.0);
     }
@@ -226,6 +247,13 @@ fn fs(v: VOut) -> @location(0) vec4<f32> {
         return vec4(sea(v, shaded), 1.0);
     }
     var lit = (shaded + c.rgb * v.light) * (1.0 + glow * u.post.x);
+    if (v.circuit > 0.5) {
+        let texel = max(length(gx * size), length(gy * size));
+        lit += sent_signal(v.world, texel);
+    }
+    if (u.gloss.x > 0.5 && v.mirror.x < 0.5) {
+        lit = glossy(lit, v, facing);
+    }
     if (u.weather.x > 0.0) {
         // Sand drifting over the desert floor, then the dust in the air.
         if (v.tile.x > 0.0) {
@@ -287,16 +315,51 @@ fn fs_sky(v: SkyOut) -> @location(0) vec4<f32> {
         // All-round sky: a horizontally wrapping panorama stretched over the
         // full screen height (provisional).
         let full = vec2(col / dims.x, clamp(p.y / (400.0 * u.sky.z), 0.0, 0.999));
-        let c = textureSampleLevel(tex, samp, full, 0.0);
+        let starry = u.weather.w > 0.5;
+        var c = textureSampleLevel(tex, samp, full, 0.0);
+        // In a night sky only a point of light is a star (ours): a glow with
+        // more glow a couple of texels off is part of something bigger (a
+        // planet), which neither twinkles, texel by texel in bands, nor
+        // outshines its own dim rim.
+        var around = 0.0;
+        if (starry) {
+            let o = STAR_SPAN / dims;
+            around = max(
+                max(
+                    glow_of(textureSampleLevel(tex, samp, full + vec2(o.x, 0.0), 0.0).a),
+                    glow_of(textureSampleLevel(tex, samp, full - vec2(o.x, 0.0), 0.0).a),
+                ),
+                max(
+                    glow_of(textureSampleLevel(tex, samp, full + vec2(0.0, o.y), 0.0).a),
+                    glow_of(textureSampleLevel(tex, samp, full - vec2(0.0, o.y), 0.0).a),
+                ),
+            );
+        }
         // Its stars glow, each twinkling at its own pace.
         let texel = floor(fract(full) * dims);
         let phase = noise(texel) * 6.2832;
-        let twinkle = 0.65 + 0.35 * sin(u.sky.w * (1.5 + noise(texel.yx))  + phase);
-        let lit = c.rgb * (1.0 + glow_of(c.a) * twinkle * u.post.x);
-        // On an HDR screen the sky stays a backdrop: its stars clip at white
-        // as on an SDR one, rather than outshining what is in front of it.
+        var twinkle = 0.65 + 0.35 * sin(u.sky.w * (1.5 + noise(texel.yx))  + phase);
+        var point = 0.0;
+        if (starry) {
+            point = 1.0 - smoothstep(0.15, 0.5, around);
+            twinkle = mix(0.82, twinkle, point);
+        }
+        var lit = c.rgb * (1.0 + glow_of(c.a) * twinkle * u.post.x);
+        if (starry) {
+            // Twinkling in brightness too, without glow as well (ours).
+            lit *= 1.0 + glow_of(c.a) * (twinkle - 0.8) * 1.5;
+            // Big glowing bodies breathe slowly, each as a whole (ours).
+            lit *= 1.0 + glow_of(c.a) * (1.0 - point) * breath(full);
+        }
+        // On an HDR screen the sky stays a backdrop: it clips at white as on
+        // an SDR one, rather than outshining what is in front of it. Only a
+        // night sky's stars shine on above white (ours), as stars do.
         if (u.post.y > 0.0) {
-            return vec4(min(lit, vec3(1.0)), 1.0);
+            var shown = min(lit, vec3(1.0));
+            if (starry) {
+                shown += c.rgb * glow_of(c.a) * twinkle * point * STAR_HDR_GAIN;
+            }
+            return vec4(shown, 1.0);
         }
         return vec4(lit, 1.0);
     }
@@ -850,4 +913,92 @@ fn shimmer(at: vec2<f32>) -> vec2<f32> {
     // (a wall's edge), that would be pulled into what is far behind it.
     let there = clamp(textureSampleLevel(tex, samp, shifted, 0.0).a, 0.0, 1.0);
     return mix(at, shifted, smoothstep(amount - 0.3, amount - 0.05, there));
+}
+
+// A night sky (ours, Enhanced and Ultra): its stars twinkle in brightness,
+// shining above white on an HDR screen.
+
+/// How far above white a night sky's stars shine on an HDR screen, per
+/// unit of their brightness (ours, by eye).
+const STAR_HDR_GAIN: f32 = 4.0;
+/// How far a big glowing body's brightness swells and dims as it breathes.
+const BREATH: f32 = 0.18;
+/// How fast it breathes, in radians a second (a breath every 12 s or so).
+const BREATH_PACE: f32 = 0.5;
+
+/// How much brighter (or dimmer) a big glowing body at `uv` (0–1 over the
+/// panorama, wrapping across) is just now, about ±[`BREATH`]: its timing
+/// varies slowly across the sky, so that a body breathes as one and
+/// bodies apart are out of step.
+fn breath(uv: vec2<f32>) -> f32 {
+    let a = 6.2832 * uv.x;
+    let phase = 1.5 * sin(a + uv.y * 2.0) + sin(2.0 * a - uv.y * 3.0 + 1.3);
+    return BREATH * sin(u.sky.w * BREATH_PACE + phase);
+}
+
+/// How far off, in sky texels, a star is looked at for more glow: further
+/// than a star spans, nearer than a planet's edge.
+const STAR_SPAN: f32 = 2.5;
+
+// A glossy floor (ours, Ultra mode, "Breakout"): it shows the level
+// mirrored in it, as a polished floor does, more towards the horizon.
+
+/// How much of the mirrored level a glossy floor shows looking straight
+/// down, and looking along it.
+const GLOSS_DOWN: f32 = 0.12;
+const GLOSS_GRAZING: f32 = 0.4;
+
+/// `lit`, the colour of the fragment `v` facing `facing`, with the mirrored
+/// level in it if it is the floor.
+fn glossy(lit: vec3<f32>, v: VOut, facing: vec3<f32>) -> vec3<f32> {
+    // Only the floor, at the mirror: block tops above it would show the
+    // picture misplaced.
+    if (abs(facing.y) < 0.98 || abs(v.world.y - u.eye.w) > 0.02 || u.eye.y < v.world.y) {
+        return lit;
+    }
+    let dims = vec2<f32>(textureDimensions(second_tex));
+    let mirrored = textureSampleLevel(second_tex, second_samp, v.clip.xy / dims, 0.0);
+    let to_eye = normalize(u.eye.xyz - v.world);
+    let amount = mix(GLOSS_DOWN, GLOSS_GRAZING, pow(1.0 - clamp(to_eye.y, 0.0, 1.0), 3.0));
+    return mix(lit, mirrored.rgb, amount * clamp(mirrored.a, 0.0, 1.0));
+}
+
+// Signals on a circuit board (ours, Enhanced and Ultra): a lemming standing
+// on a trace sends a faint pulse of light from its feet along the traces
+// joined to it, round their corners (`crate::signals`). Unlit, so that the
+// glowing traps stay what catches the eye.
+
+/// How fast a signal runs, in texels a second (as `crate::signals`), how
+/// long its fading tail is, in texels, and its light.
+const SIGNAL_SPEED: f32 = 45.0;
+const SIGNAL_TAIL: f32 = 14.0;
+const SIGNAL_LIGHT: vec3<f32> = vec3(0.04, 0.2, 0.06);
+
+/// The light of a signal a lemming sent (`crate::signals`) at `world` on a
+/// circuit board, a texel spanning `texel` pixels: its front's arrival at
+/// the field texel there (`crate::signals::SignalField::arrivals`), lit
+/// for a short tail after, or longer round where the signal set off.
+fn sent_signal(world: vec3<f32>, texel: f32) -> vec3<f32> {
+    if (u.gloss.z <= 0.5) {
+        return vec3(0.0);
+    }
+    let dims = vec2<i32>(textureDimensions(field_tex));
+    let at = vec2<i32>(floor(world.xz * u.gloss.y));
+    if (any(at < vec2(0)) || any(at >= dims)) {
+        return vec3(0.0);
+    }
+    let b = round(textureLoad(field_tex, at, 0) * 255.0);
+    // When the front gets here (milliseconds, wrapping at 2^24), and how long
+    // it stays lit here (4 ms steps; 0 for a front passing).
+    let arrival = b.r + b.g * 256.0 + b.b * 65536.0;
+    if (arrival <= 0.0) {
+        return vec3(0.0);
+    }
+    let lit_ms = max(SIGNAL_TAIL / SIGNAL_SPEED * 1000.0, b.a * 4.0);
+    let since = (u.sky.w * 1000.0) % 16777216.0 - arrival;
+    if (since < 0.0 || since > lit_ms) {
+        return vec3(0.0);
+    }
+    let near = 1.0 - smoothstep(3.0, 8.0, texel);
+    return SIGNAL_LIGHT * (1.0 - since / lit_ms) * near;
 }

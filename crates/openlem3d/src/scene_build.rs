@@ -14,6 +14,9 @@ use crate::scene_render::{RgbaImage, SceneData, SceneLayer, VERTEX_FLOATS};
 pub const GROUND_Y: f32 = 1.0;
 /// The sea's height, just under the ground.
 const SEA_Y: f32 = GROUND_Y - 0.01;
+/// How far below the ground the lowest land polygon lies, just above the
+/// sea; later ones lie a little higher.
+const LAND_BELOW_GROUND: f32 = 0.008;
 
 /// Texels per grid unit for sprites (same density as block faces).
 const SPRITE_TEXELS_PER_UNIT: f32 = 64.0;
@@ -560,7 +563,7 @@ fn land_layer(
         // The top 3 bits of the options byte shade the texture (unverified),
         // taken as a flat top's shading.
         let shade = crate::level_mesh::face_shade(poly[0].options >> 5, true);
-        let y = GROUND_Y - 0.008 + 0.006 * i as f32 / (count - 1).max(1) as f32;
+        let y = GROUND_Y - LAND_BELOW_GROUND + 0.006 * i as f32 / (count - 1).max(1) as f32;
         let pts: Vec<[f32; 3]> = poly.iter().map(|v| [v.x as f32, y, v.z as f32]).collect();
         for p in &pts {
             Vertex::fixed(*p, [p[0] / tile, p[2] / tile], shade, false).push(&mut b.vertices);
@@ -1408,12 +1411,64 @@ pub struct Show {
     pub waves: bool,
     /// A sea of water with waves mirrors the level (ours, in Ultra mode).
     pub mirror: bool,
+    /// Signals run along a circuit board's traces (ours, in Enhanced and
+    /// Ultra modes; see [`CIRCUIT_LANDS`]).
+    pub signals: bool,
     /// A desert (a sea of sand) has a sandstorm (ours, in Ultra mode).
     pub storm: bool,
 }
 
 /// The sea graphics that are sand.
 const SAND_SEAS: [u8; 1] = [0];
+
+/// The land graphics that are circuit boards, whose traces carry signals the
+/// lemmings set off (ours, Enhanced and Ultra; `crate::signals`): `LAND.008`,
+/// the board of "Motherboard", "Family Tree", "Across the Network" and
+/// "Critical Path"; and its traces' palette colour (the board is index 127).
+const CIRCUIT_LANDS: [u8; 1] = [8];
+const CIRCUIT_TRACE: u8 = 125;
+
+/// Levels whose floor shines (ours, Ultra mode): "Breakout" (`LEVEL.024`),
+/// its floor glossy like an arcade game's.
+const GLOSSY_LEVELS: [u32; 1] = [24];
+
+/// The height of the mirror for a glossy level's floor: the ground where it
+/// draws land, which lies just under it, so that the blocks standing there
+/// meet their reflections; else the commonest top of its blocks.
+fn glossy_floor(level: &Level, show: Show) -> Option<f32> {
+    let land = show.land
+        && level.land_gfx != 0xFF
+        && level.flags & level_flags::LAND_INVISIBLE == 0
+        && !level.land_polygons.is_empty();
+    if land {
+        return Some(GROUND_Y);
+    }
+    floor_height(level)
+}
+
+/// The height of `level`'s floor: the commonest top of a column's highest
+/// block, if there are blocks.
+fn floor_height(level: &Level) -> Option<f32> {
+    let mut counts = std::collections::BTreeMap::<u32, u32>::new();
+    for x in 0..SIZE_X {
+        for z in 0..SIZE_Z {
+            let top = (0..l3d_formats::level::SIZE_Y).rev().find_map(|y| {
+                let b = level.block(x, y, z);
+                (!b.is_empty()).then(|| y as u32 * 4 + (8 - b.segments.leading_zeros()))
+            });
+            if let Some(t) = top {
+                *counts.entry(t).or_default() += 1;
+            }
+        }
+    }
+    let (top, _) = counts.into_iter().max_by_key(|&(_, c)| c)?;
+    Some(top as f32 / 4.0)
+}
+
+/// The average brightness (0–255) below which an all-round sky is a night
+/// sky of stars: the starry and nebula skies are far below it, the
+/// candy-floss one far above (ours, by eye).
+const STARRY_MEAN: f32 = 100.0;
 
 /// Builds everything drawn for level `n`.
 pub fn build(data: &mut GameData, n: u32, show: Show) -> Result<BuiltLevel, l3d_formats::Error> {
@@ -1437,6 +1492,13 @@ pub fn build(data: &mut GameData, n: u32, show: Show) -> Result<BuiltLevel, l3d_
     let flags = level.flags;
     let surround = flags & level_flags::SURROUND_SKY != 0;
     scene.storm = show.storm && !surround && SAND_SEAS.contains(&level.sea_gfx);
+    if show.mirror
+        && GLOSSY_LEVELS.contains(&n)
+        && let Some(floor) = glossy_floor(&level, show)
+    {
+        scene.mirror = Some(floor);
+        scene.glossy = true;
+    }
 
     if show.sea
         && level.sea_gfx != 0xFF
@@ -1529,12 +1591,26 @@ pub fn build(data: &mut GameData, n: u32, show: Show) -> Result<BuiltLevel, l3d_
                 continue;
             }
             let pixels = &land[index * size * size..((index + 1) * size * size).min(land.len())];
-            scene.layers.push(land_layer(
-                &polys,
-                level.land_polygons.len(),
-                indexed_to_rgba(pixels, size as u32, &pal),
-                tile,
-            ));
+            let img = indexed_to_rgba(pixels, size as u32, &pal);
+            let circuit = show.signals && CIRCUIT_LANDS.contains(&level.land_gfx);
+            if circuit {
+                scene.circuit = Some(crate::signals::CircuitBoard {
+                    trace: pixels.iter().map(|&p| p == CIRCUIT_TRACE).collect(),
+                    texels: size,
+                    per_unit: size as f32 / tile,
+                });
+            }
+            let mut layer = land_layer(&polys, level.land_polygons.len(), img, tile);
+            if circuit {
+                // Marked as a circuit board for the shader (`scene.wgsl`).
+                for v in layer
+                    .vertices
+                    .chunks_mut(crate::scene_render::VERTEX_FLOATS)
+                {
+                    v[crate::scene_render::VERTEX_FLOATS - 1] = -2.0;
+                }
+            }
+            scene.layers.push(layer);
         }
     }
     let block_layer_index = scene.layers.len();
@@ -1598,6 +1674,14 @@ pub fn build(data: &mut GameData, n: u32, show: Show) -> Result<BuiltLevel, l3d_
                 let lit = glow::stars(&transposed, 320, &pal);
                 scene.sky = Some(glowing_rgba(&transposed, 320, &pal, |p| lit[p]));
                 scene.sky_surround = true;
+                // A night sky of stars (ours): dark on the whole, as the starry
+                // and nebula skies are and the candy-floss one is not.
+                let mean = transposed
+                    .iter()
+                    .map(|&i| pal[i as usize].iter().map(|&c| c as f32).sum::<f32>() / 3.0)
+                    .sum::<f32>()
+                    / transposed.len() as f32;
+                scene.starry = mean < STARRY_MEAN;
             }
             _ => {}
         }

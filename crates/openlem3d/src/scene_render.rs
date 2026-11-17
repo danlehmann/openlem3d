@@ -36,6 +36,9 @@ pub struct SceneData {
     /// The sky is a tiled all-round backdrop covering the whole screen
     /// (space levels) rather than a panorama above the horizon.
     pub sky_surround: bool,
+    /// The all-round sky is a night sky of stars (ours): its stars twinkle
+    /// and shine above white on an HDR screen ([`SceneCamera::ours`]).
+    pub starry: bool,
     /// Texture for the per-frame sprites in [`SceneSprites`].
     pub sprite_atlas: Option<RgbaImage>,
     /// The level's lights, kept to light the blocks again when they are
@@ -49,6 +52,12 @@ pub struct SceneData {
     pub mirror: Option<f32>,
     /// A sandstorm blows over the level (ours, Ultra mode).
     pub storm: bool,
+    /// What faces up at the height of [`Self::mirror`] shines with the level
+    /// mirrored there (ours, Ultra mode): a glossy floor.
+    pub glossy: bool,
+    /// The land is a circuit board whose traces carry signals the lemmings
+    /// set off (ours; see `crate::signals`).
+    pub circuit: Option<crate::signals::CircuitBoard>,
 }
 
 /// Geometry rebuilt every frame (moving sprites such as lemmings), textured
@@ -120,6 +129,8 @@ pub struct SceneCamera {
     /// Draw [`SceneLayer::screen`] layers as the glass of a cathode-ray
     /// tube (ours).
     pub crt: bool,
+    /// Our touches beyond the original show (Enhanced and Ultra modes).
+    pub ours: bool,
     /// How enclosed the camera is, 0 (open air) to 1 (inside a tunnel):
     /// the grains and dust blowing past it stay outside.
     pub shelter: f32,
@@ -139,11 +150,14 @@ pub struct SceneInput<'a> {
     pub headroom: f32,
     /// The last frame drawn, for [`SceneLayer::screen`] layers.
     pub screen: Option<&'a wgpu::TextureView>,
+    /// The circuit board's signal field, if the level has one, and the part of
+    /// it changed since the last frame.
+    pub signals: Option<(&'a crate::signals::SignalField, Option<[u32; 4]>)>,
 }
 
 /// The scene's colour format while glowing: room above white.
 const HDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
-const UNIFORM_SIZE: u64 = 176;
+const UNIFORM_SIZE: u64 = 192;
 /// How much brighter than its palette colour a fully glowing texel is drawn
 /// (ours, tuned by eye).
 const GLOW_GAIN: f32 = 3.0;
@@ -183,7 +197,8 @@ pub struct SceneGpu {
     /// Version of the uploaded [`SceneContent`].
     version: Option<u64>,
     layers: Vec<UploadedLayer>,
-    sky: Option<wgpu::BindGroup>,
+    /// The sky, sampled smoothly in our modes ([`SceneCamera::filtered`]).
+    sky: Option<Bound>,
     sprite_atlas: Option<wgpu::BindGroup>,
     /// Per-frame sprite geometry: buffers (grown as needed) and index count.
     sprites: Option<(wgpu::Buffer, wgpu::Buffer, u32)>,
@@ -201,9 +216,17 @@ pub struct SceneGpu {
         wgpu::TextureView,
         wgpu::BindGroup,
     )>,
-    /// A one-texel picture bound in place of the reflection when there is
-    /// none.
+    /// A one-texel picture bound in place of a picture there is not: as a
+    /// bind group in the second place, and as a view.
     blank: wgpu::BindGroup,
+    blank_view: wgpu::TextureView,
+    /// The scene's second bind group: the reflection (`second_tex`) and the
+    /// circuit board's signal field (`field_tex`), either blank.
+    extras_layout: wgpu::BindGroupLayout,
+    /// The circuit board's signal field on the GPU: which field it is, the
+    /// texture (RGBA8, a millisecond count in each texel's bytes) and its
+    /// view.
+    signals: Option<(u64, wgpu::Texture, wgpu::TextureView)>,
     /// Floats where the GPU can draw into them, for reversed depth's
     /// precision; otherwise (the Nexus 6P's Adreno 430 on Vulkan) 24 bits.
     depth_format: wgpu::TextureFormat,
@@ -346,6 +369,37 @@ impl SceneGpu {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        let extras_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("scene extras"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+            ],
+        });
         let blank = device
             .create_texture(&wgpu::TextureDescriptor {
                 label: Some("scene blank"),
@@ -362,6 +416,7 @@ impl SceneGpu {
                 view_formats: &[],
             })
             .create_view(&Default::default());
+        let blank_view = blank.clone();
         let blank = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("scene blank"),
             layout: &layout,
@@ -383,6 +438,9 @@ impl SceneGpu {
         SceneGpu {
             reflection: None,
             blank,
+            blank_view,
+            extras_layout,
+            signals: None,
             layout,
             shader,
             sampler,
@@ -423,16 +481,23 @@ impl SceneGpu {
             ..Default::default()
         });
         // Presenting the glowing scene also samples the bloom chain's top
-        // level, bound second; drawing the scene, the reflection.
+        // level, bound second.
         let pl_two = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("scene two pictures"),
             bind_group_layouts: &[Some(&self.layout), Some(&self.layout)],
             ..Default::default()
         });
+        // Drawing the scene, the reflection and the signal field are bound
+        // second.
+        let pl_scene = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("scene with extras"),
+            bind_group_layouts: &[Some(&self.layout), Some(&self.extras_layout)],
+            ..Default::default()
+        });
         let geometry = |label, cull| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some(label),
-            layout: Some(&pl_two),
+            layout: Some(&pl_scene),
             vertex: wgpu::VertexState {
                 module: &self.shader,
                 entry_point: Some("vs"),
@@ -469,7 +534,7 @@ impl SceneGpu {
         let over_scene = |label, fragment, blend: Option<wgpu::BlendState>| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: Some(label),
-                layout: Some(&pl_two),
+                layout: Some(&pl_scene),
                 vertex: wgpu::VertexState {
                     module: &self.shader,
                     entry_point: Some("vs_sky"),
@@ -506,7 +571,7 @@ impl SceneGpu {
         );
         let sky = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("scene sky"),
-            layout: Some(&pl_two),
+            layout: Some(&pl_scene),
             vertex: wgpu::VertexState {
                 module: &self.shader,
                 entry_point: Some("vs_sky"),
@@ -570,7 +635,7 @@ impl SceneGpu {
         };
         let shadow = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("scene shadows"),
-            layout: Some(&pl_two),
+            layout: Some(&pl_scene),
             vertex: wgpu::VertexState {
                 module: &self.shader,
                 entry_point: Some("vs"),
@@ -882,6 +947,7 @@ fn prepare(
     sprites: &SceneSprites,
     camera: &SceneCamera,
     headroom: f32,
+    signals: Option<f32>,
 ) {
     let (w, h) = gpu.target_size;
     // The original's 3D view is 400 rows tall (its 640×400 mode); its sky
@@ -950,7 +1016,19 @@ fn prepare(
     // Heat shimmer goes with the storm, over the same deserts; it is kept
     // in the alpha of the glowing scene, so only while that is drawn.
     let heat = if glow { storm } else { 0.0 };
-    uniforms.extend([storm, around, heat, 0.0]);
+    // A night sky shows our stars and clouds only in our modes.
+    let sky = match content.data.as_ref() {
+        Some(d) if camera.ours && d.starry => 1.0,
+        _ => 0.0,
+    };
+    uniforms.extend([storm, around, heat, sky]);
+    let glossy = content
+        .data
+        .as_ref()
+        .is_some_and(|d| d.glossy && d.mirror.is_some());
+    // The signal field's texels per unit, and whether it is bound.
+    let (per_unit, field) = signals.map_or((0.0, 0.0), |p| (p, 1.0));
+    uniforms.extend([if glossy { 1.0 } else { 0.0 }, per_unit, field, 0.0]);
     queue.write_buffer(&gpu.uniforms, 0, &f32_bytes(&uniforms));
     upload_dynamic(
         device,
@@ -1014,7 +1092,7 @@ fn prepare(
         });
     }
     gpu.layers = layers;
-    gpu.sky = data.sky.as_ref().map(|s| bind(gpu, s, false).plain);
+    gpu.sky = data.sky.as_ref().map(|s| bind(gpu, s, true));
     gpu.sprite_atlas = data
         .sprite_atlas
         .as_ref()
@@ -1079,6 +1157,16 @@ impl SceneGpu {
         self.target_origin = (viewport.x, viewport.y);
         self.target_size = size;
         let device = &gpu.device;
+        let signals = match input.signals {
+            Some((field, dirty)) => {
+                self.upload_signals(device, &gpu.queue, field, dirty);
+                Some(field.per_unit())
+            }
+            None => {
+                self.signals = None;
+                None
+            }
+        };
         prepare(
             self,
             device,
@@ -1087,8 +1175,70 @@ impl SceneGpu {
             input.sprites,
             input.camera,
             input.headroom,
+            signals,
         );
         draw(self, device, encoder, target, full, viewport, input);
+    }
+
+    /// Brings the GPU's copy of the signal field `field` up to date: made
+    /// and filled whole for a new field, else its `dirty` part rewritten.
+    fn upload_signals(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        field: &crate::signals::SignalField,
+        dirty: Option<[u32; 4]>,
+    ) {
+        let (w, h) = field.size;
+        let fresh = self
+            .signals
+            .as_ref()
+            .is_none_or(|s| s.0 != field.generation);
+        if fresh {
+            let texture = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("signal field"),
+                size: wgpu::Extent3d {
+                    width: w,
+                    height: h,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Rgba8Unorm,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+            let view = texture.create_view(&Default::default());
+            self.signals = Some((field.generation, texture, view));
+        }
+        let rect = if fresh { Some([0, 0, w, h]) } else { dirty };
+        let (Some([x0, y0, x1, y1]), Some((_, texture, _))) = (rect, &self.signals) else {
+            return;
+        };
+        let bytes: Vec<u8> = (y0..y1)
+            .flat_map(|y| (x0..x1).map(move |x| (y * w + x) as usize))
+            .flat_map(|i| field.arrivals[i].to_le_bytes())
+            .collect();
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
+                texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d { x: x0, y: y0, z: 0 },
+                aspect: wgpu::TextureAspect::All,
+            },
+            &bytes,
+            wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some((x1 - x0) * 4),
+                rows_per_image: None,
+            },
+            wgpu::Extent3d {
+                width: x1 - x0,
+                height: y1 - y0,
+                depth_or_array_layers: 1,
+            },
+        );
     }
 }
 
@@ -1136,6 +1286,31 @@ fn draw(
         .filter(|_| gpu.layers.iter().any(|l| l.screen))
         .map(|view| gpu.bind_view(&device, view, &gpu.linear));
     let gpu = &*gpu;
+    // The scene's second bind group: the reflection when it is drawn, the
+    // circuit board's signal field, either blank.
+    let extras = |reflection: Option<&wgpu::TextureView>| {
+        let field = gpu.signals.as_ref().map(|(_, _, view)| view);
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("scene extras"),
+            layout: &gpu.extras_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(
+                        reflection.unwrap_or(&gpu.blank_view),
+                    ),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&gpu.linear),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(field.unwrap_or(&gpu.blank_view)),
+                },
+            ],
+        })
+    };
     if gpu.layers.is_empty() && gpu.sky.is_none() && gpu.sprites.is_none() {
         profile.stamp(encoder, Stamp::Geometry);
         profile.stamp(encoder, Stamp::Bloom);
@@ -1181,6 +1356,10 @@ fn draw(
         pass.set_bind_group(1, second, &[]);
         if let Some(sky) = &gpu.sky {
             pass.set_pipeline(&scene_p.sky);
+            let sky = match &sky.filtered {
+                Some(f) if camera.filtered => f,
+                _ => &sky.plain,
+            };
             pass.set_bind_group(0, sky, &[]);
             pass.draw(0..3, instance.clone());
         }
@@ -1247,7 +1426,7 @@ fn draw(
         if low.is_none() && hdr.is_none() {
             set_viewport(&mut pass, viewport);
         }
-        scene(&mut pass, true, &gpu.blank);
+        scene(&mut pass, true, &extras(None));
     }
     let color = match (&low, &hdr) {
         (Some((_, (view, _))), _) => offscreen(view),
@@ -1263,8 +1442,11 @@ fn draw(
     if low.is_none() && hdr.is_none() {
         set_viewport(&mut pass, viewport);
     }
-    let second = reflection.as_ref().map_or(&gpu.blank, |(_, bind)| bind);
-    scene(&mut pass, false, second);
+    scene(
+        &mut pass,
+        false,
+        &extras(reflection.as_ref().map(|(view, _)| view)),
+    );
     drop(pass);
     profile.stamp(encoder, Stamp::Geometry);
     // Bloom: halve the glow above white down the chain, then blur each

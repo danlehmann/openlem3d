@@ -36,6 +36,7 @@ mod scene_render;
 mod screen;
 mod settings;
 mod sfx;
+mod signals;
 mod style;
 mod texture;
 mod time_dial;
@@ -328,6 +329,8 @@ pub struct World {
     fade: fade::Fade,
     style: style::Style,
     fps: fps::Fps,
+    /// The circuit board's signals the lemmings set off, on a level with one.
+    signals: Option<signals::SignalField>,
     hdr_blink: hdr_blink::HdrBlink,
     key_buttons: key_buttons::KeyButtons,
     muted: music::MusicMuted,
@@ -418,6 +421,7 @@ impl World {
             fade: fade::Fade::default(),
             style: style::Style::default(),
             fps: fps::Fps::default(),
+            signals: None,
             hdr_blink: hdr_blink::HdrBlink::default(),
             key_buttons: key_buttons::KeyButtons::default(),
             muted: music::MusicMuted::default(),
@@ -1437,6 +1441,36 @@ fn update_lemming_sprites(w: &mut World) {
         });
         (sprites.shadow_vertices, sprites.shadow_indices) =
             lemming_render::shadows(sim, &drawn, ground);
+    }
+    // Signals the lemmings set off on a circuit board (ours): a field made
+    // anew for each board, fed with the feet of those standing at its
+    // height.
+    let Some(board) = w.scene.data.as_ref().and_then(|d| d.circuit.clone()) else {
+        w.signals = None;
+        return;
+    };
+    if !w.signals.as_ref().is_some_and(|f| f.is_for(&board)) {
+        static GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let generation = GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        w.signals = Some(signals::SignalField::new(board, generation));
+    }
+    let feet: Vec<_> = sim
+        .lemmings
+        .iter()
+        .zip(&drawn)
+        .map(|(l, &(p, _))| {
+            use l3d_sim::State;
+            let standing = !l.gone
+                && matches!(
+                    l.state,
+                    State::Walking | State::Blocking | State::Turning { .. } | State::Shrugging
+                )
+                && (p[1] - scene_build::GROUND_Y).abs() < 0.05;
+            standing.then_some(p)
+        })
+        .collect();
+    if let Some(field) = w.signals.as_mut() {
+        field.step(&feet, w.camera.time);
     }
 }
 

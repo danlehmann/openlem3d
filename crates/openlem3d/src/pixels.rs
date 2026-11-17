@@ -18,6 +18,7 @@ pub(crate) fn update(w: &mut World) {
     camera.glow = settings.mode == crate::settings::Mode::Ultra && !w.opts.no_glow;
     camera.filtered = settings.enhanced();
     camera.crt = settings.enhanced();
+    camera.ours = settings.enhanced();
     let screen = (w.screen.size * w.e.window.scale_factor()).round();
     camera.pixels = if settings.enhanced() || screen.min_element() < 1.0 {
         UVec2::ZERO

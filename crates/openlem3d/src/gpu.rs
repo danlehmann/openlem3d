@@ -625,6 +625,10 @@ pub(crate) fn render(w: &mut World) {
                 format,
                 headroom,
                 screen: previous.as_ref().map(|p| &p.3),
+                signals: w.signals.as_mut().map(|f| {
+                    let dirty = f.dirty.take();
+                    (&*f, dirty)
+                }),
             },
         );
     profile.stamp(&mut encoder, Stamp::Scene);
