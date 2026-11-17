@@ -682,8 +682,17 @@ struct Glide {
 /// Another camera nearer the view than this (units) is not drawn.
 const CAMERA_MARKER_CLEARANCE: f32 = 0.3;
 
-/// How long a glide to a preset view takes, in seconds (ours).
+/// How long a glide takes before its way is known, in seconds (ours).
 const GLIDE_SECONDS: f32 = 0.8;
+/// How long a glide takes for the length of its way (ours): a base time,
+/// then a time per unit travelled, up to a longest time. Short hops are
+/// quick and long moves take longer at a speed still easy to follow (at
+/// most about 20 units a second at the eased middle of a long glide; the
+/// owner found close cameras slow and distant ones too fast with one fixed
+/// time).
+const GLIDE_BASE_SECONDS: f32 = 0.3;
+const GLIDE_SECONDS_PER_UNIT: f32 = 0.065;
+const GLIDE_MAX_SECONDS: f32 = 2.4;
 /// How fast Q/E and the panel's turn arrows turn the world about the
 /// level's centre, in radians per second (ours).
 pub(crate) const ORBIT_SPEED: f32 = 1.2;
@@ -755,10 +764,9 @@ impl ViewCamera {
     }
 
     /// Plans the way a glide just started takes, round the blocks of
-    /// `level` in the straight line's way; a longer way takes a little
-    /// longer (by the square root of how much longer it is, at most twice
-    /// as long). With no way round, the view cuts to its destination at once
-    /// rather than pass through blocks.
+    /// `level` in the straight line's way, and how long it takes by the way's
+    /// length (see [`GLIDE_BASE_SECONDS`]). With no way round, the view cuts
+    /// to its destination at once rather than pass through blocks.
     fn plan_glide(&mut self, level: &Level, blocks: &BlockSet) {
         let Some(g) = self.glide.as_mut().filter(|g| g.route.is_none()) else {
             return;
@@ -767,9 +775,8 @@ impl ViewCamera {
             self.finish_glide();
             return;
         };
-        let straight = g.from.0.distance(g.to.0).max(1e-3);
-        let longer = (camera_route::length(&route) / straight).max(1.0);
-        g.seconds = GLIDE_SECONDS * longer.sqrt().min(2.0);
+        let length = camera_route::length(&route);
+        g.seconds = (GLIDE_BASE_SECONDS + length * GLIDE_SECONDS_PER_UNIT).min(GLIDE_MAX_SECONDS);
         g.route = Some(route);
     }
 
