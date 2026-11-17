@@ -152,8 +152,25 @@ pub const DROWN_TICKS: u32 = 12;
 /// the original, 2026-10-23: they rise about 2 units and rain down for about
 /// 2½ s).
 pub const EXPLODE_TICKS: u32 = 35;
-/// How long a killing trap stays busy after taking a lemming (provisional).
+/// How long a killing trap stays busy after taking a lemming, but for the
+/// weird trap ([`WEIRD_TRAP_BUSY_TICKS`]) (provisional).
 pub const TRAP_BUSY_TICKS: u32 = 28;
+/// How long a weird trap (the mud pit) stays busy after taking a lemming
+/// (**measured**, owner: Tricky 7 "Rescue Team" at release rate 99 without
+/// skills, the first stream of walkers lost 4 lemmings, evenly spaced, at
+/// the first mud pit and 4 more at the second, which 12–14 ticks give; the
+/// stored route of Mayhem 10 "The Hanger", whose lemmings cross weird traps,
+/// saves enough only from 14 on).
+pub const WEIRD_TRAP_BUSY_TICKS: u32 = 14;
+
+/// How long a killing trap of `kind` stays busy after taking a lemming.
+pub fn trap_busy_ticks(kind: Option<objects::ObjectKind>) -> u32 {
+    if kind == Some(objects::ObjectKind::WeirdTrap) {
+        WEIRD_TRAP_BUSY_TICKS
+    } else {
+        TRAP_BUSY_TICKS
+    }
+}
 /// How long a spring shows its launch after throwing a lemming (unmeasured:
 /// one tick per frame of its seven-frame animation).
 pub const SPRING_BUSY_TICKS: u32 = 7;
@@ -1337,7 +1354,7 @@ impl Simulation {
                 }
             }
             State::Trapped => {
-                if l.state_ticks >= TRAP_BUSY_TICKS {
+                if l.state_ticks >= trap_busy_ticks(self.object_kind) {
                     l.gone = true;
                     self.counts.dead += 1;
                 }
@@ -1656,7 +1673,7 @@ impl Simulation {
             .iter_mut()
             .find(|o| o.busy == 0 && o.touches(l.pos))
         {
-            o.busy = TRAP_BUSY_TICKS;
+            o.busy = trap_busy_ticks(self.object_kind);
             l.fuse = None;
             // A laser electrocutes the lemming as electric liquid does,
             // with no beam to be seen (recorded in the original,

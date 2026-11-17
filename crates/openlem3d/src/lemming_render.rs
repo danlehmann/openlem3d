@@ -436,7 +436,7 @@ fn objects(b: &mut LayerBuilder, sim: &Simulation, eye: Vec3, tex: [f32; 2]) {
     let last = TRAP_ATLAS_CELLS - 1;
     for o in &sim.objects {
         let firing = o.busy > 0;
-        let elapsed = (l3d_sim::TRAP_BUSY_TICKS - o.busy) as usize;
+        let elapsed = (l3d_sim::trap_busy_ticks(Some(kind)) - o.busy) as usize;
         let played = |seq: &[u32]| {
             if firing {
                 seq.get(elapsed).copied().unwrap_or(0)
