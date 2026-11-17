@@ -115,6 +115,9 @@ pub struct SceneCamera {
     pub glow: bool,
     /// Sample [`SceneLayer::smooth`] textures through their mipmaps.
     pub filtered: bool,
+    /// Draw [`SceneLayer::screen`] layers as the glass of a cathode-ray
+    /// tube (ours).
+    pub crt: bool,
 }
 
 /// What a frame draws of the scene.
@@ -882,7 +885,7 @@ fn prepare(
         if glow { GLOW_GAIN } else { 0.0 },
         headroom,
         if mirror.is_some() { 1.0 } else { 0.0 },
-        0.0,
+        if camera.crt { 1.0 } else { 0.0 },
     ]);
     // The camera's position: the point the projection takes to infinity
     // in every direction.

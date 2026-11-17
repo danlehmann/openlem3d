@@ -22,7 +22,8 @@ struct Uniforms {
     // x: how much brighter than its palette colour a fully glowing texel is
     // drawn; 0 when glow is off. y: how far above white the screen shows
     // (an HDR target, linear with 1 at white), or 0. z: 1 when the sea
-    // mirrors the level (`second_tex` holds the reflection), else 0.
+    // mirrors the level (`second_tex` holds the reflection), else 0. w: 1
+    // when screens are drawn as the glass of a cathode-ray tube (ours).
     post: vec4<f32>,
     // xyz: the camera's position. w: the height of the sea the level is
     // mirrored in.
@@ -57,7 +58,8 @@ struct VIn {
     // mode, `scene_build::Waves`): x how strongly they shade it (0 for
     // none, calm by the scenery), y how far they lift it (0 beyond the
     // finely divided sea around the level), z 0 for no water, else 1 plus
-    // the surf there (1 at the shore, 0 from `FOAM_REACH` out).
+    // the surf there (1 at the shore, 0 from `FOAM_REACH` out). A negative z
+    // marks a screen showing the game (`SceneLayer::screen`), uv 0–1 over it.
     @location(5) light: vec3<f32>,
 };
 
@@ -97,6 +99,8 @@ struct VOut {
     @location(4) wave: vec4<f32>,
     // x: 1 when drawn mirrored in the sea, y: the height above the sea.
     @location(5) mirror: vec2<f32>,
+    // 1 on a screen showing the game, else 0.
+    @location(6) screen: f32,
 };
 
 /// `p` mirrored in the sea when `mirrored`.
@@ -130,6 +134,7 @@ fn vs(v: VIn, @builtin(instance_index) instance: u32) -> VOut {
     o.light = select(vec3(0.0), v.light * flicker, u.post.x > 0.0);
     o.wave = vec4(0.0);
     o.mirror = vec2(select(0.0, 1.0, mirrored), 0.0);
+    o.screen = select(0.0, 1.0, v.light.z < 0.0);
     if (v.anim.y < 0.0) {
         var p = v.pos;
         if (v.light.y > 0.0) {
@@ -203,6 +208,12 @@ fn fs(v: VOut) -> @location(0) vec4<f32> {
     let lowered = max(top - v.params.x, min(top, SHADE_FLOOR));
     let shaded = pow(srgb * (lowered / max(top, 1e-5)), vec3(2.2));
     let glow = glow_of(c.a);
+    // Taken here, where every fragment still runs: how much of the screen
+    // one pixel spans.
+    let footprint = fwidth(v.uv);
+    if (v.screen > 0.5 && u.post.w > 0.5) {
+        return vec4(crt(v.uv, footprint), 1.0);
+    }
     if (v.wave.z > 0.0 || v.wave.w > 0.0) {
         return vec4(sea(v, shaded), 1.0);
     }
@@ -605,4 +616,60 @@ fn sea(v: VOut, shaded: vec3<f32>) -> vec3<f32> {
         c = mix(c, lit, foam);
     }
     return c;
+}
+
+// A screen showing the game as the glass of a cathode-ray tube (ours,
+// enhanced mode): bulging glass with rounded corners, scanlines and a
+// phosphor mask (both fading out where they would be finer than the
+// pixels), colours fringing apart towards the edges, darker corners, a
+// faint band of brightness rolling down and a sheen on the glass.
+
+/// How far the glass bulges: the picture's corners pull in by about this
+/// much of its size.
+const CRT_CURVE: f32 = 0.12;
+/// The rounding of the glass's corners, as a share of the picture.
+const CRT_CORNER: f32 = 0.06;
+/// Scanlines down the picture (the original's 200 rows) and phosphor
+/// triads across it.
+const CRT_LINES: f32 = 200.0;
+const CRT_TRIADS: f32 = 320.0;
+/// How far the red and blue images drift apart at the edges, as a share
+/// of the picture.
+const CRT_FRINGE: f32 = 0.006;
+/// How much brighter than the picture the tube is drawn, against the
+/// light the scanlines and mask take away.
+const CRT_GAIN: f32 = 1.3;
+
+/// The tube's colour at `at` (0–1 over the picture), one pixel spanning
+/// `footprint` of it.
+fn crt(at: vec2<f32>, footprint: vec2<f32>) -> vec3<f32> {
+    let t = u.sky.w;
+    let d = at - 0.5;
+    let uv = 0.5 + d * (1.0 + CRT_CURVE * 4.0 * dot(d, d));
+    // The glass: a rectangle with rounded corners, softened over a pixel.
+    let q = abs(uv - 0.5) - (0.5 - CRT_CORNER);
+    let edge = length(max(q, vec2(0.0))) + min(max(q.x, q.y), 0.0) - CRT_CORNER;
+    let pixel = max(footprint.x, footprint.y);
+    let glass = 1.0 - smoothstep(-pixel, pixel, edge);
+    let fringe = d * CRT_FRINGE * 2.0;
+    var c = vec3(
+        textureSampleLevel(tex, samp, uv + fringe, 0.0).r,
+        textureSampleLevel(tex, samp, uv, 0.0).g,
+        textureSampleLevel(tex, samp, uv - fringe, 0.0).b,
+    );
+    // Scanlines and mask, faded out as they near a pixel's size.
+    let lines = 1.0 - smoothstep(0.25, 0.5, footprint.y * CRT_LINES);
+    let scan = 0.5 + 0.5 * cos(uv.y * CRT_LINES * 6.2832);
+    c *= mix(1.0, 0.45 + 0.55 * scan, lines);
+    let triads = 1.0 - smoothstep(0.2, 0.4, footprint.x * CRT_TRIADS);
+    let k = uv.x * CRT_TRIADS * 6.2832;
+    let mask = 0.7 + 0.3 * vec3(cos(k), cos(k - 2.0944), cos(k - 4.1888));
+    c *= mix(vec3(1.0), mask, triads);
+    c *= CRT_GAIN;
+    // Darker towards the corners, a faint band rolling down, a sheen.
+    c *= 1.0 - 0.5 * pow(length(d) * 1.4, 4.0);
+    let band = fract(uv.y * 0.6 - t * 0.12);
+    c *= 1.0 + 0.05 * smoothstep(0.0, 0.08, band) * (1.0 - smoothstep(0.08, 0.3, band));
+    c += vec3(0.05) * (1.0 - smoothstep(0.0, 0.45, length(at - vec2(0.28, 0.22))));
+    return c * glass;
 }

@@ -1057,6 +1057,14 @@ fn decal_layers(data: &mut GameData, level: &Level, pal: &Palette) -> Vec<SceneL
             height: 1,
             texels: vec![0, 0, 0, 255].into(),
         };
+        // Marked as a screen for the shader (`scene.wgsl`): a negative
+        // light's z.
+        for v in screen_b
+            .vertices
+            .chunks_mut(crate::scene_render::VERTEX_FLOATS)
+        {
+            v[crate::scene_render::VERTEX_FLOATS - 1] = -1.0;
+        }
         layers.push(SceneLayer {
             screen: true,
             ..screen_b.finish(black)
