@@ -281,6 +281,32 @@ fn miner_on_its_stairs_mines_the_bricks_ahead() {
 }
 
 #[test]
+fn digger_under_an_overhang_digs_down() {
+    // A cell with its bottom and top quarters left, as a basher leaves one:
+    // a digger standing on the bottom quarter digs that, not the top.
+    let mut sim = open_level(1)
+        .block(20, 2, 16, 9, 0, 0b1001)
+        .skill(0, Skill::Digger, 1)
+        .sim();
+    run(&mut sim, 30);
+    let c = [20, 2, 16];
+    {
+        let l = &mut sim.lemmings[0];
+        l.pos = [20 * SUB + SUB / 2, 2 * SUB + SUB / 4, 16 * SUB + SUB / 2];
+        l.state = State::Walking;
+    }
+    assert!(sim.assign(0, Skill::Digger));
+    for _ in 0..200 {
+        sim.step();
+        assert_ne!(sim.world.present(c) & 0b1000, 0, "dug the overhang");
+        if sim.world.present(c) & 0b0001 == 0 {
+            return;
+        }
+    }
+    panic!("never dug the quarter under it");
+}
+
+#[test]
 fn one_way_blocks_give_way_in_one_direction() {
     // Block 6 is one-way towards −X before rotation; rotation 1 turns −X to +Z.
     for (rotation, open, closed) in [(0, [-1, 0, 0], [1, 0, 0]), (1, [0, 0, 1], [0, 0, -1])] {

@@ -302,15 +302,29 @@ const SPLITTER_ID: u8 = 2;
 /// cell's bottom: a quarter off the top; a shaped block whose top reaches
 /// above the feet is first cut level with them, so the digger stands on the
 /// cut (a sixteenth of slack keeps a digger on a quarter line from cutting
-/// below it).
+/// below it). Of a plain block only the part under the feet counts: one
+/// standing inside a bashed cell, its top still overhead, digs down, not up
+/// (owner's report on Taxing 10 "It's the Name of the Game").
 fn dig_cut(b: l3d_formats::level::BlockCell, cut: u8, feet: i32) -> u8 {
-    let top = (8 - b.segments.leading_zeros() as u8).min(cut);
-    let level = ((feet + SUB / 16) / (SUB / 4)).clamp(0, 4) as u8;
+    let level = dig_level(feet);
+    let under = if b.shape == 0 {
+        b.segments & ((1u8 << level) - 1)
+    } else {
+        b.segments
+    };
+    let top = (8 - under.leading_zeros() as u8).min(cut);
     if b.shape != 0 && level < top {
         level
     } else {
         top.saturating_sub(1)
     }
+}
+
+/// The quarter line a digger whose feet are `feet` above a cell's bottom
+/// stands on (with a sixteenth of slack), 0 to 4: a dig removes nothing
+/// above it.
+fn dig_level(feet: i32) -> u8 {
+    ((feet + SUB / 16) / (SUB / 4)).clamp(0, 4) as u8
 }
 
 /// The segments of `segments` from height `from` up to `to`, in quarter
@@ -2602,7 +2616,13 @@ impl Simulation {
                 } else if shallow && !above {
                     self.world.breakable_towards(cell, Some(d)) && self.world.shave(cell, low as u8)
                 } else {
-                    self.world.remove_segments_towards(cell, mask, Some(d))
+                    // The stroke takes the rest of the block above its cut
+                    // too (verified, owner, Taxing 10 "It's the Name of the
+                    // Game": the cracks covered the block's lower part, as
+                    // ours, then the whole block went; ours left its top
+                    // hanging over the lemmings).
+                    let rest = 0xFu8.checked_shl(low).unwrap_or(0) & 0xF;
+                    self.world.remove_segments_towards(cell, rest, Some(d))
                 };
                 if !cut {
                     l.set_state(State::Walking);
@@ -2778,10 +2798,16 @@ impl Simulation {
         }
         let (c, b, _) = self.dig_cell(l)?;
         let cut = self.world.cut(c);
-        let to = dig_cut(b, cut, l.pos[1] - c[1] * SUB);
+        let feet = l.pos[1] - c[1] * SUB;
+        let to = dig_cut(b, cut, feet);
+        let up_to = if b.shape == 0 {
+            cut.min(dig_level(feet))
+        } else {
+            cut
+        };
         Some((
             c,
-            segments_between(b.segments, to, cut),
+            segments_between(b.segments, to, up_to),
             l.state_ticks % DIG_TICKS,
         ))
     }
@@ -2868,14 +2894,17 @@ impl Simulation {
         match self.dig_cell(l) {
             Some((c, b, f)) if f & flags::STEEL == 0 => {
                 let cut = self.world.cut(c);
-                let to = dig_cut(b, cut, l.pos[1] - c[1] * SUB);
+                let feet = l.pos[1] - c[1] * SUB;
+                let to = dig_cut(b, cut, feet);
                 // A shaped block is shaved flat and keeps its slopes below
                 // the cut: where a sloped underside leaves nothing under the
                 // digger it falls, and the rest stays as a ledge (owner,
                 // comparing Fun 2 with the original).
                 if b.shape == 0 {
-                    self.world
-                        .remove_segments(c, segments_between(b.segments, to, 4));
+                    self.world.remove_segments(
+                        c,
+                        segments_between(b.segments, to, dig_level(feet).max(to + 1)),
+                    );
                 } else {
                     self.world.shave(c, to);
                 }
