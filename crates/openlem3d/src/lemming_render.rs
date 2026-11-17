@@ -38,13 +38,13 @@ const TICKS_PER_FRAME: u32 = 1;
 const UMBRELLA_FIRST: u32 = 336;
 /// How far a rope slide's rope runs above the straight line its rider's
 /// feet follow, from the floor at the sender to the floor at the receiver,
-/// (Ã‚Â¾Ã¢â‚¬â€œ1 unit in Practice "Rope Slide").
+/// (¾–1 unit in Practice "Rope Slide").
 const ROPE_ABOVE_PATH: f32 = 0.75;
 
 /// The height in units of the rope over a rope-slide rider whose feet are
 /// drawn at height `feet`,
 /// [`ROPE_ABOVE_PATH`] above the line its feet follow (the rope is drawn by
-/// a run of ramp blocks parallel to that line, Ã‚Â¾Ã¢â‚¬â€œ1 unit above it in
+/// a run of ramp blocks parallel to that line, ¾–1 unit above it in
 /// Practice "Rope Slide"; searching the blocks for it found the deck
 /// instead just off the start).
 fn rope_above(feet: f32) -> f32 {
@@ -70,13 +70,13 @@ pub enum ViewAngle {
 
 impl ViewAngle {
     /// The angle for a lemming heading `lemming_yaw` seen by a camera facing
-    /// `camera_yaw` (both in the camera-yaw convention: 0 = Ã¢Ë†â€™X, Ãâ‚¬/2 = Ã¢Ë†â€™Z).
-    /// Quantised to 45Ã‚Â° sectors (the original's quantisation is unmeasured).
+    /// `camera_yaw` (both in the camera-yaw convention: 0 = −X, π/2 = −Z).
+    /// Quantised to 45° sectors (the original's quantisation is unmeasured).
     pub fn from_yaws(lemming_yaw: f32, camera_yaw: f32) -> Self {
         // 0 when the lemming walks the way the camera looks (seen from behind).
         let rel = (lemming_yaw - camera_yaw).rem_euclid(TAU);
         let sector = ((rel + FRAC_PI_4 / 2.0) / FRAC_PI_4) as u32 % 8;
-        // Yaw grows clockwise seen from above, so +Ã‚Â¼ turn heads to screen right.
+        // Yaw grows clockwise seen from above, so +¼ turn heads to screen right.
         [
             ViewAngle::Back,
             ViewAngle::BackRight,
@@ -104,7 +104,7 @@ impl ViewAngle {
     }
 
     /// Position going round the lemming from the front: 0 = front,
-    /// 1 = front-right, Ã¢â‚¬Â¦ 4 = back, Ã¢â‚¬Â¦ 7 = front-left.
+    /// 1 = front-right, … 4 = back, … 7 = front-left.
     fn round_index(self) -> u32 {
         match self {
             ViewAngle::Front => 0,
@@ -123,14 +123,14 @@ impl ViewAngle {
 #[derive(Clone, Copy)]
 enum Angles {
     /// Five blocks, front to back round the lemming's left: the stored side
-    /// view faces screen-left (verified by eye on the walker, cells 12Ã¢â‚¬â€œ17,
-    /// and the Ã‚Â¾ views 6Ã¢â‚¬â€œ11 and 18Ã¢â‚¬â€œ23); the right-hand angles mirror them.
+    /// view faces screen-left (verified by eye on the walker, cells 12–17,
+    /// and the ¾ views 6–11 and 18–23); the right-hand angles mirror them.
     Five,
 
     /// Eight blocks going round the lemming from the front by its left, as
-    /// the turner's: its block 2 (cells 44Ã¢â‚¬â€œ50) faces screen-left and block 6
-    /// (72Ã¢â‚¬â€œ78) screen-right, the pointing arm towards the camera (verified
-    /// by eye); the floater's too (its block 1, 301Ã¢â‚¬â€œ305, looks and swings
+    /// the turner's: its block 2 (cells 44–50) faces screen-left and block 6
+    /// (72–78) screen-right, the pointing arm towards the camera (verified
+    /// by eye); the floater's too (its block 1, 301–305, looks and swings
     /// its legs to screen-left; the other order showed a floater facing away
     /// from where it then walked, owner's observation).
     EightByLeft,
@@ -141,13 +141,13 @@ enum Angles {
 /// The order in which an action's frames are shown, one per step.
 #[derive(Clone, Copy)]
 enum Playback {
-    /// Frames 0, 1, Ã¢â‚¬Â¦ in a loop.
+    /// Frames 0, 1, … in a loop.
     Loop,
-    /// Frames 0, 1, Ã¢â‚¬Â¦, the last, then back down, in a loop: for poses that
+    /// Frames 0, 1, …, the last, then back down, in a loop: for poses that
     /// sweep one way through the frames (the turner's and blocker's head,
     /// the floater's legs), which a loop would snap back.
     PingPong,
-    /// Frames 0, 1, Ã¢â‚¬Â¦, then the last frame held.
+    /// Frames 0, 1, …, then the last frame held.
     Once,
     /// The listed frame indices in a loop, the front and back views drawn
     /// mirrored (verified for falls); the side views as stored, which face
@@ -225,7 +225,7 @@ fn anim_for(state: State) -> Anim {
         State::Floating => ping_pong(296, 5, EightByLeft),
         // Arms spread on ice: the pose with arms spread and one leg kicking
         // up, played as a ping-pong (both verified: a lemming sliding away
-        // from the camera matched cells 558Ã¢â‚¬â€œ562, the back view, in this
+        // from the camera matched cells 558–562, the back view, in this
         // order, one frame per tick).
         State::Sliding => Anim {
             first: 538,
@@ -243,15 +243,15 @@ fn anim_for(state: State) -> Anim {
             playback: Playback::MirroredCycle(FALL_CYCLE),
         },
         State::Building { .. } => anim(344, 5, Five),
-        // Out of bricks: a shrug with the empty sack (cells 474Ã¢â‚¬â€œ488).
+        // Out of bricks: a shrug with the empty sack (cells 474–488).
         State::Shrugging => once(474, 3, Five),
         State::Drowning => once(369, 6, Five),
         State::Splatting => once(429, 3, Five),
-        // Lying still on the back, feet up (cells 429Ã¢â‚¬â€œ443, the first frame:
+        // Lying still on the back, feet up (cells 429–443, the first frame:
         // owner's observation, no animation; see `build`).
         State::Stunned => once(429, 3, Five),
         State::Zapped | State::Electrocuted | State::Trapped => anim(514, 2, Five),
-        // Reaching up the wall and pulling the knees up (cells 121Ã¢â‚¬â€œ160).
+        // Reaching up the wall and pulling the knees up (cells 121–160).
         State::Climbing => anim(121, 8, Five),
         // Standing on the pad facing the camera (observed); see `build`.
         State::Teleporting { .. } => once(0, 1, One),
@@ -276,8 +276,8 @@ fn cell_for(a: Anim, view: ViewAngle, ticks: u32) -> (u32, bool) {
         Angles::One => (0, false),
         Angles::Five => {
             let r = view.round_index();
-            // Round positions 1Ã¢â‚¬â€œ3 (the right) mirror the stored left-hand
-            // views 7Ã¢â‚¬â€œ5.
+            // Round positions 1–3 (the right) mirror the stored left-hand
+            // views 7–5.
             match r {
                 0 | 4 => (r, false),
                 1..=3 => (r, true),
@@ -302,8 +302,8 @@ const BEAR_TRAP_FRAMES: [u32; 9] = [7, 7, 7, 5, 4, 3, 2, 1, 0];
 /// The flame-blower's jet, `t` ticks after it fired: full length for
 /// [`JET_FULL_TICKS`], then shrinking back and gone at [`JET_TICKS`]
 /// (recorded in the original, 2026-10-24, with the trap under a block as
-/// real levels place it). Its frames are the sheet's eight jets, 64Ãƒâ€”32
-/// texels in the top and bottom halves of frames 0Ã¢â‚¬â€œ3.
+/// real levels place it). Its frames are the sheet's eight jets, 64×32
+/// texels in the top and bottom halves of frames 0–3.
 fn flame_jet(b: &mut LayerBuilder, o: &l3d_sim::objects::Object, t: u32, eye: Vec3, tex: [f32; 2]) {
     if t >= JET_TICKS {
         return;
@@ -328,7 +328,7 @@ fn flame_jet(b: &mut LayerBuilder, o: &l3d_sim::objects::Object, t: u32, eye: Ve
 
 /// The laser's beam, `t` ticks after it fired: on while its lemming flashes
 /// as an X-ray (the owner's picture of "Lemlab"), cycling through the
-/// sheet's four beams, the tops of frames 0Ã¢â‚¬â€œ3.
+/// sheet's four beams, the tops of frames 0–3.
 fn laser_beam(
     b: &mut LayerBuilder,
     o: &l3d_sim::objects::Object,
@@ -352,8 +352,8 @@ fn laser_beam(
 
 /// A trap's beam across its cell along Z, `height` above the floor, turned
 /// about its own axis to face the camera at `eye`, drawn from the half
-/// (0 top, 1 bottom) of trap frame `frame.0`; `length` (0Ã¢â‚¬â€œ1) of it shows,
-/// from its Ã¢Ë†â€™Z end. Both beams run across the corridor, side-on in the
+/// (0 top, 1 bottom) of trap frame `frame.0`; `length` (0–1) of it shows,
+/// from its −Z end. Both beams run across the corridor, side-on in the
 /// owner's pictures of "Raiders of the Lost Lemming" and "Lemlab", and
 /// along the view in recordings looking along Z; that they always run
 /// along Z is inferred (the trap blocks seen were turned 0 and 1).
@@ -446,7 +446,7 @@ fn objects(b: &mut LayerBuilder, sim: &Simulation, eye: Vec3, tex: [f32; 2]) {
         };
         let frame = match kind {
             // Trampolines are pads in the static scene; one a lemming has just
-            // touched plays its dip (frames 1Ã¢â‚¬â€œ3 of its colour) on top, flat
+            // touched plays its dip (frames 1–3 of its colour) on top, flat
             // just above the static pad. Rope-slide ends are not drawn at
             // all ([L3DEdit]).
             ObjectKind::Trampoline => {
@@ -493,7 +493,7 @@ fn objects(b: &mut LayerBuilder, sim: &Simulation, eye: Vec3, tex: [f32; 2]) {
                 continue;
             }
             // Teleporter and spring pads are in the static scene too; a
-            // spring shows its launch (frames 1Ã¢â‚¬â€œ7, side on) while busy.
+            // spring shows its launch (frames 1–7, side on) while busy.
             ObjectKind::Teleporter => continue,
             // A sender (even value) stands as the spring at rest, frame 1;
             // the receiver is the flat target in the static scene (owner:
@@ -549,8 +549,8 @@ pub fn doors(level: &l3d_formats::level::Level, blocks: &l3d_formats::blk::Block
         .filter(|(.., b, _)| b.id as usize == EXIT_ID && !b.is_empty())
         .map(|(x, y, z, b, _)| Door {
             cell: [x as i32, y as i32, z as i32],
-            // The doorway is the +Z face turned with the block: 0 Ã¢â€ â€™ +Z, 1 Ã¢â€ â€™ +X,
-            // 2 Ã¢â€ â€™ Ã¢Ë†â€™Z, 3 Ã¢â€ â€™ Ã¢Ë†â€™X (verified).
+            // The doorway is the +Z face turned with the block: 0 → +Z, 1 → +X,
+            // 2 → −Z, 3 → −X (verified).
             normal: [[0, 1], [1, 0], [0, -1], [-1, 0]][(b.rotation % 4) as usize],
             shade: crate::level_mesh::face_shade(shading, false),
             frame: 0,
@@ -604,8 +604,8 @@ fn teleport_width(t: u32) -> f32 {
     }
 }
 
-/// The teleporter sparkle: frames 4Ã¢â‚¬â€œ7 of its `TRAPS` sheet (the pad is
-/// 0Ã¢â‚¬â€œ3), drawn so the column stands about half a unit tall, half again a
+/// The teleporter sparkle: frames 4–7 of its `TRAPS` sheet (the pad is
+/// 0–3), drawn so the column stands about half a unit tall, half again a
 /// lemming's height (observed).
 const SPARKLE_FIRST: u32 = 4;
 const SPARKLE_FRAMES: u32 = 4;
@@ -625,8 +625,8 @@ fn sparkle_at(t: u32, from: [i32; 3], to: [i32; 3]) -> Option<[i32; 3]> {
 const EXIT_SHRINK_TICKS: u32 = 6;
 const EXIT_SHRINK_DEPTH: f32 = 0.2;
 
-/// The storm cloud's cells: growing (524Ã¢â‚¬â€œ526), striking with bolts
-/// (527Ã¢â‚¬â€œ529), shrinking away (530Ã¢â‚¬â€œ533).
+/// The storm cloud's cells: growing (524–526), striking with bolts
+/// (527–529), shrinking away (530–533).
 const ZAP_CLOUD_FIRST: u32 = 524;
 /// Height of a standing lemming's head top above its feet, in units (the
 /// figure fills about 110 of the cell's 128 pixels).
@@ -677,8 +677,8 @@ fn zap_cloud(t: u32) -> Option<u32> {
 const CRACK_OFFSET: f32 = 0.004;
 /// Pieces flying off a bashed block: bursts starting this many ticks into a
 /// stroke, pieces per burst, and ticks each flies (measured in the Practice
-/// "Basher" demo: bursts at about 1, 9, 18 and 25 ticks, 25Ã¢â‚¬â€œ30 pieces,
-/// gone after 6Ã¢â‚¬â€œ7 ticks).
+/// "Basher" demo: bursts at about 1, 9, 18 and 25 ticks, 25–30 pieces,
+/// gone after 6–7 ticks).
 const CHUNK_BURSTS: [u32; 4] = [1, 9, 17, 25];
 const CHUNKS_PER_BURST: u32 = 25;
 const CHUNK_TICKS: u32 = 7;
@@ -746,7 +746,7 @@ fn draw_cracks(
         (crack / ATLAS_COLUMNS) * LEMMING_CELL,
     );
     // Each segment's slice of the overlay: segment s (0 at the bottom) is
-    // the face's texel rows (3 Ã¢Ë†â€™ s)Ã‚Â·16 to (4 Ã¢Ë†â€™ s)Ã‚Â·16, on each of the
+    // the face's texel rows (3 − s)·16 to (4 − s)·16, on each of the
     // block's sides there: the cube faces it fills, and a deflector's
     // diagonal face.
     for s in (0..4).filter(|s| mask & (1 << s) != 0) {
@@ -1243,7 +1243,7 @@ fn bash_effects(b: &mut LayerBuilder, sim: &Simulation, blocks: Option<&BlockSet
 /// flies apart into `pieces` small copies of itself that shoot up, spread
 /// and rain down past the ground (seen in the original side-on, 2026-10-23:
 /// about a dozen, half size, rising about 2 units in 0.8 s, gone after
-/// about 2Ã‚Â½ s; speeds ours, read from those frames). A splat bursts the
+/// about 2½ s; speeds ours, read from those frames). A splat bursts the
 /// same way into about eight (recorded, 2026-10-24).
 fn burst(
     b: &mut LayerBuilder,
@@ -1279,7 +1279,7 @@ const BURST_SWELL_TICKS: u32 = 2;
 const BURST_SWELL: f32 = 1.3;
 const BURST_PIECES: u32 = 12;
 const SPLAT_PIECES: u32 = 8;
-/// A splat's pieces fan out wider: about 1Ã‚Â½ units in ten ticks (recorded).
+/// A splat's pieces fan out wider: about 1½ units in ten ticks (recorded).
 const SPLAT_OUT: f32 = 0.14;
 /// A splat's pieces are bigger than a bomber's: about two thirds of the
 /// swollen lemming (recorded).
@@ -1290,7 +1290,7 @@ const BURST_GRAVITY: f32 = 0.033;
 
 /// One of the level's other cameras, drawn in the world where it is.
 pub struct CameraMarker {
-    /// The camera's number, 1Ã¢â‚¬â€œ4.
+    /// The camera's number, 1–4.
     pub number: u32,
     pub pos: Vec3,
     /// Facing, as `ViewCamera::yaw`.
@@ -1303,10 +1303,10 @@ pub struct CameraMarker {
 const CAMERA_FRONT: u32 = 563;
 const CAMERA_SIDE: u32 = 565;
 const CAMERA_BACK: u32 = 567;
-/// How far above a camera its number is centred (measured 0.39Ã¢â‚¬â€œ0.43).
+/// How far above a camera its number is centred (measured 0.39–0.43).
 const CAMERA_NUMBER_RISE: f32 = 0.4;
 
-/// A facing's quarter turn, 0Ã¢â‚¬â€œ3, the quarters centred 11.25Ã‚Â° to the left of
+/// A facing's quarter turn, 0–3, the quarters centred 11.25° to the left of
 /// the four rotations (fitted to the original's camera markers).
 fn camera_quarter(yaw: f32) -> i32 {
     ((yaw + std::f32::consts::PI / 16.0) / std::f32::consts::FRAC_PI_2).floor() as i32 & 3
@@ -1489,7 +1489,7 @@ pub fn build(
         };
         let view = ViewAngle::from_yaws(yaw, camera_yaw);
         let (cell, mirror) = match l.state {
-            // The stored turner points to its right (cells 30Ã¢â‚¬â€œ36, seen from
+            // The stored turner points to its right (cells 30–36, seen from
             // the front, hold out the lemming's right arm); one pointing
             // left is its mirror image. The reverse showed turners pointing
             // away from where they sent walkers.
@@ -1503,7 +1503,7 @@ pub fn build(
             // (recorded).
             State::Drowning => cell_for(anim_for(l.state), view, l.state_ticks / 2),
             // Standing, flashing between itself and its X-ray (cells
-            // 514Ã¢â‚¬â€œ523 in pairs).
+            // 514–523 in pairs).
             State::Zapped | State::Electrocuted => cell_for(
                 anim_for(l.state),
                 view,
@@ -1533,7 +1533,7 @@ pub fn build(
                 cell_for(anim(444, 6, Angles::Five), view, l.state_ticks)
             }
             // Each brick: the walk up onto it and along it with the sack
-            // (444Ã¢â‚¬â€œ473), as the simulation moves the builder, then the
+            // (444–473), as the simulation moves the builder, then the
             // laying motion over the rest of the 25-tick cycle.
             State::Building { .. } => {
                 // In step with the bricks, the first of which comes
@@ -1553,7 +1553,7 @@ pub fn build(
             // about 10 ticks after the last countdown digit).
             _ if l.fuse.is_some_and(|f| f <= l3d_sim::SWELL_TICKS) && !l.state.is_terminal() => {
                 // Hand to the nose, holding it shut for most of the time
-                // (frames 1Ã¢â‚¬â€œ2), then swelling (3Ã¢â‚¬â€œ4); the split is ours.
+                // (frames 1–2), then swelling (3–4); the split is ours.
                 let frame = match l3d_sim::SWELL_TICKS - l.fuse.unwrap_or(0) {
                     0 => 0,
                     1..=2 => 1,
@@ -1621,7 +1621,7 @@ pub fn build(
             && let Some(cell) = zap_cloud(l.state_ticks)
         {
             // The storm cloud over the lemming, its bolts reaching down to
-            // the lemming's head (cells 524Ã¢â‚¬â€œ533, view-independent).
+            // the lemming's head (cells 524–533, view-independent).
             let (cx, cy) = (
                 (cell % ATLAS_COLUMNS) * LEMMING_CELL,
                 (cell / ATLAS_COLUMNS) * LEMMING_CELL,
@@ -1722,7 +1722,7 @@ pub fn build(
             LEMMING_TEXELS_PER_UNIT / scale,
             width,
         );
-        // The bomber's countdown, 5Ã¢â‚¬Â¦1, over its head (`BOMBNUMB` digits).
+        // The bomber's countdown, 5…1, over its head (`BOMBNUMB` digits).
         if let Some(fuse) = l.fuse.filter(|_| !l.state.is_terminal()) {
             let digit =
                 5u32.saturating_sub((l3d_sim::FUSE_TICKS - fuse) / l3d_sim::FUSE_DIGIT_TICKS);
@@ -1771,7 +1771,7 @@ pub fn build(
             );
         }
         if l.state == State::Floating {
-            // The umbrella is stored apart (cells 336Ã¢â‚¬â€œ343), its handle at the
+            // The umbrella is stored apart (cells 336–343), its handle at the
             // bottom of the cell, held by the floater's raised hand at the top
             // of the floater's cell (frame order unverified).
             let cell = UMBRELLA_FIRST + l.state_ticks % UMBRELLA_FRAMES;
@@ -1807,11 +1807,11 @@ mod tests {
 
     #[test]
     fn view_angles() {
-        // Camera facing +Z (yaw 3Ãâ‚¬/2).
+        // Camera facing +Z (yaw 3π/2).
         let cam = 3.0 * FRAC_PI_2;
         assert_eq!(ViewAngle::from_yaws(3.0 * FRAC_PI_2, cam), ViewAngle::Back); // walking +Z
-        assert_eq!(ViewAngle::from_yaws(FRAC_PI_2, cam), ViewAngle::Front); // walking Ã¢Ë†â€™Z
-        // Facing +Z, screen right is Ã¢Ë†â€™X (yaw 0).
+        assert_eq!(ViewAngle::from_yaws(FRAC_PI_2, cam), ViewAngle::Front); // walking −Z
+        // Facing +Z, screen right is −X (yaw 0).
         assert_eq!(ViewAngle::from_yaws(0.0, cam), ViewAngle::Right);
         assert_eq!(ViewAngle::from_yaws(PI, cam), ViewAngle::Left);
     }
@@ -1823,8 +1823,8 @@ mod tests {
         assert_eq!(camera_cell(PI, 0.0), (CAMERA_FRONT, false));
         // Facing the same way: the back.
         assert_eq!(camera_cell(deg(90.0), deg(90.0)), (CAMERA_BACK, false));
-        // Turned from facing the viewer: +68Ã‚Â° still the lens, +80.5Ã‚Â° the
-        // side as stored, Ã¢Ë†â€™12.3Ã‚Â° the side mirrored, Ã¢Ë†â€™107.6Ã‚Â° the back
+        // Turned from facing the viewer: +68° still the lens, +80.5° the
+        // side as stored, −12.3° the side mirrored, −107.6° the back
         // (measured).
         assert_eq!(camera_cell(PI + deg(68.0), 0.0), (CAMERA_FRONT, false));
         assert_eq!(camera_cell(PI + deg(80.5), 0.0), (CAMERA_SIDE, false));
