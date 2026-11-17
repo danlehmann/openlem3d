@@ -2569,11 +2569,31 @@ impl Simulation {
     }
 
     /// Whether there is wall a basher can break in the cell after the one it
-    /// works on.
+    /// works on: something in its band there that a walker would turn at,
+    /// solid at the cell's near face above a step's height. A slope rising
+    /// from that face is not: the basher walks on up it, whatever lies behind
+    /// the slope; another basher given there bashes it (verified, owner, on
+    /// test lanes in the original: after a cube or a wall-faced ramp, a
+    /// rising ramp was walked up, with nothing or a cube behind it; a basher
+    /// started at a rising ramp bashes it; Taxing 10 "It's the Name of the
+    /// Game" alike).
     fn bash_more_ahead(&self, l: &Lemming) -> bool {
         let (next, mask) = Self::bash_cell_at(l, SUB / 2 + SUB);
+        let d = l.dir.delta();
+        let mut face = [l.pos[0], l.pos[1] + 3 * SUB / 8, l.pos[2]];
+        for a in [0, 2] {
+            if d[a] != 0 {
+                let edge = if d[a] > 0 {
+                    next[a] * SUB
+                } else {
+                    (next[a] + 1) * SUB - 1
+                };
+                face[a] = edge + d[a] * (SUB / 16);
+            }
+        }
         (self.world.present(next) & mask != 0 || self.world.bricks_in(next, mask))
-            && self.world.breakable_towards(next, Some(l.dir.delta()))
+            && self.world.solid(face)
+            && self.world.breakable_towards(next, Some(d))
     }
 
     /// Removes body-height terrain in the cell ahead and moves into the gap;

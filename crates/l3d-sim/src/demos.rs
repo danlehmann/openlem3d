@@ -945,12 +945,12 @@ pub const SOLUTIONS: &[Solution] = &[
     Solution {
         level: 76,
         plan: Plan::Rated(
-            &[(280, 49)],
+            &[(300, 49)],
             &[
-                (69, 0, 6, None),
-                (127, 0, 4, None),
-                (274, 1, 2, None),
-                (1256, 2, 4, None),
+                (70, 1, 2, None),
+                (258, 0, 4, None),
+                (1174, 2, 6, None),
+                (1226, 0, 4, None),
             ],
         ),
         saves: 0,
@@ -965,9 +965,9 @@ pub const SOLUTIONS: &[Solution] = &[
             (578, 3, 1, Some(true)),
             (693, 4, 1, Some(true)),
             (937, 5, 4, None),
-            (1269, 9, 1, Some(false)),
-            (1335, 10, 4, None),
-            (1575, 10, 3, None),
+            (1100, 5, 1, Some(false)),
+            (1155, 6, 4, None),
+            (1365, 6, 3, None),
         ],
     ),
     at(
