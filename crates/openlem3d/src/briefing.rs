@@ -6,8 +6,9 @@
 //! the original's briefings.
 //!
 //! Preview starts the level paused with the camera circling the level's
-//! preview pivot; any key or click ends it and the level runs. A Practice
-//! level's briefing is that preview, with Demo (Enter) among its prompts.
+//! preview pivot; any key (but Tab, which switches the graphics mode) or
+//! click ends it and the level runs. A Practice level's briefing is that
+//! preview, with Demo (Enter) among its prompts.
 
 use std::collections::HashMap;
 
@@ -361,7 +362,9 @@ pub(crate) fn preview(w: &mut World) {
         current.loaded = None;
         return;
     }
-    let any = keys.get_just_pressed().next().is_some()
+    // Tab switches the graphics mode (`crate::style`), so the preview can
+    // be watched in each; it doesn't start the level.
+    let any = keys.get_just_pressed().any(|&k| k != KeyCode::Tab)
         || (mouse.get_just_pressed().next().is_some() && !on_prompt)
         || on(Choice::Continue)
         || lifted;
