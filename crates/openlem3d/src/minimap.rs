@@ -85,7 +85,8 @@ pub struct Minimap {
     pub image: Handle<Image>,
     pub shown: bool,
     clickable: bool,
-    /// Enhanced mode: sea or land per grid cell, as under any block.
+    /// Enhanced mode: sea or land at each sample, as under any block,
+    /// indexed as [`Detail`]'s.
     ground: Vec<[u8; 3]>,
     /// Enhanced mode: the average colour of each block id's top tile.
     top_colour: Vec<[u8; 3]>,
@@ -219,14 +220,22 @@ pub(crate) fn build_base(w: &mut World) {
         })
         .collect();
     let mut cells = vec![sea; SIZE_X * SIZE_Z];
-    let mut ground = vec![sea; SIZE_X * SIZE_Z];
+    let ground = (0..GRID * GRID)
+        .map(|i| {
+            let (x, z) = ((i % GRID) as f32 + 0.5, (i / GRID) as f32 + 0.5);
+            if on_land(x / SAMPLES as f32, z / SAMPLES as f32) {
+                land
+            } else {
+                sea
+            }
+        })
+        .collect();
     let mut marks = Vec::new();
     for z in 0..SIZE_Z {
         for x in 0..SIZE_X {
             let colour = &mut cells[z * SIZE_X + x];
             if on_land(x as f32 + 0.5, z as f32 + 0.5) {
                 *colour = land;
-                ground[z * SIZE_X + x] = land;
             }
             // A hatch or exit shows even under the blocks above it (Fun 16:
             // the hatch inside a tower).
@@ -336,7 +345,7 @@ fn sample_column(map: &Minimap, world: &l3d_sim::World, x: usize, z: usize, deta
                 }
             }
             let i = (z * SAMPLES + sz) * GRID + x * SAMPLES + sx;
-            let (h, c) = found.unwrap_or((f32::NAN, map.ground[z * SIZE_X + x]));
+            let (h, c) = found.unwrap_or((f32::NAN, map.ground[i]));
             detail.height[i] = h;
             detail.colour[i] = c;
         }
