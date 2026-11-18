@@ -215,7 +215,7 @@ fn walkers_cross_a_staircase_from_the_side() {
 #[test]
 fn walkers_climb_a_slope_two_cells_long() {
     // A 45° slope rising +X from the floor (surface y = 2) over two cells,
-    // then a landing, with nothing under the upper ramp (as on Fun 11
+    // then a landing, with nothing under the upper ramp (as on Fun 12
     // "Alpine Assault Course"): wherever a walker's steps fall against the
     // edge between the slope's cells, it walks up and on, never turning
     // round.

@@ -517,7 +517,7 @@ impl World {
         // On the edge between two cells of one 45° slope the upper cell's
         // ramp has no thickness yet: there the surface is the lower cell's,
         // which the upper one carries on from just inside its edge (a lemming
-        // sliding up the long slope of Fun 11 "Alpine Assault Course" turned
+        // sliding up the long slope of Fun 12 "Alpine Assault Course" turned
         // back where its step ended on that edge).
         let on_edge = |v: i32| v.rem_euclid(SUB) == 0;
         for (dx, dz) in [(1, 0), (0, 1)] {
