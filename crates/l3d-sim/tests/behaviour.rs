@@ -213,6 +213,42 @@ fn walkers_cross_a_staircase_from_the_side() {
 }
 
 #[test]
+fn walkers_climb_a_slope_two_cells_long() {
+    // A 45° slope rising +X from the floor (surface y = 2) over two cells,
+    // then a landing, with nothing under the upper ramp (as on Fun 11
+    // "Alpine Assault Course"): wherever a walker's steps fall against the
+    // edge between the slope's cells, it walks up and on, never turning
+    // round.
+    // A 45° ramp (shape 5) turned to rise towards +X; the shape sits in the
+    // cell's bits 6–9.
+    const RAMP_UP_X: u16 = 5 << 2 | 3;
+    let synth = open_level(1)
+        .block(20, 2, 16, FLOOR, RAMP_UP_X, 0xF)
+        .block(21, 3, 16, FLOOR, RAMP_UP_X, 0xF)
+        .floor(2, 22..24, 16..17)
+        .floor(3, 22..24, 16..17);
+    for phase in 0..8 {
+        let mut sim = synth.sim();
+        while sim.lemmings.is_empty() {
+            sim.step();
+        }
+        let l = &mut sim.lemmings[0];
+        l.pos = [18 * SUB + phase, 2 * SUB, 16 * SUB + SUB / 2];
+        l.dir = Dir::PosX;
+        l.state = State::Walking;
+        run(&mut sim, 140);
+        let l = &sim.lemmings[0];
+        assert_eq!(l.dir, Dir::PosX, "phase {phase}");
+        assert!(
+            l.pos[0] > 22 * SUB,
+            "phase {phase}: x = {}",
+            l.pos[0] as f32 / SUB as f32
+        );
+        assert_eq!(l.pos[1], 4 * SUB, "phase {phase}");
+    }
+}
+
+#[test]
 fn bashing_removes_bricks() {
     let mut sim = open_level(1).sim();
     let c = [20, 2, 20];

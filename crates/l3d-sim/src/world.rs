@@ -473,38 +473,73 @@ impl World {
         }
     }
 
-    /// As [`World::surface_below`], bricks aside.
-    pub fn terrain_surface_below(&self, x: i32, from_y: i32, z: i32) -> (i32, bool) {
+    /// The top of the highest terrain in column `(x, z)` at or below
+    /// `from_y`, down to the ground plane; `None` with none.
+    fn column_surface(&self, x: i32, from_y: i32, z: i32) -> Option<i32> {
+        let top_from = |mut top: i32| {
+            while self.terrain_solid([x, top, z]) {
+                top += 1;
+            }
+            top
+        };
         let mut y = from_y;
         // Step down in fine increments until the point below is solid.
         const STEP: i32 = SUB / 64;
         while y > GROUND {
             if self.terrain_solid([x, y - 1, z]) {
-                return (y, true);
+                return Some(y);
             }
+            let floor = (y - 1).div_euclid(SUB) * SUB;
             y -= STEP;
             // Snap to the precise surface when we enter solid geometry.
             if self.terrain_solid([x, y - 1, z]) {
-                let mut top = y;
-                while self.terrain_solid([x, top, z]) {
-                    top += 1;
-                }
-                return (top, true);
+                return Some(top_from(y));
+            }
+            // The steps can pass over terrain within a step of a cell's
+            // bottom, such as the foot of a ramp (Mayhem 2 "Brechin's
+            // Staircase", on the ground).
+            if y - 1 < floor && floor >= GROUND && self.terrain_solid([x, floor, z]) {
+                return Some(top_from(floor));
             }
         }
-        // The steps can pass over terrain within a step of the ground, such
-        // as the foot of a ramp (Mayhem 2 "Brechin's Staircase").
         if self.terrain_solid([x, GROUND, z]) {
-            let mut top = GROUND;
-            while self.terrain_solid([x, top, z]) {
-                top += 1;
+            return Some(top_from(GROUND));
+        }
+        None
+    }
+
+    /// As [`World::surface_below`], bricks aside.
+    pub fn terrain_surface_below(&self, x: i32, from_y: i32, z: i32) -> (i32, bool) {
+        /// How far apart, in sub-units, the surfaces either side of a cell
+        /// edge may lie and still be one slope.
+        const EDGE_SLACK: i32 = 2;
+        let mut surface = self.column_surface(x, from_y, z);
+        // On the edge between two cells of one 45° slope the upper cell's
+        // ramp has no thickness yet: there the surface is the lower cell's,
+        // which the upper one carries on from just inside its edge (a lemming
+        // sliding up the long slope of Fun 11 "Alpine Assault Course" turned
+        // back where its step ended on that edge).
+        let on_edge = |v: i32| v.rem_euclid(SUB) == 0;
+        for (dx, dz) in [(1, 0), (0, 1)] {
+            if !on_edge(if dx != 0 { x } else { z }) {
+                continue;
             }
+            let Some(behind) = self.column_surface(x - dx, from_y, z - dz) else {
+                continue;
+            };
+            let inside = self.column_surface(x + dx, from_y, z + dz);
+            let gap = surface.is_none_or(|s| behind > s + EDGE_SLACK);
+            if gap && inside.is_some_and(|i| (i - behind).abs() <= EDGE_SLACK) {
+                surface = Some(behind);
+            }
+        }
+        if let Some(top) = surface {
             return (top, true);
         }
         // Over water, a point on a cell edge stands on the cells on either
         // side of it, as the foot of a ramp beside a ground-level stone
         // (Mayhem 4 "Driving Range").
-        let edge = |v: i32| if v.rem_euclid(SUB) == 0 { -1 } else { 0 };
+        let edge = |v: i32| if on_edge(v) { -1 } else { 0 };
         let beside = [(edge(x), 0), (0, edge(z)), (edge(x), edge(z))];
         if from_y >= GROUND
             && self.floor(x, z) == Floor::Water
