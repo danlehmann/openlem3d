@@ -145,6 +145,7 @@ impl Settings {
             waves: self.enhanced(),
             mirror: self.mode == Mode::Ultra,
             storm: self.mode == Mode::Ultra,
+            snow: self.enhanced(),
             signals: self.enhanced(),
         }
     }

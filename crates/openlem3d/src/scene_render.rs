@@ -52,12 +52,24 @@ pub struct SceneData {
     pub mirror: Option<f32>,
     /// A sandstorm blows over the level (ours, Ultra mode).
     pub storm: bool,
+    /// Snow falls gently over the level (ours, Enhanced and Ultra modes).
+    pub snow: bool,
+    /// The lemmings leave marks in the snow and on the ice (ours, Ultra
+    /// mode; see `crate::marks`).
+    pub marks: bool,
     /// What faces up at the height of [`Self::mirror`] shines with the level
-    /// mirrored there (ours, Ultra mode): a glossy floor.
-    pub glossy: bool,
+    /// mirrored there (ours, Ultra mode), this much (1 for a polished floor;
+    /// 0 for none).
+    pub glossy: f32,
+    /// Only the tops of slippery blocks shine (`glossy`), not the rest of
+    /// what faces up there.
+    pub glossy_slippery: bool,
     /// The land is a circuit board whose traces carry signals the lemmings
     /// set off (ours; see `crate::signals`).
     pub circuit: Option<crate::signals::CircuitBoard>,
+    /// Which texture-set tiles show snow, by tile, on a level with snow
+    /// lying on its blocks (ours; `scene_build::SNOW_DEPTH`).
+    pub snow_tiles: Option<Arc<[bool]>>,
 }
 
 /// Geometry rebuilt every frame (moving sprites such as lemmings), textured
@@ -153,11 +165,23 @@ pub struct SceneInput<'a> {
     /// The circuit board's signal field, if the level has one, and the part of
     /// it changed since the last frame.
     pub signals: Option<(&'a crate::signals::SignalField, Option<[u32; 4]>)>,
+    /// The marks in snow, if the level shows them, and the part of them
+    /// changed since the last frame.
+    pub marks: Option<(&'a crate::marks::MarkField, Option<[u32; 4]>)>,
+}
+
+/// Which field the level's field texture holds.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Field {
+    Signals,
+    Marks,
 }
 
 /// The scene's colour format while glowing: room above white.
 const HDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
-const UNIFORM_SIZE: u64 = 192;
+const UNIFORM_SIZE: u64 = 272;
+/// Snowflakes (`scene.wgsl`'s `SNOW_FLAKES`).
+const SNOW_FLAKES: u32 = 3000;
 /// How much brighter than its palette colour a fully glowing texel is drawn
 /// (ours, tuned by eye).
 const GLOW_GAIN: f32 = 3.0;
@@ -197,7 +221,8 @@ pub struct SceneGpu {
     /// Version of the uploaded [`SceneContent`].
     version: Option<u64>,
     layers: Vec<UploadedLayer>,
-    /// The sky, sampled smoothly in our modes ([`SceneCamera::filtered`]).
+    /// The sky, a night sky sampled smoothly in our modes
+    /// ([`SceneCamera::filtered`]).
     sky: Option<Bound>,
     sprite_atlas: Option<wgpu::BindGroup>,
     /// Per-frame sprite geometry: buffers (grown as needed) and index count.
@@ -221,12 +246,11 @@ pub struct SceneGpu {
     blank: wgpu::BindGroup,
     blank_view: wgpu::TextureView,
     /// The scene's second bind group: the reflection (`second_tex`) and the
-    /// circuit board's signal field (`field_tex`), either blank.
+    /// level's field (`field_tex`), either blank.
     extras_layout: wgpu::BindGroupLayout,
-    /// The circuit board's signal field on the GPU: which field it is, the
-    /// texture (RGBA8, a millisecond count in each texel's bytes) and its
-    /// view.
-    signals: Option<(u64, wgpu::Texture, wgpu::TextureView)>,
+    /// The level's field on the GPU, a circuit board's signals or the marks
+    /// in snow: which field it is, the texture (RGBA8) and its view.
+    field: Option<(Field, u64, wgpu::Texture, wgpu::TextureView)>,
     /// Floats where the GPU can draw into them, for reversed depth's
     /// precision; otherwise (the Nexus 6P's Adreno 430 on Vulkan) 24 bits.
     depth_format: wgpu::TextureFormat,
@@ -259,6 +283,8 @@ struct Pipelines {
     shadow: wgpu::RenderPipeline,
     /// Sand grains blown past the camera in a sandstorm.
     grains: wgpu::RenderPipeline,
+    /// Snowflakes falling gently.
+    snow: wgpu::RenderPipeline,
 }
 
 /// The scene drawn in [`HDR_FORMAT`], and the bloom chain's levels, each
@@ -384,13 +410,13 @@ impl SceneGpu {
                 },
                 wgpu::BindGroupLayoutEntry {
                     binding: 2,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
                 wgpu::BindGroupLayoutEntry {
                     binding: 3,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                     ty: wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Float { filterable: true },
                         view_dimension: wgpu::TextureViewDimension::D2,
@@ -440,7 +466,7 @@ impl SceneGpu {
             blank,
             blank_view,
             extras_layout,
-            signals: None,
+            field: None,
             layout,
             shader,
             sampler,
@@ -569,6 +595,38 @@ impl SceneGpu {
             "fs_grains",
             Some(wgpu::BlendState::ALPHA_BLENDING),
         );
+        // Snow: a billboard per flake, hidden by what is nearer.
+        let snow = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("scene snow"),
+            layout: Some(&pl_scene),
+            vertex: wgpu::VertexState {
+                module: &self.shader,
+                entry_point: Some("vs_snow"),
+                buffers: &[],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &self.shader,
+                entry_point: Some("fs_snow"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::COLOR,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: Default::default(),
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: self.depth_format,
+                depth_write_enabled: Some(false),
+                depth_compare: Some(wgpu::CompareFunction::Greater),
+                stencil: Default::default(),
+                bias: Default::default(),
+            }),
+            multisample: Default::default(),
+            multiview_mask: None,
+            cache: None,
+        });
         let sky = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("scene sky"),
             layout: Some(&pl_scene),
@@ -680,6 +738,7 @@ impl SceneGpu {
         });
         let pipelines = Pipelines {
             grains,
+            snow,
             shadow,
             geometry: geometry("scene geometry", wgpu::Face::Back),
             // Mirrored, the faces turn over.
@@ -948,6 +1007,7 @@ fn prepare(
     camera: &SceneCamera,
     headroom: f32,
     signals: Option<f32>,
+    marks: Option<f32>,
 ) {
     let (w, h) = gpu.target_size;
     // The original's 3D view is 400 rows tall (its 640×400 mode); its sky
@@ -1025,10 +1085,30 @@ fn prepare(
     let glossy = content
         .data
         .as_ref()
-        .is_some_and(|d| d.glossy && d.mirror.is_some());
+        .filter(|d| d.mirror.is_some())
+        .map_or(0.0, |d| d.glossy);
     // The signal field's texels per unit, and whether it is bound.
     let (per_unit, field) = signals.map_or((0.0, 0.0), |p| (p, 1.0));
-    uniforms.extend([if glossy { 1.0 } else { 0.0 }, per_unit, field, 0.0]);
+    // 1: what faces up at the mirror shines; 2: only slippery tops there.
+    let slippery = content.data.as_ref().is_some_and(|d| d.glossy_slippery);
+    let shines = match (glossy > 0.0, slippery) {
+        (false, _) => 0.0,
+        (true, false) => 1.0,
+        (true, true) => 2.0,
+    };
+    uniforms.extend([shines, per_unit, field, glossy]);
+    // Snow, and how much of it falls around the camera: none under cover.
+    let snow = content.data.as_ref().is_some_and(|d| d.snow);
+    let snow = if snow { 1.0 } else { 0.0 };
+    // The marks in snow's texels per unit, bound as the field, or 0.
+    uniforms.extend([
+        snow,
+        snow * (1.0 - camera.shelter),
+        marks.unwrap_or(0.0),
+        0.0,
+    ]);
+    // From clip space back to the world, for rays through the screen.
+    uniforms.extend(camera.view_proj.inverse().to_cols_array());
     queue.write_buffer(&gpu.uniforms, 0, &f32_bytes(&uniforms));
     upload_dynamic(
         device,
@@ -1157,16 +1237,22 @@ impl SceneGpu {
         self.target_origin = (viewport.x, viewport.y);
         self.target_size = size;
         let device = &gpu.device;
-        let signals = match input.signals {
-            Some((field, dirty)) => {
-                self.upload_signals(device, &gpu.queue, field, dirty);
-                Some(field.per_unit())
-            }
-            None => {
-                self.signals = None;
-                None
-            }
-        };
+        let (mut signals, mut marks) = (None, None);
+        if let Some((field, dirty)) = input.signals {
+            let id = (Field::Signals, field.generation);
+            self.upload_field(device, &gpu.queue, id, field.size, dirty, |i| {
+                field.arrivals[i].to_le_bytes()
+            });
+            signals = Some(field.per_unit());
+        } else if let Some((field, dirty)) = input.marks {
+            let id = (Field::Marks, field.generation);
+            self.upload_field(device, &gpu.queue, id, field.size, dirty, |i| {
+                field.texels[i * 4..i * 4 + 4].try_into().unwrap()
+            });
+            marks = Some(crate::marks::PER_UNIT);
+        } else {
+            self.field = None;
+        }
         prepare(
             self,
             device,
@@ -1176,27 +1262,27 @@ impl SceneGpu {
             input.camera,
             input.headroom,
             signals,
+            marks,
         );
         draw(self, device, encoder, target, full, viewport, input);
     }
 
-    /// Brings the GPU's copy of the signal field `field` up to date: made
-    /// and filled whole for a new field, else its `dirty` part rewritten.
-    fn upload_signals(
+    /// Brings the GPU's copy of the level's field `id` (`(w, h)` texels,
+    /// texel `i` row by row being `texel(i)`) up to date: made and filled
+    /// whole for a new field, else its `dirty` part rewritten.
+    fn upload_field(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        field: &crate::signals::SignalField,
+        id: (Field, u64),
+        (w, h): (u32, u32),
         dirty: Option<[u32; 4]>,
+        texel: impl Fn(usize) -> [u8; 4],
     ) {
-        let (w, h) = field.size;
-        let fresh = self
-            .signals
-            .as_ref()
-            .is_none_or(|s| s.0 != field.generation);
+        let fresh = self.field.as_ref().is_none_or(|s| (s.0, s.1) != id);
         if fresh {
             let texture = device.create_texture(&wgpu::TextureDescriptor {
-                label: Some("signal field"),
+                label: Some("level field"),
                 size: wgpu::Extent3d {
                     width: w,
                     height: h,
@@ -1210,15 +1296,15 @@ impl SceneGpu {
                 view_formats: &[],
             });
             let view = texture.create_view(&Default::default());
-            self.signals = Some((field.generation, texture, view));
+            self.field = Some((id.0, id.1, texture, view));
         }
         let rect = if fresh { Some([0, 0, w, h]) } else { dirty };
-        let (Some([x0, y0, x1, y1]), Some((_, texture, _))) = (rect, &self.signals) else {
+        let (Some([x0, y0, x1, y1]), Some((_, _, texture, _))) = (rect, &self.field) else {
             return;
         };
         let bytes: Vec<u8> = (y0..y1)
             .flat_map(|y| (x0..x1).map(move |x| (y * w + x) as usize))
-            .flat_map(|i| field.arrivals[i].to_le_bytes())
+            .flat_map(texel)
             .collect();
         queue.write_texture(
             wgpu::TexelCopyTextureInfo {
@@ -1280,6 +1366,10 @@ fn draw(
         .is_some_and(|d| d.mirror.is_some());
     let reflection = mirror.then(|| gpu.reflection_target(&device, depth_size, scene_format));
     let storm = input.content.data.as_ref().is_some_and(|d| d.storm);
+    let snow = input.content.data.as_ref().is_some_and(|d| d.snow);
+    // Only a night sky is sampled smoothly: its stars and planets gain;
+    // painted skies (trees, hills) only blur.
+    let starry = input.content.data.as_ref().is_some_and(|d| d.starry);
     // The last frame, for layers showing the screen.
     let screen = input
         .screen
@@ -1287,9 +1377,9 @@ fn draw(
         .map(|view| gpu.bind_view(&device, view, &gpu.linear));
     let gpu = &*gpu;
     // The scene's second bind group: the reflection when it is drawn, the
-    // circuit board's signal field, either blank.
+    // level's field (signals or marks), either blank.
     let extras = |reflection: Option<&wgpu::TextureView>| {
-        let field = gpu.signals.as_ref().map(|(_, _, view)| view);
+        let field = gpu.field.as_ref().map(|(_, _, _, view)| view);
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("scene extras"),
             layout: &gpu.extras_layout,
@@ -1357,7 +1447,7 @@ fn draw(
         if let Some(sky) = &gpu.sky {
             pass.set_pipeline(&scene_p.sky);
             let sky = match &sky.filtered {
-                Some(f) if camera.filtered => f,
+                Some(f) if camera.filtered && starry => f,
                 _ => &sky.plain,
             };
             pass.set_bind_group(0, sky, &[]);
@@ -1398,6 +1488,12 @@ fn draw(
             pass.set_vertex_buffer(0, v.slice(..));
             pass.set_index_buffer(i.slice(..), wgpu::IndexFormat::Uint32);
             pass.draw_indexed(0..*n, 0, instance);
+        }
+        // Snowflakes, behind what is nearer.
+        if snow && !mirrored {
+            pass.set_pipeline(&scene_p.snow);
+            pass.set_bind_group(0, &gpu.blank, &[]);
+            pass.draw(0..6, 0..SNOW_FLAKES);
         }
         // Sand grains blown past the camera, over everything.
         if storm && !mirrored {

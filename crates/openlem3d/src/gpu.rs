@@ -629,6 +629,10 @@ pub(crate) fn render(w: &mut World) {
                     let dirty = f.dirty.take();
                     (&*f, dirty)
                 }),
+                marks: w.marks.as_mut().map(|f| {
+                    let dirty = f.dirty.take();
+                    (&*f, dirty)
+                }),
             },
         );
     profile.stamp(&mut encoder, Stamp::Scene);

@@ -89,6 +89,8 @@ struct Vertex {
     anim: [f32; 2],
     /// Light from glowing things nearby (`crate::light`), linear RGB.
     light: [f32; 3],
+    /// On the top of a slippery block (`scene.wgsl`'s `glossy`).
+    slippery: bool,
 }
 
 impl Vertex {
@@ -101,13 +103,21 @@ impl Vertex {
             offset: [0.0; 2],
             anim: [1.0, 0.0],
             light: [0.0; 3],
+            slippery: false,
         }
     }
 
     fn push(&self, out: &mut Vec<f32>) {
         out.extend(self.pos);
         out.extend(self.uv);
-        out.extend([self.shade, if self.cutout { 1.0 } else { 0.0 }]);
+        // `scene.wgsl`'s `VIn::params`: 1 with palette index 0 see-through,
+        // −1 on a slippery top.
+        let marker = match (self.cutout, self.slippery) {
+            (true, _) => 1.0,
+            (false, true) => -1.0,
+            (false, false) => 0.0,
+        };
+        out.extend([self.shade, marker]);
         out.extend(self.offset);
         out.extend(self.anim);
         out.extend(self.light);
@@ -202,6 +212,7 @@ impl LayerBuilder {
                 offset: off,
                 anim,
                 light: [0.0; 3],
+                slippery: false,
             }
             .push(&mut self.vertices);
         }
@@ -257,20 +268,54 @@ impl LayerBuilder {
     }
 }
 
-/// Interleaves the block mesh (opaque and cutout parts) into one layer.
+/// Interleaves the block mesh (opaque and cutout parts) into one layer, the
+/// tops of slippery blocks marked.
 fn block_layer(
     mesh: &LevelMesh,
     texture: RgbaImage,
     lights: &[Light],
     level: &Level,
+    blocks: &BlockSet,
 ) -> SceneLayer {
     let mut b = LayerBuilder::default();
     for (part, cutout) in [(&mesh.opaque, false), (&mesh.cutout, true)] {
         let base = b.base();
+        // A face's vertices are its own, so its triangles mark them.
+        let mut slippery = vec![false; part.positions.len()];
+        for t in part.indices.as_chunks::<3>().0 {
+            let [a, bb, c] = t.map(|i| i as usize);
+            if part.normals[a][1] < 0.98 {
+                continue;
+            }
+            let centre = [0, 1, 2].map(|k| {
+                (part.positions[a][k] + part.positions[bb][k] + part.positions[c][k]) / 3.0
+            });
+            let (x, y, z) = (
+                centre[0].floor(),
+                (centre[1] - 0.01).floor(),
+                centre[2].floor(),
+            );
+            if x < 0.0 || y < 0.0 || z < 0.0 {
+                continue;
+            }
+            let (x, y, z) = (x as usize, y as usize, z as usize);
+            if x >= SIZE_X || z >= SIZE_Z || y >= l3d_formats::level::SIZE_Y {
+                continue;
+            }
+            let cell = level.block(x, y, z);
+            if !cell.is_empty()
+                && blocks.defs[cell.id as usize].flags & l3d_formats::blk::flags::SLIPPERY != 0
+            {
+                for i in [a, bb, c] {
+                    slippery[i] = true;
+                }
+            }
+        }
         for i in 0..part.positions.len() {
             let mut v = Vertex::fixed(part.positions[i], part.uvs[i], part.shades[i], cutout);
             v.anim = part.anims[i];
             v.light = light::shine(lights, level, part.positions[i], part.normals[i]);
+            v.slippery = slippery[i];
             v.push(&mut b.vertices);
         }
         b.indices.extend(part.indices.iter().map(|i| i + base));
@@ -306,7 +351,7 @@ const FOAM_REACH: f32 = 2.5;
 
 /// How strongly waves move the sea around a level (ours, enhanced mode):
 /// per unit square around the grid, the distance to the nearest scenery
-/// (a block in the bottom layer, standing in the sea, or land), from which
+/// (a block standing in the sea, or land), from which
 /// the sea is calm at the shore and rough further out.
 pub(crate) struct Waves {
     /// Distances in units, `SIDE` × `SIDE` squares from `-WAVE_NEAR` on x
@@ -329,9 +374,15 @@ impl Waves {
                 let (cx, cz) = (x + 0.5, z + 0.5);
                 let in_grid =
                     (0.0..SIZE_X as f32).contains(&x) && (0.0..SIZE_Z as f32).contains(&z);
-                // Only the bottom layer stands in the sea: blocks above it
-                // float clear of the water.
-                let blocks = in_grid && !level.block(x as usize, 0, z as usize).is_empty();
+                // The bottom layer lies in the sea, its tops at the water,
+                // and the layer on it stands in the sea where its lowest
+                // quarter is there (Fun 6 "Ricochet"'s exit island and
+                // tower); blocks higher up float clear of the water.
+                let stands = |y: usize, low: u8| {
+                    let b = level.block(x as usize, y, z as usize);
+                    !b.is_empty() && !matches!(b.id, 3 | 4) && b.segments & low != 0
+                };
+                let blocks = in_grid && (stands(0, 0xF) || stands(1, 1));
                 let on_land = land && level.land_polygons.iter().any(|p| inside(p, cx, cz));
                 if blocks || on_land {
                     d[i * n + k] = 0.0;
@@ -853,7 +904,12 @@ fn sign_rect(g: u8) -> [f32; 4] {
 
 /// Sign (`0x20`–`0x3F`) and wall-decal (`0x70`–`0xEF`) layers
 /// ([L3DEdit] semantics, unverified).
-fn decal_layers(data: &mut GameData, level: &Level, pal: &Palette) -> Vec<SceneLayer> {
+fn decal_layers(
+    data: &mut GameData,
+    level: &Level,
+    blocks: &BlockSet,
+    pal: &Palette,
+) -> Vec<SceneLayer> {
     let signs = (level.sign_set != 0xFF)
         .then(|| data.gfx("SIGNS", level.sign_set).ok())
         .flatten();
@@ -909,15 +965,24 @@ fn decal_layers(data: &mut GameData, level: &Level, pal: &Palette) -> Vec<SceneL
                         // decals in an empty cell face into it (the 5×3
                         // monitor screen on "Lemmings Inside" only reads left
                         // to right that way), and one between two empty
-                        // cells shows on both sides.
+                        // cells shows on both sides. A block drawing nothing
+                        // counts as open: the outer walls of Fun 10 "Castle
+                        // Lemmalot" are decals between its courtyard's cells
+                        // and invisible blocks, and show from outside too.
                         let n = SIDE_NORMALS[(side - 0x7) as usize];
                         let solid = |dx: i32, dz: i32| {
                             let (nx, nz) = (x as i32 + dx, z as i32 + dz);
-                            (0..SIZE_X as i32).contains(&nx)
-                                && (0..SIZE_Z as i32).contains(&nz)
-                                && !level.block(nx as usize, y, nz as usize).is_empty()
+                            if !(0..SIZE_X as i32).contains(&nx)
+                                || !(0..SIZE_Z as i32).contains(&nz)
+                            {
+                                return false;
+                            }
+                            let c = level.block(nx as usize, y, nz as usize);
+                            !c.is_empty()
+                                && !level_mesh::INVISIBLE_IDS.contains(&c.id)
+                                && !blocks.defs[c.id as usize].is_placeholder()
                         };
-                        let (own, next) = (!block.is_empty(), solid(n[0] as i32, n[1] as i32));
+                        let (own, next) = (solid(0, 0), solid(n[0] as i32, n[1] as i32));
                         let face = |d: f32| [cx + n[0] * (0.5 + d), base_y, cz + n[1] * (0.5 + d)];
                         let sides = [(own || !next, 1.0), (!own, -1.0)];
                         for (shown, s) in sides {
@@ -1303,9 +1368,27 @@ pub fn rebuild_blocks(
         texture,
         &scene.lights,
         level,
+        blocks,
     );
     let brick_texture = out.layers[layer + 1].texture.clone();
     out.layers[layer + 1] = brick_layer(&sim.world.bricks, brick_texture);
+    // The snow lying on the blocks, gone with what was dug away.
+    if let Some(tiles) = &scene.snow_tiles
+        && let Some(at) = out
+            .layers
+            .iter()
+            .position(|l| l.vertices.get(VERTEX_FLOATS - 1) == Some(&SNOW_MARKER))
+    {
+        let cover = snow_cover(level, blocks, &|t| tiles[t as usize], &|x, y, z| {
+            world_cut(level, &sim.world, x, y, z)
+        });
+        match cover {
+            Some(cover) => out.layers[at] = cover,
+            None => {
+                out.layers.remove(at);
+            }
+        }
+    }
     out
 }
 
@@ -1414,12 +1497,19 @@ pub struct Show {
     /// Signals run along a circuit board's traces (ours, in Enhanced and
     /// Ultra modes; see [`CIRCUIT_LANDS`]).
     pub signals: bool,
-    /// A desert (a sea of sand) has a sandstorm (ours, in Ultra mode).
+    /// Weather (ours, in Ultra mode): a desert (a sea of sand) has a
+    /// sandstorm; on an icy level (a sea of ice) the lemmings leave marks.
     pub storm: bool,
+    /// Snow falls gently on an icy level (a sea of ice; ours, in Enhanced
+    /// and Ultra modes).
+    pub snow: bool,
 }
 
 /// The sea graphics that are sand.
 const SAND_SEAS: [u8; 1] = [0];
+/// The sea graphics that are ice: "Alpine Assault Course", "Slippery Maze"
+/// and "Ski Jump".
+const SNOW_SEAS: [u8; 1] = [6];
 
 /// The land graphics that are circuit boards, whose traces carry signals the
 /// lemmings set off (ours, Enhanced and Ultra; `crate::signals`): `LAND.008`,
@@ -1431,6 +1521,21 @@ const CIRCUIT_TRACE: u8 = 125;
 /// Levels whose floor shines (ours, Ultra mode): "Breakout" (`LEVEL.024`),
 /// its floor glossy like an arcade game's.
 const GLOSSY_LEVELS: [u32; 1] = [24];
+/// How much a sea of ice shines with the level, against a polished floor's 1.
+const ICE_GLOSS: f32 = 0.6;
+
+/// Whether any slippery block of `level` has its top open at height `y`
+/// (within the gloss shader's reach of it).
+fn slippery_tops_at(level: &Level, blocks: &BlockSet, y: f32) -> bool {
+    level.cells().any(|(x, cy, z, b, _)| {
+        let top = cy as f32 + (8 - b.segments.leading_zeros()) as f32 / 4.0;
+        let open = cy + 1 >= l3d_formats::level::SIZE_Y || level.block(x, cy + 1, z).is_empty();
+        !b.is_empty()
+            && blocks.defs[b.id as usize].flags & l3d_formats::blk::flags::SLIPPERY != 0
+            && open
+            && (top - y).abs() < 0.02
+    })
+}
 
 /// The height of the mirror for a glossy level's floor: the ground where it
 /// draws land, which lies just under it, so that the blocks standing there
@@ -1470,6 +1575,174 @@ fn floor_height(level: &Level) -> Option<f32> {
 /// candy-floss one far above (ours, by eye).
 const STARRY_MEAN: f32 = 100.0;
 
+/// Snow lying on an icy level (ours, Ultra mode): a layer `SNOW_DEPTH` deep
+/// over the flat tops of whole blocks and the slopes of whole ramps whose
+/// surface tile is snow, open above, thinning to nothing towards edges with
+/// no snow beyond. Finely divided, `SNOW_DIVISIONS` a side per cell, so that
+/// the lemmings' marks (`crate::marks`) press into it (`scene.wgsl`).
+pub const SNOW_DEPTH: f32 = 0.12;
+const SNOW_DIVISIONS: usize = 20;
+/// How far in from an open edge the snow takes to reach its depth, in units.
+const SNOW_TAPER: f32 = 0.2;
+
+/// Whether texture-set tile `tile` (64×64 indexed texels in `tex`) shows
+/// snow: on average near white and barely tinted.
+fn snowy_tile(tex: &[u8], pal: &Palette, tile: u8) -> bool {
+    let Some(px) = tex.get(tile as usize * 64 * 64..(tile as usize + 1) * 64 * 64) else {
+        return false;
+    };
+    let mut sum = [0u32; 3];
+    for &p in px {
+        let c = pal[p as usize];
+        (0..3).for_each(|k| sum[k] += c[k] as u32);
+    }
+    let mean = sum.map(|s| s as f32 / px.len() as f32 / 255.0);
+    let low = mean.iter().cloned().fold(1.0, f32::min);
+    let high = mean.iter().cloned().fold(0.0, f32::max);
+    low > 0.72 && high - low < 0.15
+}
+
+/// The snow lying on `level` (see [`SNOW_DEPTH`]), as left by `cut` (as
+/// [`level_mesh::build`] takes it), `snowy(tile)` saying which top tiles are
+/// snow; `None` with none.
+fn snow_cover(
+    level: &Level,
+    blocks: &BlockSet,
+    snowy: &dyn Fn(u8) -> bool,
+    cut: &dyn Fn(usize, usize, usize) -> (f32, f32, u8),
+) -> Option<SceneLayer> {
+    let open = |x: usize, y: usize, z: usize| {
+        y + 1 >= l3d_formats::level::SIZE_Y || level.block(x, y + 1, z).is_empty()
+    };
+    // The height of the surface snow lies on in cell (x, y, z) at world x
+    // and z, when snow lies there.
+    let surface = |x: i32, y: i32, z: i32| -> Option<Box<dyn Fn(f32, f32) -> f32>> {
+        if x < 0 || y < 0 || z < 0 || x >= SIZE_X as i32 || z >= SIZE_Z as i32 {
+            return None;
+        }
+        let (xu, yu, zu) = (x as usize, y as usize, z as usize);
+        if yu >= l3d_formats::level::SIZE_Y {
+            return None;
+        }
+        let cell = level.block(xu, yu, zu);
+        if cell.is_empty() || level_mesh::INVISIBLE_IDS.contains(&cell.id) {
+            return None;
+        }
+        let def = &blocks.defs[cell.id as usize];
+        let (base, top, _) = cut(xu, yu, zu);
+        if def.is_placeholder() || base > 0.0 || top < 1.0 || !open(xu, yu, zu) {
+            return None;
+        }
+        // The local height over a cell at rotation 0 (`level_mesh`'s
+        // shapes): a flat top, a 45° ramp rising towards −Z, a 22.5° one
+        // over the upper half.
+        let (face, rise): (FaceDir, fn(f32) -> f32) = match cell.shape {
+            0 if cell.segments & 0b1000 != 0 => (FaceDir::PosY, |_| 1.0),
+            5 if cell.segments == 0b1111 => (FaceDir::PosZ, |lz| 1.0 - lz),
+            8 if cell.segments == 0b1111 => (FaceDir::PosZ, |lz| 1.0 - 0.5 * lz),
+            _ => return None,
+        };
+        if !snowy(def.face(face).texture) {
+            return None;
+        }
+        let back = (4 - level_mesh::effective_rotation(cell.shape, cell.rotation)) % 4;
+        Some(Box::new(move |wx, wz| {
+            let local = level_mesh::rotate_point([wx - x as f32, 0.0, wz - z as f32], back);
+            y as f32 + rise(local[2].clamp(0.0, 1.0))
+        }))
+    };
+    let mut b = LayerBuilder::default();
+    let n = SNOW_DIVISIONS;
+    for (x, y, z, _, _) in level.cells() {
+        let (xi, yi, zi) = (x as i32, y as i32, z as i32);
+        let Some(height) = surface(xi, yi, zi) else {
+            continue;
+        };
+        // Whether snow carries on over each side (−x, +x, −z, +z): on a
+        // neighbour, level with or a step either side of this cell, whose
+        // snow meets this cell's halfway along that side.
+        let mids = [(0.0, 0.5), (1.0, 0.5), (0.5, 0.0), (0.5, 1.0)];
+        let steps = [(-1, 0), (1, 0), (0, -1), (0, 1)];
+        let sides: [bool; 4] = std::array::from_fn(|k| {
+            let (mx, mz) = (x as f32 + mids[k].0, z as f32 + mids[k].1);
+            let here = height(mx, mz);
+            !(-1..=1).any(|dy| {
+                surface(xi + steps[k].0, yi + dy, zi + steps[k].1)
+                    .is_some_and(|there| (there(mx, mz) - here).abs() < 0.01)
+            })
+        });
+        let base = b.base();
+        for j in 0..=n {
+            for i in 0..=n {
+                let (u, v) = (i as f32 / n as f32, j as f32 / n as f32);
+                let mut edge = f32::INFINITY;
+                for (open, d) in sides.iter().zip([u, 1.0 - u, v, 1.0 - v]) {
+                    if *open {
+                        edge = edge.min(d);
+                    }
+                }
+                let depth = SNOW_DEPTH * (edge / SNOW_TAPER).min(1.0);
+                let (wx, wz) = (x as f32 + u, z as f32 + v);
+                let ground = height(wx, wz);
+                b.vertices.extend([
+                    wx,
+                    ground + depth,
+                    wz,
+                    wx,
+                    wz,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    0.0,
+                    depth,
+                    ground,
+                    SNOW_MARKER,
+                ]);
+            }
+        }
+        let at = |i: usize, j: usize| base + (j * (n + 1) + i) as u32;
+        for j in 0..n {
+            for i in 0..n {
+                let (a, bb, c, d) = (at(i, j), at(i + 1, j), at(i + 1, j + 1), at(i, j + 1));
+                b.indices.extend([a, bb, c, a, c, d]);
+            }
+        }
+    }
+    if b.indices.is_empty() {
+        return None;
+    }
+    Some(SceneLayer {
+        vertices: b.vertices,
+        indices: b.indices,
+        texture: snow_texture(),
+        smooth: true,
+        screen: false,
+    })
+}
+
+/// The vertex light's z marking snow lying on the level (`scene.wgsl`'s
+/// `VIn::light`).
+const SNOW_MARKER: f32 = -3.0;
+
+/// A tile of fresh snow: near white, faintly grained.
+fn snow_texture() -> RgbaImage {
+    let size = 64u32;
+    let texels = (0..size * size)
+        .flat_map(|i| {
+            let h = (i.wrapping_mul(2_654_435_761) >> 24) as i32 % 9 - 4;
+            let c = |v: i32| (v + h).clamp(0, 255) as u8;
+            [c(232), c(240), c(246), 255]
+        })
+        .collect();
+    RgbaImage {
+        width: size,
+        height: size,
+        texels,
+    }
+}
+
 /// Builds everything drawn for level `n`.
 pub fn build(data: &mut GameData, n: u32, show: Show) -> Result<BuiltLevel, l3d_formats::Error> {
     let level = data.level(n)?;
@@ -1492,12 +1765,23 @@ pub fn build(data: &mut GameData, n: u32, show: Show) -> Result<BuiltLevel, l3d_
     let flags = level.flags;
     let surround = flags & level_flags::SURROUND_SKY != 0;
     scene.storm = show.storm && !surround && SAND_SEAS.contains(&level.sea_gfx);
+    scene.snow = show.snow && !surround && SNOW_SEAS.contains(&level.sea_gfx);
+    scene.marks = show.storm && SNOW_SEAS.contains(&level.sea_gfx);
     if show.mirror
         && GLOSSY_LEVELS.contains(&n)
         && let Some(floor) = glossy_floor(&level, show)
     {
         scene.mirror = Some(floor);
-        scene.glossy = true;
+        scene.glossy = 1.0;
+    } else if show.mirror
+        && show.sea
+        && !surround
+        && SNOW_SEAS.contains(&level.sea_gfx)
+        && flags & level_flags::SEA_SOLID_COLOUR == 0
+    {
+        // A sea of ice shines faintly with the level.
+        scene.mirror = Some(SEA_Y);
+        scene.glossy = ICE_GLOSS;
     }
 
     if show.sea
@@ -1558,6 +1842,15 @@ pub fn build(data: &mut GameData, n: u32, show: Show) -> Result<BuiltLevel, l3d_
         scene
             .layers
             .push(plane_layer(SEA_Y, tile, img, frames, drift, waves.as_ref()));
+    }
+    // Ice on a level mirrored in its sea shines with it, where its top lies
+    // at the sea (Practice "Slippery").
+    if scene.glossy == 0.0
+        && let Some(sea) = scene.mirror
+        && slippery_tops_at(&level, &blocks, sea)
+    {
+        scene.glossy = ICE_GLOSS;
+        scene.glossy_slippery = true;
     }
     if show.land
         && level.land_gfx != 0xFF
@@ -1625,6 +1918,7 @@ pub fn build(data: &mut GameData, n: u32, show: Show) -> Result<BuiltLevel, l3d_
         },
         &scene.lights,
         &level,
+        &blocks,
     ));
     // Builders' bricks, right after the blocks (see rebuild_blocks).
     let brick_tile = tex
@@ -1634,8 +1928,21 @@ pub fn build(data: &mut GameData, n: u32, show: Show) -> Result<BuiltLevel, l3d_
         .layers
         .push(brick_layer(&[], indexed_to_rgba(brick_tile, 64, &pal)));
     scene.layers.extend(object_layers(data, &level, &pal));
-    scene.layers.extend(decal_layers(data, &level, &pal));
+    scene
+        .layers
+        .extend(decal_layers(data, &level, &blocks, &pal));
     scene.layers.extend(trap_layer(data, &level, &pal));
+    // Snow lying where the lemmings leave marks (see rebuild_blocks).
+    if scene.marks {
+        let tiles: std::sync::Arc<[bool]> =
+            (0..=255u8).map(|t| snowy_tile(&tex, &pal, t)).collect();
+        if let Some(layer) = snow_cover(&level, &blocks, &|t| tiles[t as usize], &|x, y, z| {
+            level_cut(&level, x, y, z)
+        }) {
+            scene.layers.push(layer);
+        }
+        scene.snow_tiles = Some(tiles);
+    }
 
     let traps = (level.trap_type != 0xFF)
         .then(|| data.gfx("TRAPS", level.trap_type).ok())

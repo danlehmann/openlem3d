@@ -1966,9 +1966,10 @@ pub fn shadows(
     /// against the straight edges between its points dipping under a
     /// ramp's crest.
     const LIFT: f32 = 0.03;
-    /// How far a point's floor may be from the middle's and still be used:
-    /// as far as the point is from the middle, which takes in a ramp.
-    const STEP_LIMIT: f32 = SHADOW_RADIUS + 0.05;
+    /// How much more than its distance across a point's floor may lie above
+    /// or below another's on the way out from the middle: a 45° ramp's
+    /// floor changes by as much as the distance, a step at once.
+    const SLOPE_SLACK: f32 = 0.03;
     /// Squares along each side of a shadow, each corner on the floor.
     const GRID: u32 = 6;
     let mut vertices = Vec::new();
@@ -2008,11 +2009,23 @@ pub fn shadows(
             let u = j as f32 / GRID as f32 * 2.0 - 1.0;
             let v = k as f32 / GRID as f32 * 2.0 - 1.0;
             let (x, z) = (p[0] + u * r, p[2] + v * r);
-            // A point with no floor near the middle's (over a drop, or
-            // against a wall) stays at the middle's height and is clear, so
-            // the shadow fades out there rather than float.
-            let (y, dark) = match floor_under(sim, unseen, x, top, z, ground) {
-                Some(y) if (y - floor).abs() <= STEP_LIMIT => (y, dark),
+            // A point whose floor is not reached from the middle's along a
+            // slope of at most 45°, checked halfway too (over a drop, past a
+            // step of builder's bricks, against a wall), stays at the
+            // middle's height and is clear, so the shadow fades out there
+            // rather than float or hang down over the step.
+            let reach = |a: f32, b: f32, across: f32| (a - b).abs() <= across + SLOPE_SLACK;
+            let d = (u * u + v * v).sqrt() * r;
+            let half = floor_under(
+                sim,
+                unseen,
+                p[0] + u * r / 2.0,
+                top,
+                p[2] + v * r / 2.0,
+                ground,
+            );
+            let (y, dark) = match (floor_under(sim, unseen, x, top, z, ground), half) {
+                (Some(y), Some(h)) if reach(h, floor, d / 2.0) && reach(y, h, d / 2.0) => (y, dark),
                 _ => (floor, 0.0),
             };
             vertices.extend([x, y + LIFT, z, u, v, dark, 0.0]);

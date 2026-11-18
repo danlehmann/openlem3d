@@ -311,7 +311,7 @@ fn tile_face(shape: u8, src: FaceDir) -> FaceDir {
 
 /// Rotates a local point about the cell's vertical centre line, matching
 /// [`rotate_dir`].
-fn rotate_point(p: [f32; 3], r: u8) -> [f32; 3] {
+pub fn rotate_point(p: [f32; 3], r: u8) -> [f32; 3] {
     let (mut x, mut z) = (p[0] - 0.5, p[2] - 0.5);
     for _ in 0..r % 4 {
         // +X (1,0) → −Z (0,−1): (x, z) → (z, −x).

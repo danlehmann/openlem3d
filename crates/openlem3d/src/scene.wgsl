@@ -34,9 +34,15 @@ struct Uniforms {
     // all-round sky is a night sky of stars shown with our touches, else 0.
     weather: vec4<f32>,
     // x: 1 when the floor shines with the level mirrored at `eye.w` (ours),
-    // else 0. y: the circuit board's signal field's texels per unit, z: 1
-    // when that field is bound as `field_tex` (`crate::signals`), else 0.
+    // 2 when only the tops of slippery blocks there do, else 0; w how much (1 for a polished floor). y: the circuit board's
+    // signal field's texels per unit, z: 1 when that field is bound as
+    // `field_tex` (`crate::signals`), else 0.
     gloss: vec4<f32>,
+    // x: 1 when snow falls (ours), else 0. y: how much falls around the
+    // camera, 0–1: none under cover.
+    snow: vec4<f32>,
+    // From clip space back to the world.
+    inv_view_proj: mat4x4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> u: Uniforms;
@@ -54,7 +60,7 @@ struct VIn {
     @location(0) pos: vec3<f32>,
     @location(1) uv: vec2<f32>,
     // x: shade (`level_mesh::SHADE_STEP`), y: 1 if palette index 0 is
-    // transparent.
+    // transparent, −1 on the top of a slippery block, else 0.
     @location(2) params: vec2<f32>,
     // Billboard corner offset from `pos`, in world units along the camera
     // right vector (x) and up (y). Zero for fixed geometry.
@@ -72,8 +78,10 @@ struct VIn {
     // finely divided sea around the level), z 0 for no water, else 1 plus
     // the surf there (1 at the shore, 0 from `FOAM_REACH` out). A negative z
     // marks a screen showing the game (`SceneLayer::screen`), uv 0–1 over it,
-    // and -2 a circuit board, which the lemmings' signals light
-    // (`crate::signals`).
+    // -2 a circuit board, which the lemmings' signals light
+    // (`crate::signals`), and -3 snow lying on the level, which their marks
+    // press down (`scene_build::SNOW_DEPTH`): x then its depth there, y the
+    // height of the ground under it.
     @location(5) light: vec3<f32>,
 };
 
@@ -119,6 +127,10 @@ struct VOut {
     @location(7) world: vec3<f32>,
     // 1 on a circuit board, else 0.
     @location(8) circuit: f32,
+    // On snow lying on the level (ours): x 1, y how far it is pressed down
+    // there, 0–1 of its depth, z how far it is moved up from where it lies
+    // untouched; else 0.
+    @location(9) cover: vec3<f32>,
 };
 
 /// `p` mirrored in the sea when `mirrored`.
@@ -155,7 +167,8 @@ fn vs(v: VIn, @builtin(instance_index) instance: u32) -> VOut {
     o.wave = vec4(0.0);
     o.mirror = vec2(select(0.0, 1.0, mirrored), 0.0);
     o.screen = select(0.0, 1.0, v.light.z < 0.0 && v.light.z > -1.5);
-    o.circuit = select(0.0, 1.0, v.light.z < -1.5);
+    o.circuit = select(0.0, 1.0, v.light.z < -1.5 && v.light.z > -2.5);
+    o.cover = vec3(0.0);
     if (v.anim.y < 0.0) {
         var p = v.pos;
         if (v.light.y > 0.0) {
@@ -169,7 +182,14 @@ fn vs(v: VIn, @builtin(instance_index) instance: u32) -> VOut {
         o.tile = vec2(max(v.anim.x, 1.0), frame);
         return o;
     }
-    let world = v.pos + u.right.xyz * v.offset.x + vec3(0.0, v.offset.y, 0.0);
+    var world = v.pos + u.right.xyz * v.offset.x + vec3(0.0, v.offset.y, 0.0);
+    if (v.light.z < -2.5) {
+        // Snow lying on the level, pressed down by the lemmings' marks.
+        let pressed_here = snow_pressed(world, v.light.x, v.light.y);
+        world.y += pressed_here.x;
+        o.cover = vec3(1.0, pressed_here.y, pressed_here.x);
+        o.light = vec3(0.0);
+    }
     o.mirror.y = world.y - u.eye.w;
     o.world = world;
     o.clip = u.view_proj * vec4(mirror_of(world, mirrored), 1.0);
@@ -240,6 +260,9 @@ fn fs(v: VOut) -> @location(0) vec4<f32> {
     // Which way the surface faces, from how its position changes across
     // the screen.
     let facing = normalize(cross(dpdx(v.world), dpdy(v.world)));
+    // Which way snow lying on the level faced untouched.
+    let untouched = v.world - vec3(0.0, v.cover.z, 0.0);
+    let ground = normalize(cross(dpdx(untouched), dpdy(untouched)) + vec3(0.0, 1e-9, 0.0));
     if (v.screen > 0.5 && u.post.w > 0.5) {
         return vec4(crt(v.uv, footprint), 1.0);
     }
@@ -250,6 +273,11 @@ fn fs(v: VOut) -> @location(0) vec4<f32> {
     if (v.circuit > 0.5) {
         let texel = max(length(gx * size), length(gy * size));
         lit += sent_signal(v.world, texel);
+    }
+    if (v.cover.x > 0.5) {
+        lit = snow_lit(lit, facing, ground, v.cover.y);
+    } else if (u.snow.z > 0.0 && v.mirror.x < 0.5 && abs(facing.y) > 0.7) {
+        lit = marked(lit, v.world, srgb);
     }
     if (u.gloss.x > 0.5 && v.mirror.x < 0.5) {
         lit = glossy(lit, v, facing);
@@ -940,8 +968,9 @@ fn breath(uv: vec2<f32>) -> f32 {
 /// than a star spans, nearer than a planet's edge.
 const STAR_SPAN: f32 = 2.5;
 
-// A glossy floor (ours, Ultra mode, "Breakout"): it shows the level
-// mirrored in it, as a polished floor does, more towards the horizon.
+// A glossy floor (ours, Ultra mode: "Breakout", and seas of ice, fainter):
+// it shows the level mirrored in it, as a polished floor does, more towards
+// the horizon.
 
 /// How much of the mirrored level a glossy floor shows looking straight
 /// down, and looking along it.
@@ -956,10 +985,14 @@ fn glossy(lit: vec3<f32>, v: VOut, facing: vec3<f32>) -> vec3<f32> {
     if (abs(facing.y) < 0.98 || abs(v.world.y - u.eye.w) > 0.02 || u.eye.y < v.world.y) {
         return lit;
     }
+    // Ice among other floors: only the slippery tops (`VIn::params`).
+    if (u.gloss.x > 1.5 && v.params.y > -0.5) {
+        return lit;
+    }
     let dims = vec2<f32>(textureDimensions(second_tex));
     let mirrored = textureSampleLevel(second_tex, second_samp, v.clip.xy / dims, 0.0);
     let to_eye = normalize(u.eye.xyz - v.world);
-    let amount = mix(GLOSS_DOWN, GLOSS_GRAZING, pow(1.0 - clamp(to_eye.y, 0.0, 1.0), 3.0));
+    let amount = mix(GLOSS_DOWN, GLOSS_GRAZING, pow(1.0 - clamp(to_eye.y, 0.0, 1.0), 3.0)) * u.gloss.w;
     return mix(lit, mirrored.rgb, amount * clamp(mirrored.a, 0.0, 1.0));
 }
 
@@ -1001,4 +1034,191 @@ fn sent_signal(world: vec3<f32>, texel: f32) -> vec3<f32> {
     }
     let near = 1.0 - smoothstep(3.0, 8.0, texel);
     return SIGNAL_LIGHT * (1.0 - since / lit_ms) * near;
+}
+
+// Gentle snow (ours, Enhanced and Ultra, the icy levels): sparse soft flakes
+// drift down slowly, swaying a little. Each flake has its own place in the
+// world, in a box that wraps around the camera: moving, the camera passes
+// among them; one leaving the box comes back on its far side, where flakes
+// fade out. Drawn as billboards, hidden by what is nearer.
+
+/// How many flakes there are; the box's size, in units; how fast they fall,
+/// in units a second; how far they sway; their radius, in units.
+const SNOW_FLAKES: u32 = 3000u;
+const SNOW_BOX: f32 = 16.0;
+const SNOW_FALL: f32 = 0.45;
+const SNOW_SWAY: f32 = 0.12;
+const SNOW_SIZE: f32 = 0.025;
+
+struct SnowOut {
+    @builtin(position) clip: vec4<f32>,
+    // Where on the flake, -1 to 1 across; and its opacity.
+    @location(0) at: vec2<f32>,
+    @location(1) alpha: f32,
+};
+
+@vertex
+fn vs_snow(@builtin(vertex_index) i: u32, @builtin(instance_index) n: u32) -> SnowOut {
+    let t = u.sky.w;
+    let k = f32(n);
+    let seed = vec3(hash2(vec2(k, 1.0)), hash2(vec2(k, 2.0)), hash2(vec2(k, 3.0)));
+    // Its place in the world, falling and swaying, wrapped into the box
+    // around the camera.
+    var p = seed * SNOW_BOX;
+    p.y -= t * SNOW_FALL * (0.8 + 0.4 * hash2(vec2(k, 4.0)));
+    let phase = hash2(vec2(k, 5.0)) * 6.283;
+    p.x += sin(t * 0.7 + phase) * SNOW_SWAY;
+    p.z += cos(t * 0.5 + phase) * SNOW_SWAY;
+    let rel = (p - u.eye.xyz + SNOW_BOX * 0.5) - floor((p - u.eye.xyz + SNOW_BOX * 0.5) / SNOW_BOX) * SNOW_BOX - SNOW_BOX * 0.5;
+    let world = u.eye.xyz + rel;
+    // Faded out towards the box's edge and very close to the eye.
+    let reach = max(abs(rel.x), max(abs(rel.y), abs(rel.z))) / (SNOW_BOX * 0.5);
+    var alpha = (1.0 - smoothstep(0.6, 1.0, reach)) * smoothstep(0.15, 0.5, length(rel));
+    // At least about a pixel across, fainter for it, so far flakes do not
+    // flicker away.
+    let c = u.view_proj * vec4(world, 1.0);
+    let c_up = u.view_proj * vec4(world + vec3(0.0, 1.0, 0.0), 1.0);
+    let per_unit = abs(c_up.y / c_up.w - c.y / c.w) * 200.0 * u.sky.z;
+    let size = SNOW_SIZE * (0.7 + 0.6 * hash2(vec2(k, 6.0)));
+    let radius = max(size, 0.9 / max(per_unit, 1e-3));
+    alpha *= min(1.0, size / radius) * 0.8 * u.snow.y;
+    let corner = vec2(f32((0x32u >> i) & 1u), f32((0x2Cu >> i) & 1u)) * 2.0 - 1.0;
+    let at = world + (u.right.xyz * corner.x + vec3(0.0, corner.y, 0.0)) * radius;
+    var o: SnowOut;
+    o.clip = u.view_proj * vec4(at, 1.0);
+    o.at = corner;
+    o.alpha = alpha;
+    return o;
+}
+
+@fragment
+fn fs_snow(v: SnowOut) -> @location(0) vec4<f32> {
+    let a = (1.0 - smoothstep(0.4, 1.0, length(v.at))) * v.alpha;
+    if (a <= 0.0) {
+        discard;
+    }
+    return vec4(vec3(0.95, 0.97, 1.0), a);
+}
+
+// Marks the lemmings leave on an icy level (ours, Ultra mode;
+// `crate::marks`): footprints and slides pressed into snow, slides
+// scratched into ice. Snow is shaded as if pushed aside: each mark a trough,
+// its walls lit from one side and shaded on the other, with a raised ridge
+// of the snow it displaced around it.
+
+/// How much a trough's bottom darkens snow, and the blue-grey it takes on;
+/// how much its walls brighten or darken facing towards or away from the
+/// light; how much its ridge brightens; how far out, in field texels, the
+/// ridge lies; how much a slide's scratch lightens ice.
+const PRINT_DARK: f32 = 0.22;
+const PRINT_TINT: vec3<f32> = vec3(0.8, 0.88, 1.0);
+const WALL_LIGHT: f32 = 0.45;
+const RIDGE_LIGHT: f32 = 0.18;
+const RIDGE_OUT: f32 = 3.0;
+const SCRATCH_LIGHT: f32 = 0.35;
+/// How deep a slide's groove in snow is, against a footprint's 1.
+const GROOVE: f32 = 0.8;
+/// Where the light comes from across the ground (x and z), for the walls.
+const MARK_LIGHT: vec2<f32> = vec2(-0.6, -0.8);
+/// How far from a mark's surface, in units, it still shows.
+const MARK_REACH: f32 = 0.08;
+/// Steps per unit a mark's surface height is counted in
+/// (`crate::marks::HEIGHT_STEPS`).
+const MARK_HEIGHT_STEPS: f32 = 8.0;
+
+/// How deep the snow is pressed at field coordinates `uv` (0–1), and the
+/// slide scratch there.
+fn pressed(uv: vec2<f32>) -> vec2<f32> {
+    let m = textureSampleLevel(field_tex, second_samp, uv, 0.0);
+    return vec2(max(m.r, m.g * GROOVE), m.g);
+}
+
+/// `lit`, the colour of an upward face at `world`, its texel `srgb` (sRGB),
+/// with the marks there: troughs where it is snow (near white, barely
+/// tinted), slide scratches elsewhere.
+fn marked(lit: vec3<f32>, world: vec3<f32>, srgb: vec3<f32>) -> vec3<f32> {
+    let dims = vec2<f32>(textureDimensions(field_tex));
+    let uv = world.xz * u.snow.z / dims;
+    let px = 1.0 / dims;
+    let m = textureSampleLevel(field_tex, second_samp, uv, 0.0);
+    let height = round(m.b * 255.0) / MARK_HEIGHT_STEPS;
+    if (m.b == 0.0 || abs(world.y - height) > MARK_REACH) {
+        return lit;
+    }
+    let here = pressed(uv);
+    // The snow pushed out of the way, piled round the trough.
+    let r = px * RIDGE_OUT;
+    let ring = 0.25 * (pressed(uv + vec2(r.x, 0.0)).x + pressed(uv - vec2(r.x, 0.0)).x
+        + pressed(uv + vec2(0.0, r.y)).x + pressed(uv - vec2(0.0, r.y)).x);
+    if (here.x + ring + here.y < 0.004) {
+        return lit;
+    }
+    let low = min(srgb.r, min(srgb.g, srgb.b));
+    let spread = max(srgb.r, max(srgb.g, srgb.b)) - low;
+    let snow = smoothstep(0.72, 0.85, low) * (1.0 - smoothstep(0.08, 0.18, spread));
+    // The trough's slope, from its depth either side: a wall facing the
+    // light is lit, one facing away shaded.
+    let e = px * 1.5;
+    let slope = vec2(
+        pressed(uv + vec2(e.x, 0.0)).x - pressed(uv - vec2(e.x, 0.0)).x,
+        pressed(uv + vec2(0.0, e.y)).x - pressed(uv - vec2(0.0, e.y)).x,
+    );
+    let wall = clamp(dot(slope, normalize(MARK_LIGHT)), -1.0, 1.0) * WALL_LIGHT;
+    let ridge = max(ring - here.x, 0.0) * RIDGE_LIGHT;
+    let bottom = mix(vec3(1.0), PRINT_TINT * (1.0 - PRINT_DARK), here.x);
+    var out = mix(lit, lit * bottom * (1.0 + wall + ridge), snow);
+    let top = max(out.r, max(out.g, out.b));
+    out = mix(out, vec3(max(top, 0.9)), here.y * SCRATCH_LIGHT * (1.0 - snow));
+    return out;
+}
+
+// Snow lying on the level (ours, Ultra mode; `scene_build::SNOW_DEPTH`): a
+// layer the lemmings' marks press down into troughs, heaping what they push
+// aside into a low ridge alongside, lit by its slopes.
+
+/// How high the ridge rises, against the snow's depth there; where the light
+/// comes from; how strongly slopes turn towards or away from it shade the
+/// snow; how dark a trough's bottom is.
+const RIDGE_RISE: f32 = 0.6;
+const SNOW_LIGHT: vec3<f32> = vec3(-0.45, 0.8, -0.4);
+const SLOPE_SHADE: f32 = 2.2;
+const TROUGH_DARK: f32 = 0.32;
+/// How far out, in field texels, the snow pushed aside heaps up.
+const SNOW_RIDGE_OUT: f32 = 5.0;
+/// How far, in units, the ground under the snow may lie from a mark's
+/// surface and still take it: a slope's height changes across a mark.
+const SNOW_MARK_REACH: f32 = 0.3;
+
+/// How far the snow lying at `world`, `depth` deep over ground at height
+/// `ground`, is moved up (down where pressed), and how far it is pressed,
+/// 0–1 of its depth.
+fn snow_pressed(world: vec3<f32>, depth: f32, ground: f32) -> vec2<f32> {
+    if (u.snow.z <= 0.0) {
+        return vec2(0.0);
+    }
+    let dims = vec2<f32>(textureDimensions(field_tex));
+    let uv = world.xz * u.snow.z / dims;
+    let m = textureSampleLevel(field_tex, second_samp, uv, 0.0);
+    let floor_y = round(m.b * 255.0) / MARK_HEIGHT_STEPS;
+    if (m.b == 0.0 || abs(ground - floor_y) > SNOW_MARK_REACH) {
+        return vec2(0.0);
+    }
+    let here = pressed(uv).x;
+    let r = SNOW_RIDGE_OUT / dims;
+    let ring = 0.25 * (pressed(uv + vec2(r.x, 0.0)).x + pressed(uv - vec2(r.x, 0.0)).x
+        + pressed(uv + vec2(0.0, r.y)).x + pressed(uv - vec2(0.0, r.y)).x);
+    let rise = max(ring - here, 0.0) * RIDGE_RISE;
+    return vec2((rise - here) * depth, here);
+}
+
+/// `lit`, the colour of snow lying on the level facing `facing`, which faced
+/// `untouched` before the lemmings' marks, pressed `pressed` of its depth
+/// there, lit by how its slope turns from the untouched one.
+fn snow_lit(lit: vec3<f32>, facing: vec3<f32>, untouched: vec3<f32>, pressed: f32) -> vec3<f32> {
+    let n = facing * select(1.0, -1.0, facing.y < 0.0);
+    let n0 = untouched * select(1.0, -1.0, untouched.y < 0.0);
+    let l = normalize(SNOW_LIGHT);
+    let shade = clamp(1.0 + SLOPE_SHADE * (dot(n, l) - dot(n0, l)), 0.45, 1.25);
+    let bottom = mix(vec3(1.0), PRINT_TINT * (1.0 - TROUGH_DARK), pressed);
+    return lit * shade * bottom;
 }

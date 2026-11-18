@@ -20,6 +20,7 @@ mod lemming_cam;
 mod lemming_render;
 mod level_mesh;
 mod light;
+mod marks;
 mod menu;
 mod minimap;
 mod music;
@@ -331,6 +332,8 @@ pub struct World {
     fps: fps::Fps,
     /// The circuit board's signals the lemmings set off, on a level with one.
     signals: Option<signals::SignalField>,
+    /// The marks the lemmings leave in snow, on a level showing them.
+    marks: Option<marks::MarkField>,
     hdr_blink: hdr_blink::HdrBlink,
     key_buttons: key_buttons::KeyButtons,
     muted: music::MusicMuted,
@@ -422,6 +425,7 @@ impl World {
             style: style::Style::default(),
             fps: fps::Fps::default(),
             signals: None,
+            marks: None,
             hdr_blink: hdr_blink::HdrBlink::default(),
             key_buttons: key_buttons::KeyButtons::default(),
             muted: music::MusicMuted::default(),
@@ -1361,9 +1365,10 @@ fn unseen_cell(game: &Game, c: [i32; 3]) -> bool {
         return false;
     }
     let (x, y, z) = (x as usize, y as usize, z as usize);
-    let id = level.block(x, y, z).id as usize;
+    let block = level.block(x, y, z);
+    let id = block.id as usize;
     let invisible = id == 3 || id == 4 || blocks.defs.get(id).is_some_and(|d| d.is_placeholder());
-    invisible && level.object(x, y, z).kind == 0
+    !block.is_empty() && invisible && level.object(x, y, z).kind == 0
 }
 
 /// How fast a lemming is drawn turning, radians per second of game time: a
@@ -1461,6 +1466,35 @@ fn update_lemming_sprites(w: &mut World) {
         });
         (sprites.shadow_vertices, sprites.shadow_indices) =
             lemming_render::shadows(sim, &drawn, ground, &|c| unseen_cell(game, c));
+    }
+    // Marks in snow and on ice (ours): a field made anew for each level
+    // showing them, and again when the level restarts (fewer lemmings than
+    // followed).
+    let restarted = w
+        .marks
+        .as_ref()
+        .is_some_and(|f| sim.lemmings.len() < f.followed());
+    if !w.scene.data.as_ref().is_some_and(|d| d.marks) {
+        w.marks = None;
+    } else if w.marks.is_none() || restarted {
+        static GENERATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let generation = GENERATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        w.marks = Some(marks::MarkField::new(generation));
+    }
+    if let Some(field) = w.marks.as_mut() {
+        use l3d_sim::State;
+        let steps: Vec<_> = sim
+            .lemmings
+            .iter()
+            .zip(&drawn)
+            .map(|(l, &(p, _))| match l.state {
+                _ if l.gone => None,
+                State::Walking | State::Shrugging => Some(marks::Step::Walk(p)),
+                State::Sliding => Some(marks::Step::Slide(p)),
+                _ => None,
+            })
+            .collect();
+        field.step(&steps, w.camera.time);
     }
     // Signals the lemmings set off on a circuit board (ours): a field made
     // anew for each board, fed with the feet of those standing at its
