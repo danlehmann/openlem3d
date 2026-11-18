@@ -1372,6 +1372,14 @@ pub fn rebuild_blocks(
     );
     let brick_texture = out.layers[layer + 1].texture.clone();
     out.layers[layer + 1] = brick_layer(&sim.world.bricks, brick_texture);
+    // The sand grains' lee, gone with what was dug away.
+    if scene.solid.is_some() {
+        out.solid = Some(solid_cells(&|x, y, z| {
+            sim.world
+                .block([x as i32, y as i32, z as i32])
+                .is_some_and(|(b, _)| shows(blocks, b))
+        }));
+    }
     // The snow lying on the blocks, gone with what was dug away.
     if let Some(tiles) = &scene.snow_tiles
         && let Some(at) = out
@@ -1523,6 +1531,24 @@ const CIRCUIT_TRACE: u8 = 125;
 const GLOSSY_LEVELS: [u32; 1] = [24];
 /// How much a sea of ice shines with the level, against a polished floor's 1.
 const ICE_GLOSS: f32 = 0.6;
+
+/// Whether block `b` is drawn: not empty, invisible or a placeholder.
+fn shows(blocks: &BlockSet, b: BlockCell) -> bool {
+    !b.is_empty()
+        && !level_mesh::INVISIBLE_IDS.contains(&b.id)
+        && !blocks.defs[b.id as usize].is_placeholder()
+}
+
+/// The grid's cells for which `solid(x, y, z)`, a bit each, as
+/// [`SceneData::solid`].
+fn solid_cells(solid: &dyn Fn(usize, usize, usize) -> bool) -> std::sync::Arc<[u32]> {
+    (0..crate::scene_render::SOLID_WORDS)
+        .map(|w| {
+            let (y, z) = (w / SIZE_Z, w % SIZE_Z);
+            (0..SIZE_X).fold(0u32, |bits, x| bits | (solid(x, y, z) as u32) << x)
+        })
+        .collect()
+}
 
 /// Whether any slippery block of `level` has its top open at height `y`
 /// (within the gloss shader's reach of it).
@@ -1765,6 +1791,9 @@ pub fn build(data: &mut GameData, n: u32, show: Show) -> Result<BuiltLevel, l3d_
     let flags = level.flags;
     let surround = flags & level_flags::SURROUND_SKY != 0;
     scene.storm = show.storm && !surround && SAND_SEAS.contains(&level.sea_gfx);
+    if scene.storm {
+        scene.solid = Some(solid_cells(&|x, y, z| shows(&blocks, level.block(x, y, z))));
+    }
     scene.snow = show.snow && !surround && SNOW_SEAS.contains(&level.sea_gfx);
     scene.marks = show.storm && SNOW_SEAS.contains(&level.sea_gfx);
     if show.mirror

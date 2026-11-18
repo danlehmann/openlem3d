@@ -34,16 +34,31 @@ struct Uniforms {
     // all-round sky is a night sky of stars shown with our touches, else 0.
     weather: vec4<f32>,
     // x: 1 when the floor shines with the level mirrored at `eye.w` (ours),
-    // 2 when only the tops of slippery blocks there do, else 0; w how much (1 for a polished floor). y: the circuit board's
-    // signal field's texels per unit, z: 1 when that field is bound as
-    // `field_tex` (`crate::signals`), else 0.
+    // 2 when only the tops of slippery blocks there do, else 0; w how much
+    // (1 for a polished floor). y: the circuit board's signal field's
+    // texels per unit, z: 1 when that field is bound as `field_tex`
+    // (`crate::signals`), else 0.
     gloss: vec4<f32>,
     // x: 1 when snow falls (ours), else 0. y: how much falls around the
     // camera, 0–1: none under cover.
     snow: vec4<f32>,
     // From clip space back to the world.
     inv_view_proj: mat4x4<f32>,
+    // On a level with a sandstorm, the grid cells holding a visible block:
+    // word y · 32 + z (four to an element), bit x (`SceneData::solid`).
+    solid: array<vec4<u32>, 128>,
 };
+
+/// Whether the grid cell at `p` (world) holds a visible block
+/// (`Uniforms::solid`); outside the grid, no.
+fn cell_solid(p: vec3<f32>) -> bool {
+    let c = vec3<i32>(floor(p));
+    if (any(c < vec3(0)) || c.x >= 32 || c.y >= 16 || c.z >= 32) {
+        return false;
+    }
+    let w = c.y * 32 + c.z;
+    return (u.solid[w / 4][w % 4] >> u32(c.x) & 1u) != 0u;
+}
 
 @group(0) @binding(0) var<uniform> u: Uniforms;
 @group(0) @binding(1) var tex: texture_2d<f32>;
@@ -789,7 +804,8 @@ fn crt(at: vec2<f32>, footprint: vec2<f32>) -> vec3<f32> {
 // A sandstorm over a desert (ours, Ultra mode): dust in the air, thicker
 // with distance and near the ground and billowing as the wind carries it;
 // streaks of sand racing over the floor; the sky dusty down to the
-// horizon, with bands blowing past; and grains flying past the camera.
+// horizon, with bands blowing past; sheets of dust sweeping across the
+// view; and grains of sand flying along the wind (`vs_sand`).
 // The whole storm swells and eases in gusts.
 
 /// The wind's direction over the ground (world x and z).
@@ -850,48 +866,121 @@ fn dusty_sky(sky: vec3<f32>, p: vec2<f32>, col: f32) -> vec3<f32> {
     return mix(mix(sky, grey, min(1.2 * storm(t), 1.0)), DUST_SKY, clamp(amount, 0.0, 0.97));
 }
 
-/// Grains of sand flying past the camera, in three layers, nearer ones
-/// bigger and faster: streaks along the wind as it crosses the screen.
+/// Sheets of dust sweeping across the view, long along the wind as it
+/// crosses the screen: faster and more sideways the more across the view
+/// the wind blows, turning smoothly as the camera turns.
 @fragment
-fn fs_grains(v: SkyOut) -> @location(0) vec4<f32> {
+fn fs_dust_sheets(v: SkyOut) -> @location(0) vec4<f32> {
     let t = u.sky.w;
     let g = storm(t) * u.weather.y;
-    let s = u.sky.z;
     let side = dot(WIND, normalize(u.right.xz + vec2(1e-5, 0.0)));
-    let dir = normalize(vec2(select(-1.0, 1.0, side >= 0.0) * max(abs(side), 0.35), 0.12));
-    var alpha = 0.0;
-    for (var i = 0; i < 3; i++) {
-        let depth = 1.0 + f32(i);
-        let cell = 26.0 * s / depth;
-        let speed = 1100.0 * s / depth * (0.4 + 0.6 * abs(side));
-        let q = (v.clip.xy - dir * speed * t) / cell;
-        let id = floor(q);
-        let f = q - id;
-        let layer = vec2(f32(i) * 101.0, 0.0);
-        if (hash2(id + layer) > 0.14 * g) {
-            continue;
-        }
-        let centre = vec2(hash2(id + layer + vec2(7.0, 0.0)), hash2(id + layer + vec2(19.0, 3.0)))
-            * 0.4 + 0.3;
-        let half_len = min(speed / 60.0 / cell, 0.9) * 0.25;
-        let a = centre - dir * half_len;
-        let ba = dir * half_len * 2.0;
-        let h = clamp(dot(f - a, ba) / dot(ba, ba), 0.0, 1.0);
-        let dist = length(f - a - ba * h) * cell;
-        let width = 1.8 * s / depth;
-        alpha += (1.0 - smoothstep(0.0, width, dist)) * 0.6 / depth;
-    }
-    let grains = min(alpha * g, 0.85);
-    // Sheets of dust sweeping across the view, long along the wind.
-    let p = v.clip.xy / s;
+    let dir = normalize(vec2(side, 0.12));
+    let p = v.clip.xy / u.sky.z;
     let along = dot(p, dir);
     let across = dot(p, vec2(-dir.y, dir.x));
-    let sheet = value_noise(vec2(along * 0.006 - t * 1.4, across * 0.02))
-        * value_noise(vec2(along * 0.013 - t * 2.3, across * 0.045 + 9.0));
+    let speed = 0.3 + 0.7 * abs(side);
+    let sheet = value_noise(vec2(along * 0.006 - t * 1.4 * speed, across * 0.02))
+        * value_noise(vec2(along * 0.013 - t * 2.3 * speed, across * 0.045 + 9.0));
     let sheets = smoothstep(0.15, 0.5, sheet) * 0.2 * g;
-    let a = grains + sheets * (1.0 - grains);
-    let colour = mix(DUST_SKY, GRAIN_COLOUR, grains / max(a, 1e-4));
-    return vec4(colour, a);
+    return vec4(DUST_SKY, sheets);
+}
+
+// Sand grains in a sandstorm (ours, Ultra): each has its own place in the
+// world, low over the ground, and is carried along the wind, in a box that
+// wraps around the camera as the snow's does (moving, the camera passes
+// among them). Drawn as short streaks along their flight, hidden by what
+// is nearer.
+
+/// How many grains there are; the box's width, in units; how high over
+/// the ground they fly; how fast, in units a second; how long a streak is,
+/// in seconds of flight; how thick, in units.
+const SAND_GRAINS: u32 = 4000u;
+const SAND_BOX: f32 = 14.0;
+const SAND_HIGH: f32 = 2.5;
+const SAND_SPEED: f32 = 6.0;
+const SAND_STREAK: f32 = 0.04;
+const SAND_WIDTH: f32 = 0.012;
+/// How far upwind a block keeps the grains away, in units (looked along
+/// in half-unit steps); how far under a roof; how high above a grain a
+/// block is its roof, in units.
+const SAND_LEE: f32 = 3.0;
+const SAND_LEE_INDOORS: f32 = 16.0;
+const SAND_ROOF: i32 = 6;
+
+struct SandOut {
+    @builtin(position) clip: vec4<f32>,
+    // Where on the streak: along it and across it, -1 to 1; its opacity.
+    @location(0) at: vec2<f32>,
+    @location(1) alpha: f32,
+};
+
+@vertex
+fn vs_sand(@builtin(vertex_index) i: u32, @builtin(instance_index) n: u32) -> SandOut {
+    let t = u.sky.w;
+    let k = f32(n);
+    let seed = vec3(hash2(vec2(k, 11.0)), hash2(vec2(k, 12.0)), hash2(vec2(k, 13.0)));
+    let speed = SAND_SPEED * (0.6 + 0.8 * hash2(vec2(k, 14.0)));
+    let phase = hash2(vec2(k, 15.0)) * 6.283;
+    // Along the wind, bouncing a little, from its own place in the world.
+    var p = vec3(seed.x * SAND_BOX, 1.0 + 0.05 + seed.y * seed.y * SAND_HIGH, seed.z * SAND_BOX);
+    p.x += WIND.x * speed * t;
+    p.z += WIND.y * speed * t;
+    p.y += 0.08 * sin(t * 3.0 + phase);
+    // Wrapped across the ground into the box around the camera.
+    let half = SAND_BOX * 0.5;
+    let rel_xz = p.xz - u.eye.xz;
+    let wrapped = rel_xz + half - floor((rel_xz + half) / SAND_BOX) * SAND_BOX - half;
+    let world = vec3(u.eye.x + wrapped.x, p.y, u.eye.z + wrapped.y);
+    let rel = world - u.eye.xyz;
+    let reach = max(abs(wrapped.x), abs(wrapped.y)) / half;
+    var alpha = (1.0 - smoothstep(0.6, 1.0, reach)) * smoothstep(0.2, 0.6, length(rel));
+    // Only some grains fly at a time: more as the storm gusts.
+    let g = storm(t);
+    alpha *= select(0.0, 1.0, hash2(vec2(k, 16.0)) < 0.25 + 0.75 * g) * g;
+    // None in a block, nor in the lee of one: where a block stands a
+    // little way upwind, the wind brings no sand. Under a roof the wind
+    // must come a long way unbroken (into a tomb, it does not; under a
+    // roof open to the wind, it does).
+    var roofed = false;
+    for (var s = 1; s <= SAND_ROOF; s++) {
+        roofed = roofed || cell_solid(world + vec3(0.0, f32(s), 0.0));
+    }
+    let lee = select(SAND_LEE, SAND_LEE_INDOORS, roofed);
+    let steps = i32(lee * 2.0);
+    for (var s = 0; s <= steps && alpha > 0.0; s++) {
+        let back = f32(s) * 0.5;
+        if (cell_solid(world - vec3(WIND.x, 0.0, WIND.y) * back)) {
+            alpha = 0.0;
+        }
+    }
+    // A streak along the flight, at least about a pixel thick (fainter
+    // for it).
+    let along = normalize(vec3(WIND.x, 0.24 * cos(t * 3.0 + phase), WIND.y));
+    let to_eye = normalize(-rel);
+    let across = normalize(cross(along, to_eye) + vec3(0.0, 1e-5, 0.0));
+    let c = u.view_proj * vec4(world, 1.0);
+    let c_up = u.view_proj * vec4(world + vec3(0.0, 1.0, 0.0), 1.0);
+    let per_unit = abs(c_up.y / c_up.w - c.y / c.w) * 200.0 * u.sky.z;
+    let width = max(SAND_WIDTH, 0.8 / max(per_unit, 1e-3));
+    alpha *= min(1.0, SAND_WIDTH / width) * 0.7;
+    let corner = vec2(f32((0x32u >> i) & 1u), f32((0x2Cu >> i) & 1u)) * 2.0 - 1.0;
+    let length_half = speed * SAND_STREAK * 0.5;
+    let at = world + along * corner.x * length_half + across * corner.y * width;
+    var o: SandOut;
+    o.clip = u.view_proj * vec4(at, 1.0);
+    o.at = corner;
+    o.alpha = alpha;
+    return o;
+}
+
+@fragment
+fn fs_sand(v: SandOut) -> @location(0) vec4<f32> {
+    // Brightest at the head, trailing off behind; soft across.
+    let a = (1.0 - abs(v.at.y)) * (0.35 + 0.65 * (v.at.x * 0.5 + 0.5)) * v.alpha;
+    if (a <= 0.0) {
+        discard;
+    }
+    return vec4(GRAIN_COLOUR, a);
 }
 
 // Heat shimmer over a desert (ours, Ultra mode): what is far off and near

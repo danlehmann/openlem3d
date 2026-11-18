@@ -67,6 +67,10 @@ pub struct SceneData {
     /// The land is a circuit board whose traces carry signals the lemmings
     /// set off (ours; see `crate::signals`).
     pub circuit: Option<crate::signals::CircuitBoard>,
+    /// On a level with a sandstorm, the grid cells holding a visible block,
+    /// a bit each: [`SOLID_WORDS`] words, word `y · 32 + z`, bit `x`
+    /// (`scene.wgsl`'s `Uniforms::solid`).
+    pub solid: Option<Arc<[u32]>>,
     /// Which texture-set tiles show snow, by tile, on a level with snow
     /// lying on its blocks (ours; `scene_build::SNOW_DEPTH`).
     pub snow_tiles: Option<Arc<[bool]>>,
@@ -144,7 +148,7 @@ pub struct SceneCamera {
     /// Our touches beyond the original show (Enhanced and Ultra modes).
     pub ours: bool,
     /// How enclosed the camera is, 0 (open air) to 1 (inside a tunnel):
-    /// the grains and dust blowing past it stay outside.
+    /// the dust sweeping past it and the snow falling stay outside.
     pub shelter: f32,
 }
 
@@ -179,9 +183,13 @@ enum Field {
 
 /// The scene's colour format while glowing: room above white.
 const HDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
-const UNIFORM_SIZE: u64 = 272;
+const UNIFORM_SIZE: u64 = 272 + SOLID_WORDS as u64 * 4;
+/// Words of [`SceneData::solid`]: a bit per cell of the 32 × 16 × 32 grid.
+pub const SOLID_WORDS: usize = 16 * 32;
 /// Snowflakes (`scene.wgsl`'s `SNOW_FLAKES`).
 const SNOW_FLAKES: u32 = 3000;
+/// Sand grains (`scene.wgsl`'s `SAND_GRAINS`).
+const SAND_GRAINS: u32 = 4000;
 /// How much brighter than its palette colour a fully glowing texel is drawn
 /// (ours, tuned by eye).
 const GLOW_GAIN: f32 = 3.0;
@@ -281,8 +289,10 @@ struct Pipelines {
     bloom_up: wgpu::RenderPipeline,
     /// Shadows: multiplied onto what is drawn, behind what is in front.
     shadow: wgpu::RenderPipeline,
-    /// Sand grains blown past the camera in a sandstorm.
-    grains: wgpu::RenderPipeline,
+    /// Sheets of dust sweeping across the view in a sandstorm.
+    dust_sheets: wgpu::RenderPipeline,
+    /// Sand grains blown along the wind in a sandstorm.
+    sand: wgpu::RenderPipeline,
     /// Snowflakes falling gently.
     snow: wgpu::RenderPipeline,
 }
@@ -590,43 +600,48 @@ impl SceneGpu {
                 cache: None,
             })
         };
-        let grains = over_scene(
-            "scene grains",
-            "fs_grains",
+        let dust_sheets = over_scene(
+            "scene dust sheets",
+            "fs_dust_sheets",
             Some(wgpu::BlendState::ALPHA_BLENDING),
         );
-        // Snow: a billboard per flake, hidden by what is nearer.
-        let snow = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("scene snow"),
-            layout: Some(&pl_scene),
-            vertex: wgpu::VertexState {
-                module: &self.shader,
-                entry_point: Some("vs_snow"),
-                buffers: &[],
-                compilation_options: Default::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &self.shader,
-                entry_point: Some("fs_snow"),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::COLOR,
-                })],
-                compilation_options: Default::default(),
-            }),
-            primitive: Default::default(),
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: self.depth_format,
-                depth_write_enabled: Some(false),
-                depth_compare: Some(wgpu::CompareFunction::Greater),
-                stencil: Default::default(),
-                bias: Default::default(),
-            }),
-            multisample: Default::default(),
-            multiview_mask: None,
-            cache: None,
-        });
+        // Particles in the world (snowflakes, sand grains): a quad each,
+        // hidden by what is nearer.
+        let particles = |label, vs, fs| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some(label),
+                layout: Some(&pl_scene),
+                vertex: wgpu::VertexState {
+                    module: &self.shader,
+                    entry_point: Some(vs),
+                    buffers: &[],
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &self.shader,
+                    entry_point: Some(fs),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::COLOR,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                primitive: Default::default(),
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: self.depth_format,
+                    depth_write_enabled: Some(false),
+                    depth_compare: Some(wgpu::CompareFunction::Greater),
+                    stencil: Default::default(),
+                    bias: Default::default(),
+                }),
+                multisample: Default::default(),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
+        let snow = particles("scene snow", "vs_snow", "fs_snow");
+        let sand = particles("scene sand", "vs_sand", "fs_sand");
         let sky = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("scene sky"),
             layout: Some(&pl_scene),
@@ -737,7 +752,8 @@ impl SceneGpu {
             cache: None,
         });
         let pipelines = Pipelines {
-            grains,
+            dust_sheets,
+            sand,
             snow,
             shadow,
             geometry: geometry("scene geometry", wgpu::Face::Back),
@@ -1109,6 +1125,12 @@ fn prepare(
     ]);
     // From clip space back to the world, for rays through the screen.
     uniforms.extend(camera.view_proj.inverse().to_cols_array());
+    // The cells the sand grains are kept out of the lee of.
+    let solid = content.data.as_ref().and_then(|d| d.solid.as_deref());
+    uniforms.extend(
+        (0..SOLID_WORDS)
+            .map(|i| f32::from_bits(solid.and_then(|s| s.get(i)).copied().unwrap_or(0))),
+    );
     queue.write_buffer(&gpu.uniforms, 0, &f32_bytes(&uniforms));
     upload_dynamic(
         device,
@@ -1495,10 +1517,13 @@ fn draw(
             pass.set_bind_group(0, &gpu.blank, &[]);
             pass.draw(0..6, 0..SNOW_FLAKES);
         }
-        // Sand grains blown past the camera, over everything.
+        // Sand grains blown along the wind, behind what is nearer; then
+        // sheets of dust sweeping across the view, over everything.
         if storm && !mirrored {
-            pass.set_pipeline(&scene_p.grains);
+            pass.set_pipeline(&scene_p.sand);
             pass.set_bind_group(0, &gpu.blank, &[]);
+            pass.draw(0..6, 0..SAND_GRAINS);
+            pass.set_pipeline(&scene_p.dust_sheets);
             pass.draw(0..3, 0..1);
         }
     };
