@@ -67,8 +67,11 @@ pub struct SceneData {
     /// The land is a circuit board whose traces carry signals the lemmings
     /// set off (ours; see `crate::signals`).
     pub circuit: Option<crate::signals::CircuitBoard>,
-    /// On a level with a sandstorm, the grid cells holding a visible block,
-    /// a bit each: [`SOLID_WORDS`] words, word `y · 32 + z`, bit `x`
+    /// The block texture's windows look out on space (ours; their glass
+    /// marked, `scene_build::WINDOW_ALPHA`).
+    pub windows: bool,
+    /// On a level with a sandstorm or windows onto space, the grid cells
+    /// holding a visible block, a bit each: [`SOLID_WORDS`] words, word `y · 32 + z`, bit `x`
     /// (`scene.wgsl`'s `Uniforms::solid`).
     pub solid: Option<Arc<[u32]>>,
     /// Which texture-set tiles show snow, by tile, on a level with snow
@@ -1117,11 +1120,12 @@ fn prepare(
     let snow = content.data.as_ref().is_some_and(|d| d.snow);
     let snow = if snow { 1.0 } else { 0.0 };
     // The marks in snow's texels per unit, bound as the field, or 0.
+    let windows = content.data.as_ref().is_some_and(|d| d.windows);
     uniforms.extend([
         snow,
         snow * (1.0 - camera.shelter),
         marks.unwrap_or(0.0),
-        0.0,
+        if windows { 1.0 } else { 0.0 },
     ]);
     // From clip space back to the world, for rays through the screen.
     uniforms.extend(camera.view_proj.inverse().to_cols_array());

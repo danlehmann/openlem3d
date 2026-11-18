@@ -40,7 +40,9 @@ struct Uniforms {
     // (`crate::signals`), else 0.
     gloss: vec4<f32>,
     // x: 1 when snow falls (ours), else 0. y: how much falls around the
-    // camera, 0–1: none under cover.
+    // camera, 0–1: none under cover. z: the marks field's texels per unit
+    // (`crate::marks`), 0 without. w: 1 when windows look out on space
+    // (ours, `space`), else 0.
     snow: vec4<f32>,
     // From clip space back to the world.
     inv_view_proj: mat4x4<f32>,
@@ -52,12 +54,55 @@ struct Uniforms {
 /// Whether the grid cell at `p` (world) holds a visible block
 /// (`Uniforms::solid`); outside the grid, no.
 fn cell_solid(p: vec3<f32>) -> bool {
-    let c = vec3<i32>(floor(p));
+    return cell_solid_at(vec3<i32>(floor(p)));
+}
+
+/// Whether grid cell `c` holds a visible block (`Uniforms::solid`); outside
+/// the grid, no.
+fn cell_solid_at(c: vec3<i32>) -> bool {
     if (any(c < vec3(0)) || c.x >= 32 || c.y >= 16 || c.z >= 32) {
         return false;
     }
     let w = c.y * 32 + c.z;
     return (u.solid[w / 4][w % 4] >> u32(c.x) & 1u) != 0u;
+}
+
+/// Whether, looking in direction `d` through a window's glass at `p`, more
+/// of the level shows behind it: past the run of blocks the window is in,
+/// the line of sight meets another visible block before leaving the grid.
+fn sees_level(p: vec3<f32>, d: vec3<f32>) -> bool {
+    let start = p + d * 1e-3;
+    var cell = vec3<i32>(floor(start));
+    let step = vec3<i32>(sign(d));
+    let inv = 1.0 / max(abs(d), vec3(1e-6));
+    // How far along the line the next cell boundary is on each axis.
+    let next = vec3<f32>(cell) + select(vec3(0.0), vec3(1.0), d > vec3(0.0));
+    var t_max = abs(next - start) * inv;
+    let t_delta = inv;
+    // Still in the blocks the window is set in.
+    var in_wall = true;
+    for (var i = 0; i < 96; i++) {
+        if (any(cell < vec3(-1)) || cell.x > 32 || cell.y > 16 || cell.z > 32) {
+            return false;
+        }
+        let solid = cell_solid_at(cell);
+        if (in_wall) {
+            in_wall = solid;
+        } else if (solid) {
+            return true;
+        }
+        if (t_max.x < t_max.y && t_max.x < t_max.z) {
+            cell.x += step.x;
+            t_max.x += t_delta.x;
+        } else if (t_max.y < t_max.z) {
+            cell.y += step.y;
+            t_max.y += t_delta.y;
+        } else {
+            cell.z += step.z;
+            t_max.z += t_delta.z;
+        }
+    }
+    return false;
 }
 
 @group(0) @binding(0) var<uniform> u: Uniforms;
@@ -75,7 +120,9 @@ struct VIn {
     @location(0) pos: vec3<f32>,
     @location(1) uv: vec2<f32>,
     // x: shade (`level_mesh::SHADE_STEP`), y: 1 if palette index 0 is
-    // transparent, −1 on the top of a slippery block, else 0.
+    // transparent, −1 on the top of a slippery block, −2 less a thousandth
+    // of the tile on a face showing a whole window tile (looking out on
+    // `space`), else 0.
     @location(2) params: vec2<f32>,
     // Billboard corner offset from `pos`, in world units along the camera
     // right vector (x) and up (y). Zero for fixed geometry.
@@ -252,6 +299,14 @@ fn fs(v: VOut) -> @location(0) vec4<f32> {
     if (v.wave.w <= 0.0 && max(length(gx * size), length(gy * size)) < 1.0) {
         uv = (floor(uv * size) + 0.5) / size;
     }
+    // On a window's face (`VIn::params`, its tile in thousandths) the
+    // texture is taken from inside the tile only: at the face's edge a
+    // pixel can fall a little beyond it, onto the frame across the tile.
+    if (v.params.y < -1.5) {
+        let tile = round(fract(-v.params.y) * 1000.0);
+        let half = 0.5 / size;
+        uv = clamp(uv, vec2(half.x, tile / TILES + half.y), vec2(1.0 - half.x, (tile + 1.0) / TILES - half.y));
+    }
     let c = textureSampleGrad(tex, samp, uv, gx, gy);
     if (v.params.y > 0.5 && c.a < 0.5) {
         discard;
@@ -268,16 +323,33 @@ fn fs(v: VOut) -> @location(0) vec4<f32> {
     let top = max(srgb.r, max(srgb.g, srgb.b));
     let lowered = max(top - v.params.x, min(top, SHADE_FLOOR));
     let shaded = pow(srgb * (lowered / max(top, 1e-5)), vec3(2.2));
-    let glow = glow_of(c.a);
+    // A window's glass (its alpha marked, `scene_build::WINDOW_ALPHA`)
+    // looks out on space.
+    let window = u.snow.w > 0.5 && v.params.y < -1.5 && c.a > 0.15 && c.a < 0.4;
+    // Glass not shown as a window (on a face showing a sliver of one)
+    // stays as painted, without glow.
+    let glass = v.params.y < 0.5 && c.a > 0.15 && c.a < 0.4;
+    let glow = select(glow_of(c.a), 0.0, glass);
     // Taken here, where every fragment still runs: how much of the screen
     // one pixel spans.
     let footprint = fwidth(v.uv);
+    // Which way the eye looks through this pixel, and how much of that
+    // direction one pixel spans (`pixel_angle`: the derivatives, taken only
+    // where a window is drawn, are unreliable along its edge).
+    let look = normalize(v.world - u.eye.xyz);
+    let look_px = pixel_angle();
     // Which way the surface faces, from how its position changes across
     // the screen.
     let facing = normalize(cross(dpdx(v.world), dpdy(v.world)));
     // Which way snow lying on the level faced untouched.
     let untouched = v.world - vec3(0.0, v.cover.z, 0.0);
     let ground = normalize(cross(dpdx(untouched), dpdy(untouched)) + vec3(0.0, 1e-9, 0.0));
+    // Glass with more of the level behind it stays as painted.
+    if (window && v.mirror.x < 0.5 && !sees_level(v.world, look)) {
+        // The glass as painted (near black, with light glare streaks)
+        // shows as a reflection over the view.
+        return vec4(space(look, look_px) + shaded, 1.0);
+    }
     if (v.screen > 0.5 && u.post.w > 0.5) {
         return vec4(crt(v.uv, footprint), 1.0);
     }
@@ -1075,7 +1147,7 @@ fn glossy(lit: vec3<f32>, v: VOut, facing: vec3<f32>) -> vec3<f32> {
         return lit;
     }
     // Ice among other floors: only the slippery tops (`VIn::params`).
-    if (u.gloss.x > 1.5 && v.params.y > -0.5) {
+    if (u.gloss.x > 1.5 && (v.params.y > -0.5 || v.params.y < -1.5)) {
         return lit;
     }
     let dims = vec2<f32>(textureDimensions(second_tex));
@@ -1187,6 +1259,106 @@ fn fs_snow(v: SnowOut) -> @location(0) vec4<f32> {
         discard;
     }
     return vec4(vec3(0.95, 0.97, 1.0), a);
+}
+
+// Space seen through a spaceship's windows (ours, Enhanced and Ultra;
+// `glow::window_tile`): stars in three layers, faint nebulae and a banded
+// planet lit from one side, all infinitely far off (they depend only on the
+// direction looked in), turning slowly about the vertical as if the ship
+// were.
+
+/// How fast the view turns, radians a second; where the planet is, its
+/// angular radius, and where its sun is.
+const SPACE_TURN: f32 = 0.004;
+const PLANET_AT: vec3<f32> = vec3(0.55, 0.12, -0.82);
+const PLANET_RADIUS: f32 = 0.24;
+const PLANET_SUN: vec3<f32> = vec3(-0.75, 0.35, 0.2);
+const PLANET_LIGHT: vec3<f32> = vec3(0.9, 0.55, 0.32);
+const PLANET_DARK: vec3<f32> = vec3(0.35, 0.16, 0.1);
+const PLANET_AIR: vec3<f32> = vec3(0.35, 0.6, 1.0);
+
+/// Tiles in the block texture, stacked one above the other
+/// (`level_mesh::TILES`).
+const TILES: f32 = 100.0;
+
+/// How much of the direction looked in one pixel spans at the middle of the
+/// view: between the rays through the middle and a pixel above it.
+fn pixel_angle() -> f32 {
+    let height = u.sky.z * 400.0;
+    let a = u.inv_view_proj * vec4(0.0, 0.0, 0.5, 1.0);
+    let b = u.inv_view_proj * vec4(0.0, 2.0 / height, 0.5, 1.0);
+    let da = normalize(a.xyz / a.w - u.eye.xyz);
+    let db = normalize(b.xyz / b.w - u.eye.xyz);
+    return length(db - da);
+}
+
+/// The view of space in direction `d`, a pixel spanning `px` of direction.
+fn space(d0: vec3<f32>, px: f32) -> vec3<f32> {
+    let t = u.sky.w;
+    let a = t * SPACE_TURN;
+    let d = vec3(d0.x * cos(a) - d0.z * sin(a), d0.y, d0.x * sin(a) + d0.z * cos(a));
+    // Coordinates on the face of a cube the direction points at.
+    let m = abs(d);
+    var uv: vec2<f32>;
+    var face: f32;
+    if (m.x >= m.y && m.x >= m.z) {
+        uv = d.yz / m.x;
+        face = select(1.0, 2.0, d.x < 0.0);
+    } else if (m.y >= m.z) {
+        uv = d.xz / m.y;
+        face = select(3.0, 4.0, d.y < 0.0);
+    } else {
+        uv = d.xy / m.z;
+        face = select(5.0, 6.0, d.z < 0.0);
+    }
+    let uv_px = px / max(m.x, max(m.y, m.z));
+    // Faint nebulae.
+    let haze = value_noise(uv * 2.5 + face * 7.0) * value_noise(uv * 5.0 - face * 3.0);
+    var c = vec3(0.004, 0.005, 0.012) + mix(vec3(0.03, 0.01, 0.05), vec3(0.01, 0.03, 0.06), haze)
+        * smoothstep(0.15, 0.6, haze);
+    // Stars: in each layer a few cells of a grid hold one, at its own spot,
+    // about a pixel across, twinkling a little.
+    var stars = vec3(0.0);
+    for (var l = 0; l < 3; l++) {
+        let n = 24.0 * pow(2.2, f32(l));
+        let q = uv * n;
+        let cell = floor(q);
+        let key = cell + vec2(face * 131.0, f32(l) * 977.0);
+        if (hash2(key) > 0.22) {
+            continue;
+        }
+        let spot = vec2(hash2(key + 3.1), hash2(key + 7.7)) * 0.8 + 0.1;
+        let dist = length(q - cell - spot) / n / max(uv_px, 1e-5);
+        let size = 0.7 + 0.8 * hash2(key + 11.3) / (1.0 + f32(l));
+        let twinkle = 0.85 + 0.15 * sin(t * (1.0 + 3.0 * hash2(key + 5.5)) + hash2(key) * 40.0);
+        let tint = mix(vec3(0.7, 0.8, 1.0), vec3(1.0, 0.85, 0.7), hash2(key + 13.0));
+        stars += tint * exp(-dist * dist / (size * size)) * twinkle / (1.0 + 0.6 * f32(l));
+    }
+    // Bright points: lifted above white with glow (Ultra), and as far as
+    // white without.
+    c += stars * (1.8 + 0.7 * u.post.x);
+    // The planet, in front of the stars.
+    let p = normalize(PLANET_AT);
+    let cos_r = cos(PLANET_RADIUS);
+    let along = dot(d, p);
+    let rim = smoothstep(cos_r - 0.004, cos_r + 0.002, along);
+    let glow_rim = smoothstep(cos_r - 0.05, cos_r, along) * (1.0 - rim);
+    if (along > cos_r - 0.05) {
+        // Where on the disc, -1 to 1 from its middle, and its surface's
+        // normal there.
+        let off = (d - p * along) / sin(PLANET_RADIUS);
+        let r2 = min(dot(off, off), 1.0);
+        let normal = normalize(off + p * sqrt(1.0 - r2));
+        let sun = max(dot(normal, normalize(PLANET_SUN)), 0.0);
+        let lat = dot(normal, vec3(0.0, 1.0, 0.0));
+        let bands = 0.5 + 0.5 * sin(lat * 18.0 + value_noise(vec2(lat * 9.0, dot(normal.xz, vec2(1.0, 0.4)) * 4.0)) * 3.0);
+        let ground = mix(PLANET_DARK, PLANET_LIGHT, bands);
+        let lit = ground * (0.04 + 0.96 * smoothstep(0.0, 0.6, sun));
+        let air = PLANET_AIR * pow(1.0 - sqrt(1.0 - r2), 3.0) * sun * 0.6;
+        c = mix(c, lit + air, rim);
+        c += PLANET_AIR * glow_rim * 0.15 * max(dot(normalize(off), normalize(PLANET_SUN - p * dot(PLANET_SUN, p))), 0.0);
+    }
+    return c;
 }
 
 // Marks the lemmings leave on an icy level (ours, Ultra mode;

@@ -18,7 +18,7 @@ pub const GLOW_STEPS: f32 = 120.0;
 
 /// `ANIMOBJ` sets that are light sources: torches, lamps, the ring of fire,
 /// and the hanging lamp (judged by eye from the data). The exit flags of set
-/// 9 are not lights (owner, on Fun 6 "Ricochet").
+/// 9 are not lights (owner, on Taxing 6 "Ricochet").
 const GLOWING_ANIM_OBJECTS: [u8; 7] = [0, 2, 3, 7, 8, 11, 22];
 
 /// Trap sheets with something glowing in them, and which colours glow:
@@ -89,15 +89,164 @@ pub fn torch_tile(set: u8, tile: usize) -> bool {
         .any(|(s, tiles)| *s == set && tiles.contains(&tile))
 }
 
+/// Electric lights in the spaceships' block textures, by texture set (found
+/// by eye): set 2's fluorescent tubes (32–39 flicker as two animations),
+/// set 12's cyan strip lights and white ceiling panel; each with how
+/// strongly its core glows (the panel, near white over a wide area, only
+/// faintly, or it blooms into a blur).
+const LIGHT_TILES: [(u8, &[(usize, f32)]); 2] = [
+    (
+        2,
+        &[
+            (32, 0.7),
+            (33, 0.7),
+            (34, 0.7),
+            (35, 0.7),
+            (36, 0.7),
+            (37, 0.7),
+            (38, 0.7),
+            (39, 0.7),
+            (82, 0.7),
+            (83, 0.7),
+        ],
+    ),
+    (12, &[(64, 0.7), (65, 0.7), (72, 0.7), (83, 0.12)]),
+];
+
+/// How strongly tile `tile` of texture set `set` glows as an electric
+/// light; `None` for a tile that is not one.
+fn light_glow(set: u8, tile: usize) -> Option<f32> {
+    LIGHT_TILES
+        .iter()
+        .filter(|(s, _)| *s == set)
+        .flat_map(|(_, tiles)| tiles.iter())
+        .find(|(t, _)| *t == tile)
+        .map(|&(_, g)| g)
+}
+
+/// How strongly a colour of an electric light glows, at most `most`: only
+/// its near-white core (set 2's tubes are in the grey ramp, set 12's strips
+/// in the cyan one).
+fn lamp(rgb: [u8; 3], most: f32) -> f32 {
+    let v = *rgb.iter().max().unwrap() as f32 / 255.0;
+    let t = ((v - 0.86) / 0.14).clamp(0.0, 1.0);
+    most * t * t * (3.0 - 2.0 * t)
+}
+
+/// Whether tile `tile` of texture set `set` shows an electric light.
+pub fn light_tile(set: u8, tile: usize) -> bool {
+    light_glow(set, tile).is_some()
+}
+
+/// Windows in the spaceships' block textures, by texture set (found by
+/// eye): black glass with glare streaks, set 2's and set 12's (64, 91 and
+/// 98 consoles with a small window in a corner); their glass shows space
+/// (ours, Enhanced and Ultra modes; `scene.wgsl`'s `space`).
+const WINDOW_TILES: [(u8, &[usize]); 2] = [(2, &[75]), (12, &[64, 74, 85, 86, 87, 91, 98])];
+
+/// Whether tile `tile` of texture set `set` shows a window.
+pub fn window_tile(set: u8, tile: usize) -> bool {
+    WINDOW_TILES
+        .iter()
+        .any(|(s, tiles)| *s == set && tiles.contains(&tile))
+}
+
+/// The glass of a window tile (64×64 palette indices `tile`), a flag per
+/// texel: its large patches of near-black texels (a thin seam elsewhere in
+/// the tile is not glass; set 2's window is two panes either side of a
+/// crossbar), each filled across its rows and columns between its ends, so
+/// that the light glare streaks painted on it are glass too.
+pub fn window_glass(tile: &[u8], pal: &Palette) -> Vec<bool> {
+    const N: usize = 64;
+    /// A pane is at least this share of the largest one.
+    const PANE: usize = 4;
+    let dark: Vec<bool> = tile
+        .iter()
+        .map(|&i| pal[i as usize].iter().all(|&c| c <= 40))
+        .collect();
+    // The patches of dark texels (4-connected), with their sizes.
+    let mut patch = vec![usize::MAX; N * N];
+    let mut sizes: Vec<(usize, usize)> = Vec::new();
+    for start in 0..N * N {
+        if !dark[start] || patch[start] != usize::MAX {
+            continue;
+        }
+        let mut stack = vec![start];
+        patch[start] = start;
+        let mut size = 0;
+        while let Some(p) = stack.pop() {
+            size += 1;
+            let (x, y) = (p % N, p / N);
+            let near = [
+                (x > 0).then(|| p - 1),
+                (x + 1 < N).then(|| p + 1),
+                (y > 0).then(|| p - N),
+                (y + 1 < N).then(|| p + N),
+            ];
+            for q in near.into_iter().flatten() {
+                if dark[q] && patch[q] == usize::MAX {
+                    patch[q] = start;
+                    stack.push(q);
+                }
+            }
+        }
+        sizes.push((start, size));
+    }
+    let largest = sizes.iter().map(|&(_, s)| s).max().unwrap_or(0);
+    // Each pane filled across each row and down each column between its
+    // ends, so that glare streaks running into the frame are glass too.
+    let mut glass = vec![false; N * N];
+    for &(pane, _) in sizes.iter().filter(|&&(_, s)| s * PANE >= largest) {
+        for y in 0..N {
+            let row = (0..N).filter(|&x| patch[y * N + x] == pane);
+            if let (Some(a), Some(b)) = (row.clone().min(), row.max()) {
+                glass[y * N + a..=y * N + b].fill(true);
+            }
+        }
+        for x in 0..N {
+            let column = (0..N).filter(|&y| patch[y * N + x] == pane);
+            if let (Some(a), Some(b)) = (column.clone().min(), column.max()) {
+                (a..=b).for_each(|y| glass[y * N + x] = true);
+            }
+        }
+    }
+    glass
+}
+
+/// The edge of window glass `glass` (as [`window_glass`]): its texels with a
+/// texel beside them (4-connected) that is not glass. Drawn as painted, not
+/// as space, so that the glass's stepped edge does not shimmer as the view
+/// moves.
+pub fn glass_edge(glass: &[bool]) -> Vec<bool> {
+    const N: usize = 64;
+    (0..N * N)
+        .map(|p| {
+            let (x, y) = (p % N, p / N);
+            glass[p]
+                && (x == 0
+                    || y == 0
+                    || x == N - 1
+                    || y == N - 1
+                    || !glass[p - 1]
+                    || !glass[p + 1]
+                    || !glass[p - N]
+                    || !glass[p + N])
+        })
+        .collect()
+}
+
 /// Per-pixel glow of texture set `set`, a strip of 64×64 tiles: the flames
-/// of its wall torches.
+/// of its wall torches and its electric lights.
 pub fn texture(set: u8, pixels: &[u8], pal: &Palette) -> Vec<f32> {
     pixels
         .iter()
         .enumerate()
         .map(|(p, &i)| {
-            if torch_tile(set, p / (64 * 64)) && warm(i) {
+            let tile = p / (64 * 64);
+            if torch_tile(set, tile) && warm(i) {
                 strength(pal[i as usize])
+            } else if let Some(most) = light_glow(set, tile) {
+                lamp(pal[i as usize], most)
             } else {
                 0.0
             }

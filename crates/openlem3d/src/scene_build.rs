@@ -91,6 +91,10 @@ struct Vertex {
     light: [f32; 3],
     /// On the top of a slippery block (`scene.wgsl`'s `glossy`).
     slippery: bool,
+    /// On a face showing a whole window tile (that tile), whose glass looks
+    /// out on space where nothing of the level is behind it
+    /// (`scene.wgsl`'s `space`).
+    window: Option<u32>,
 }
 
 impl Vertex {
@@ -104,6 +108,7 @@ impl Vertex {
             anim: [1.0, 0.0],
             light: [0.0; 3],
             slippery: false,
+            window: None,
         }
     }
 
@@ -111,11 +116,13 @@ impl Vertex {
         out.extend(self.pos);
         out.extend(self.uv);
         // `scene.wgsl`'s `VIn::params`: 1 with palette index 0 see-through,
-        // −1 on a slippery top.
-        let marker = match (self.cutout, self.slippery) {
-            (true, _) => 1.0,
-            (false, true) => -1.0,
-            (false, false) => 0.0,
+        // −1 on a slippery top, −2 less a thousandth of the tile on a whole
+        // window.
+        let marker = match (self.cutout, self.slippery, self.window) {
+            (true, ..) => 1.0,
+            (false, _, Some(tile)) => -2.0 - tile as f32 / 1000.0,
+            (false, true, None) => -1.0,
+            (false, false, None) => 0.0,
         };
         out.extend([self.shade, marker]);
         out.extend(self.offset);
@@ -213,6 +220,7 @@ impl LayerBuilder {
                 anim,
                 light: [0.0; 3],
                 slippery: false,
+                window: None,
             }
             .push(&mut self.vertices);
         }
@@ -269,7 +277,7 @@ impl LayerBuilder {
 }
 
 /// Interleaves the block mesh (opaque and cutout parts) into one layer, the
-/// tops of slippery blocks marked.
+/// tops of slippery blocks and the faces showing whole windows marked.
 fn block_layer(
     mesh: &LevelMesh,
     texture: RgbaImage,
@@ -282,8 +290,31 @@ fn block_layer(
         let base = b.base();
         // A face's vertices are its own, so its triangles mark them.
         let mut slippery = vec![false; part.positions.len()];
+        let mut window = vec![None; part.positions.len()];
         for t in part.indices.as_chunks::<3>().0 {
             let [a, bb, c] = t.map(|i| i as usize);
+            // An upright face showing a window tile whole (not a sliver of
+            // one on a cut or thin face, nor a box's top).
+            let tiles = [a, bb, c].map(|i| part.uvs[i][1] * level_mesh::TILES as f32);
+            let (low, high) = (
+                tiles.iter().cloned().fold(f32::MAX, f32::min),
+                tiles.iter().cloned().fold(f32::MIN, f32::max),
+            );
+            let across = [a, bb, c].map(|i| part.uvs[i][0]);
+            let wide = across.iter().cloned().fold(f32::MIN, f32::max)
+                - across.iter().cloned().fold(f32::MAX, f32::min);
+            if glow::window_tile(level.texture_set, (low + 1e-3) as usize)
+                && high - low > 0.9
+                && wide > 0.9
+                && part.normals[a][1].abs() < 0.5
+            {
+                // Whether a pixel of its glass looks out on space or onto more
+                // of the level is for the shader to see (`scene.wgsl`'s
+                // `sees_level`).
+                for i in [a, bb, c] {
+                    window[i] = Some((low + 1e-3) as u32);
+                }
+            }
             if part.normals[a][1] < 0.98 {
                 continue;
             }
@@ -316,6 +347,7 @@ fn block_layer(
             v.anim = part.anims[i];
             v.light = light::shine(lights, level, part.positions[i], part.normals[i]);
             v.slippery = slippery[i];
+            v.window = window[i];
             v.push(&mut b.vertices);
         }
         b.indices.extend(part.indices.iter().map(|i| i + base));
@@ -376,7 +408,7 @@ impl Waves {
                     (0.0..SIZE_X as f32).contains(&x) && (0.0..SIZE_Z as f32).contains(&z);
                 // The bottom layer lies in the sea, its tops at the water,
                 // and the layer on it stands in the sea where its lowest
-                // quarter is there (Fun 6 "Ricochet"'s exit island and
+                // quarter is there (Taxing 6 "Ricochet"'s exit island and
                 // tower); blocks higher up float clear of the water.
                 let stands = |y: usize, low: u8| {
                     let b = level.block(x as usize, y, z as usize);
@@ -748,9 +780,14 @@ fn anim_object_spot(kind: u8) -> (f32, f32, Option<f32>) {
     }
 }
 
+/// How much light an electric light's face throws, against a torch's (ours,
+/// by eye: a spaceship's rooms have rows of them).
+const ELECTRIC_LIGHT: f32 = 0.3;
+
 /// The level's lights (`crate::light`): its glowing animated objects, where
 /// their flame or lamp is (near the top of the sprite), and the flames of
-/// its wall torches, just in front of the face showing them.
+/// its wall torches and its electric lights, just in front of the face
+/// showing them.
 fn level_lights(
     data: &mut GameData,
     level: &Level,
@@ -793,7 +830,8 @@ fn level_lights(
                     .fold(f32::MAX, f32::min)
                     * level_mesh::TILES as f32
                     + 1e-3) as usize;
-                if !glow::torch_tile(level.texture_set, tile) {
+                let electric = glow::light_tile(level.texture_set, tile);
+                if !glow::torch_tile(level.texture_set, tile) && !electric {
                     continue;
                 }
                 let n = part.normals[a];
@@ -807,9 +845,11 @@ fn level_lights(
                 }) {
                     continue;
                 }
+                // Electric lights come many to a room: each throws less.
+                let scale = if electric { ELECTRIC_LIGHT } else { 1.0 };
                 lights.push(Light {
                     pos: centre,
-                    colour,
+                    colour: colour.map(|c| c * scale),
                 });
             }
         }
@@ -1511,6 +1551,9 @@ pub struct Show {
     /// Snow falls gently on an icy level (a sea of ice; ours, in Enhanced
     /// and Ultra modes).
     pub snow: bool,
+    /// A spaceship's windows look out on space (ours, in Enhanced and Ultra
+    /// modes; see [`glow::window_tile`]).
+    pub windows: bool,
 }
 
 /// The sea graphics that are sand.
@@ -1531,6 +1574,16 @@ const CIRCUIT_TRACE: u8 = 125;
 const GLOSSY_LEVELS: [u32; 1] = [24];
 /// How much a sea of ice shines with the level, against a polished floor's 1.
 const ICE_GLOSS: f32 = 0.6;
+
+/// The alpha marking a texel of a window's glass in the block texture (ours,
+/// Enhanced and Ultra modes): below the glow's range and above the
+/// see-through texels' (`scene.wgsl`'s `fs` reads 0.15–0.4 as glass).
+const WINDOW_ALPHA: u8 = 64;
+
+/// Levels whose windows keep their black glass (ours): "3D - A Lemming
+/// Odyssey" (`LEVEL.044`), where a tunnel leaves through the window wall,
+/// which a view of space outside could not show.
+const WINDOWLESS_LEVELS: [u32; 1] = [44];
 
 /// Whether block `b` is drawn: not empty, invisible or a placeholder.
 fn shows(blocks: &BlockSet, b: BlockCell) -> bool {
@@ -1943,12 +1996,32 @@ pub fn build(data: &mut GameData, n: u32, show: Show) -> Result<BuiltLevel, l3d_
             let torches = glow::texture(level.texture_set, &tex, &pal);
             let current = glow::electric(&tex, &glow::electric_runs(&level, &blocks), &pal);
             let ice = glow::ice(&tex, &glow::ice_tiles(&blocks), &pal);
-            glowing_rgba(&tex, 64, &pal, |p| torches[p].max(current[p]).max(ice[p]))
+            let mut img = glowing_rgba(&tex, 64, &pal, |p| torches[p].max(current[p]).max(ice[p]));
+            if show.windows && !WINDOWLESS_LEVELS.contains(&n) {
+                let mut texels = img.texels.to_vec();
+                const TILE: usize = 64 * 64;
+                for t in (0..tex.len() / TILE).filter(|&t| glow::window_tile(level.texture_set, t))
+                {
+                    let glass = glow::window_glass(&tex[t * TILE..(t + 1) * TILE], &pal);
+                    let edge = glow::glass_edge(&glass);
+                    for k in (0..TILE).filter(|&k| glass[k] && !edge[k]) {
+                        texels[(t * TILE + k) * 4 + 3] = WINDOW_ALPHA;
+                        scene.windows = true;
+                    }
+                }
+                img.texels = texels.into();
+            }
+            img
         },
         &scene.lights,
         &level,
         &blocks,
     ));
+    // The cells a window's view meets the level in (`scene.wgsl`'s
+    // `sees_level`).
+    if scene.windows && scene.solid.is_none() {
+        scene.solid = Some(solid_cells(&|x, y, z| shows(&blocks, level.block(x, y, z))));
+    }
     // Builders' bricks, right after the blocks (see rebuild_blocks).
     let brick_tile = tex
         .get(BRICK_TILE * 64 * 64..(BRICK_TILE + 1) * 64 * 64)
