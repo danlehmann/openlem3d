@@ -1346,6 +1346,26 @@ impl Game {
     }
 }
 
+/// Whether cell `c` of the level holds nothing drawn: an invisible block (ids
+/// 3 and 4, or a definition all placeholder faces, as block 25 of "Alpine
+/// Assault Course") with no object or decal of its own.
+fn unseen_cell(game: &Game, c: [i32; 3]) -> bool {
+    let Some((level, blocks, _)) = &game.terrain else {
+        return false;
+    };
+    let [x, y, z] = c;
+    let inside = (0..l3d_formats::level::SIZE_X as i32).contains(&x)
+        && (0..l3d_formats::level::SIZE_Y as i32).contains(&y)
+        && (0..l3d_formats::level::SIZE_Z as i32).contains(&z);
+    if !inside {
+        return false;
+    }
+    let (x, y, z) = (x as usize, y as usize, z as usize);
+    let id = level.block(x, y, z).id as usize;
+    let invisible = id == 3 || id == 4 || blocks.defs.get(id).is_some_and(|d| d.is_placeholder());
+    invisible && level.object(x, y, z).kind == 0
+}
+
 /// How fast a lemming is drawn turning, radians per second of game time: a
 /// quarter turn in a quarter of a second, through the diagonal views.
 const TURN_RATE: f32 = std::f32::consts::FRAC_PI_2 / 0.25;
@@ -1440,7 +1460,7 @@ fn update_lemming_sprites(w: &mut World) {
             sea || land
         });
         (sprites.shadow_vertices, sprites.shadow_indices) =
-            lemming_render::shadows(sim, &drawn, ground);
+            lemming_render::shadows(sim, &drawn, ground, &|c| unseen_cell(game, c));
     }
     // Signals the lemmings set off on a circuit board (ours): a field made
     // anew for each board, fed with the feet of those standing at its

@@ -1892,21 +1892,34 @@ const SHADOW_DARK: f32 = 0.5;
 const SHADOW_FADE_HEIGHT: f32 = 8.0;
 /// How far below a lemming its floor is looked for, in units.
 const SHADOW_REACH: f32 = 16.0;
+/// How far above a lemming's feet its floor may be, in units: as far as
+/// they sink into a ramp between ticks.
+const FEET_SLACK: f32 = 0.25;
 
 /// The height of the floor under `(x, z)`, looking down from `top`: the
 /// top of the first solid part of the world below open space (where `top`
 /// is inside something solid, the floor under that is not taken), or the
 /// ground plane at [`crate::scene_build::GROUND_Y`] when `ground` (the level
 /// draws a sea or land there) and nothing is above it; `None` with nothing
-/// to fall on.
-fn floor_under(sim: &Simulation, x: f32, top: f32, z: f32, ground: bool) -> Option<f32> {
+/// to fall on. Cells `unseen` gives (`[x, y, z]`) count as open: what
+/// is not drawn casts no floor.
+fn floor_under(
+    sim: &Simulation,
+    unseen: &dyn Fn([i32; 3]) -> bool,
+    x: f32,
+    top: f32,
+    z: f32,
+    ground: bool,
+) -> Option<f32> {
     // Steps of 1/32 unit (8 sub-units).
     const STEP: i32 = l3d_sim::SUB / 32;
     let sub = |v: f32| (v * l3d_sim::SUB as f32).floor() as i32;
     let (sx, sz) = (sub(x), sub(z));
     let ground_y = crate::scene_build::GROUND_Y;
     let lowest = sub((top - SHADOW_REACH).max(0.0));
-    let solid = |y: i32| sim.world.solid([sx, y, sz]);
+    let solid = |y: i32| {
+        sim.world.solid([sx, y, sz]) && !unseen([sx, y, sz].map(|v| v.div_euclid(l3d_sim::SUB)))
+    };
     let mut y = sub(top) - 1;
     if solid(y) {
         return None;
@@ -1936,13 +1949,19 @@ fn floor_under(sim: &Simulation, x: f32, top: f32, z: f32, ground: bool) -> Opti
 
 /// Soft round shadows on the floor under the lemmings (ours, enhanced
 /// mode): `drawn` gives where each is drawn; `ground` says the level has a
-/// sea or land to fall on. Each point of a shadow's 6×6 grid takes the
-/// floor's height under it, so the shadow lies along a ramp and over its
-/// edges, and fades out where that is far off (over a drop or against a
-/// wall). A falling lemming's shadow fades and shrinks as it gets higher.
+/// sea or land to fall on; `unseen` says which cells hold nothing drawn
+/// (an invisible block), which they fall through. Each point of a shadow's
+/// 6×6 grid takes the floor's height under it, so the shadow lies along a
+/// ramp and over its edges, and fades out where that is far off (over a drop
+/// or against a wall). A falling lemming's shadow fades and shrinks as it gets higher.
 /// Not for lemmings gone, caught in a trap or dying (but for one walking
 /// out through the exit).
-pub fn shadows(sim: &Simulation, drawn: &[([f32; 3], f32)], ground: bool) -> (Vec<f32>, Vec<u32>) {
+pub fn shadows(
+    sim: &Simulation,
+    drawn: &[([f32; 3], f32)],
+    ground: bool,
+    unseen: &dyn Fn([i32; 3]) -> bool,
+) -> (Vec<f32>, Vec<u32>) {
     /// How far above its floor a shadow is drawn, against fighting it and
     /// against the straight edges between its points dipping under a
     /// ramp's crest.
@@ -1966,10 +1985,19 @@ pub fn shadows(sim: &Simulation, drawn: &[([f32; 3], f32)], ground: bool) -> (Ve
         };
         // From above the highest a corner on a ramp can be (as high again
         // as the shadow is wide), so as to start in open space.
-        let top = p[1] + 2.0 * SHADOW_RADIUS + 0.1;
-        let Some(floor) = floor_under(sim, p[0], top, p[2], ground) else {
+        let mut top = p[1] + 2.0 * SHADOW_RADIUS + 0.1;
+        let Some(mut floor) = floor_under(sim, unseen, p[0], top, p[2], ground) else {
             continue;
         };
+        // A floor found above the feet is what the lemming has just dropped
+        // out of or past (a hatch): the floor is the one under its feet.
+        if floor > p[1] + FEET_SLACK {
+            top = p[1] + FEET_SLACK;
+            let Some(under) = floor_under(sim, unseen, p[0], top, p[2], ground) else {
+                continue;
+            };
+            floor = under;
+        }
         let height = (p[1] - floor).max(0.0);
         // Up high: fainter (to a third) and smaller (to half).
         let up = (height / SHADOW_FADE_HEIGHT).min(1.0);
@@ -1983,7 +2011,7 @@ pub fn shadows(sim: &Simulation, drawn: &[([f32; 3], f32)], ground: bool) -> (Ve
             // A point with no floor near the middle's (over a drop, or
             // against a wall) stays at the middle's height and is clear, so
             // the shadow fades out there rather than float.
-            let (y, dark) = match floor_under(sim, x, top, z, ground) {
+            let (y, dark) = match floor_under(sim, unseen, x, top, z, ground) {
                 Some(y) if (y - floor).abs() <= STEP_LIMIT => (y, dark),
                 _ => (floor, 0.0),
             };
