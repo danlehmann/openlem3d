@@ -17,8 +17,9 @@ use l3d_formats::level::Level;
 pub const GLOW_STEPS: f32 = 120.0;
 
 /// `ANIMOBJ` sets that are light sources: torches, lamps, the ring of fire,
-/// the neon exit signs and the hanging lamp (judged by eye from the data).
-const GLOWING_ANIM_OBJECTS: [u8; 8] = [0, 2, 3, 7, 8, 9, 11, 22];
+/// and the hanging lamp (judged by eye from the data). The exit flags of set
+/// 9 are not lights (owner, on Fun 6 "Ricochet").
+const GLOWING_ANIM_OBJECTS: [u8; 7] = [0, 2, 3, 7, 8, 11, 22];
 
 /// Trap sheets with something glowing in them, and which colours glow:
 /// the flame-thrower's fire (warm), the teleporter's sparkle and the laser
