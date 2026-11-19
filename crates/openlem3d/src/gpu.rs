@@ -50,11 +50,27 @@ pub(crate) struct Renderer {
     /// The layer drawn into for HDR where that takes one (Android), for the
     /// surface made on it; dropped after that.
     hdr_layer: Option<crate::platform::HdrLayer>,
+    /// VR on a headset (the `xr` build).
+    #[cfg(all(target_os = "android", feature = "xr"))]
+    pub(crate) xr: crate::xr::State,
+}
+
+#[cfg(all(target_os = "android", feature = "xr"))]
+impl Renderer {
+    /// The GPU, once made, and VR's state.
+    pub(crate) fn gpu_and_xr(&mut self) -> (Option<&Gpu>, &mut crate::xr::State) {
+        (self.gpu.as_ref(), &mut self.xr)
+    }
+
+    /// Takes the GPU made elsewhere (by VR).
+    pub(crate) fn set_gpu(&mut self, gpu: Gpu) {
+        self.gpu = Some(gpu);
+    }
 }
 
 pub struct Gpu {
     instance: wgpu::Instance,
-    adapter: wgpu::Adapter,
+    pub(crate) adapter: wgpu::Adapter,
     pub device: wgpu::Device,
     pub queue: wgpu::Queue,
     /// Set when the driver gives the device up.
@@ -62,6 +78,30 @@ pub struct Gpu {
 }
 
 impl Gpu {
+    /// The GPU of devices made elsewhere (by VR).
+    #[cfg(all(target_os = "android", feature = "xr"))]
+    pub(crate) fn from_parts(
+        instance: wgpu::Instance,
+        adapter: wgpu::Adapter,
+        device: wgpu::Device,
+        queue: wgpu::Queue,
+    ) -> Gpu {
+        device.on_uncaptured_error(Arc::new(|e| error!("GPU error: {e}")));
+        let lost = Arc::new(AtomicBool::new(false));
+        let flag = lost.clone();
+        device.set_device_lost_callback(move |reason, message| {
+            error!("GPU lost ({reason:?}): {message}");
+            flag.store(true, Ordering::Release);
+        });
+        Gpu {
+            instance,
+            adapter,
+            device,
+            queue,
+            lost,
+        }
+    }
+
     /// The device for the window `handle`, and the window's surface; with
     /// GPU timestamps if `profile` asks for them and the GPU has them, and
     /// with the graphics APIs in `backend` if given.
@@ -437,6 +477,11 @@ impl Copy {
 /// Draws a frame: the clear colour, the scene in the screen's part of the
 /// window, the UI, then onto the window.
 pub(crate) fn render(w: &mut World) {
+    #[cfg(all(target_os = "android", feature = "xr"))]
+    if crate::xr::active(w) {
+        crate::xr::render(w);
+        return;
+    }
     let hdr_on = crate::hdr_blink::on(w);
     let Renderer {
         generation,
@@ -448,6 +493,7 @@ pub(crate) fn render(w: &mut World) {
         scene,
         ui,
         hdr_layer,
+        ..
     } = &mut w.renderer;
     let (window, screen, clear, screenshots) =
         (&w.e.window, &w.screen, &w.clear, &mut w.screenshots);

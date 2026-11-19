@@ -56,3 +56,13 @@ objc2-quartz-core = { version = "0.3", default-features = false, features = [
 [target.'cfg(target_os = "android")'.dependencies]
 # For the window insets (`src/platform.rs`); the version the sound output (cpal) uses.
 jni = "0.21"
+# VR on standalone headsets (`src/xr.rs`, the `xr` feature): OpenXR, which
+# makes the Vulkan device that wgpu then draws with, through wgpu-hal and ash
+# (the versions wgpu uses).
+openxr = { version = "0.22", optional = true }
+ash = { version = "0.38", optional = true }
+
+[features]
+# The VR build for standalone headsets (Meta Quest): `android/build-apk.sh`
+# with XR=1.
+xr = ["dep:openxr", "dep:ash"]

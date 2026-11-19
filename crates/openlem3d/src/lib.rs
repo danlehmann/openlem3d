@@ -45,6 +45,8 @@ mod title;
 mod touch;
 mod trackpad;
 mod ui;
+#[cfg(all(target_os = "android", feature = "xr"))]
+mod xr;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -608,6 +610,8 @@ impl l3d_engine::Game for World {
         }
         // The screen's measurements, then the input.
         screen::update(self);
+        #[cfg(all(target_os = "android", feature = "xr"))]
+        xr::input(self);
         screen::full_screen(self);
         touch::touch_over_mouse(self);
         scripted_presses(self);

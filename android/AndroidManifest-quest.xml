@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The VR build for Meta Quest headsets (android/build-apk.sh with XR=1): the
+     phone manifest's app, started in VR, with what OpenXR needs. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="org.openlem3d"
+    android:versionCode="1"
+    android:versionName="0.1.0">
+
+    <!-- API 29: before Android 11's package visibility, so the OpenXR loader
+         finds the runtime without <queries> (which this aapt can't take). -->
+    <uses-sdk android:minSdkVersion="29" android:targetSdkVersion="29" />
+    <uses-feature android:name="android.hardware.vulkan.version" android:required="true" />
+    <uses-feature android:name="android.hardware.vr.headtracking" android:version="1" android:required="true" />
+    <!-- Using the OpenXR runtime. -->
+    <uses-permission android:name="org.khronos.openxr.permission.OPENXR" />
+    <uses-permission android:name="org.khronos.openxr.permission.OPENXR_SYSTEM" />
+
+    <application
+        android:label="openlem3d"
+        android:hasCode="false"
+        android:appCategory="game"
+        android:isGame="true">
+        <meta-data android:name="com.oculus.supportedDevices" android:value="quest2|questpro|quest3|quest3s" />
+        <activity
+            android:name="android.app.NativeActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:screenOrientation="landscape"
+            android:resizeableActivity="false"
+            android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|navigation|uiMode|density">
+            <meta-data android:name="android.app.lib_name" android:value="openlem3d" />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="com.oculus.intent.category.VR" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
