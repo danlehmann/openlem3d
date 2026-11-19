@@ -42,6 +42,37 @@ const PANEL_TILT: f32 = 0.5;
 const STICK_DEAD: f32 = 0.2;
 /// A snap turn with the right stick, in radians.
 const SNAP_TURN: f32 = std::f32::consts::FRAC_PI_6;
+/// The field of view of the game's camera along the ray (degrees): only
+/// the middle, where the pointer is, matters.
+const AIM_FOV_Y: f32 = 30.0;
+/// The ray: drawn at most this long (metres), this wide, and the dot at its
+/// end this big (radians across, as seen).
+const BEAM_LONGEST: f32 = 30.0;
+const BEAM_WIDTH: f32 = 0.004;
+const DOT_SIZE: f32 = 0.012;
+/// The ray's colour (linear, straight alpha) on the panel, into the level,
+/// and on a lemming that a click would pick.
+const BEAM_PANEL: Vec4 = Vec4::new(1.0, 1.0, 1.0, 0.8);
+const BEAM_LEVEL: Vec4 = Vec4::new(0.55, 0.8, 1.0, 0.7);
+const BEAM_LEMMING: Vec4 = Vec4::new(1.0, 0.8, 0.1, 0.95);
+/// The overlay the ray is drawn into is this fraction of the eyes'
+/// resolution.
+const OVERLAY_SCALE: u32 = 2;
+
+/// The controller's ray as drawn: from the hand to what it meets, in the
+/// headset's space.
+#[derive(Clone, Copy)]
+struct Beam {
+    start: Vec3,
+    end: Vec3,
+    colour: Vec4,
+}
+
+/// The layer drawn over everything (the panel too) holding the ray.
+struct Overlay {
+    chain: Chain,
+    pipeline: wgpu::RenderPipeline,
+}
 
 /// Whether VR is running, not yet tried, or unavailable (the game then draws
 /// into its window as usual).
@@ -72,6 +103,13 @@ pub(crate) struct Xr {
     time: Option<xr::Time>,
     /// Which hand holds the left button down, if any.
     clicking: Option<usize>,
+    /// The hand pointing (0 left, 1 right).
+    hand: usize,
+    /// The game camera's view along the ray, while it points into the level.
+    aim: Option<Mat4>,
+    /// The ray to draw, in the headset's space.
+    beam: Option<Beam>,
+    overlay: Option<Overlay>,
     /// Whether the right stick has been back in the middle since its last
     /// snap turn.
     turn_ready: bool,
@@ -175,6 +213,10 @@ unsafe fn try_start(profile: bool) -> Result<(Box<Xr>, Gpu), Error> {
         controls,
         time: None,
         clicking: None,
+        hand: 1,
+        aim: None,
+        beam: None,
+        overlay: None,
         turn_ready: true,
         scene,
         ui: None,
@@ -423,8 +465,8 @@ pub(crate) fn input(w: &mut World) {
     }
     let c = &x.controls;
     let panel = w.screen.pixels;
-    let mut pointer = None;
     let mut pressed = [false; 2];
+    let mut rays = [None; 2];
     for hand in 0..2 {
         pressed[hand] = c
             .select
@@ -433,34 +475,92 @@ pub(crate) fn input(w: &mut World) {
         let Ok(loc) = c.aims[hand].locate(&x.space, time) else {
             continue;
         };
-        if !loc.location_flags.contains(
+        if loc.location_flags.contains(
             xr::SpaceLocationFlags::POSITION_VALID | xr::SpaceLocationFlags::ORIENTATION_VALID,
         ) {
-            continue;
-        }
-        let (origin, rotation) = pose(loc.pose);
-        let Some(uv) = panel_hit(origin, rotation * Vec3::NEG_Z, panel) else {
-            continue;
-        };
-        // The hand clicking keeps the pointer; else the right hand has it.
-        if pointer.is_none() || x.clicking == Some(hand) || (x.clicking.is_none() && hand == 1) {
-            pointer = Some((hand, uv));
+            let (origin, rotation) = pose(loc.pose);
+            rays[hand] = Some((origin, rotation));
         }
     }
+    // The hand pointing: the one clicking, else the one whose trigger went
+    // down last.
+    if x.clicking.is_none()
+        && let Some(hand) = (0..2).find(|&h| pressed[h] && rays[h].is_some())
+    {
+        x.hand = hand;
+    }
+    if rays[x.hand].is_none() {
+        x.hand = 1 - x.hand;
+    }
+    x.aim = None;
+    x.beam = None;
     let window = &mut w.e.window;
-    let mouse = &mut w.e.input.mouse;
-    match pointer {
-        Some((hand, uv)) => {
-            let p = Vec2::new(panel.x as f32, panel.y as f32)
-                + uv * Vec2::new(panel.z as f32, panel.w as f32);
-            window.set_physical_cursor_position(Some(p));
-            if x.clicking.is_none() && pressed[hand] {
-                x.clicking = Some(hand);
-                mouse.press(MouseButton::Left);
+    match rays[x.hand] {
+        Some((origin, rotation)) => {
+            let dir = rotation * Vec3::NEG_Z;
+            if let Some((uv, at)) = panel_hit(origin, dir, panel) {
+                let p = Vec2::new(panel.x as f32, panel.y as f32)
+                    + uv * Vec2::new(panel.z as f32, panel.w as f32);
+                window.set_physical_cursor_position(Some(p));
+                x.beam = Some(Beam {
+                    start: origin,
+                    end: at,
+                    colour: BEAM_PANEL,
+                });
+            } else {
+                // Into the level: the game sees it as a view along the ray
+                // with the pointer in its middle.
+                let anchor = world_from_space(w.view.pos, w.view.yaw);
+                let from = anchor.transform_point3(origin);
+                let toward = anchor.transform_vector3(dir).normalize();
+                let up = anchor.transform_vector3(rotation * Vec3::Y).normalize();
+                let size = w.screen.size;
+                let view_proj = crate::projection(AIM_FOV_Y, size.x / size.y.max(1.0), 0.5)
+                    * Mat4::look_to_rh(from, toward, up);
+                x.aim = Some(view_proj);
+                window.set_physical_cursor_position(Some(Vec2::new(
+                    (panel.x + panel.z / 2) as f32,
+                    (panel.y + panel.w / 2) as f32,
+                )));
+                let aim_camera = SceneCamera {
+                    view_proj,
+                    ..w.camera
+                };
+                let picked = w.game.sim.as_ref().and_then(|sim| {
+                    let i = crate::hud::lemming_at(sim, &aim_camera, size, size / 2.0)?;
+                    Some(Vec3::from_array(sim.lemmings[i].pos.map(crate::units)) + Vec3::Y * 0.2)
+                });
+                let solid = || {
+                    let (level, ..) = w.game.terrain.as_ref()?;
+                    crate::first_solid(level, from, toward).or_else(|| {
+                        let t = (crate::scene_build::GROUND_Y - from.y) / toward.y;
+                        (t > 0.0).then(|| from + toward * t)
+                    })
+                };
+                let space_from_world = anchor.inverse();
+                let end = picked
+                    .or_else(solid)
+                    .map(|p| space_from_world.transform_point3(p))
+                    .filter(|p| p.distance(origin) < BEAM_LONGEST)
+                    .unwrap_or(origin + dir * BEAM_LONGEST);
+                x.beam = Some(Beam {
+                    start: origin,
+                    end,
+                    colour: if picked.is_some() {
+                        BEAM_LEMMING
+                    } else {
+                        BEAM_LEVEL
+                    },
+                });
             }
         }
         None if x.clicking.is_none() => window.set_physical_cursor_position(None),
         None => {}
+    }
+    let mouse = &mut w.e.input.mouse;
+    if x.clicking.is_none() && pressed[x.hand] && rays[x.hand].is_some() {
+        x.clicking = Some(x.hand);
+        mouse.press(MouseButton::Left);
     }
     if let Some(hand) = x.clicking
         && !pressed[hand]
@@ -468,6 +568,11 @@ pub(crate) fn input(w: &mut World) {
         x.clicking = None;
         mouse.release(MouseButton::Left);
     }
+    aim(w);
+    let State::On(x) = &mut w.renderer.xr else {
+        return;
+    };
+    let c = &x.controls;
 
     // Walking and turning.
     let stick = |hand: usize| {
@@ -509,6 +614,17 @@ pub(crate) fn input(w: &mut World) {
         w.view.yaw -= SNAP_TURN * turn.x.signum();
         let after = world_from_space(w.view.pos, w.view.yaw).transform_point3(head);
         w.view.pos += before - after;
+    }
+}
+
+/// Points the game's camera along the controller's ray while it points
+/// into the level, so that what the pointer picks is what the ray meets.
+/// After the camera's own update, and at the start of the frame.
+pub(crate) fn aim(w: &mut World) {
+    if let State::On(x) = &w.renderer.xr
+        && let Some(view_proj) = x.aim
+    {
+        w.camera.view_proj = view_proj;
     }
 }
 
@@ -650,6 +766,59 @@ pub(crate) fn render(w: &mut World) {
     }
     let _ = panel.handle.release_image();
 
+    // The ray, over everything.
+    let eye_size = x.eyes.as_ref().expect("made above").size;
+    let overlay = x.overlay.get_or_insert_with(|| Overlay {
+        chain: chain(&x.session, device, eye_size / OVERLAY_SCALE, 2),
+        pipeline: overlay_pipeline(device),
+    });
+    let image = overlay
+        .chain
+        .handle
+        .acquire_image()
+        .expect("an overlay image") as usize;
+    let _ = overlay.chain.handle.wait_image(xr::Duration::INFINITE);
+    {
+        let mut encoder = device.create_command_encoder(&Default::default());
+        for (eye, view) in views.iter().enumerate() {
+            let target = &overlay.chain.images[image].1[eye];
+            let vertices = x.beam.map(|b| beam_vertices(&b, view)).unwrap_or_default();
+            let buffer = (!vertices.is_empty()).then(|| {
+                wgpu::util::DeviceExt::create_buffer_init(
+                    device,
+                    &wgpu::util::BufferInitDescriptor {
+                        label: Some("VR ray"),
+                        contents: &vertices
+                            .iter()
+                            .flat_map(|v| v.to_le_bytes())
+                            .collect::<Vec<u8>>(),
+                        usage: wgpu::BufferUsages::VERTEX,
+                    },
+                )
+            });
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("VR ray"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: target,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                ..Default::default()
+            });
+            if let Some(buffer) = &buffer {
+                pass.set_pipeline(&overlay.pipeline);
+                pass.set_vertex_buffer(0, buffer.slice(..));
+                pass.draw(0..(vertices.len() / VERTEX_FLOATS) as u32, 0..1);
+            }
+        }
+        gpu.queue.submit([encoder.finish()]);
+    }
+    let _ = overlay.chain.handle.release_image();
+
     let rect = |size: UVec2| xr::Rect2Di {
         offset: xr::Offset2Di { x: 0, y: 0 },
         extent: xr::Extent2Di {
@@ -700,10 +869,27 @@ pub(crate) fn render(w: &mut World) {
             width: PANEL_WIDTH,
             height: panel_height(panel.size),
         });
-    if let Err(e) = x
-        .stream
-        .end(state.predicted_display_time, x.blend, &[&projection, &quad])
-    {
+    let overlay = x.overlay.as_ref().expect("made above");
+    let overlay_views = [0, 1].map(|i| {
+        xr::CompositionLayerProjectionView::new()
+            .pose(views[i].pose)
+            .fov(views[i].fov)
+            .sub_image(
+                xr::SwapchainSubImage::new()
+                    .swapchain(&overlay.chain.handle)
+                    .image_array_index(i as u32)
+                    .image_rect(rect(overlay.chain.size)),
+            )
+    });
+    let ray = xr::CompositionLayerProjection::new()
+        .space(&x.space)
+        .layer_flags(xr::CompositionLayerFlags::BLEND_TEXTURE_SOURCE_ALPHA)
+        .views(&overlay_views);
+    if let Err(e) = x.stream.end(
+        state.predicted_display_time,
+        x.blend,
+        &[&projection, &quad, &ray],
+    ) {
         warn!("VR frame: {e}");
     }
 }
@@ -900,9 +1086,9 @@ fn panel_height(size: UVec2) -> f32 {
 }
 
 /// Where a ray from `origin` along `dir` meets the panel showing the screen
-/// `panel` (its pixels' rectangle), as 0–1 across and down; none if it
-/// misses.
-fn panel_hit(origin: Vec3, dir: Vec3, panel: UVec4) -> Option<Vec2> {
+/// `panel` (its pixels' rectangle), as 0–1 across and down, and the point
+/// met; none if it misses.
+fn panel_hit(origin: Vec3, dir: Vec3, panel: UVec4) -> Option<(Vec2, Vec3)> {
     let (centre, rotation) = panel_pose();
     let normal = rotation * Vec3::Z;
     let facing = dir.dot(normal);
@@ -913,8 +1099,126 @@ fn panel_hit(origin: Vec3, dir: Vec3, panel: UVec4) -> Option<Vec2> {
     if t <= 0.0 {
         return None;
     }
-    let local = rotation.inverse() * (origin + dir * t - centre);
+    let at = origin + dir * t;
+    let local = rotation.inverse() * (at - centre);
     let height = panel_height(UVec2::new(panel.z, panel.w));
     let uv = Vec2::new(local.x / PANEL_WIDTH + 0.5, 0.5 - local.y / height);
-    (uv.cmpge(Vec2::ZERO).all() && uv.cmple(Vec2::ONE).all()).then_some(uv)
+    (uv.cmpge(Vec2::ZERO).all() && uv.cmple(Vec2::ONE).all()).then_some((uv, at))
+}
+
+/// Floats per vertex of the ray: clip position, colour (premultiplied
+/// below), and where in a dot it is (−1–1; 0 along the beam).
+const VERTEX_FLOATS: usize = 10;
+
+const OVERLAY_SHADER: &str = "
+struct In {
+    @location(0) pos: vec4<f32>,
+    @location(1) colour: vec4<f32>,
+    @location(2) dot: vec2<f32>,
+};
+struct Out {
+    @builtin(position) pos: vec4<f32>,
+    @location(0) colour: vec4<f32>,
+    @location(1) dot: vec2<f32>,
+};
+@vertex fn vs(v: In) -> Out {
+    return Out(v.pos, v.colour, v.dot);
+}
+@fragment fn fs(o: Out) -> @location(0) vec4<f32> {
+    let r = length(o.dot);
+    let a = o.colour.a * (1.0 - smoothstep(0.75, 1.0, r));
+    return vec4(o.colour.rgb * a, a);
+}
+";
+
+/// Draws the ray's triangles, blending premultiplied colour over the clear
+/// overlay.
+fn overlay_pipeline(device: &wgpu::Device) -> wgpu::RenderPipeline {
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("VR ray"),
+        source: wgpu::ShaderSource::Wgsl(OVERLAY_SHADER.into()),
+    });
+    let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("VR ray"),
+        bind_group_layouts: &[],
+        immediate_size: 0,
+    });
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label: Some("VR ray"),
+        layout: Some(&layout),
+        vertex: wgpu::VertexState {
+            module: &shader,
+            entry_point: Some("vs"),
+            compilation_options: Default::default(),
+            buffers: &[wgpu::VertexBufferLayout {
+                array_stride: (VERTEX_FLOATS * 4) as u64,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: &wgpu::vertex_attr_array![
+                    0 => Float32x4, 1 => Float32x4, 2 => Float32x2
+                ],
+            }],
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &shader,
+            entry_point: Some("fs"),
+            compilation_options: Default::default(),
+            targets: &[Some(wgpu::ColorTargetState {
+                format: TARGET_FORMAT,
+                blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        primitive: Default::default(),
+        depth_stencil: None,
+        multisample: Default::default(),
+        multiview_mask: None,
+        cache: None,
+    })
+}
+
+/// The ray's triangles for the eye at `view`: a ribbon facing the eye from
+/// the hand to the end, fading in, and a dot at the end, a dark rim round a
+/// bright middle, the same size wherever it is.
+fn beam_vertices(beam: &Beam, view: &xr::View) -> Vec<f32> {
+    let (eye, rotation) = pose(view.pose);
+    let to_clip =
+        fov_projection(view.fov) * Mat4::from_rotation_translation(rotation, eye).inverse();
+    let mut out = Vec::new();
+    let mut corner = |p: Vec3, colour: Vec4, dot: Vec2| {
+        out.extend(to_clip.mul_vec4(p.extend(1.0)).to_array());
+        out.extend(colour.to_array());
+        out.extend(dot.to_array());
+    };
+    let (a, b) = (beam.start, beam.end);
+    let side = (b - a).cross(eye - a).normalize_or_zero() * BEAM_WIDTH / 2.0;
+    let faint = beam.colour.with_w(0.0);
+    for (p, c) in [
+        (a - side, faint),
+        (a + side, faint),
+        (b + side, beam.colour),
+        (a - side, faint),
+        (b + side, beam.colour),
+        (b - side, beam.colour),
+    ] {
+        corner(p, c, Vec2::ZERO);
+    }
+    let (right, up) = (rotation * Vec3::X, rotation * Vec3::Y);
+    let size = b.distance(eye) * DOT_SIZE / 2.0;
+    for (scale, colour) in [
+        (1.0, Vec4::new(0.0, 0.0, 0.0, 0.6)),
+        (0.6, beam.colour.with_w(1.0)),
+    ] {
+        let r = size * scale;
+        for d in [
+            Vec2::new(-1.0, -1.0),
+            Vec2::new(1.0, -1.0),
+            Vec2::new(1.0, 1.0),
+            Vec2::new(-1.0, -1.0),
+            Vec2::new(1.0, 1.0),
+            Vec2::new(-1.0, 1.0),
+        ] {
+            corner(b + (right * d.x + up * d.y) * r, colour, d);
+        }
+    }
+    out
 }

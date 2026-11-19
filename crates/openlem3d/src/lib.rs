@@ -570,6 +570,8 @@ impl World {
                 trackpad::trackpad_camera(self);
                 trackpad::gesture_camera(self);
                 camera_controls(self);
+                #[cfg(all(target_os = "android", feature = "xr"))]
+                xr::aim(self);
                 minimap::build_base(self);
                 minimap::draw(self);
                 minimap::click(self);
