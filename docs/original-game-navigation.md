@@ -420,6 +420,17 @@ Findings from the screen-layout runs (`spec/ui-graphics.md`, "Screens")
   skill to the highlighted lemming at once: the count dropped from 5 to 4.
   The arrow again switches highlighting off. Which lemming gets it depends on
   the view (`spec/ui-graphics.md`, "Highlight arrow").
+- **Moving the highlight to the next lemming** **[verified]** (2026-11-20,
+  owner's recipe): with Hi-Light on, click the face (68,440), the arrow, then
+  the face again. The marker moved from a miner to the lemming walking past
+  it, and the next skill click went to that one.
+- **Timing a skill on a moving lemming** **[verified]** (2026-11-20): with a
+  one- or two-lemming level and a fixed camera, poll `shot.ps1` grabs, find
+  the lemmings by their green hair, and press the skill icon (pointer parked
+  on it beforehand, so the press is a single `lhold`) once the lemming has
+  passed a chosen screen x. Start times drift by over a second between runs,
+  so fixed delays are not enough. A preset camera edit (`@161`, camera 1's
+  x) moves the fixed view sideways.
 - **A turner by mouse** **[verified]** (Practice "Turner", serial mouse, no
   focus). Select the turner (174,440), click the lemming once on the bracket
   (100 ms), then move the pointer about 60 px to one side (`rel:-29,0`) and
