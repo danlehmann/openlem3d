@@ -1437,7 +1437,15 @@ impl Simulation {
                         None => false,
                     }
                 } else {
-                    l.state == State::Walking && Self::take_up_pending(l)
+                    // Climbing a slope: its cell under its feet is not a
+                    // whole block, and the ground a step on is higher.
+                    let next = ahead_of(l.pos, l.dir.delta(), WALK_SPEED);
+                    let (ahead, _) = self
+                        .world
+                        .surface_below(next[0], l.pos[1] + STEP_UP, next[2]);
+                    let up_slope =
+                        ahead > l.pos[1] && self.dig_cell(l).is_some_and(|(_, b, _)| b.shape != 0);
+                    l.state == State::Walking && Self::take_up_pending(l, up_slope)
                 };
                 if !started {
                     let d = l.dir.delta();
@@ -1618,8 +1626,13 @@ impl Simulation {
     /// edge, whichever comes first ([LOAP]; the owner saw it walk on with
     /// the sack before building); a miner [`MINE_STANDOFF`] before the edge,
     /// in front of the block ahead (owner's observation). Returns whether
-    /// it started.
-    fn take_up_pending(l: &mut Lemming) -> bool {
+    /// it started. A digger climbing a slope (`up_slope`: its cell under its
+    /// feet is not a whole block, and the ground ahead is higher) walks on to
+    /// the top of the slope instead, and starts at the edge of its cell (owner, beside the original on Taxing
+    /// 10 "It's the Name of the Game": the original's digger dug at the top
+    /// of a ramp, ours a quarter lower from its middle, leaving a step the
+    /// lemmings after it turned at).
+    fn take_up_pending(l: &mut Lemming, up_slope: bool) -> bool {
         let Some(s) = l.pending else {
             return false;
         };
@@ -1657,6 +1670,7 @@ impl Simulation {
             l.pos = ahead_of(l.pos, d, to_edge - 1);
             l.build_at_edge = false;
         } else if matches!(s, State::Building { .. } | State::Digging)
+            && !(s == State::Digging && up_slope)
             && at_mid(l.pos[0], d[0])
             && at_mid(l.pos[2], d[2])
         {
@@ -1672,7 +1686,7 @@ impl Simulation {
             if to_edge > MINE_STANDOFF {
                 l.pos = Self::mine_stand(l.pos, d);
             }
-        } else if to_edge <= WALK_SPEED && s != State::Digging {
+        } else if to_edge <= WALK_SPEED && (s != State::Digging || up_slope) {
             l.pos = ahead_of(l.pos, d, to_edge - 1);
         } else {
             return false;
