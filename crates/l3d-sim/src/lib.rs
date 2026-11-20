@@ -1437,7 +1437,21 @@ impl Simulation {
                         None => false,
                     }
                 } else {
-                    l.state == State::Walking && Self::take_up_pending(l)
+                    // Climbing a slope: its cell under its feet is not a
+                    // whole block, and the ground a step on is higher.
+                    let climbing = l.pending == Some(State::Mining) && {
+                        let next = ahead_of(l.pos, l.dir.delta(), WALK_SPEED);
+                        let (ahead, _) =
+                            self.world
+                                .surface_below(next[0], l.pos[1] + STEP_UP, next[2]);
+                        ahead > l.pos[1] && self.dig_cell(l).is_some_and(|(_, b, _)| b.shape != 0)
+                    };
+                    let started = l.state == State::Walking && Self::take_up_pending(l, climbing);
+                    if started && climbing {
+                        // At the edge, up on the slope it walked along.
+                        self.settle(l);
+                    }
+                    started
                 };
                 if !started {
                     let d = l.dir.delta();
@@ -1617,9 +1631,14 @@ impl Simulation {
     /// starts in the middle of a block); a builder at the middle or the
     /// edge, whichever comes first ([LOAP]; the owner saw it walk on with
     /// the sack before building); a miner [`MINE_STANDOFF`] before the edge,
-    /// in front of the block ahead (owner's observation). Returns whether
-    /// it started.
-    fn take_up_pending(l: &mut Lemming) -> bool {
+    /// in front of the block ahead (owner's observation), or at the edge
+    /// itself when `climbing` a slope (its cell under its feet not a whole
+    /// block, the ground ahead higher), at the slope's top (verified in the
+    /// original on a changed Practice "Digger", 2026-11-20: given low on a
+    /// ramp, it walked up to the wall at its top and mined from there; on a
+    /// slope two cells long, from the top of the lower ramp). Returns
+    /// whether it started.
+    fn take_up_pending(l: &mut Lemming, climbing: bool) -> bool {
         let Some(s) = l.pending else {
             return false;
         };
@@ -1665,6 +1684,11 @@ impl Simulation {
                     l.pos[a] = mid(l.pos[a]);
                 }
             }
+        } else if s == State::Mining && climbing {
+            if to_edge > WALK_SPEED {
+                return false;
+            }
+            l.pos = ahead_of(l.pos, d, to_edge - 1);
         } else if s == State::Mining {
             if to_edge - WALK_SPEED > MINE_STANDOFF {
                 return false;

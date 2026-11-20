@@ -257,6 +257,49 @@ fn digger_on_a_slope_starts_at_the_middle_of_its_ramp() {
 }
 
 #[test]
+fn miner_on_a_ramp_mines_from_its_top() {
+    // A ramp rising +X into a wall: a miner given low on it walks up to the
+    // wall and starts at the ramp's top (verified in the original on a
+    // changed Practice "Digger", 2026-11-20), not a standoff before the
+    // edge, a quarter lower (owner's report on Taxing 10 "It's the Name of
+    // the Game").
+    const RAMP_UP_X: u16 = 5 << 2 | 3;
+    let mut sim = open_level(1)
+        .skill(0, Skill::Miner, 5)
+        .block(20, 2, 16, FLOOR, RAMP_UP_X, 0xF)
+        .floor(2, 21..22, 14..19)
+        .floor(3, 21..22, 14..19)
+        .floor(4, 21..22, 14..19)
+        .sim();
+    let mut ticks = 0;
+    while sim.lemmings.is_empty() || sim.lemmings[0].pos[0] < 20 * SUB + SUB / 8 {
+        sim.step();
+        ticks += 1;
+        assert!(ticks < 2000, "never reached the ramp");
+    }
+    assert!(sim.assign(0, Skill::Miner));
+    let mut started = None;
+    for _ in 0..300 {
+        sim.step();
+        if sim.lemmings[0].state == State::Mining {
+            started = Some(sim.lemmings[0].pos);
+            break;
+        }
+    }
+    let at = started.expect("never started mining");
+    assert!(
+        at[0] > 21 * SUB - SUB / 16,
+        "started at x = {}",
+        at[0] as f32 / SUB as f32
+    );
+    assert!(
+        at[1] > 3 * SUB - SUB / 16,
+        "started at y = {}",
+        at[1] as f32 / SUB as f32
+    );
+}
+
+#[test]
 fn walkers_climb_a_slope_two_cells_long() {
     // A 45° slope rising +X from the floor (surface y = 2) over two cells,
     // then a landing, with nothing under the upper ramp (as on Fun 12
