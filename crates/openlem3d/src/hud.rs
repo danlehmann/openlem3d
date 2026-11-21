@@ -255,10 +255,9 @@ pub(crate) fn assign_on_pointer(w: &mut World) {
                 return;
             }
             pending.0 = None;
-            let head = view.head;
-            let sides = lemming_sides(&sim.lemmings[f]);
-            let ok = sim.assign_turner(f, sides[riding_right_half(head, size, point) as usize]);
-            sfx.play(if ok { "VOXFX/OK2" } else { "VOXFX/UH_UH1" });
+            if let Some(ok) = give_pending_turner(sim, camera, size, Some(view.head), f, point) {
+                sfx.play(if ok { "VOXFX/OK2" } else { "VOXFX/UH_UH1" });
+            }
             return;
         }
         return;
@@ -267,11 +266,9 @@ pub(crate) fn assign_on_pointer(w: &mut World) {
         return;
     }
     if let Some(i) = pending.0.take().filter(|_| !picking) {
-        let Some(to) = turner_choice(camera, size, &sim.lemmings[i], point) else {
-            return;
-        };
-        let ok = sim.assign_turner(i, to);
-        sfx.play(if ok { "VOXFX/OK2" } else { "VOXFX/UH_UH1" });
+        if let Some(ok) = give_pending_turner(sim, camera, size, None, i, point) {
+            sfx.play(if ok { "VOXFX/OK2" } else { "VOXFX/UH_UH1" });
+        }
         return;
     }
     let best = lemming_at(sim, camera, size, point);
@@ -332,6 +329,27 @@ fn turner_sides(
     let dirs = [screen(l.dir.anticlockwise()), screen(l.dir.clockwise())];
     let towards = point.map_or(Vec2::ZERO, |p| (p - at).normalize_or_zero());
     Some((at, dirs, dirs.map(|d| d.dot(towards))))
+}
+
+/// Gives lemming `i` its waiting turner, pointing to the side a click at
+/// `point` lands on: riding along with it, the side of the screen (head
+/// turned `head` radians); otherwise the side of the lemming as seen on
+/// screen. Whether the sim took it; `None` if the lemming is behind the
+/// camera.
+pub(crate) fn give_pending_turner(
+    sim: &mut l3d_sim::Simulation,
+    camera: &SceneCamera,
+    size: Vec2,
+    riding: Option<f32>,
+    i: usize,
+    point: Vec2,
+) -> Option<bool> {
+    let l = &sim.lemmings[i];
+    let to = match riding {
+        Some(head) => lemming_sides(l)[riding_right_half(head, size, point) as usize],
+        None => turner_choice(camera, size, l, point)?,
+    };
+    Some(sim.assign_turner(i, to))
 }
 
 /// The direction a click at `point` gives a waiting turner: the side, as

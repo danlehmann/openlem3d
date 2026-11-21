@@ -631,6 +631,29 @@ fn buttons(w: &mut World) {
         let Some(sim) = &mut game.sim else { return };
         match action {
             Action::Skill(s) => {
+                // With a turner waiting for its side, a skill button is no
+                // skill: the press picks the side, like a click anywhere
+                // (owner, of the original).
+                if let Some(i) = pending_turner.0 {
+                    if paused {
+                        continue;
+                    }
+                    pending_turner.0 = None;
+                    let riding = (lemming_cam.following() == Some(i)).then_some(view.head);
+                    if let Some(point) = screen.cursor(&w.e.window)
+                        && let Some(ok) = crate::hud::give_pending_turner(
+                            sim,
+                            scene_camera,
+                            screen.size,
+                            riding,
+                            i,
+                            point,
+                        )
+                    {
+                        sfx.play(if ok { "VOXFX/OK2" } else { "VOXFX/UH_UH1" });
+                    }
+                    continue;
+                }
                 // A skill with none left can't be selected (verified). Paused,
                 // it is only selected, not given to the highlighted lemming.
                 if sim.skills_left[s as usize] > 0 {
