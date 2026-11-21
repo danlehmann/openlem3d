@@ -2103,7 +2103,8 @@ impl Simulation {
         // beside it; for a climber the wall cell and those beside it along
         // the wall.
         let columns: Vec<([i32; 2], i32)> = if climbing {
-            let at = Self::cell_of([l.pos[0] + d[0] * SUB / 4, feet, l.pos[2] + d[2] * SUB / 4]);
+            let into = REACH + 1;
+            let at = Self::cell_of([l.pos[0] + d[0] * into, feet, l.pos[2] + d[2] * into]);
             [-1, 0, 1]
                 .map(|k| {
                     (
@@ -2257,9 +2258,13 @@ impl Simulation {
         }
     }
 
+    /// A climber stands [`REACH`] out from the wall face, where it stopped
+    /// walking; `ahead` is just inside the wall. At the top it steps in to
+    /// there, onto the edge, and walks on from it (the original, 2026-11-20:
+    /// it pulled itself up and stood at the edge).
     fn climb(&mut self, l: &mut Lemming) {
         let d = l.dir.delta();
-        let ahead = [l.pos[0] + d[0] * REACH, l.pos[2] + d[2] * REACH];
+        let ahead = [l.pos[0] + d[0] * (REACH + 1), l.pos[2] + d[2] * (REACH + 1)];
         if self
             .world
             .terrain_solid([l.pos[0], l.pos[1] + HEAD_HEIGHT + CLIMB_SPEED, l.pos[2]])
