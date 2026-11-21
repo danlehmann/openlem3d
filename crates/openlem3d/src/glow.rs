@@ -391,6 +391,37 @@ pub fn lemming(cell: u32, i: u8, pal: &Palette) -> f32 {
     lit * strength(pal[i as usize])
 }
 
+/// Static objects that are lamps, as (`OBJ` set, object number): the street
+/// lamp of set 5 (Taxing 11 "Chaos Maze" and others) and of the Practice
+/// levels' set 95 (owner, 2026-11-20).
+const LAMP_OBJECTS: [(u8, u8); 2] = [(5, 1), (95, 1)];
+
+/// Per-pixel glow of `OBJ` set `set`, a 64-wide sheet, given each object's
+/// texel rectangle `[x, y, w, h]` by number: a lamp's glass, its bright
+/// yellow, glows.
+pub fn static_objects(
+    set: u8,
+    pixels: &[u8],
+    pal: &Palette,
+    rect: impl Fn(u8) -> [f32; 4],
+) -> Vec<f32> {
+    let mut glow = vec![0.0; pixels.len()];
+    for &(_, n) in LAMP_OBJECTS.iter().filter(|(s, _)| *s == set) {
+        let [x0, y0, w, h] = rect(n).map(|v| v as usize);
+        for y in y0..y0 + h {
+            for x in x0..x0 + w {
+                let p = y * 64 + x;
+                let Some(&i) = pixels.get(p) else { continue };
+                let [r, g, b] = pal[i as usize];
+                if i != 0 && r >= 230 && g >= 230 && b < 200 {
+                    glow[p] = strength(pal[i as usize]);
+                }
+            }
+        }
+    }
+    glow
+}
+
 /// Per-pixel glow of `ANIMOBJ` set `set`, a 64-wide strip of 64×64 frames.
 /// Only what changes between frames glows (the flame, not the torch holding
 /// it), widened by a pixel so a flame's steady middle glows too.

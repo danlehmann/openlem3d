@@ -900,7 +900,8 @@ fn object_layers(data: &mut GameData, level: &Level, pal: &Palette) -> Vec<Scene
     if let Some(obj) = obj
         && !statics.indices.is_empty()
     {
-        layers.push(statics.finish(indexed_to_rgba(&obj, 64, pal)));
+        let lit = glow::static_objects(level.object_set, &obj, pal, obj_rect);
+        layers.push(statics.finish(glowing_rgba(&obj, 64, pal, |p| lit[p])));
     }
     if let Some(anim) = anim
         && !animated.indices.is_empty()
