@@ -90,6 +90,8 @@ pub struct Options {
     assign: Vec<l3d_sim::demos::Step>,
     /// Lemming the virtual-lemming camera follows from the start (`--follow N`).
     follow: Option<usize>,
+    /// Lemming highlighted from when it appears (`--highlight N`).
+    highlight: Option<usize>,
     /// Play the level's stored solution as a replay of player input, so it
     /// ends on the results screen like a real attempt (`--solve`).
     solve: bool,
@@ -136,6 +138,7 @@ fn parse_args() -> Options {
         no_hud: false,
         assign: Vec::new(),
         follow: None,
+        highlight: None,
         solve: false,
         turbo: false,
         screen: menu::AppState::Title,
@@ -214,6 +217,9 @@ fn parse_args() -> Options {
             "--solve" => o.solve = true,
             "--turbo" => o.turbo = true,
             "--follow" => o.follow = Some(val().parse().expect("--follow takes a lemming number")),
+            "--highlight" => {
+                o.highlight = Some(val().parse().expect("--highlight takes a lemming number"))
+            }
             "--assign" => o.assign.push(
                 l3d_sim::demos::parse_step(&val())
                     .expect("--assign takes TICK:LEMMING:SKILL[:cw|acw]"),

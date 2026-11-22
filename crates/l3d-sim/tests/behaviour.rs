@@ -134,6 +134,47 @@ fn walking_speed_is_one_32nd_unit_per_tick() {
 }
 
 #[test]
+fn walker_turns_at_a_wall_face_and_a_climber_a_quarter_before() {
+    // Walls at x = 14 and x = 19 across the walk; the hatch drops lemmings
+    // at x = 16½ heading +X.
+    let synth = open_level(1)
+        .floor(2, 14..15, 2..30)
+        .floor(2, 19..20, 2..30)
+        .skill(0, Skill::Climber, 1);
+    // Walkers: each turns a step before the face, both ways, so one length takes 127 ticks (measured in
+    // the original, 2026-11-21: 127½ on four units).
+    let mut sim = synth.sim();
+    let mut turns = Vec::new();
+    let mut dir = None;
+    for _ in 0..800 {
+        sim.step();
+        let Some(l) = sim.lemmings.first() else {
+            continue;
+        };
+        if l.state == State::Walking && dir.is_some_and(|d| d != l.dir) {
+            turns.push((sim.tick, l.pos[0]));
+        }
+        dir = Some(l.dir);
+    }
+    assert_eq!(turns[0].1, 19 * SUB - SUB / 32, "a step before the face");
+    assert_eq!(
+        turns[1].1,
+        15 * SUB + SUB / 32,
+        "a step before the far face"
+    );
+    assert_eq!(turns[1].0 - turns[0].0, 127);
+    // A climber starts up where its next step comes a quarter before the face.
+    let mut sim = synth.sim();
+    run(&mut sim, 30);
+    assert!(sim.assign(0, Skill::Climber));
+    while sim.lemmings[0].state != State::Climbing {
+        sim.step();
+        assert!(sim.tick < 300, "never climbed");
+    }
+    assert_eq!(sim.lemmings[0].pos[0], 19 * SUB - SUB / 4 - SUB / 32);
+}
+
+#[test]
 fn two_unit_drop_survives_and_five_unit_drop_splats() {
     for (drop, survives) in [(2, true), (5, false)] {
         // Walk +X off a ledge at layer 7 onto a floor `drop` units lower.

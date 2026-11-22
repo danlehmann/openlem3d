@@ -3163,7 +3163,7 @@ impl Simulation {
         // Bricks are floors only, never walls (owner's recollection: walkers
         // meeting a staircase from the side step onto a low step or pass
         // under).
-        let wall = |w: &World, y: i32| w.terrain_solid([ahead[0], y, ahead[1]]);
+        let wall = |w: &World, at: [i32; 2], y: i32| w.terrain_solid([at[0], y, at[1]]);
         // Stepping off an edge, the walker is still at its own height when
         // it moves on (then falls), so that is where it needs room: walls
         // down by a lower surface don't turn it round.
@@ -3191,11 +3191,22 @@ impl Simulation {
         // changed Practice "Mud", 2026-10-25: under a cube leaving a quarter
         // unit of headroom, walkers walked on until their centre reached
         // the cell's edge before turning).
-        let blocked = surface > l.pos[1] + STEP_UP + STEP_SLACK
-            || (!rising
-                && wall(&self.world, body + STEP_UP + 2)
-                && wall(&self.world, body + STEP_UP - 1))
-            || ceiling;
+        let blocked_at = |at: [i32; 2]| {
+            surface > l.pos[1] + STEP_UP + STEP_SLACK
+                || (!rising
+                    && wall(&self.world, at, body + STEP_UP + 2)
+                    && wall(&self.world, at, body + STEP_UP - 1))
+                || ceiling
+        };
+        // A walker turns a step before its centre would reach the wall face,
+        // either way along an axis (measured in the original, 2026-11-21: a
+        // walker pacing between two walls four units apart took 127½ ticks
+        // a length). A climber starts up [`REACH`] before the wall face.
+        let climbs = l.climber
+            && l.pending.is_none()
+            && blocked_at(ahead)
+            && self.world.solid([ahead[0], l.pos[1] + SUB / 8, ahead[1]]);
+        let blocked = climbs || blocked_at([next[0] + d[0], next[2] + d[2]]);
         // A brick step up with too little headroom over it is not taken: the
         // walker walks on at its own height, under that brick (bricks are
         // floors only), and off the end of the one it is on (owner's
@@ -3211,7 +3222,7 @@ impl Simulation {
             && !self
                 .world
                 .terrain_solid([next[0], l.pos[1] + HEAD_HEIGHT - 1, next[2]])
-            && !wall(&self.world, l.pos[1] + STEP_UP + 2)
+            && !wall(&self.world, ahead, l.pos[1] + STEP_UP + 2)
         {
             l.pos[0] = next[0];
             l.pos[2] = next[2];
@@ -3230,10 +3241,7 @@ impl Simulation {
             // a skill pending takes the skill up at the wall instead
             // (inferred: Tricky 3 "This Is the Army" has a climber mine
             // through a wall it walks up to).
-            if l.climber
-                && l.pending.is_none()
-                && self.world.solid([ahead[0], l.pos[1] + SUB / 8, ahead[1]])
-            {
+            if climbs {
                 l.set_state(State::Climbing);
             } else {
                 l.dir = l.dir.reverse();

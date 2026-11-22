@@ -282,6 +282,14 @@ pub(crate) fn follow(w: &mut World) {
         highlight.on = true;
         highlight.lemming = Some(i);
     }
+    // `--highlight N`: highlight lemming N as soon as it appears.
+    if let Some(i) = opts.highlight
+        && !highlight.on
+        && game.sim.as_ref().is_some_and(|s| s.lemmings.len() > i)
+    {
+        highlight.on = true;
+        highlight.lemming = Some(i);
+    }
     let Some(mut i) = cam.following() else {
         view.roll = 0.0;
         view.head = 0.0;
