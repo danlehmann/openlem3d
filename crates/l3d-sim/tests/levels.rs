@@ -49,6 +49,33 @@ fn all_levels_run_deterministically() {
     }
 }
 
+/// A teleporter pad lets a second lemming walk across 12 ticks behind the
+/// first and beams one 13 behind (measured in the original on Practice
+/// "Teleporter", `LEVEL.099`, with two lemmings at release rates 89 and 88).
+#[test]
+fn teleporter_pad_rests_after_beaming() {
+    let Some(dir) = data_dir() else {
+        eprintln!("game data not found; skipping");
+        return;
+    };
+    let mut data = GameData::open(&dir).expect("open game data");
+    let blocks = data.blocks(99).expect("blocks");
+    for (rate, second_beams) in [(89, false), (88, true)] {
+        let mut level = data.level(99).expect("level");
+        level.lemmings = 2;
+        level.release_rate = rate;
+        let mut sim = Simulation::new(&level, &blocks);
+        let mut beamed = [false; 2];
+        for _ in 0..600 {
+            sim.step();
+            for (i, l) in sim.lemmings.iter().enumerate() {
+                beamed[i] |= matches!(l.state, l3d_sim::State::Teleporting { .. });
+            }
+        }
+        assert_eq!(beamed, [true, second_beams], "release rate {rate}");
+    }
+}
+
 /// Every Practice level (and Fun 1) is solvable, and each solution's
 /// command log replays to the same result (the demos play these logs).
 #[test]

@@ -1216,6 +1216,7 @@ pub const SOLUTIONS: &[Solution] = &[
             (333, 2, 1, Some(false)),
             (842, 4, 1, Some(false)),
             (941, 6, 1, Some(false)),
+            (1626, 3, 1, Some(true)),
         ],
     ),
     at(

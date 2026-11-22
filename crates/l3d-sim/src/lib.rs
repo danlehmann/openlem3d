@@ -196,6 +196,12 @@ pub const SPRING_BUSY_TICKS: u32 = 7;
 /// 31 ticks apart all thrown, 17 apart every other one, and one throw 25
 /// ticks after the last). Proportional to the distance is ours.
 const SPRING_REST_PER_UNIT: f32 = 2.65;
+/// Ticks a teleporter pad rests after a lemming starts beaming from it: a
+/// walker reaching its centre meanwhile walks across (measured in the
+/// original, 2026-11-21: Practice "Teleporter" with two lemmings, the second
+/// walked across 2, 10 and 12 ticks behind the first and beamed 13, 14, 16
+/// and 20 or more behind).
+const TELEPORT_REST_TICKS: u32 = 13;
 /// How long a trampoline pad shows its dip after a lemming touches it
 /// (its four frames, one per tick; timing unmeasured).
 pub const PAD_BUSY_TICKS: u32 = 4;
@@ -1778,6 +1784,11 @@ impl Simulation {
         if (centre[0] - l.pos[0]) * d[0] + (centre[2] - l.pos[2]) * d[2] > 0 {
             return;
         }
+        if self.objects[here].rest > 0 {
+            l.teleported = true;
+            return;
+        }
+        self.objects[here].rest = TELEPORT_REST_TICKS;
         l.pos[0] = centre[0];
         l.pos[2] = centre[2];
         l.set_state(State::Teleporting {

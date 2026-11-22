@@ -57,7 +57,8 @@ pub struct Object {
     pub surface: i32,
     /// Ticks left before a trap can fire again.
     pub busy: u32,
-    /// Ticks left before a spring's sender throws another lemming.
+    /// Ticks left before a spring's sender throws another lemming, or a
+    /// teleporter pad beams another.
     pub rest: u32,
 }
 
