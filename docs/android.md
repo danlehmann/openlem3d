@@ -1,8 +1,10 @@
 # Android
 
 The game builds as a code-free APK: Android's `NativeActivity` loads the game
-library (`libopenlem3d.so`) directly, so there is no Java and no Gradle. Only
-arm64 devices are supported.
+library (`libopenlem3d.so`) directly, so there is no Java and no Gradle. The
+APK holds the library for 64-bit and 32-bit ARM and for x86_64 (`arm64-v8a`,
+`armeabi-v7a` and `x86_64`): some devices, such as the Chromecast with Google
+TV, run only 32-bit apps; x86_64 is for Chromebooks and the emulator. On a TV it is listed in the TV launcher.
 
 The system's back gesture (or button) is Esc, and the code screen brings up
 the on-screen keyboard. A touchpad works as a mouse; its two-finger gestures
@@ -66,9 +68,11 @@ five seconds, labelled, for comparing.
 
 builds `target/android/openlem3d.apk`: optimised code, but a debuggable APK
 signed with a debug key (which the script creates in `~/.android/debug.keystore`
-if it is missing). It needs:
+if it is missing). `ABIS=arm64-v8a` (or another of them) builds for one ABI only,
+which is quicker while developing. It needs:
 
-- the Rust target: `rustup target add aarch64-linux-android`;
+- the Rust targets: `rustup target add aarch64-linux-android
+  armv7-linux-androideabi x86_64-linux-android`;
 - the [Android NDK](https://developer.android.com/ndk/downloads), unpacked
   anywhere (`ANDROID_NDK_HOME`);
 - a platform `android.jar` (`ANDROID_JAR`), from an SDK platform package in

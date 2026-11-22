@@ -1,12 +1,17 @@
 #!/bin/sh
-# Builds target/android/openlem3d.apk (arm64, release code, but a debuggable
-# and debug-signed APK).
+# Builds target/android/openlem3d.apk (release code, but a debuggable and
+# debug-signed APK) for 64-bit and 32-bit ARM and for x86_64: some devices run
+# only 32-bit apps (the Chromecast with Google TV); x86_64 is for Chromebooks
+# and the emulator. ABIS limits the ABIs built, of arm64-v8a, armeabi-v7a and
+# x86_64 (ABIS=arm64-v8a builds faster while developing; the VR build is
+# arm64 only).
 #
 # With XR=1, builds the VR version for Meta Quest headsets instead: the `xr`
 # feature, the Quest manifest, and the Khronos OpenXR loader (downloaded from
 # Maven Central once, into target/android/, and checked).
 #
-# Needs: the Rust target aarch64-linux-android; the Android NDK
+# Needs: the Rust targets aarch64-linux-android, armv7-linux-androideabi and
+# x86_64-linux-android (those of the ABIs built); the Android NDK
 # ($ANDROID_NDK_HOME); a platform android.jar ($ANDROID_JAR); aapt, zipalign
 # and apksigner (Android SDK build-tools, or the Debian packages); keytool; and
 # on hosts without an NDK toolchain, clang and lld. See docs/android.md.
@@ -17,24 +22,35 @@ cd "$(dirname "$0")/.."
 export ANDROID_NDK_HOME
 HERE=$PWD/android
 OUT=target/android
-export CC_aarch64_linux_android="$HERE/clang.sh"
-export CXX_aarch64_linux_android="$HERE/clang++.sh"
-export AR_aarch64_linux_android=llvm-ar
+for t in aarch64_linux_android armv7_linux_androideabi x86_64_linux_android; do
+    export "CC_$t=$HERE/clang.sh" "CXX_$t=$HERE/clang++.sh" "AR_$t=llvm-ar"
+done
 export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$HERE/clang.sh"
+export CARGO_TARGET_ARMV7_LINUX_ANDROIDEABI_LINKER="$HERE/clang-armv7.sh"
+export CARGO_TARGET_X86_64_LINUX_ANDROID_LINKER="$HERE/clang-x86_64.sh"
+ABIS=${ABIS:-arm64-v8a armeabi-v7a x86_64}
 
 MANIFEST=android/AndroidManifest.xml
 FEATURES=
 if [ "${XR:-0}" = 1 ]; then
     MANIFEST=android/AndroidManifest-quest.xml
     FEATURES="--features xr"
+    ABIS=arm64-v8a
 fi
 
-# shellcheck disable=SC2086
-cargo rustc -p openlem3d --lib --release --target aarch64-linux-android --crate-type cdylib $FEATURES
-
-rm -rf "$OUT/apk" && mkdir -p "$OUT/apk/lib/arm64-v8a"
-llvm-strip -o "$OUT/apk/lib/arm64-v8a/libopenlem3d.so" \
-    target/aarch64-linux-android/release/libopenlem3d.so
+rm -rf "$OUT/apk"
+for abi in $ABIS; do
+    case "$abi" in
+        arm64-v8a) target=aarch64-linux-android ;;
+        armeabi-v7a) target=armv7-linux-androideabi ;;
+        x86_64) target=x86_64-linux-android ;;
+        *) echo "unknown ABI $abi" >&2; exit 1 ;;
+    esac
+    # shellcheck disable=SC2086
+    cargo rustc -p openlem3d --lib --release --target $target --crate-type cdylib $FEATURES
+    mkdir -p "$OUT/apk/lib/$abi"
+    llvm-strip -o "$OUT/apk/lib/$abi/libopenlem3d.so" "target/$target/release/libopenlem3d.so"
+done
 if [ "${XR:-0}" = 1 ]; then
     LOADER_VERSION=1.1.65
     LOADER_SHA256=a298c326085b09181c85235fb04d37510939bd30938ed4322c093c09780e8643
