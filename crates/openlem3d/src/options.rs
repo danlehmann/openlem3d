@@ -507,7 +507,15 @@ pub(crate) fn gamepad(w: &mut World, way: Vec2, pressed: bool, slide: i32) {
     if let Entry::Toggle(item) = entry
         && (pressed || (stepped && slide != 0))
     {
-        press(w, item);
+        // The left bumper steps back, the right one (and A) on.
+        if slide < 0
+            && let Some(g) = graphics_by(w.settings.graphics, item, -1)
+        {
+            w.settings.graphics = g;
+            w.options.rebuild = true;
+        } else {
+            press(w, item);
+        }
         return;
     }
     let settings = &mut w.settings;
@@ -543,14 +551,24 @@ fn toggle(s: &mut Settings, item: Item) {
 /// Enhanced's graphics after pressing `item`: a preset's, or
 /// one setting changed (then named by the preset it matches, or Custom).
 fn graphics(g: Graphics, item: Item) -> Option<Graphics> {
+    graphics_by(g, item, 1)
+}
+
+/// The same, a setting with several values stepped `step` (1 on, −1 back).
+fn graphics_by(g: Graphics, item: Item, step: i32) -> Option<Graphics> {
     let mut next = match item {
         Item::Preset(p) => return Some(p.graphics(g)),
         Item::Resolution => Graphics {
-            resolution: (g.resolution + 1) % crate::settings::RESOLUTIONS as u8,
+            resolution: (g.resolution as i32 + step).rem_euclid(crate::settings::RESOLUTIONS as i32)
+                as u8,
             ..g
         },
         Item::Glow => Graphics {
-            glow: g.glow.next(),
+            glow: if step < 0 {
+                g.glow.previous()
+            } else {
+                g.glow.next()
+            },
             ..g
         },
         Item::Waves => Graphics {

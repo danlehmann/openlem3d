@@ -175,6 +175,10 @@ impl Glow {
         }
     }
 
+    pub fn previous(self) -> Self {
+        self.next().next()
+    }
+
     fn key(self) -> &'static str {
         match self {
             Glow::Off => "off",
