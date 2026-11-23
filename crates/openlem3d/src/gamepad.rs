@@ -10,7 +10,7 @@
 //! and down the release rate; the left trigger runs the level back and the
 //! right one forward as fast as they are pulled (`backspace_rewind`); the
 //! right stick's click highlights the lemming nearest the middle again;
-//! Menu opens the options and View is Esc.
+//! View opens the options and Menu is Esc (the level's menu).
 
 use l3d_engine::input::{KeyCode, MouseButton, PadButton};
 use l3d_engine::math::Vec2;
@@ -122,10 +122,11 @@ pub(crate) fn input(w: &mut World) {
         w.gamepad.in_use = true;
     }
     w.e.window.cursor_hidden = w.gamepad.in_use;
-    // View is Esc everywhere; B goes back outside levels.
-    if pad.buttons.just_pressed(PadButton::Select)
+    // Menu is Esc everywhere (owner: swapped with View, the options); B
+    // goes back outside levels; View closes the options again.
+    if pad.buttons.just_pressed(PadButton::Start)
         || (menu && w.state != AppState::Code && pad.buttons.just_pressed(PadButton::East))
-        || (w.state == AppState::Options && pad.buttons.just_pressed(PadButton::Start))
+        || (w.state == AppState::Options && pad.buttons.just_pressed(PadButton::Select))
     {
         tap(w, KeyCode::Escape);
     }
@@ -652,7 +653,7 @@ fn level(w: &mut World, pad: &l3d_engine::input::Pad) {
         ][(w.preset.0 + 1) % 4];
         tap(w, key);
     }
-    if b.just_pressed(PadButton::Start) {
+    if b.just_pressed(PadButton::Select) {
         tap(w, KeyCode::F12);
     }
     for (button, key) in [
