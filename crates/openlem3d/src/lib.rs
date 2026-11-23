@@ -364,7 +364,6 @@ pub struct World {
     gamepad: gamepad::GamepadState,
     follow: lemming_cam::Follow,
     confirm: confirm::Confirm,
-    autodetect: autodetect::AutoDetect,
     fade: fade::Fade,
     style: style::Style,
     fps: fps::Fps,
@@ -465,7 +464,6 @@ impl World {
             gamepad: gamepad::GamepadState::default(),
             follow: lemming_cam::Follow::default(),
             confirm: confirm::Confirm::default(),
-            autodetect: Default::default(),
             fade: fade::Fade::default(),
             style: style::Style::default(),
             fps: fps::Fps::default(),
@@ -556,8 +554,7 @@ impl World {
         screenshot_when_ready(self);
         hide_ui(self);
         trackpad::watch(self);
-        // Enhanced's graphics for the machine: guessed at once, measured
-        // in the first level.
+        // Enhanced's graphics for the machine, guessed once its GPU is known.
         autodetect::update(self);
         match self.state {
             Title => {
