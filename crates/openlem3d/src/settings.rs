@@ -15,6 +15,8 @@ pub struct Settings {
     pub mode: Mode,
     /// Enhanced's graphics (ours).
     pub graphics: Graphics,
+    /// They suit the machine: chosen by `autodetect`, or by hand.
+    pub calibrated: bool,
     /// Show the frames per second in a corner (ours).
     pub fps: bool,
     /// Backspace runs the level back in time (ours); off, no snapshots are
@@ -279,6 +281,7 @@ impl Default for Settings {
             fullscreen: false,
             mode: Mode::Enhanced,
             graphics: Graphics::default(),
+            calibrated: false,
             fps: false,
             rewind: true,
             music: 8,
@@ -420,6 +423,7 @@ impl Settings {
                 // Before CRT and windows were apart.
                 "screens" => (s.graphics.crt, s.graphics.windows) = (flag, flag),
                 "windows" => s.graphics.windows = flag,
+                "calibrated" => s.calibrated = flag,
                 // Before there were three modes.
                 "enhanced" => s.mode = if flag { Mode::Enhanced } else { Mode::Original },
                 "fps" => s.fps = flag,
@@ -462,7 +466,7 @@ impl Settings {
         let Some(path) = Self::path() else { return };
         let on = |b: bool| if b { "on" } else { "off" };
         let text = format!(
-            "fullscreen = {}\nmode = {}\npreset = {}\nresolution = {}\nfiltering = {}\nwaves = {}\nreflections = {}\nshadows = {}\nglow = {}\nsnow = {}\nsandstorm = {}\ncrt = {}\nwindows = {}\nfps = {}\nrewind = {}\nmusic = {}\neffects = {}\ncamera = {}\nrating = {}\ncompleted = {}\nbest = {}\n",
+            "fullscreen = {}\nmode = {}\npreset = {}\nresolution = {}\nfiltering = {}\nwaves = {}\nreflections = {}\nshadows = {}\nglow = {}\nsnow = {}\nsandstorm = {}\ncrt = {}\nwindows = {}\ncalibrated = {}\nfps = {}\nrewind = {}\nmusic = {}\neffects = {}\ncamera = {}\nrating = {}\ncompleted = {}\nbest = {}\n",
             on(self.fullscreen),
             self.mode.key(),
             self.graphics.preset.key(),
@@ -476,6 +480,7 @@ impl Settings {
             on(self.graphics.sandstorm),
             on(self.graphics.crt),
             on(self.graphics.windows),
+            on(self.calibrated),
             on(self.fps),
             on(self.rewind),
             self.music,

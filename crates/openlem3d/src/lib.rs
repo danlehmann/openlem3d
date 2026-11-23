@@ -5,6 +5,7 @@
 //! options (`--camera`, `--screen`, `--screenshot`, `--press`, …) are those
 //! of `parse_args`. Without `--level` the game starts at the title screen.
 
+mod autodetect;
 mod briefing;
 mod camera_route;
 mod codes;
@@ -367,6 +368,7 @@ pub struct World {
     gamepad: gamepad::GamepadState,
     follow: lemming_cam::Follow,
     confirm: confirm::Confirm,
+    autodetect: autodetect::AutoDetect,
     fade: fade::Fade,
     style: style::Style,
     fps: fps::Fps,
@@ -409,6 +411,7 @@ impl World {
         }
         if let Some(p) = opts.preset {
             settings.graphics = p.graphics(settings.graphics);
+            settings.calibrated = true;
         }
         let rating = settings.rating;
         World {
@@ -465,6 +468,7 @@ impl World {
             gamepad: gamepad::GamepadState::default(),
             follow: lemming_cam::Follow::default(),
             confirm: confirm::Confirm::default(),
+            autodetect: Default::default(),
             fade: fade::Fade::default(),
             style: style::Style::default(),
             fps: fps::Fps::default(),
@@ -555,6 +559,9 @@ impl World {
         screenshot_when_ready(self);
         hide_ui(self);
         trackpad::watch(self);
+        // Enhanced's graphics for the machine: guessed at once, measured
+        // in the first level.
+        autodetect::update(self);
         match self.state {
             Title => {
                 title::attract(self);

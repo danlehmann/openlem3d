@@ -55,6 +55,13 @@ pub(crate) struct Renderer {
     pub(crate) xr: crate::xr::State,
 }
 
+impl Renderer {
+    /// The GPU's name, once it is made.
+    pub(crate) fn adapter_name(&self) -> Option<String> {
+        self.gpu.as_ref().map(|g| g.adapter.get_info().name)
+    }
+}
+
 #[cfg(all(target_os = "android", feature = "xr"))]
 impl Renderer {
     /// The GPU, once made, and VR's state.

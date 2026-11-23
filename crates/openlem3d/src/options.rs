@@ -521,6 +521,7 @@ pub(crate) fn gamepad(w: &mut World, way: Vec2, pressed: bool, slide: i32) {
             && let Some(g) = graphics_by(w.settings.graphics, item, -1)
         {
             w.settings.graphics = g;
+            w.settings.calibrated = true;
             w.options.rebuild = true;
         } else {
             press(w, item);
@@ -625,6 +626,8 @@ fn press(w: &mut World, item: Item) {
     }
     toggle(&mut w.settings, item);
     if graphics(w.settings.graphics, item).is_some() {
+        // Chosen by hand: the automatic choice leaves it be.
+        w.settings.calibrated = true;
         w.options.rebuild = true;
     }
 }
