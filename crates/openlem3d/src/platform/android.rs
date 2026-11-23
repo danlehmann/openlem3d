@@ -74,6 +74,21 @@ fn on_main_thread(
     }));
 }
 
+/// Ends the app once the game has quit: closes the activity (and its task,
+/// as an app's Exit should) and ends the process. A process left running
+/// after its activity closed kept a game session open on Android's game
+/// services (a Googlebook), which put an activity into its task again and
+/// again: the app seemed to keep relaunching and quitting.
+pub fn quit() {
+    if let Err(e) = with_activity(|env, activity| {
+        env.call_method(activity, "finishAndRemoveTask", "()V", &[])
+            .map(|_| ())
+    }) {
+        warn!("cannot close the activity: {e}");
+    }
+    std::process::exit(0);
+}
+
 /// The first of these holding a CD image: the external files directory; the
 /// external media directory, which (unlike that) file managers on the device
 /// can write to; the internal `gamedata`, for where adb can't reach external

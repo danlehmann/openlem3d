@@ -268,6 +268,8 @@ fn parse_args() -> Options {
 fn android_main(app: l3d_engine::android::android_activity::AndroidApp) {
     let _ = l3d_engine::android::ANDROID_APP.set(app);
     main();
+    // The game quit (Exit): end the app, not just the game's loop.
+    platform::quit();
 }
 
 pub fn main() {

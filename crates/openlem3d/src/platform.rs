@@ -7,6 +7,8 @@ use std::path::PathBuf;
 
 #[cfg(target_os = "android")]
 mod android;
+#[cfg(target_os = "android")]
+pub use android::quit;
 
 /// The command-line arguments, without the program's name. Android starts
 /// apps without any, so there they are the words of `args.txt` in the app's
