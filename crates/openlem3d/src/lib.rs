@@ -112,9 +112,6 @@ pub struct Options {
     record: Option<(PathBuf, f32)>,
     /// Draw glowing things plainly (`--no-glow`), for comparison.
     no_glow: bool,
-    /// Render Enhanced and Ultra's 3D view at this fraction of the screen's
-    /// size, stretched over it (`--render-scale`, for slow GPUs).
-    render_scale: f32,
     /// Draw at most this many rows, the system stretching them over the
     /// window (`--max-height`, for slow GPUs on large screens).
     max_height: Option<u32>,
@@ -157,7 +154,6 @@ fn parse_args() -> Options {
         press: Vec::new(),
         record: None,
         no_glow: false,
-        render_scale: 1.0,
         max_height: None,
         profile: false,
         backend: None,
@@ -196,9 +192,6 @@ fn parse_args() -> Options {
             "--no-glow" => o.no_glow = true,
             "--max-height" => {
                 o.max_height = Some(val().parse().expect("--max-height takes a number of rows"))
-            }
-            "--render-scale" => {
-                o.render_scale = val().parse().expect("--render-scale takes a fraction")
             }
             "--profile" => o.profile = true,
             "--hdr" => o.hdr = true,

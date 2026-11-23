@@ -38,15 +38,10 @@ pub(crate) fn update(w: &mut World) {
         window.set_max_height(rows);
     }
     let screen = (w.screen.size * w.e.window.scale_factor()).round();
-    let scale = w.opts.render_scale;
     camera.pixels = if screen.min_element() < 1.0 {
         UVec2::ZERO
     } else if settings.enhanced() {
-        if scale < 1.0 {
-            (screen * scale).round().max(Vec2::ONE).as_uvec2()
-        } else {
-            UVec2::ZERO
-        }
+        UVec2::ZERO
     } else {
         // The original's rows, and as many columns as keep its pixel shape
         // on this screen.
