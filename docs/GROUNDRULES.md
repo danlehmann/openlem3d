@@ -44,7 +44,8 @@ game instead looks in the app's own external files directory,
 
 ## Technical direction
 
-- **Language and engine:** Rust (latest stable) and Bevy.
+- **Language and engine:** Rust (latest stable), on a small engine of our own
+  (`crates/l3d-engine`: winit for the window and input) with wgpu for drawing.
 - **Portable:** the game must run on Windows, Linux and macOS (x86_64 and
   arm64), and on Android (arm64). Web/WASM would be nice to have.
   Platform-specific code is only allowed in small, isolated modules.
@@ -58,9 +59,9 @@ game instead looks in the app's own external files directory,
   sky is essentially a 2D panorama image that pans as the camera turns.
   Reproduce this behaviour (at least as the default mode).
 - **Structure:** a Cargo workspace with three layers:
-  - format parsers, with no Bevy dependency and unit-tested;
-  - deterministic simulation, with no Bevy dependency and a fixed timestep;
-  - the Bevy application on top of both.
+  - format parsers, with no engine dependency and unit-tested;
+  - deterministic simulation, with no engine dependency and a fixed timestep;
+  - the game application on top of both.
 
 ## Gameplay decisions
 

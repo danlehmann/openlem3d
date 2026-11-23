@@ -31,6 +31,6 @@ under the clean-room rules in `../GROUNDRULES.md`. Facts carry a status:
 - Multi-byte values are little-endian unless stated otherwise.
 - Grid axes are X (0–31), Y (0–15, vertical, up) and Z (0–31). This is a
   right-handed system: viewed from above with +Y towards the viewer, turning
-  from +X to +Z is clockwise. Bevy also uses a right-handed, Y-up system, so
-  grid axes map directly to Bevy axes.
+  from +X to +Z is clockwise. The renderer also uses a right-handed, Y-up
+  system, so grid axes map directly to its axes.
 - Tool commands below mean `cargo run -p l3d-tool -- <command>`.

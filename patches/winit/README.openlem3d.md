@@ -18,4 +18,4 @@ buttons' Android key codes, unidentified, rather than passing for arrow keys,
 Enter or Esc, and its sticks, triggers and hat are reported as
 `DeviceEvent::Motion` with Android's `AXIS_*` numbers, not as touches.
 
-Remove this copy once Bevy uses a winit that handles all of this.
+Remove this copy once a winit release handles all of this.
