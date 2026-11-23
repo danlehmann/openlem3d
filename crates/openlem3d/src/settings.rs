@@ -280,7 +280,9 @@ impl Default for Settings {
         Settings {
             fullscreen: false,
             mode: Mode::Enhanced,
-            graphics: Graphics::default(),
+            // This machine's guess, once its GPU is known (so Default
+            // Config gives it too).
+            graphics: crate::autodetect::default_preset().graphics(Graphics::default()),
             calibrated: false,
             fps: false,
             rewind: true,

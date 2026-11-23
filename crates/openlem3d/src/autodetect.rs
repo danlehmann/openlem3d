@@ -45,6 +45,15 @@ pub(crate) struct AutoDetect {
     raised: bool,
 }
 
+/// The guess for this machine's GPU, once it is known.
+static GUESS: std::sync::OnceLock<Preset> = std::sync::OnceLock::new();
+
+/// The preset the default settings take: the guess for this GPU, or High
+/// before it is known.
+pub(crate) fn default_preset() -> Preset {
+    GUESS.get().copied().unwrap_or(Preset::High)
+}
+
 /// The preset to start from on a GPU named `name`.
 pub(crate) fn guess(name: &str) -> Preset {
     if WEAK_GPUS.iter().any(|w| name.contains(w)) {
@@ -72,6 +81,7 @@ pub(crate) fn update(w: &mut World) {
         };
         a.guessed = true;
         let preset = guess(&name);
+        let _ = GUESS.set(preset);
         w.settings.graphics = preset.graphics(w.settings.graphics);
         l3d_engine::log::info!(
             "graphics: {} for {name}; measuring in the first level",
