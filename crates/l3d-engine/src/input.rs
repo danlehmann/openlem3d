@@ -43,8 +43,11 @@ pub struct Pad {
     /// How far the triggers are pulled, 0 to 1.
     pub left_trigger: f32,
     pub right_trigger: f32,
-    /// Whether a gamepad is connected.
+    /// Whether a gamepad is connected (on Android: has been used).
     pub connected: bool,
+    /// Android's raw axes, by `AXIS_*` number, that the sticks, triggers
+    /// and D-pad are made from (`crate::gamepad`).
+    pub(crate) axes: [f32; 24],
 }
 
 /// A gamepad's buttons, by where they are on an Xbox controller: South is
@@ -360,6 +363,10 @@ pub(crate) enum Raw {
     Focus(bool),
     /// The app went into the background.
     Suspended,
+    /// A gamepad's button (Android's key code) went down (true) or up.
+    PadButton(u32, bool),
+    /// A gamepad's axis (Android's `AXIS_*` number) moved to a value.
+    PadAxis(u32, f32),
 }
 
 /// Takes in the input since the last frame, after forgetting what went down
@@ -367,6 +374,7 @@ pub(crate) enum Raw {
 pub(crate) fn take_in(input: &mut Input, events: Vec<Raw>) {
     input.keys.clear();
     input.mouse.clear();
+    input.pad.buttons.clear();
     input.motion = AccumulatedMouseMotion::default();
     input.scroll = AccumulatedMouseScroll::default();
     input.keyboard.clear();
@@ -414,6 +422,10 @@ pub(crate) fn take_in(input: &mut Input, events: Vec<Raw>) {
             Raw::Pan(d) => input.pans.push(PanGesture(d)),
             Raw::Pinch(d) => input.pinches.push(PinchGesture(d)),
             Raw::Suspended => input.resumed = true,
+            Raw::PadButton(code, down) => {
+                crate::gamepad::android_button(&mut input.pad, code, down)
+            }
+            Raw::PadAxis(axis, value) => crate::gamepad::android_axis(&mut input.pad, axis, value),
             Raw::Focus(focused) => {
                 input.focus.push(focused);
                 if !focused {

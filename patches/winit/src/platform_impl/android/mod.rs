@@ -18,6 +18,7 @@ use crate::cursor::Cursor;
 use crate::dpi::{PhysicalPosition, PhysicalSize, Position, Size};
 use crate::error;
 use crate::error::EventLoopError;
+use crate::keyboard;
 use crate::event::{self, Force, InnerSizeWriter, StartCause};
 use crate::event_loop::{self, ActiveEventLoop as RootAEL, ControlFlow, DeviceEvents};
 use crate::platform::pump_events::PumpStatus;
@@ -182,6 +183,29 @@ fn is_touchpad_gesture(motion_event: &MotionEvent<'_>) -> bool {
                 | MotionAction::PointerUp
         )
 }
+
+/// openlem3d patch: whether an event comes from a gamepad or joystick
+/// (by its source), rather than a keyboard, a remote's D-pad or a pointer.
+fn from_gamepad(source: u32) -> bool {
+    const SOURCE_GAMEPAD_BIT: u32 = 0x0400; // AINPUT_SOURCE_GAMEPAD without the class
+    const SOURCE_JOYSTICK_BIT: u32 = 0x0100_0000; // AINPUT_SOURCE_JOYSTICK without the class
+    source & (SOURCE_GAMEPAD_BIT | SOURCE_JOYSTICK_BIT) != 0
+}
+
+/// openlem3d patch: a gamepad's sticks, triggers and hat (Android's
+/// `AXIS_*` numbers), reported as `DeviceEvent::Motion` with that number.
+const GAMEPAD_AXES: [(Axis, u32); 10] = [
+    (Axis::X, 0),
+    (Axis::Y, 1),
+    (Axis::Z, 11),
+    (Axis::Rz, 14),
+    (Axis::HatX, 15),
+    (Axis::HatY, 16),
+    (Axis::Ltrigger, 17),
+    (Axis::Rtrigger, 18),
+    (Axis::Gas, 22),
+    (Axis::Brake, 23),
+];
 
 /// openlem3d patch: whether the event comes from a mouse-like pointer: a
 /// mouse, or a touchpad moving the pointer (whose pointer is a finger, but whose
@@ -567,6 +591,20 @@ impl<T: 'static> EventLoop<T> {
             InputEvent::MotionEvent(motion_event) if is_mouse(motion_event) => {
                 self.handle_mouse_event(motion_event, callback);
             },
+            // openlem3d patch: a gamepad's sticks and triggers as axes, not as
+            // a touch at the stick's position.
+            InputEvent::MotionEvent(motion_event)
+                if from_gamepad(u32::from(motion_event.source()))
+                    && motion_event.pointer_count() > 0 =>
+            {
+                let device_id = event::DeviceId(DeviceId(motion_event.device_id()));
+                let pointer = motion_event.pointer_at_index(0);
+                for (axis, number) in GAMEPAD_AXES {
+                    let event =
+                        event::DeviceEvent::Motion { axis: number, value: pointer.axis_value(axis) as f64 };
+                    callback(event::Event::DeviceEvent { device_id, event }, self.window_target());
+                }
+            },
             InputEvent::MotionEvent(motion_event) => {
                 let window_id = window::WindowId(WindowId);
                 let device_id = event::DeviceId(DeviceId(motion_event.device_id()));
@@ -634,13 +672,25 @@ impl<T: 'static> EventLoop<T> {
                             _ => event::ElementState::Released,
                         };
 
-                        let key_char = keycodes::character_map_and_combine_key(
-                            android_app,
-                            key,
-                            &mut self.combining_accent,
-                        );
+                        // openlem3d patch: a gamepad's buttons (its D-pad too) keep
+                        // their Android key codes, unidentified, rather than
+                        // passing for arrow keys, Enter or Esc.
+                        let gamepad = from_gamepad(u32::from(key.source()));
+                        let key_char = if gamepad {
+                            None
+                        } else {
+                            keycodes::character_map_and_combine_key(
+                                android_app,
+                                key,
+                                &mut self.combining_accent,
+                            )
+                        };
 
-                        let logical_key = keycodes::to_logical(key_char, keycode);
+                        let logical_key = if gamepad {
+                            keyboard::Key::Unidentified(keyboard::NativeKey::Android(keycode.into()))
+                        } else {
+                            keycodes::to_logical(key_char, keycode)
+                        };
                         let text = if state == event::ElementState::Pressed {
                             logical_key.to_text().map(smol_str::SmolStr::new)
                         } else {
@@ -653,7 +703,13 @@ impl<T: 'static> EventLoop<T> {
                                 device_id: event::DeviceId(DeviceId(key.device_id())),
                                 event: event::KeyEvent {
                                     state,
-                                    physical_key: keycodes::to_physical_key(keycode),
+                                    physical_key: if gamepad {
+                                        keyboard::PhysicalKey::Unidentified(
+                                            keyboard::NativeKeyCode::Android(keycode.into()),
+                                        )
+                                    } else {
+                                        keycodes::to_physical_key(keycode)
+                                    },
                                     logical_key,
                                     location: keycodes::to_location(keycode),
                                     repeat: key.repeat_count() > 0,

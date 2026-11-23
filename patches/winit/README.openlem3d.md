@@ -13,4 +13,9 @@ mouse, or a touchpad moving the pointer) as `CursorMoved`, `MouseInput`,
 `PanGesture` and `PinchGesture` (and a swipe as `MouseWheel` too), and the
 system's back gesture or button as the Escape key (in `keycodes.rs`).
 
+A gamepad (by its source, `AINPUT_SOURCE_GAMEPAD` or `_JOYSTICK`) keeps its
+buttons' Android key codes, unidentified, rather than passing for arrow keys,
+Enter or Esc, and its sticks, triggers and hat are reported as
+`DeviceEvent::Motion` with Android's `AXIS_*` numbers, not as touches.
+
 Remove this copy once Bevy uses a winit that handles all of this.

@@ -241,6 +241,20 @@ impl<G: Game> ApplicationHandler for Runner<G> {
                 };
                 self.events.push(Raw::Wheel(MouseWheel { unit, x, y }));
             }
+            // A gamepad's button, as Android's patched winit reports it
+            // (`patches/winit`).
+            WindowEvent::KeyboardInput {
+                event:
+                    winit::event::KeyEvent {
+                        physical_key:
+                            PhysicalKey::Unidentified(winit::keyboard::NativeKeyCode::Android(code)),
+                        state,
+                        ..
+                    },
+                ..
+            } if crate::gamepad::is_android_button(code) => {
+                self.events.push(Raw::PadButton(code, state.is_pressed()));
+            }
             WindowEvent::KeyboardInput { event, .. } => {
                 self.events.push(Raw::Key(KeyboardInput {
                     key_code: match event.physical_key {
@@ -267,9 +281,16 @@ impl<G: Game> ApplicationHandler for Runner<G> {
     }
 
     fn device_event(&mut self, _: &ActiveEventLoop, _: DeviceId, event: DeviceEvent) {
-        if let DeviceEvent::MouseMotion { delta } = event {
-            self.events
-                .push(Raw::MouseMotion(Vec2::new(delta.0 as f32, delta.1 as f32)));
+        match event {
+            DeviceEvent::MouseMotion { delta } => {
+                self.events
+                    .push(Raw::MouseMotion(Vec2::new(delta.0 as f32, delta.1 as f32)));
+            }
+            // A gamepad's axis, as Android's patched winit reports it.
+            DeviceEvent::Motion { axis, value } if cfg!(target_os = "android") => {
+                self.events.push(Raw::PadAxis(axis, value as f32));
+            }
+            _ => {}
         }
     }
 
