@@ -122,6 +122,60 @@ pub struct SceneLayer {
     pub kind: LayerKind,
 }
 
+/// Parts of the scene left out (`--skip`, for measuring what each costs a
+/// slow GPU): layer kinds, and the sky, the sprites, the shadows and the
+/// UI.
+#[derive(Default, Clone, Copy, Debug)]
+pub struct Skip {
+    pub blocks: bool,
+    pub sea: bool,
+    pub land: bool,
+    pub objects: bool,
+    pub snow: bool,
+    pub sky: bool,
+    pub sprites: bool,
+    pub shadows: bool,
+    pub ui: bool,
+}
+
+pub static SKIP: std::sync::OnceLock<Skip> = std::sync::OnceLock::new();
+
+fn skip() -> Skip {
+    SKIP.get().copied().unwrap_or_default()
+}
+
+impl Skip {
+    /// From a comma-separated list of the parts' names.
+    pub fn parse(list: &str) -> Skip {
+        let mut s = Skip::default();
+        for name in list.split(',') {
+            match name.trim() {
+                "blocks" => s.blocks = true,
+                "sea" => s.sea = true,
+                "land" => s.land = true,
+                "objects" => s.objects = true,
+                "snow" => s.snow = true,
+                "sky" => s.sky = true,
+                "sprites" => s.sprites = true,
+                "shadows" => s.shadows = true,
+                "ui" => s.ui = true,
+                other => panic!("--skip: unknown part {other}"),
+            }
+        }
+        s
+    }
+
+    fn layer(self, kind: LayerKind) -> bool {
+        match kind {
+            LayerKind::Blocks | LayerKind::Screen => self.blocks,
+            LayerKind::Sea => self.sea,
+            LayerKind::Land => self.land,
+            LayerKind::Objects => self.objects,
+            LayerKind::Snow => self.snow,
+        }
+    }
+}
+
 /// What a scene layer is, for the features its pixels can show.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum LayerKind {
@@ -348,6 +402,7 @@ struct Features {
     gloss: bool,
     storm: bool,
     mirror: bool,
+    cutout: bool,
 }
 
 impl Features {
@@ -359,13 +414,18 @@ impl Features {
             mirror: self.mirror,
             ..Features::default()
         };
+        // Cut-out texels on the blocks and the objects (and sprites) only.
+        let cutout = Features {
+            cutout: true,
+            ..only
+        };
         match kind {
             LayerKind::Blocks => Features {
                 windows: self.windows,
                 circuit: self.circuit,
                 snow: self.snow,
                 gloss: self.gloss,
-                ..only
+                ..cutout
             },
             LayerKind::Screen => Features {
                 screens: self.screens,
@@ -389,7 +449,7 @@ impl Features {
                 snow: self.snow,
                 ..only
             },
-            LayerKind::Objects => only,
+            LayerKind::Objects => cutout,
         }
     }
 
@@ -404,6 +464,7 @@ impl Features {
             ("GLOSS", on(self.gloss)),
             ("STORM", on(self.storm)),
             ("MIRROR", on(self.mirror)),
+            ("CUTOUT", on(self.cutout)),
         ]
     }
 }
@@ -1783,6 +1844,7 @@ fn draw(
             gloss: d.glossy > 0.0,
             storm: d.storm,
             mirror: d.mirror.is_some(),
+            cutout: true,
         });
     gpu.pipelines(&device, scene_format, &need, features);
     // The geometry's pipelines, one for each kind of layer the level has
@@ -1964,7 +2026,23 @@ fn draw(
         let instance = if mirrored { 1..2 } else { 0..1 };
         let geometry = geometry_for(mirrored, LayerKind::Objects);
         pass.set_bind_group(1, second, &[]);
-        for layer in &gpu.layers {
+        // Nearest first, as far as the kinds go: the blocks, then the land
+        // and the sea they stand on, so that the depth test turns away the
+        // ground's pixels under the blocks before they are shaded (drawn
+        // first, the sea was shaded under the whole level; see `CUTOUT` in
+        // `scene.wgsl`); the rest after, in their order.
+        let order = |kind: LayerKind| match kind {
+            LayerKind::Blocks | LayerKind::Screen => 0,
+            LayerKind::Land => 1,
+            LayerKind::Sea => 2,
+            LayerKind::Snow | LayerKind::Objects => 3,
+        };
+        let mut layers: Vec<&UploadedLayer> = gpu.layers.iter().collect();
+        layers.sort_by_key(|l| order(l.kind));
+        for layer in layers {
+            if skip().layer(layer.kind) {
+                continue;
+            }
             pass.set_pipeline(geometry_for(mirrored, layer.kind));
             let own = layer.bind_group.for_camera(camera);
             let bind = match &screen {
@@ -1977,7 +2055,8 @@ fn draw(
             pass.draw_indexed(0..layer.index_count, 0, instance.clone());
         }
         // Shadows on what is drawn so far, before the sprites that cast them.
-        if let (false, Some(atlas), Some((v, i, n))) = (mirrored, &gpu.sprite_atlas, &gpu.shadows)
+        if let (false, false, Some(atlas), Some((v, i, n))) =
+            (mirrored, skip().shadows, &gpu.sprite_atlas, &gpu.shadows)
             && *n > 0
         {
             pass.set_bind_group(0, atlas, &[]);
@@ -1989,7 +2068,8 @@ fn draw(
             }
             pass.set_pipeline(geometry);
         }
-        if let (Some(atlas), Some((v, i, n))) = (&gpu.sprite_atlas, &gpu.sprites)
+        if let (false, Some(atlas), Some((v, i, n))) =
+            (skip().sprites, &gpu.sprite_atlas, &gpu.sprites)
             && *n > 0
         {
             pass.set_pipeline(geometry);
@@ -2001,7 +2081,7 @@ fn draw(
         // The sky last, where nothing else is (its depth test passes only
         // where nothing was drawn): drawn first, it was drawn under the sea
         // and the land too, each of their pixels twice.
-        if let Some(sky) = &gpu.sky {
+        if let Some(sky) = gpu.sky.as_ref().filter(|_| !skip().sky) {
             pass.set_pipeline(scene_p(Which::Sky));
             let sky = if bare {
                 sky.for_camera(camera)

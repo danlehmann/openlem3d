@@ -194,6 +194,11 @@ fn parse_args() -> Options {
                 o.max_height = Some(val().parse().expect("--max-height takes a number of rows"))
             }
             "--profile" => o.profile = true,
+            // Parts of the scene left out, for measuring (see
+            // `scene_render::Skip`).
+            "--skip" => {
+                let _ = scene_render::SKIP.set(scene_render::Skip::parse(&val()));
+            }
             "--hdr" => o.hdr = true,
             "--hdr-blink" => (o.hdr, o.hdr_blink) = (true, true),
             "--preset" => {

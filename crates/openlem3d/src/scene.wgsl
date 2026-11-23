@@ -291,6 +291,11 @@ override SNOW: bool = true;
 override GLOSS: bool = true;
 override STORM: bool = true;
 override MIRROR: bool = true;
+// Cut-out texels are discarded (blocks' see-through parts, sprites). Left
+// out of the layers that have none (the sea, the land): a shader that may
+// discard is shaded before its depth test on a tiled GPU, so nothing
+// hidden behind nearer surfaces or the UI was turned away beforehand.
+override CUTOUT: bool = true;
 
 @fragment
 fn fs(v: VOut) -> @location(0) vec4<f32> {
@@ -327,7 +332,7 @@ fn fs(v: VOut) -> @location(0) vec4<f32> {
         uv = clamp(uv, vec2(half.x, tile / TILES + half.y), vec2(1.0 - half.x, (tile + 1.0) / TILES - half.y));
     }
     let c = textureSampleGrad(tex, samp, uv, gx, gy);
-    if (v.params.y > 0.5 && c.a < 0.5) {
+    if (CUTOUT && v.params.y > 0.5 && c.a < 0.5) {
         discard;
     }
     // The original shades a colour down its palette ramp, whose entries

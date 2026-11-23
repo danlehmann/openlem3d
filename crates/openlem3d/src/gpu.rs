@@ -678,7 +678,11 @@ pub(crate) fn render(w: &mut World) {
     let ui = ui.get_or_insert_with(|| UiGpu::new(gpu, format, Some(depth)));
     ui.prepare(gpu, viewport, &w.ui, &mut w.e.images);
     let ui = &*ui;
-    let overlay = |pass: &mut wgpu::RenderPass<'_>, depth: bool| ui.record(pass, depth, size);
+    let overlay = |pass: &mut wgpu::RenderPass<'_>, depth: bool| {
+        if !crate::scene_render::SKIP.get().is_some_and(|s| s.ui) {
+            ui.record(pass, depth, size)
+        }
+    };
     // The full-screen menus cover the level, which is not drawn behind them
     // (after a level it was, at its settings, slowing the menus).
     use crate::menu::AppState;
