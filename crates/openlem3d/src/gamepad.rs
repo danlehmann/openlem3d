@@ -552,7 +552,7 @@ fn level(w: &mut World, pad: &l3d_engine::input::Pad) {
     }
     let riding = following.map(|_| w.view.head);
     // A turner waiting for its side: the D-pad points it, any way on
-    // screen (riding along, left or right); B lets it go.
+    // screen, to the arrow nearest that way; B lets it go.
     let pending = w.pending.0.filter(|_| !w.game.paused);
     let dpad = Vec2::new(
         b.just_pressed(PadButton::Right) as i32 as f32
@@ -561,10 +561,15 @@ fn level(w: &mut World, pad: &l3d_engine::input::Pad) {
     );
     if let Some(i) = pending {
         let point = match riding {
-            Some(_) if dpad.x != 0.0 => {
-                Some(Vec2::new(size.x * (0.5 + dpad.x * 0.25), size.y / 2.0))
+            // Riding along, the arrows lie along the lemming's sides as
+            // seen with the head turned (up and down looking aside): the
+            // way pressed picks the arrow it points most towards; along
+            // the heading, neither.
+            Some(head) => {
+                let right = crate::hud::riding_axes(head).0;
+                let along = dpad.normalize_or_zero().dot(right);
+                (along.abs() > 0.3).then(|| size / 2.0 + right * along.signum() * size.x * 0.25)
             }
-            Some(_) => None,
             None if dpad != Vec2::ZERO => Some(
                 crate::hud::to_screen(
                     &w.camera,

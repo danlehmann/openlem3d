@@ -552,7 +552,7 @@ pub fn nearest_to_centre(
 /// The lemming's right and its back on screen (y down) with its head turned
 /// `head` radians to the right: ahead of the eyes is up the screen, so
 /// looking a quarter turn right its right is up.
-fn riding_axes(head: f32) -> (Vec2, Vec2) {
+pub(crate) fn riding_axes(head: f32) -> (Vec2, Vec2) {
     let (s, c) = head.sin_cos();
     (Vec2::new(c, -s), Vec2::new(s, c))
 }
