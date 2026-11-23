@@ -5,7 +5,9 @@
 //! settings that mean something here are offered, and some of ours: Rewind,
 //! FPS and the mode, named in its box and switched by clicking it.
 //! Esc, or a four-finger tap, also saves and leaves; F12 or a four-finger
-//! tap opens it from the title or a level.
+//! tap opens it from the title or a level. A gamepad steps a frame from
+//! setting to setting (ours): A switches a toggle or the mode and presses
+//! the buttons, the bumpers move a slider down and up.
 
 use l3d_engine::prelude::*;
 use l3d_formats::icons::Icons;
@@ -26,6 +28,19 @@ pub(crate) struct OptionsScreen {
     shown: Vec<(NodeId, Light)>,
     mode: Option<(NodeId, Mode)>,
     fullscreen: Option<bool>,
+    /// The settings and buttons as a gamepad steps through them: each one's
+    /// box (canvas pixels), the frame round the one it is on, and which.
+    entries: Vec<(Rect, Entry)>,
+    frame: Option<NodeId>,
+    focus: Option<usize>,
+}
+
+#[derive(Clone, Copy)]
+enum Entry {
+    Toggle(Item),
+    Slider(Item),
+    Default,
+    Exit,
 }
 
 struct Lights {
@@ -135,6 +150,8 @@ pub(crate) fn spawn_options(w: &mut World) {
     w.screen_ui = Some(screen);
     w.options.targets.clear();
     w.options.shown.clear();
+    w.options.entries = entries();
+    w.options.focus = None;
     let font = &lights.font;
     let text = |ui: &mut Ui, s: &str, x: f32, y: f32| {
         let (glyphs, _) = font.layout(s);
@@ -206,6 +223,138 @@ pub(crate) fn spawn_options(w: &mut World) {
         }
         w.options.targets.push((b, target));
         centred(ui, &label.to_uppercase(), x + 40.0, 184.0);
+    }
+    w.options.frame = Some(
+        ui.child(
+            canvas,
+            UiNode::new()
+                .at(0.0, 0.0, 1.0, 1.0)
+                .border(px(2), Color::srgb(1.0, 0.9, 0.2))
+                .hidden(),
+        ),
+    );
+}
+
+/// The settings and buttons a gamepad steps through, with their boxes, as
+/// `spawn_options` lays them out.
+fn entries() -> Vec<(Rect, Entry)> {
+    let mut e = Vec::new();
+    for (item, _, row, col) in TOGGLES {
+        let (x, y) = (COLUMNS[col], TOGGLE_ROWS[row]);
+        e.push((
+            Rect::new(x, y, x + 80.0, y + BOX_HEIGHT),
+            Entry::Toggle(item),
+        ));
+    }
+    for (item, _, row, col) in SLIDERS {
+        let ((x, _), y) = (SLIDER_COLUMNS[col], SLIDER_ROWS[row]);
+        e.push((
+            Rect::new(x, y, x + 160.0, y + BOX_HEIGHT),
+            Entry::Slider(item),
+        ));
+    }
+    let (x, y) = MODE_BOX;
+    e.push((
+        Rect::new(x, y, x + 160.0, y + BOX_HEIGHT),
+        Entry::Toggle(Item::Mode),
+    ));
+    e.push((Rect::new(0.0, 180.0, 80.0, 195.0), Entry::Default));
+    e.push((Rect::new(240.0, 180.0, 320.0, 195.0), Entry::Exit));
+    e
+}
+
+/// The box next to box `i` the way `way` points (its stronger axis): the
+/// nearest past its edge that way, better the more it lines up with it
+/// across, worse the further it lies off to the side. Left and right stay
+/// in the row.
+pub(crate) fn neighbour(boxes: &[Rect], i: usize, way: Vec2) -> Option<usize> {
+    let from = boxes[i];
+    // How much two intervals overlap; negative, how far apart they are.
+    let overlap = |a0: f32, a1: f32, b0: f32, b1: f32| a1.min(b1) - a0.max(b0);
+    let horizontal = way.x.abs() > way.y.abs();
+    let forward = if horizontal { way.x } else { way.y } > 0.0;
+    boxes
+        .iter()
+        .enumerate()
+        .filter(|&(j, _)| j != i)
+        .filter_map(|(j, r)| {
+            let (gap, across) = match (horizontal, forward) {
+                (true, true) => (
+                    r.min.x - from.max.x,
+                    overlap(from.min.y, from.max.y, r.min.y, r.max.y),
+                ),
+                (true, false) => (
+                    from.min.x - r.max.x,
+                    overlap(from.min.y, from.max.y, r.min.y, r.max.y),
+                ),
+                (false, true) => (
+                    r.min.y - from.max.y,
+                    overlap(from.min.x, from.max.x, r.min.x, r.max.x),
+                ),
+                (false, false) => (
+                    from.min.y - r.max.y,
+                    overlap(from.min.x, from.max.x, r.min.x, r.max.x),
+                ),
+            };
+            if gap < -0.5 || (horizontal && across <= 0.0) {
+                return None;
+            }
+            let side = if across > 0.0 {
+                -across * 0.5
+            } else {
+                -across * 2.0
+            };
+            Some((j, gap + side))
+        })
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(j, _)| j)
+}
+
+/// A gamepad on this screen: `way` the way the D-pad or stick stepped (or
+/// zero), then A and the bumpers on the setting framed.
+pub(crate) fn gamepad(w: &mut World, way: Vec2, press: bool, slide: i32) {
+    let o = &mut w.options;
+    if o.entries.is_empty() {
+        return;
+    }
+    // With a gamepad connected, the frame starts on the first setting.
+    if o.focus.is_none() {
+        o.focus = Some(0);
+    } else if let Some(i) = o.focus
+        && way != Vec2::ZERO
+    {
+        let boxes: Vec<Rect> = o.entries.iter().map(|e| e.0).collect();
+        o.focus = Some(neighbour(&boxes, i, way).unwrap_or(i));
+    }
+    let Some(i) = o.focus else {
+        return;
+    };
+    let (rect, entry) = o.entries[i];
+    if let Some(n) = o.frame.and_then(|f| w.ui.get_mut(f)) {
+        n.at = Some(Rect::new(
+            rect.min.x - 2.0,
+            rect.min.y - 2.0,
+            rect.max.x + 2.0,
+            rect.max.y + 2.0,
+        ));
+        n.set_visible(true);
+    }
+    let settings = &mut w.settings;
+    match entry {
+        Entry::Toggle(item) if press || (item == Item::Mode && slide != 0) => {
+            toggle(settings, item)
+        }
+        Entry::Slider(item) if slide != 0 => {
+            if let Some(v) = level(settings, item) {
+                *v = (*v as i32 + slide).clamp(0, SLIDER_STEPS as i32) as u8;
+            }
+        }
+        Entry::Default if press => *settings = Settings::default(),
+        Entry::Exit if press => {
+            settings.save();
+            w.next_state = Some(std::mem::take(&mut w.options_from.0));
+        }
+        _ => {}
     }
 }
 
@@ -350,5 +499,62 @@ pub(crate) fn open_in_level(w: &mut World) {
     if w.e.input.keys.just_pressed(KeyCode::F12) || crate::touch::four_finger_tap(w) {
         w.options_from.0 = AppState::Playing;
         w.next_state = Some(AppState::Options);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Where the gamepad steps from each setting (`--nocapture` prints
+    /// them all).
+    #[test]
+    fn gamepad_steps() {
+        let e = entries();
+        let name = |i: Option<usize>| match i.map(|i| e[i].1) {
+            None => "-".to_string(),
+            Some(Entry::Toggle(item) | Entry::Slider(item)) => format!("{item:?}"),
+            Some(Entry::Default) => "Default".into(),
+            Some(Entry::Exit) => "Exit".into(),
+        };
+        let boxes: Vec<Rect> = e.iter().map(|e| e.0).collect();
+        for i in 0..e.len() {
+            println!(
+                "{:>10}: up {:>10} down {:>10} left {:>10} right {:>10}",
+                name(Some(i)),
+                name(neighbour(&boxes, i, Vec2::NEG_Y)),
+                name(neighbour(&boxes, i, Vec2::Y)),
+                name(neighbour(&boxes, i, Vec2::NEG_X)),
+                name(neighbour(&boxes, i, Vec2::X)),
+            );
+        }
+        let find = |n: &str| (0..e.len()).find(|&i| name(Some(i)) == n).unwrap();
+        let step = |from: &str, way: Vec2| name(neighbour(&boxes, find(from), way));
+        // Straight down the columns, not to the nearest middle (owner:
+        // Fullscreen went down to Default Config).
+        assert_eq!(step("Fullscreen", Vec2::Y), "Music");
+        assert_eq!(step("Sea", Vec2::Y), "Rewind");
+        assert_eq!(step("Fps", Vec2::Y), "Camera");
+        assert_eq!(step("Mode", Vec2::NEG_Y), "Camera");
+        assert_eq!(step("Effects", Vec2::Y), "Default");
+        assert_eq!(step("Mode", Vec2::Y), "Exit");
+        // Left and right stay in the row.
+        assert_eq!(step("Fps", Vec2::X), "-");
+        // Every setting and button can be reached from the first.
+        let mut seen = vec![false; e.len()];
+        let mut todo = vec![0];
+        while let Some(i) = todo.pop() {
+            if std::mem::replace(&mut seen[i], true) {
+                continue;
+            }
+            for way in [Vec2::X, Vec2::NEG_X, Vec2::Y, Vec2::NEG_Y] {
+                todo.extend(neighbour(&boxes, i, way));
+            }
+        }
+        let missed: Vec<_> = (0..e.len())
+            .filter(|&i| !seen[i])
+            .map(|i| name(Some(i)))
+            .collect();
+        assert!(missed.is_empty(), "unreachable: {missed:?}");
     }
 }

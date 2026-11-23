@@ -24,6 +24,7 @@ pub struct Engine {
     pub time: Clocks,
     pub images: Assets<Image>,
     pub audio: Audio,
+    pub(crate) pads: crate::gamepad::Pads,
     exit: bool,
 }
 
@@ -39,6 +40,7 @@ impl Engine {
             time: Clocks::default(),
             images: Assets::default(),
             audio: Audio::open(),
+            pads: crate::gamepad::Pads::open(),
             exit: false,
         }
     }

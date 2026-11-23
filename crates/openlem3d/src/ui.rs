@@ -443,6 +443,25 @@ impl Ui {
             .collect()
     }
 
+    /// The middle of node `id` (in physical pixels from the screen's corner,
+    /// as [`Ui::focus`] measures the pointer), if it is shown.
+    pub fn middle(&self, id: NodeId) -> Option<Vec2> {
+        self.get(id)
+            .filter(|n| n.computed.visible)
+            .map(|n| n.computed.pixels.center())
+    }
+
+    /// The buttons shown: each one's rectangle (logical pixels on the
+    /// screen) and middle (in physical pixels from the screen's corner, as
+    /// [`Ui::focus`] measures the pointer).
+    pub fn button_rects(&self) -> Vec<(Rect, Vec2)> {
+        self.nodes()
+            .filter(|(_, n)| n.button && n.computed.visible)
+            .map(|(_, n)| (n.computed.rect, n.computed.pixels.center()))
+            .filter(|&(_, p)| self.nodes().any(|(id, n)| n.button && self.over(id, p)))
+            .collect()
+    }
+
     /// Whether any node is pressed.
     pub fn any_pressed(&self) -> bool {
         self.nodes()

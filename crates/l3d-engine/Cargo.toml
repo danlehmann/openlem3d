@@ -12,5 +12,8 @@ log = { version = "0.4", features = ["std"] }
 rodio = { version = "0.22", default-features = false, features = ["playback"] }
 winit = { version = "0.30.13", default-features = false, features = ["rwh_06", "x11", "wayland", "wayland-csd-adwaita"] }
 
+[target.'cfg(not(target_os = "android"))'.dependencies]
+gilrs = "0.11.2"
+
 [target.'cfg(target_os = "android")'.dependencies]
 winit = { version = "0.30.13", default-features = false, features = ["android-native-activity"] }

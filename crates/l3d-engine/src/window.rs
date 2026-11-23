@@ -107,6 +107,11 @@ pub struct Window {
     pub focused: bool,
     /// The pointer, in physical pixels in the window, if it is over it.
     pub cursor: Option<Vec2>,
+    /// Hides the system's pointer over the window.
+    pub cursor_hidden: bool,
+    /// Where to move the system's pointer to, in physical pixels in the
+    /// window (taken once done).
+    pub warp: Option<Vec2>,
 }
 
 impl Default for Window {
@@ -119,6 +124,8 @@ impl Default for Window {
             ime_enabled: false,
             focused: true,
             cursor: None,
+            warp: None,
+            cursor_hidden: false,
         }
     }
 }
@@ -157,6 +164,13 @@ impl Window {
     /// Moves where the window thinks the pointer is (not the pointer).
     pub fn set_physical_cursor_position(&mut self, position: Option<Vec2>) {
         self.cursor = position;
+    }
+
+    /// Moves the system's pointer there (physical pixels in the window),
+    /// and where the window thinks it is.
+    pub fn warp_cursor(&mut self, position: Vec2) {
+        self.cursor = Some(position);
+        self.warp = Some(position);
     }
 }
 

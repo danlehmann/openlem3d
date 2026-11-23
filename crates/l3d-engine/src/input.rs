@@ -1,4 +1,4 @@
-//! Keyboard, mouse, touch and gesture input, in the shapes Bevy gave it:
+//! Keyboard, mouse, touch, gesture and gamepad input, in the shapes Bevy gave it:
 //! what is held, what went down or up since the last frame, and the
 //! frame's events. Everything that happened since the last frame is taken
 //! in before it starts.
@@ -27,6 +27,46 @@ pub struct Input {
     pub focus: Vec<bool>,
     /// Whether the app was in the background (Android) since the last frame.
     pub resumed: bool,
+    /// The gamepads, as one.
+    pub pad: Pad,
+}
+
+/// The gamepads' buttons, sticks and triggers, all of them taken together
+/// (`crate::gamepad`).
+#[derive(Debug, Clone, Default)]
+pub struct Pad {
+    pub buttons: ButtonInput<PadButton>,
+    /// The sticks, −1 to 1 on each axis, right and up positive, with a dead
+    /// zone in the middle.
+    pub left: Vec2,
+    pub right: Vec2,
+    /// How far the triggers are pulled, 0 to 1.
+    pub left_trigger: f32,
+    pub right_trigger: f32,
+    /// Whether a gamepad is connected.
+    pub connected: bool,
+}
+
+/// A gamepad's buttons, by where they are on an Xbox controller: South is
+/// A, East B, West X, North Y; Select is View, Start Menu.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum PadButton {
+    South,
+    East,
+    West,
+    North,
+    LeftBumper,
+    RightBumper,
+    LeftTrigger,
+    RightTrigger,
+    Select,
+    Start,
+    LeftStick,
+    RightStick,
+    Up,
+    Down,
+    Left,
+    Right,
 }
 
 /// Which of some buttons are held, and which went down or up since the

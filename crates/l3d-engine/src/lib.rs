@@ -7,6 +7,7 @@ pub mod asset;
 pub mod audio;
 pub mod color;
 mod engine;
+mod gamepad;
 pub mod image;
 pub mod input;
 mod logging;

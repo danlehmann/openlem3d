@@ -44,6 +44,8 @@ const SKILL_FPS: f32 = 50.0;
 /// owner finds too hurried.
 const PAWS_FPS: f32 = 35.0;
 const ARROW_FPS: f32 = 20.0;
+/// Flashes a second of the bomb while a gamepad's bumpers are held to nuke.
+const NUKE_HELD_FLASHES: f32 = 8.0;
 /// The bomb's mushroom cloud, looped after a nuke (rate ours).
 const EXPLOSION_FPS: f32 = 14.0;
 /// The longest gap between the two clicks of a double click (ours).
@@ -265,6 +267,8 @@ pub(crate) struct Panel {
     last_bomb_click: Option<f32>,
     carry: f32,
     nuked_at: Option<f32>,
+    /// A gamepad's bumpers are held to nuke (`gamepad`): the bomb flashes.
+    pub(crate) nuke_held: bool,
     /// A skill given straight to the highlighted lemming, and when (real
     /// seconds): its button plays its animation once, though nothing is
     /// selected (owner's observation).
@@ -953,6 +957,7 @@ fn animate(w: &mut World) {
         _ => {}
     }
     let nuked_at = panel.nuked_at;
+    let nuke_held = panel.nuke_held;
     let down = |a: Action| {
         panel
             .actions
@@ -979,7 +984,7 @@ fn animate(w: &mut World) {
                     .filter(|&k| k < cells.len());
                 let frame = if let Some(k) = once {
                     k
-                } else if selected.0 == Some(s) && left && !highlight.on {
+                } else if selected.0 == Some(s) && left {
                     (t * SKILL_FPS / 4.0) as usize % cells.len()
                 } else {
                     0
@@ -1033,6 +1038,10 @@ fn animate(w: &mut World) {
                 Some(at) => art.panel[icon::EXPLOSION.start
                     + ((t - at) * EXPLOSION_FPS) as usize % icon::EXPLOSION.len()]
                 .clone(),
+                // Flashing while a gamepad's bumpers are held to nuke.
+                None if nuke_held && (t * NUKE_HELD_FLASHES) as u32 % 2 == 1 => {
+                    art.panel[icon::EXPLOSION.start].clone()
+                }
                 None => art.panel[icon::BOMB].clone(),
             },
         };

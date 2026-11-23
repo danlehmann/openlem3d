@@ -1,0 +1,612 @@
+//! Playing with a gamepad (ours): no pointer to steer. In a level the
+//! original's highlight marks the lemming skills go to (the panel's arrow),
+//! and the D-pad steps it from lemming to lemming on screen; the bumpers
+//! choose the skill and A gives it. The sticks move the camera
+//! (`camera_controls`). On the other screens the D-pad and the left stick
+//! jump the pointer from button to button, A presses and B goes back.
+//!
+//! In a level: A gives the skill, B pauses, X rides along with the
+//! highlighted lemming (and back), Y the next camera view; the D-pad's up
+//! and down the release rate; the left trigger runs the level back and the
+//! right one forward as fast as they are pulled (`backspace_rewind`); the
+//! right stick's click highlights the lemming nearest the middle again;
+//! Menu opens the options and View is Esc.
+
+use l3d_engine::input::{KeyCode, MouseButton, PadButton};
+use l3d_engine::math::Vec2;
+use l3d_sim::Skill;
+
+use crate::World;
+use crate::hud::Highlight;
+use crate::menu::AppState;
+use crate::ui::{UiNode, px};
+use l3d_engine::math::Rect;
+use l3d_engine::prelude::Color;
+
+/// How far a stick must be pushed to step to the next button, and how far
+/// back to let it step again.
+const STICK_STEP: f32 = 0.6;
+const STICK_REST: f32 = 0.3;
+/// The frame round the button the gamepad is on: above everything.
+const FRAME_Z: i32 = 1000;
+/// How long both bumpers must be held to nuke (seconds).
+const NUKE_HOLD: f32 = 1.0;
+/// Held, the D-pad (or a stick pushed) steps again after this long, then
+/// this often (seconds): quickly down a list.
+const REPEAT_AFTER: f32 = 0.35;
+const REPEAT_EVERY: f32 = 0.07;
+
+/// What the gamepad pressed for the game, let go again.
+#[derive(Default)]
+pub struct GamepadState {
+    /// Keys pressed for a frame, let go the next.
+    tapped: Vec<KeyCode>,
+    /// Keys held while a button is: (button, key).
+    held: Vec<(PadButton, KeyCode)>,
+    /// The left mouse button pressed for a frame, on a button.
+    clicked: bool,
+    /// The left stick is back near the middle, so a push steps again.
+    stick_ready: bool,
+    /// The gamepad has been used in this level: it keeps a lemming
+    /// highlighted.
+    playing: Option<u32>,
+    /// The gamepad was used last, not the mouse.
+    in_use: bool,
+    /// The button the frame is on, by its middle (as `Ui::button_rects`),
+    /// and the frame.
+    focus: Option<Vec2>,
+    frame: Option<crate::ui::NodeId>,
+    /// The screen the gamepad was last on: a new one starts afresh.
+    screen: Option<(AppState, bool)>,
+    /// Both bumpers held to nuke: since when (real seconds), and the skill
+    /// selected before the first of them stepped it.
+    nuke_since: Option<f32>,
+    before_bumper: Option<Option<Skill>>,
+    /// Letters typed on the code screen, and the last one's.
+    letters: usize,
+    letter: u8,
+    /// The way held on the D-pad or left stick in a list, and when it
+    /// steps next (real seconds).
+    repeat: Option<(i32, f32)>,
+}
+
+/// Takes in the gamepad, after the frame's other input and before the
+/// game's systems read it.
+pub(crate) fn input(w: &mut World) {
+    let pad = w.e.input.pad.clone();
+    let g = &mut w.gamepad;
+    let keys = &mut w.e.input.keys;
+    for k in g.tapped.drain(..) {
+        keys.release(k);
+    }
+    g.held.retain(|&(b, k)| {
+        let on = pad.buttons.pressed(b);
+        if !on {
+            keys.release(k);
+        }
+        on
+    });
+    if std::mem::take(&mut g.clicked) {
+        w.e.input.mouse.release(MouseButton::Left);
+    }
+    w.panel.nuke_held = false;
+    if !pad.connected {
+        w.gamepad.in_use = false;
+        w.e.window.cursor_hidden = false;
+        frame(w, None);
+        return;
+    }
+    let menu = w.state != AppState::Playing || w.confirm.question.is_some();
+    // The pointer is hidden while the gamepad is in use (a frame shows the
+    // button it is on), until the mouse moves or clicks.
+    let used = pad.buttons.get_just_pressed().len() > 0
+        || pad.left != Vec2::ZERO
+        || pad.right != Vec2::ZERO;
+    let mouse = &w.e.input;
+    if mouse.motion.delta != Vec2::ZERO || mouse.mouse.get_just_pressed().len() > 0 {
+        w.gamepad.in_use = false;
+    } else if used {
+        w.gamepad.in_use = true;
+    }
+    w.e.window.cursor_hidden = w.gamepad.in_use;
+    // View is Esc everywhere; B goes back outside levels.
+    if pad.buttons.just_pressed(PadButton::Select)
+        || (menu && w.state != AppState::Code && pad.buttons.just_pressed(PadButton::East))
+        || (w.state == AppState::Options && pad.buttons.just_pressed(PadButton::Start))
+    {
+        tap(w, KeyCode::Escape);
+    }
+    if w.state != AppState::Code {
+        w.gamepad.letters = 0;
+    }
+    // The frame is on a button only where `buttons` puts it, this frame.
+    frame(w, None);
+    // The level's preview: its choices as on the briefing (starting on
+    // Continue), B back to the list.
+    if w.state == AppState::Playing && w.preview.active {
+        if pad.buttons.just_pressed(PadButton::East) {
+            tap(w, KeyCode::Escape);
+        } else {
+            buttons(w, &pad);
+        }
+        return;
+    }
+    // A question (restart the level?): A says yes, B (Esc) no.
+    if w.confirm.question.is_some() {
+        if pad.buttons.just_pressed(PadButton::South) {
+            tap(w, KeyCode::KeyY);
+        }
+    } else if w.state == AppState::Menu {
+        list(w, &pad);
+    } else if w.state == AppState::Code {
+        code(w, &pad);
+    } else if w.state == AppState::Options {
+        let way = stepped(w, &pad);
+        let b = &pad.buttons;
+        let slide = b.just_pressed(PadButton::RightBumper) as i32
+            - b.just_pressed(PadButton::LeftBumper) as i32;
+        crate::options::gamepad(w, way, b.just_pressed(PadButton::South), slide);
+    } else if menu {
+        buttons(w, &pad);
+    } else {
+        level(w, &pad);
+    }
+}
+
+fn tap(w: &mut World, key: KeyCode) {
+    w.e.input.keys.press(key);
+    w.gamepad.tapped.push(key);
+}
+
+fn hold(w: &mut World, button: PadButton, key: KeyCode) {
+    w.e.input.keys.press(key);
+    w.gamepad.held.push((button, key));
+}
+
+/// Up or down held on the D-pad or left stick: whether to step now (at
+/// once, then after a pause, then quickly) and which way (down positive).
+fn repeated(w: &mut World, pad: &l3d_engine::input::Pad) -> Option<i32> {
+    let b = &pad.buttons;
+    let now = w.e.time.real.elapsed_secs();
+    let way = (b.pressed(PadButton::Down) || pad.left.y < -STICK_STEP) as i32
+        - (b.pressed(PadButton::Up) || pad.left.y > STICK_STEP) as i32;
+    match (way, w.gamepad.repeat) {
+        (0, _) => {
+            w.gamepad.repeat = None;
+            None
+        }
+        (_, Some((held, next))) if held == way => (now >= next).then(|| {
+            w.gamepad.repeat = Some((way, now + REPEAT_EVERY));
+            way
+        }),
+        _ => {
+            w.gamepad.repeat = Some((way, now + REPEAT_AFTER));
+            Some(way)
+        }
+    }
+}
+
+/// Typing `key` (and its text) as if on the keyboard.
+fn type_key(w: &mut World, key_code: Option<KeyCode>, logical: l3d_engine::input::Key) {
+    w.e.input.keyboard.push(l3d_engine::input::KeyboardInput {
+        key_code,
+        text: match &logical {
+            l3d_engine::input::Key::Character(s) => Some(s.clone()),
+            _ => None,
+        },
+        logical_key: logical,
+        state: l3d_engine::input::ButtonState::Pressed,
+        repeat: false,
+    });
+}
+
+/// The code screen: up and down step the last letter through the
+/// alphabet (the first push types an A), right starts the next letter,
+/// left and B rub one out, A enters the code; View leaves.
+fn code(w: &mut World, pad: &l3d_engine::input::Pad) {
+    use l3d_engine::input::{Key, NamedKey};
+    let b = &pad.buttons;
+    let letter = |c: u8| Key::Character((c as char).to_string().into());
+    let mut typed = None;
+    if let Some(way) = repeated(w, pad) {
+        let g = &mut w.gamepad;
+        if g.letters == 0 {
+            typed = Some(b'A');
+        } else {
+            // Down goes on through the alphabet, up back.
+            let c = (g.letter - b'A' + if way > 0 { 1 } else { 25 }) % 26 + b'A';
+            type_key(w, Some(KeyCode::Backspace), Key::Named(NamedKey::Backspace));
+            w.gamepad.letters -= 1;
+            typed = Some(c);
+        }
+    }
+    if b.just_pressed(PadButton::Right) && w.gamepad.letters < 8 {
+        typed = Some(if w.gamepad.letters == 0 {
+            b'A'
+        } else {
+            w.gamepad.letter
+        });
+    }
+    if let Some(c) = typed {
+        type_key(w, None, letter(c));
+        w.gamepad.letters += 1;
+        w.gamepad.letter = c;
+    }
+    if (b.just_pressed(PadButton::Left) || b.just_pressed(PadButton::East)) && w.gamepad.letters > 0
+    {
+        type_key(w, Some(KeyCode::Backspace), Key::Named(NamedKey::Backspace));
+        w.gamepad.letters -= 1;
+    }
+    if b.just_pressed(PadButton::South) {
+        type_key(w, Some(KeyCode::Enter), Key::Named(NamedKey::Enter));
+        w.gamepad.letters = 0;
+    }
+}
+
+/// The level list: up and down (held, quickly) move the highlighted row,
+/// the bumpers a page, left and right the rating, A chooses (the keys'
+/// doing, `menu::menu_input`).
+fn list(w: &mut World, pad: &l3d_engine::input::Pad) {
+    let b = &pad.buttons;
+    if let Some(way) = repeated(w, pad) {
+        tap(
+            w,
+            if way > 0 {
+                KeyCode::ArrowDown
+            } else {
+                KeyCode::ArrowUp
+            },
+        );
+    }
+    for (button, key) in [
+        (PadButton::LeftBumper, KeyCode::PageUp),
+        (PadButton::RightBumper, KeyCode::PageDown),
+        (PadButton::Left, KeyCode::ArrowLeft),
+        (PadButton::Right, KeyCode::ArrowRight),
+        (PadButton::South, KeyCode::Enter),
+    ] {
+        if b.just_pressed(button) {
+            tap(w, key);
+        }
+    }
+}
+
+/// The way the D-pad or the left stick (pushed, then let back) stepped this
+/// frame, screen down positive; zero if neither.
+fn stepped(w: &mut World, pad: &l3d_engine::input::Pad) -> Vec2 {
+    let mut way = Vec2::ZERO;
+    for (button, dir) in [
+        (PadButton::Up, Vec2::NEG_Y),
+        (PadButton::Down, Vec2::Y),
+        (PadButton::Left, Vec2::NEG_X),
+        (PadButton::Right, Vec2::X),
+    ] {
+        if pad.buttons.just_pressed(button) {
+            way += dir;
+        }
+    }
+    let g = &mut w.gamepad;
+    let stick = Vec2::new(pad.left.x, -pad.left.y);
+    if stick.length() < STICK_REST {
+        g.stick_ready = true;
+    } else if g.stick_ready && stick.length() > STICK_STEP {
+        g.stick_ready = false;
+        way += stick;
+    }
+    way
+}
+
+/// The screens other than a level's: the D-pad and the left stick move the
+/// pointer to the nearest button that way, A clicks it.
+fn buttons(w: &mut World, pad: &l3d_engine::input::Pad) {
+    let way = stepped(w, pad);
+    let targets = w.ui.button_rects();
+    // A new screen starts afresh.
+    let screen = (w.state, w.preview.active);
+    if w.gamepad.screen != Some(screen) {
+        w.gamepad.screen = Some(screen);
+        w.gamepad.focus = None;
+    }
+    let mut focus = w
+        .gamepad
+        .focus
+        .and_then(|m| targets.iter().position(|t| t.1.distance(m) < 1.0));
+    if focus.is_none() && w.gamepad.in_use && !targets.is_empty() {
+        // On the briefing and previewing, Continue, so that A carries on
+        // (owner); elsewhere the button nearest the middle.
+        let briefing = w.state == AppState::Briefing || w.preview.active;
+        let first = briefing
+            .then(|| crate::briefing::first_choice(w).and_then(|id| w.ui.middle(id)))
+            .flatten();
+        let mid = Vec2::new(w.screen.pixels.z as f32, w.screen.pixels.w as f32) / 2.0;
+        let goal = first.unwrap_or(mid);
+        focus = (0..targets.len()).min_by(|&a, &b| {
+            targets[a]
+                .1
+                .distance(goal)
+                .total_cmp(&targets[b].1.distance(goal))
+        });
+    } else if let Some(i) = focus
+        && way != Vec2::ZERO
+    {
+        let boxes: Vec<Rect> = targets.iter().map(|t| t.0).collect();
+        focus = Some(crate::options::neighbour(&boxes, i, way).unwrap_or(i));
+    }
+    w.gamepad.focus = focus.map(|i| targets[i].1);
+    let on = focus.filter(|_| w.gamepad.in_use).map(|i| targets[i]);
+    // The frame round the button, and the (unseen) pointer on it, so that
+    // A clicks it.
+    frame(w, on.map(|t| t.0));
+    let Some((_, middle)) = on else {
+        return;
+    };
+    let offset = w.screen.min * w.e.window.scale_factor();
+    w.e.window
+        .set_physical_cursor_position(Some(middle + offset));
+    if pad.buttons.just_pressed(PadButton::South) {
+        w.e.input.mouse.press(MouseButton::Left);
+        w.gamepad.clicked = true;
+    }
+}
+
+/// Shows the frame round `rect` (logical pixels on the screen), as the
+/// configuration screen frames its settings; none, hides it.
+fn frame(w: &mut World, rect: Option<Rect>) {
+    let id = match w.gamepad.frame.filter(|&id| w.ui.contains(id)) {
+        Some(id) => id,
+        None => {
+            let id = w.ui.root(
+                UiNode::new()
+                    .border(px(2), Color::srgb(1.0, 0.9, 0.2))
+                    .z(FRAME_Z)
+                    .hidden(),
+            );
+            w.gamepad.frame = Some(id);
+            id
+        }
+    };
+    let Some(n) = w.ui.get_mut(id) else { return };
+    match rect {
+        Some(r) => {
+            n.node.left = px(r.min.x - 3.0);
+            n.node.top = px(r.min.y - 3.0);
+            n.node.width = px(r.width() + 6.0);
+            n.node.height = px(r.height() + 6.0);
+            n.set_visible(true);
+        }
+        None => n.set_visible(false),
+    }
+}
+
+/// In a level.
+fn level(w: &mut World, pad: &l3d_engine::input::Pad) {
+    let b = &pad.buttons;
+    // The gamepad highlights the lemming nearest the middle, again when
+    // the one highlighted is gone.
+    // During a replay, stepping to a lemming takes over from it (as a click
+    // does, `hud::take_over`) and steps; A only takes over.
+    let mut took_over = false;
+    if w.game.replay.is_some()
+        && [PadButton::Left, PadButton::Right, PadButton::South]
+            .into_iter()
+            .any(|p| b.just_pressed(p))
+    {
+        w.game.replay = None;
+        took_over = b.just_pressed(PadButton::South);
+    }
+    let size = w.screen.size;
+    let (sim, highlight) = (w.game.sim.as_mut(), &mut w.highlight);
+    let Some(sim) = sim else { return };
+    let used = b.get_just_pressed().len() > 0 || pad.left != Vec2::ZERO || pad.right != Vec2::ZERO;
+    if used {
+        w.gamepad.playing = w.current.loaded;
+    }
+    let active = w.gamepad.playing.is_some() && w.gamepad.playing == w.current.loaded;
+    let following = w.lemming_cam.following();
+    if following.is_none()
+        && (active && highlight.lemming.is_none() || b.just_pressed(PadButton::RightStick))
+    {
+        let selected = (w.selected.0, w.selected.1);
+        *highlight = Highlight {
+            on: true,
+            lemming: crate::hud::nearest_to_centre(sim, &w.camera, size),
+            last_skill: None,
+        };
+        (w.selected.0, w.selected.1) = selected;
+    }
+    // Playing with the gamepad, a skill is always selected: the first with
+    // any left, again when the one selected runs out (quietly: the panel
+    // shows it).
+    if active
+        && w.selected
+            .0
+            .is_none_or(|s| sim.skills_left[s as usize] == 0)
+        && let Some(i) = (0..9).find(|&i| sim.skills_left[i] > 0)
+    {
+        w.selected.0 = Some(Skill::ALL[i]);
+    }
+    // Both bumpers held a second nuke (ours, as the bomb's double click):
+    // the skill the first one stepped to goes back, and the bomb flashes
+    // meanwhile.
+    let both = b.pressed(PadButton::LeftBumper) && b.pressed(PadButton::RightBumper);
+    let now = w.e.time.real.elapsed_secs();
+    if both {
+        if w.gamepad.nuke_since.is_none() {
+            w.gamepad.nuke_since = Some(now);
+            if let Some(before) = w.gamepad.before_bumper.take() {
+                w.selected.0 = before;
+            }
+        }
+        if w.gamepad.nuke_since.is_some_and(|t| now - t >= NUKE_HOLD) && !sim.nuked {
+            w.sfx.play("VOXFX/GEDDON1");
+            sim.nuke();
+        }
+    } else {
+        w.gamepad.nuke_since = None;
+        if !b.pressed(PadButton::LeftBumper) && !b.pressed(PadButton::RightBumper) {
+            w.gamepad.before_bumper = None;
+        }
+    }
+    w.panel.nuke_held = both && !sim.nuked;
+    // The bumpers: the skill before or after, of those left.
+    let step = if both {
+        0
+    } else {
+        b.just_pressed(PadButton::RightBumper) as i32 - b.just_pressed(PadButton::LeftBumper) as i32
+    };
+    if step != 0 {
+        w.gamepad.before_bumper = Some(w.selected.0);
+        let at = w
+            .selected
+            .0
+            .and_then(|s| Skill::ALL.iter().position(|&k| k == s))
+            .map_or(if step > 0 { -1 } else { 0 }, |i| i as i32);
+        let next = (1..=9)
+            .map(|k| (at + step * k).rem_euclid(9) as usize)
+            .find(|&i| sim.skills_left[i] > 0);
+        if let Some(i) = next {
+            w.selected.set(Some(Skill::ALL[i]));
+        }
+    }
+    let riding = following.map(|_| w.view.head);
+    // A turner waiting for its side: the D-pad points it, any way on
+    // screen (riding along, left or right); B lets it go.
+    let pending = w.pending.0.filter(|_| !w.game.paused);
+    let dpad = Vec2::new(
+        b.just_pressed(PadButton::Right) as i32 as f32
+            - b.just_pressed(PadButton::Left) as i32 as f32,
+        b.just_pressed(PadButton::Down) as i32 as f32 - b.just_pressed(PadButton::Up) as i32 as f32,
+    );
+    if let Some(i) = pending {
+        let point = match riding {
+            Some(_) if dpad.x != 0.0 => {
+                Some(Vec2::new(size.x * (0.5 + dpad.x * 0.25), size.y / 2.0))
+            }
+            Some(_) => None,
+            None if dpad != Vec2::ZERO => Some(
+                crate::hud::to_screen(
+                    &w.camera,
+                    size,
+                    crate::hud::lemming_centre(&sim.lemmings[i]),
+                )
+                .map_or(size / 2.0, |(p, _)| p + dpad.normalize() * 80.0),
+            ),
+            None => None,
+        };
+        if let Some(point) = point {
+            w.pending.0 = None;
+            if let Some(ok) =
+                crate::hud::give_pending_turner(sim, &w.camera, size, riding, i, point)
+            {
+                w.sfx.play(if ok { "VOXFX/OK2" } else { "VOXFX/UH_UH1" });
+            }
+        }
+        if b.just_pressed(PadButton::East) {
+            w.pending.0 = None;
+        }
+    }
+    let side = if pending.is_some() { 0 } else { dpad.x as i32 };
+    if side != 0 {
+        match highlight.lemming {
+            // Riding along: on to the next or the one before.
+            _ if following.is_some() => {
+                let n = sim.lemmings.len();
+                let f = following.unwrap_or(0);
+                if let Some(next) = (1..n)
+                    .map(|k| (f as i32 + side * k as i32).rem_euclid(n as i32) as usize)
+                    .find(|&j| !sim.lemmings[j].gone)
+                {
+                    w.lemming_cam
+                        .ride(next, highlight, &mut w.selected, &w.view);
+                }
+            }
+            Some(i) => {
+                if let Some(j) = beside(sim, &w.camera, size, i, side as f32) {
+                    highlight.lemming = Some(j);
+                    w.sfx.play("SPOTFX/SCALE");
+                }
+            }
+            _ => {}
+        }
+    }
+    // A: the skill to the highlighted lemming.
+    if b.just_pressed(PadButton::South)
+        && !took_over
+        && w.game.replay.is_none()
+        && !w.game.paused
+        && let (Some(i), Some(s)) = (highlight.lemming, w.selected.0)
+        && sim.skills_left[s as usize] > 0
+    {
+        if s == Skill::Turner {
+            if sim.can_assign(i, s) {
+                w.pending.0 = Some(i);
+            } else {
+                w.sfx.play("VOXFX/UH_UH1");
+            }
+        } else {
+            let ok = sim.assign(i, s);
+            w.sfx.play(if ok { "VOXFX/OK2" } else { "VOXFX/UH_UH1" });
+        }
+    }
+    if b.just_pressed(PadButton::West) {
+        let selected = (w.selected.0, w.selected.1);
+        w.lemming_cam.face(highlight, &mut w.selected, &mut w.view);
+        (w.selected.0, w.selected.1) = selected;
+    }
+    if b.just_pressed(PadButton::East) && pending.is_none() {
+        tap(w, KeyCode::KeyP);
+    }
+    if b.just_pressed(PadButton::North) {
+        let key = [
+            KeyCode::Digit1,
+            KeyCode::Digit2,
+            KeyCode::Digit3,
+            KeyCode::Digit4,
+        ][(w.preset.0 + 1) % 4];
+        tap(w, key);
+    }
+    if b.just_pressed(PadButton::Start) {
+        tap(w, KeyCode::F12);
+    }
+    for (button, key) in [
+        (PadButton::Up, KeyCode::Equal),
+        (PadButton::Down, KeyCode::Minus),
+    ] {
+        if b.just_pressed(button) && pending.is_none() {
+            hold(w, button, key);
+        }
+    }
+}
+
+/// The lemming next to lemming `i` on screen to its right (`way` 1) or
+/// left (−1), of those on screen in order across it (top to bottom where
+/// level), round from the last to the first: every one in view can be
+/// reached either way (owner: the nearest that way skipped some).
+fn beside(
+    sim: &l3d_sim::Simulation,
+    camera: &crate::scene_render::SceneCamera,
+    size: Vec2,
+    i: usize,
+    way: f32,
+) -> Option<usize> {
+    let mut shown: Vec<(usize, Vec2)> = (0..sim.lemmings.len())
+        .filter(|&j| !sim.lemmings[j].gone)
+        .filter_map(|j| {
+            let (p, _) =
+                crate::hud::to_screen(camera, size, crate::hud::lemming_centre(&sim.lemmings[j]))?;
+            (p.x >= 0.0 && p.y >= 0.0 && p.x <= size.x && p.y <= size.y).then_some((j, p))
+        })
+        .collect();
+    shown.sort_by(|a, b| a.1.x.total_cmp(&b.1.x).then(a.1.y.total_cmp(&b.1.y)));
+    if shown.is_empty() {
+        return None;
+    }
+    let n = shown.len() as i32;
+    let at = match shown.iter().position(|&(j, _)| j == i) {
+        Some(k) => (k as i32 + way as i32).rem_euclid(n),
+        // Off screen: from the side it comes in at.
+        None if way > 0.0 => 0,
+        None => n - 1,
+    };
+    Some(shown[at as usize].0)
+}

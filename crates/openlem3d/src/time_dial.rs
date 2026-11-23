@@ -132,6 +132,15 @@ fn spawn(w: &mut World) {
     o.readout = Some((ui.child(root, UiNode::new()), String::new()));
 }
 
+/// Hides the overlay on leaving the level, a time control still held
+/// (owner: the time ran out with the trigger pulled, and it stayed over
+/// the menus).
+pub(crate) fn hide(w: &mut World) {
+    if let Some(root) = w.time_overlay.root {
+        w.ui.set_visible(root, false);
+    }
+}
+
 /// Shows the overlay while the dial is held (or Backspace runs the level
 /// back), laid out for the screen.
 pub(crate) fn update(w: &mut World) {

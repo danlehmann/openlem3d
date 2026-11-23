@@ -72,8 +72,9 @@ pub(crate) fn title_case(s: &str) -> String {
 /// (from a capture; positions estimated, in 320×200): the title in white,
 /// one red row per level ("1  Take A Dive"), and the best result under the
 /// IN and clock icons on the right. The original lists only unlocked
-/// levels; all twenty are open here, so the list scrolls (wheel, arrow
-/// keys or Page Up/Down). Left and Right change the rating.
+/// levels; all twenty are open here, so the list scrolls (wheel, or the
+/// arrow keys and Page Up/Down moving the highlighted row, which Enter
+/// chooses; ours). Left and Right change the rating.
 const ROW_TOP: f32 = 38.0;
 const ROW_STEP: f32 = 15.0;
 const ROWS_SHOWN: usize = 10;
@@ -92,6 +93,11 @@ pub(crate) struct LevelList {
     glyphs: Vec<(NodeId, u32)>,
     body: Option<NodeId>,
     tapped: Option<u32>,
+    /// The row highlighted from the keys (or a gamepad), by its place in
+    /// the list, and the rating it is in; the pointer over a row highlights
+    /// that one.
+    selected: Option<usize>,
+    selected_rating: Option<usize>,
 }
 
 pub(crate) fn load_labels(w: &mut World) {
@@ -155,6 +161,29 @@ pub(crate) fn ensure_menu(w: &mut World) {
         }
     };
     let rating = w.rating.0;
+    // The row highlighted before stays so, coming back to the list (owner:
+    // back from a briefing, the same level); else the first level not yet
+    // completed is (ours). Either is scrolled into view.
+    let row = match list
+        .selected
+        .filter(|_| list.selected_rating == Some(rating))
+    {
+        Some(row) => row,
+        None => (0..LEVELS_PER_RATING)
+            .find(|&i| {
+                !w.settings
+                    .completed
+                    .contains(&(rating as u32 * LEVELS_PER_RATING + i))
+            })
+            .unwrap_or(0) as usize,
+    };
+    list.selected = Some(row);
+    list.selected_rating = Some(rating);
+    let max = (LEVELS_PER_RATING as usize - ROWS_SHOWN) as f32;
+    list.scroll = list
+        .scroll
+        .clamp(row as f32 - ROWS_SHOWN as f32 + 1.0, row as f32)
+        .clamp(0.0, max);
     let heading = format!("Select {} Level To Play", RATINGS[rating]);
     let (_, hw) = font.layout(&heading);
     text(
@@ -280,13 +309,23 @@ pub(crate) fn menu_input(w: &mut World) {
             })
             .sum();
     delta -= touches.iter().map(|t| t.delta().y).sum::<f32>() / row_px;
-    // The keys step to whole rows.
+    // The keys move the highlighted row (the first press highlights the
+    // top row shown), and the list scrolls to keep it in view.
     let steps = keys.just_pressed(KeyCode::ArrowDown) as i32
         - keys.just_pressed(KeyCode::ArrowUp) as i32
         + (keys.just_pressed(KeyCode::PageDown) as i32 - keys.just_pressed(KeyCode::PageUp) as i32)
             * ROWS_SHOWN as i32;
+    let last = LEVELS_PER_RATING as i32 - 1;
     if steps != 0 {
-        delta += (list.scroll + steps as f32).round() - list.scroll;
+        let row = match list.selected {
+            Some(r) => (r as i32 + steps).clamp(0, last),
+            None => (list.scroll.round() as i32).clamp(0, last),
+        };
+        list.selected = Some(row as usize);
+        let top = list
+            .scroll
+            .clamp((row - ROWS_SHOWN as i32 + 1) as f32, row as f32);
+        delta += top - list.scroll;
     }
     if delta != 0.0 {
         list.scroll = (list.scroll + delta).clamp(0.0, max);
@@ -305,6 +344,7 @@ pub(crate) fn menu_input(w: &mut World) {
     if step != 0 {
         w.rating.0 = (w.rating.0 as i32 + step).rem_euclid(PRACTICE as i32) as usize;
         list.scroll = 0.0;
+        list.selected = None;
         crate::title::close_screen(&mut w.ui, &mut w.screen_ui);
         return;
     }
@@ -312,10 +352,17 @@ pub(crate) fn menu_input(w: &mut World) {
     let hovered = list
         .rows
         .iter()
-        .find(|&&(id, _)| ui.interaction(id) != Interaction::None)
+        .position(|&(id, _)| ui.interaction(id) != Interaction::None);
+    if hovered.is_some() && w.e.input.motion.delta != Vec2::ZERO {
+        list.selected = hovered;
+    }
+    let shown = list
+        .selected
+        .or(hovered)
+        .and_then(|i| list.rows.get(i))
         .map(|&(_, r)| r);
     for &(id, row) in &list.glyphs {
-        let colour = if Some(row) == hovered { HOVER } else { RED };
+        let colour = if Some(row) == shown { HOVER } else { RED };
         if let Some(n) = ui.get_mut(id) {
             n.set_tint(colour);
         }
@@ -348,7 +395,18 @@ pub(crate) fn menu_input(w: &mut World) {
     } else {
         pressed
     };
+    let entered = keys.any_just_pressed([KeyCode::Enter, KeyCode::NumpadEnter]);
+    let chosen = chosen.or_else(|| {
+        list.selected
+            .filter(|_| entered)
+            .and_then(|i| list.rows.get(i))
+            .map(|&(_, r)| r)
+    });
     if let Some(row) = chosen {
+        // Back on the list, the level chosen is highlighted.
+        if let Some(i) = list.rows.iter().position(|&(_, r)| r == row) {
+            list.selected = Some(i);
+        }
         w.current.number = row;
         w.current.loaded = None;
         w.next_state = Some(AppState::Briefing);

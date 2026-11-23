@@ -111,18 +111,15 @@ impl Default for Settings {
 }
 
 impl Settings {
-    /// Records a finished level; returns whether anything improved.
+    /// Records a finished level; returns whether anything improved. Only a
+    /// level passed counts (owner: one failed showed its lemmings saved).
     pub fn record(&mut self, level: u32, saved: u32, seconds_left: u32, passed: bool) -> bool {
+        if !passed {
+            return false;
+        }
         let old = self.best.get(&level).copied().unwrap_or((0, 0));
-        let new = (
-            old.0.max(saved),
-            if passed {
-                old.1.max(seconds_left)
-            } else {
-                old.1
-            },
-        );
-        let completed = passed && self.completed.insert(level);
+        let new = (old.0.max(saved), old.1.max(seconds_left));
+        let completed = self.completed.insert(level);
         if new != old {
             self.best.insert(level, new);
         }
@@ -241,6 +238,10 @@ impl Settings {
                 _ => {}
             }
         }
+        // Results kept for levels never passed (before only passes were
+        // recorded) are dropped.
+        let completed = s.completed.clone();
+        s.best.retain(|level, _| completed.contains(level));
         s
     }
 

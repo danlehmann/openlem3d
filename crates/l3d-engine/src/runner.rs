@@ -25,6 +25,7 @@ struct Applied {
     mode: WindowMode,
     ime: bool,
     cursor: Option<CursorIcon>,
+    cursor_hidden: bool,
 }
 
 struct Runner<G: Game> {
@@ -101,6 +102,7 @@ impl<G: Game> Runner<G> {
         let events = std::mem::take(&mut self.events);
         let engine = self.engine();
         input::take_in(&mut engine.input, events);
+        engine.pads.take_in(&mut engine.input.pad);
         engine.time.advance();
         engine.images.update();
         self.game.frame();
@@ -115,6 +117,10 @@ impl<G: Game> Runner<G> {
             return;
         };
         let engine = self.game.engine();
+        if let Some(p) = engine.window.warp.take() {
+            let _ = window
+                .set_cursor_position(winit::dpi::PhysicalPosition::new(p.x as f64, p.y as f64));
+        }
         let w = engine.window.clone();
         let icon = Some(engine.cursor.clone());
         if w.title != self.applied.title {
@@ -127,6 +133,10 @@ impl<G: Game> Runner<G> {
                 WindowMode::BorderlessFullscreen(_) => Some(Fullscreen::Borderless(None)),
             });
             self.applied.mode = w.mode;
+        }
+        if w.cursor_hidden != self.applied.cursor_hidden {
+            window.set_cursor_visible(!w.cursor_hidden);
+            self.applied.cursor_hidden = w.cursor_hidden;
         }
         if w.ime_enabled != self.applied.ime {
             window.set_ime_allowed(w.ime_enabled);

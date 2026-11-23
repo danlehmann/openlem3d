@@ -196,6 +196,16 @@ pub(crate) fn spawn_briefing(w: &mut World) {
     }
 }
 
+/// The choice a gamepad starts on, on the briefing and previewing:
+/// Continue (owner).
+pub(crate) fn first_choice(w: &World) -> Option<NodeId> {
+    w.briefing
+        .choices
+        .iter()
+        .find(|&&(_, c)| c == Choice::Continue)
+        .map(|&(id, _)| id)
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Choice {
     Continue,

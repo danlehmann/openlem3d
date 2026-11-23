@@ -11,6 +11,7 @@ mod codes;
 mod confirm;
 mod fade;
 mod fps;
+mod gamepad;
 mod glow;
 mod gpu;
 mod hdr_blink;
@@ -333,6 +334,7 @@ pub struct World {
     highlight: hud::Highlight,
     arrows: hud::TurnerArrows,
     lemming_cam: lemming_cam::LemmingCam,
+    gamepad: gamepad::GamepadState,
     follow: lemming_cam::Follow,
     confirm: confirm::Confirm,
     fade: fade::Fade,
@@ -427,6 +429,7 @@ impl World {
             highlight: hud::Highlight::default(),
             arrows: hud::TurnerArrows::default(),
             lemming_cam: lemming_cam::LemmingCam::default(),
+            gamepad: gamepad::GamepadState::default(),
             follow: lemming_cam::Follow::default(),
             confirm: confirm::Confirm::default(),
             fade: fade::Fade::default(),
@@ -481,6 +484,7 @@ impl World {
                 confirm::close(self);
                 lemming_cam::exit_level(self);
                 style::close_notice(self);
+                time_dial::hide(self);
             }
         }
     }
@@ -618,6 +622,7 @@ impl l3d_engine::Game for World {
         }
         // The screen's measurements, then the input.
         screen::update(self);
+        gamepad::input(self);
         #[cfg(all(target_os = "android", feature = "xr"))]
         xr::input(self);
         screen::full_screen(self);
@@ -1067,9 +1072,24 @@ pub struct Game {
 const SNAPSHOT_TICKS: u64 = 28;
 
 /// The speed Backspace runs the level back at while held, with Rewind on:
-/// as fast as forward, or twice that with Shift (ours).
+/// as fast as forward, or twice that with Shift (ours). A gamepad's left
+/// trigger runs it back as fast as it is pulled, from a fifth of normal
+/// speed to fast-forward's; its right trigger runs it forward from normal
+/// speed to fast-forward's.
 pub(crate) fn backspace_rewind(w: &World) -> Option<f32> {
     let keys = &w.e.input.keys;
+    let pad = &w.e.input.pad;
+    let pulled =
+        |v: f32| (v > PAD_TRIGGER_DEAD).then(|| (v - PAD_TRIGGER_DEAD) / (1.0 - PAD_TRIGGER_DEAD));
+    let fast = FAST_FORWARD_TICKS as f32;
+    if !keys.pressed(KeyCode::Backspace) {
+        if let Some(t) = pulled(pad.left_trigger).filter(|_| w.settings.rewind) {
+            return Some(-(0.2 + t * (fast - 0.2)));
+        }
+        if let Some(t) = pulled(pad.right_trigger) {
+            return Some(1.0 + t * (fast - 1.0));
+        }
+    }
     (w.settings.rewind && keys.pressed(KeyCode::Backspace)).then(|| {
         if keys.any_pressed([KeyCode::ShiftLeft, KeyCode::ShiftRight]) {
             -2.0
@@ -1158,6 +1178,9 @@ impl Replay {
         true
     }
 }
+
+/// How far a gamepad's trigger must be pulled before it counts.
+const PAD_TRIGGER_DEAD: f32 = 0.05;
 
 /// The slowest pace the time dial runs the level at, short of pausing.
 const MIN_PACE: f32 = 0.05;
@@ -1716,18 +1739,25 @@ pub(crate) fn camera_controls(w: &mut World) {
         // ← → turn the camera; Q and E turn the world about the level's
         // centre, like the panel's turn arrows (owner: the arrows turn the
         // whole level, not the camera).
-        let arrows = key(KeyCode::ArrowRight) - key(KeyCode::ArrowLeft);
+        // A gamepad's sticks: the left one walks, the right one turns and
+        // rises (`gamepad`).
+        let pad = &input.pad;
+        let arrows =
+            (key(KeyCode::ArrowRight) - key(KeyCode::ArrowLeft) + pad.right.x).clamp(-1.0, 1.0);
         let world_turn = key(KeyCode::KeyE) - key(KeyCode::KeyQ);
         let turn = arrows + world_turn;
         // The keys held: forward, sideways, up, turning. In Enhanced mode
         // (ours) the camera eases into and out of their moves; the
         // original's moves start and stop at once.
         let pressed = Vec4::new(
-            held(KeyCode::KeyW, KeyCode::ArrowUp) - held(KeyCode::KeyS, KeyCode::ArrowDown),
-            key(KeyCode::KeyD) - key(KeyCode::KeyA),
-            held(KeyCode::KeyR, KeyCode::PageUp) - held(KeyCode::KeyF, KeyCode::PageDown),
+            held(KeyCode::KeyW, KeyCode::ArrowUp) - held(KeyCode::KeyS, KeyCode::ArrowDown)
+                + pad.left.y,
+            key(KeyCode::KeyD) - key(KeyCode::KeyA) + pad.left.x,
+            held(KeyCode::KeyR, KeyCode::PageUp) - held(KeyCode::KeyF, KeyCode::PageDown)
+                + pad.right.y,
             arrows,
-        );
+        )
+        .clamp(Vec4::splat(-1.0), Vec4::splat(1.0));
         if !enhanced || lemming_cam.following().is_some() || gliding {
             *eased = pressed;
         } else {

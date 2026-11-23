@@ -86,7 +86,7 @@ const PICK_RADIUS_UNITS: f32 = 0.35;
 
 /// Where a world position appears on screen, in logical pixels, and the
 /// pixels per world unit at its depth; `None` behind the camera.
-fn to_screen(camera: &SceneCamera, size: Vec2, pos: Vec3) -> Option<(Vec2, f32)> {
+pub(crate) fn to_screen(camera: &SceneCamera, size: Vec2, pos: Vec3) -> Option<(Vec2, f32)> {
     let clip = camera.view_proj * pos.extend(1.0);
     if clip.w <= 0.0 {
         return None;
@@ -99,7 +99,7 @@ fn to_screen(camera: &SceneCamera, size: Vec2, pos: Vec3) -> Option<(Vec2, f32)>
 }
 
 /// A lemming's centre in world units.
-fn lemming_centre(l: &l3d_sim::Lemming) -> Vec3 {
+pub(crate) fn lemming_centre(l: &l3d_sim::Lemming) -> Vec3 {
     Vec3::from_array(l.pos.map(crate::units)) + Vec3::Y * 0.2
 }
 
