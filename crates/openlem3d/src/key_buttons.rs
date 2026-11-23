@@ -153,21 +153,23 @@ pub(crate) fn spawn_text_button(
 /// list). Hidden in the lemming view
 /// (where Esc leaves the view; the panel's arrow does that), while the
 /// restart question is up, and during the preview, where Esc leaves the level
-/// (owner: "Restart" there left it).
+/// (owner: "Restart" there left it), and while a gamepad is in use (its
+/// Menu button does that; it shows again once the mouse moves).
 pub(crate) fn level_button(w: &mut World) {
     let label = (w.state == AppState::Playing
         && w.lemming_cam == LemmingCam::Off
         && w.confirm.question.is_none()
-        && !w.preview.active)
-        .then(|| {
-            // Enhanced's Esc opens its menu; the original's restarts,
-            // and leaves during the replay.
-            if w.settings.enhanced() || w.game.replay.is_some() {
-                "Menu"
-            } else {
-                "Restart"
-            }
-        });
+        && !w.preview.active
+        && !crate::gamepad::in_use(w))
+    .then(|| {
+        // Enhanced's Esc opens its menu; the original's restarts,
+        // and leaves during the replay.
+        if w.settings.enhanced() || w.game.replay.is_some() {
+            "Menu"
+        } else {
+            "Restart"
+        }
+    });
     let size = w.screen.size;
     let shown = w.key_buttons.level.map(|(_, t, s)| (t, s));
     let wanted = label.map(|l| (l, size));
