@@ -908,7 +908,17 @@ impl Simulation {
             State::Mining => Some(Skill::Miner),
             _ => None,
         };
+        // No blocker or turner in a splitter's cell (recorded in the original
+        // on a changed Practice "Splitter", 2026-11-22: both were refused
+        // there, the turner twice, while a turner a cell before it, on the
+        // open path, and the seven other skills in the cell were all taken).
+        let in_splitter = || {
+            self.splitters
+                .iter()
+                .any(|(c, _)| *c == Self::cell_of(l.pos))
+        };
         match skill {
+            Skill::Blocker | Skill::Turner if in_splitter() => false,
             Skill::Climber => !l.climber,
             Skill::Floater => !l.floater,
             Skill::Bomber => l.fuse.is_none(),

@@ -1345,7 +1345,12 @@ pub const SOLUTIONS: &[Solution] = &[
         ],
     ),
     // Mayhem 14 "Jelly Belly Islands" by a route of our own, after the
-    // walkthroughs' climbers, pillar bridges and splitter builders.
+    // walkthroughs' climbers, pillar bridges and splitter builders: a turner
+    // sends a climber up a ramp to the pad onto an island, from which it
+    // bridges to the exit walkway and turns there; a bridge lifts the rest
+    // over that turner; a second bridge passes over the splitter, and its
+    // builder, turned turner above the splitter, drops everyone after it on
+    // the one pad to a pillar, whose bridge leads onto the island's roof.
     at(
         73,
         &[
@@ -1353,10 +1358,10 @@ pub const SOLUTIONS: &[Solution] = &[
             (175, 0, 1, Some(false)),
             (280, 2, 3, None),
             (447, 1, 3, None),
-            (642, 3, 1, Some(true)),
+            (560, 3, 3, None),
+            (668, 3, 1, Some(false)),
             (672, 1, 1, Some(true)),
             (686, 2, 3, None),
-            (802, 5, 1, Some(true)),
         ],
     ),
     // Mayhem 18 "Castle Peralus", after the published strategy with a route
