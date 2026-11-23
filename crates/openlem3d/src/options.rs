@@ -558,8 +558,9 @@ fn graphics(g: Graphics, item: Item) -> Option<Graphics> {
 fn graphics_by(g: Graphics, item: Item, step: i32) -> Option<Graphics> {
     let mut next = match item {
         Item::Preset(p) => return Some(p.graphics(g)),
+        // On is up: towards more rows (the steps run from the most down).
         Item::Resolution => Graphics {
-            resolution: (g.resolution as i32 + step).rem_euclid(crate::settings::RESOLUTIONS as i32)
+            resolution: (g.resolution as i32 - step).rem_euclid(crate::settings::RESOLUTIONS as i32)
                 as u8,
             ..g
         },
