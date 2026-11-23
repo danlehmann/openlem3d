@@ -2107,8 +2107,88 @@ pub fn shadows(
     sim: &Simulation,
     drawn: &[([f32; 3], f32)],
     ground: bool,
-    unseen: &dyn Fn([i32; 3]) -> bool,
+    unseen: &(dyn Fn([i32; 3]) -> bool + Sync),
 ) -> (Vec<f32>, Vec<u32>) {
+    let cast: Vec<[f32; 3]> = sim
+        .lemmings
+        .iter()
+        .enumerate()
+        .filter(|(_, l)| {
+            !(l.gone
+                || l.state == State::Trapped
+                || (l.state.is_terminal() && l.state != State::Exiting))
+        })
+        .filter_map(|(i, _)| drawn.get(i).map(|&(p, _)| p))
+        .collect();
+    // Each shadow's points worked out on its own, so the lemmings are
+    // shared among the cores (the floor searches are most of a frame's
+    // work with many lemmings on a slow device), then put together in
+    // their order.
+    let one = |p: &[f32; 3]| shadow_points(sim, unseen, *p, ground);
+    let threads = std::thread::available_parallelism()
+        .map_or(1, |n| n.get())
+        .min(SHADOW_THREADS)
+        .min(cast.len().div_ceil(SHADOWS_PER_THREAD))
+        .max(1);
+    let shadows: Vec<Option<ShadowPoints>> = if threads == 1 {
+        cast.iter().map(one).collect()
+    } else {
+        let per = cast.len().div_ceil(threads);
+        let mut parts: Vec<&[[f32; 3]]> = cast.chunks(per).collect();
+        let first = parts.remove(0);
+        std::thread::scope(|scope| {
+            let others: Vec<_> = parts
+                .into_iter()
+                .map(|part| scope.spawn(move || part.iter().map(one).collect::<Vec<_>>()))
+                .collect();
+            let mut all: Vec<Option<ShadowPoints>> = first.iter().map(one).collect();
+            for t in others {
+                all.extend(t.join().expect("shadow thread"));
+            }
+            all
+        })
+    };
+    let mut vertices = Vec::new();
+    let mut indices = Vec::new();
+    for points in shadows.into_iter().flatten() {
+        let base = (vertices.len() / crate::scene_render::VERTEX_FLOATS) as u32;
+        for [x, y, z, u, v, dark] in points {
+            vertices.extend([x, y, z, u, v, dark, 0.0]);
+            // No billboard offset, no animation, no light.
+            vertices.extend([0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0]);
+        }
+        let at = |j: u32, k: u32| base + j * (SHADOW_GRID + 1) + k;
+        for j in 0..SHADOW_GRID {
+            for k in 0..SHADOW_GRID {
+                let (a, b, c, d) = (at(j, k), at(j, k + 1), at(j + 1, k + 1), at(j + 1, k));
+                indices.extend([a, b, c, a, c, d]);
+            }
+        }
+    }
+    (vertices, indices)
+}
+
+/// Squares along each side of a shadow, each corner on the floor.
+const SHADOW_GRID: u32 = 6;
+/// Points of a shadow's grid.
+const SHADOW_POINTS: usize = ((SHADOW_GRID + 1) * (SHADOW_GRID + 1)) as usize;
+/// The most threads the shadows are worked out on, and the fewest shadows
+/// worth a thread of their own.
+const SHADOW_THREADS: usize = 4;
+const SHADOWS_PER_THREAD: usize = 8;
+
+/// A shadow's grid points, row by row: each its place (x, y, z), where on
+/// the shadow's disc (u, v, −1 to 1) and how dark its middle is.
+type ShadowPoints = [[f32; 6]; SHADOW_POINTS];
+
+/// The shadow of a lemming drawn at `p` (see [`shadows`]), if it has a
+/// floor under it.
+fn shadow_points(
+    sim: &Simulation,
+    unseen: &dyn Fn([i32; 3]) -> bool,
+    p: [f32; 3],
+    ground: bool,
+) -> Option<ShadowPoints> {
     /// How far above its floor a shadow is drawn, against fighting it and
     /// against the straight edges between its points dipping under a
     /// ramp's crest.
@@ -2117,75 +2197,62 @@ pub fn shadows(
     /// or below another's on the way out from the middle: a 45° ramp's
     /// floor changes by as much as the distance, a step at once.
     const SLOPE_SLACK: f32 = 0.03;
-    /// Squares along each side of a shadow, each corner on the floor.
-    const GRID: u32 = 6;
-    let mut vertices = Vec::new();
-    let mut indices = Vec::new();
-    for (i, l) in sim.lemmings.iter().enumerate() {
-        if l.gone
-            || l.state == State::Trapped
-            || (l.state.is_terminal() && l.state != State::Exiting)
-        {
-            continue;
-        }
-        let Some(&(p, _)) = drawn.get(i) else {
-            continue;
-        };
-        // From above the highest a corner on a ramp can be (as high again
-        // as the shadow is wide), so as to start in open space.
-        let mut top = p[1] + 2.0 * SHADOW_RADIUS + 0.1;
-        let Some(mut floor) = floor_under(sim, unseen, p[0], top, p[2], ground) else {
-            continue;
-        };
-        // A floor found above the feet is what the lemming has just dropped
-        // out of or past (a hatch): the floor is the one under its feet.
-        if floor > p[1] + FEET_SLACK {
-            top = p[1] + FEET_SLACK;
-            let Some(under) = floor_under(sim, unseen, p[0], top, p[2], ground) else {
-                continue;
-            };
-            floor = under;
-        }
-        let height = (p[1] - floor).max(0.0);
-        // Up high: fainter (to a third) and smaller (to half).
-        let up = (height / SHADOW_FADE_HEIGHT).min(1.0);
-        let dark = SHADOW_DARK * (1.0 - up * 2.0 / 3.0);
-        let r = SHADOW_RADIUS * (1.0 - up / 2.0);
-        let base = (vertices.len() / crate::scene_render::VERTEX_FLOATS) as u32;
-        for (j, k) in (0..=GRID).flat_map(|j| (0..=GRID).map(move |k| (j, k))) {
-            let u = j as f32 / GRID as f32 * 2.0 - 1.0;
-            let v = k as f32 / GRID as f32 * 2.0 - 1.0;
-            let (x, z) = (p[0] + u * r, p[2] + v * r);
-            // A point whose floor is not reached from the middle's along a
-            // slope of at most 45°, checked halfway too (over a drop, past a
-            // step of builder's bricks, against a wall), stays at the
-            // middle's height and is clear, so the shadow fades out there
-            // rather than float or hang down over the step.
-            let reach = |a: f32, b: f32, across: f32| (a - b).abs() <= across + SLOPE_SLACK;
-            let d = (u * u + v * v).sqrt() * r;
-            let half = floor_under(
+    const GRID: u32 = SHADOW_GRID;
+    // From above the highest a corner on a ramp can be (as high again
+    // as the shadow is wide), so as to start in open space.
+    let mut top = p[1] + 2.0 * SHADOW_RADIUS + 0.1;
+    let mut floor = floor_under(sim, unseen, p[0], top, p[2], ground)?;
+    // A floor found above the feet is what the lemming has just dropped
+    // out of or past (a hatch): the floor is the one under its feet.
+    if floor > p[1] + FEET_SLACK {
+        top = p[1] + FEET_SLACK;
+        floor = floor_under(sim, unseen, p[0], top, p[2], ground)?;
+    }
+    let height = (p[1] - floor).max(0.0);
+    // Up high: fainter (to a third) and smaller (to half).
+    let up = (height / SHADOW_FADE_HEIGHT).min(1.0);
+    let dark = SHADOW_DARK * (1.0 - up * 2.0 / 3.0);
+    let r = SHADOW_RADIUS * (1.0 - up / 2.0);
+    let coord = |j: u32| j as f32 / GRID as f32 * 2.0 - 1.0;
+    // Every grid point's floor first: a point's halfway point is another
+    // grid point where both its indices are odd (so is not looked for
+    // again).
+    let mut floors = [None; SHADOW_POINTS];
+    for (j, k) in (0..=GRID).flat_map(|j| (0..=GRID).map(move |k| (j, k))) {
+        let (u, v) = (coord(j), coord(k));
+        floors[(j * (GRID + 1) + k) as usize] =
+            floor_under(sim, unseen, p[0] + u * r, top, p[2] + v * r, ground);
+    }
+    let mut points = [[0.0; 6]; SHADOW_POINTS];
+    for (j, k) in (0..=GRID).flat_map(|j| (0..=GRID).map(move |k| (j, k))) {
+        let (u, v) = (coord(j), coord(k));
+        let (x, z) = (p[0] + u * r, p[2] + v * r);
+        // A point whose floor is not reached from the middle's along a
+        // slope of at most 45°, checked halfway too (over a drop, past a
+        // step of builder's bricks, against a wall), stays at the
+        // middle's height and is clear, so the shadow fades out there
+        // rather than float or hang down over the step.
+        let reach = |a: f32, b: f32, across: f32| (a - b).abs() <= across + SLOPE_SLACK;
+        let d = (u * u + v * v).sqrt() * r;
+        let half = if j % 2 == 1 && k % 2 == 1 {
+            let half_of = |i: u32| (GRID as i32 / 2 + (i as i32 - GRID as i32 / 2) / 2) as u32;
+            let (hj, hk) = (half_of(j), half_of(k));
+            floors[(hj * (GRID + 1) + hk) as usize]
+        } else {
+            floor_under(
                 sim,
                 unseen,
                 p[0] + u * r / 2.0,
                 top,
                 p[2] + v * r / 2.0,
                 ground,
-            );
-            let (y, dark) = match (floor_under(sim, unseen, x, top, z, ground), half) {
-                (Some(y), Some(h)) if reach(h, floor, d / 2.0) && reach(y, h, d / 2.0) => (y, dark),
-                _ => (floor, 0.0),
-            };
-            vertices.extend([x, y + LIFT, z, u, v, dark, 0.0]);
-            // No billboard offset, no animation, no light.
-            vertices.extend([0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0]);
-        }
-        let at = |j: u32, k: u32| base + j * (GRID + 1) + k;
-        for j in 0..GRID {
-            for k in 0..GRID {
-                let (a, b, c, d) = (at(j, k), at(j, k + 1), at(j + 1, k + 1), at(j + 1, k));
-                indices.extend([a, b, c, a, c, d]);
-            }
-        }
+            )
+        };
+        let (y, dark) = match (floors[(j * (GRID + 1) + k) as usize], half) {
+            (Some(y), Some(h)) if reach(h, floor, d / 2.0) && reach(y, h, d / 2.0) => (y, dark),
+            _ => (floor, 0.0),
+        };
+        points[(j * (GRID + 1) + k) as usize] = [x, y + LIFT, z, u, v, dark];
     }
-    (vertices, indices)
+    Some(points)
 }

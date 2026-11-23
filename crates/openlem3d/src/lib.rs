@@ -1427,8 +1427,13 @@ impl Game {
 /// Whether cell `c` of the level holds nothing drawn: an invisible block (ids
 /// 3 and 4, or a definition all placeholder faces, as block 25 of "Alpine
 /// Assault Course") with no object or decal of its own.
-fn unseen_cell(game: &Game, c: [i32; 3]) -> bool {
-    let Some((level, blocks, _)) = &game.terrain else {
+
+/// The same, given the level's terrain (shareable between threads).
+fn unseen_in(
+    terrain: Option<&(l3d_formats::level::Level, l3d_formats::blk::BlockSet, usize)>,
+    c: [i32; 3],
+) -> bool {
+    let Some((level, blocks, _)) = terrain else {
         return false;
     };
     let [x, y, z] = c;
@@ -1537,7 +1542,9 @@ fn update_lemming_sprites(w: &mut World) {
             sea || land
         });
         (sprites.shadow_vertices, sprites.shadow_indices) =
-            lemming_render::shadows(sim, &drawn, ground, &|c| unseen_cell(game, c));
+            lemming_render::shadows(sim, &drawn, ground, &|c| {
+                unseen_in(game.terrain.as_ref(), c)
+            });
     }
     // Marks in snow and on ice (ours): a field made anew for each level
     // showing them, and again when the level restarts (fewer lemmings than
