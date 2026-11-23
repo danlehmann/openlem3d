@@ -422,6 +422,7 @@ pub(crate) fn spawn_turner_marker(w: &mut World) {
 pub(crate) fn place_turner_marker(w: &mut World) {
     let (pending, game, camera, time) = (&w.pending, &w.game, &w.camera, w.e.time.game);
     let (window, screen, lemming_cam) = (&w.e.window, &w.screen, &w.lemming_cam);
+    let gamepad = crate::gamepad::in_use(w);
     let shown = (|| {
         if w.state != AppState::Playing {
             return None;
@@ -440,9 +441,16 @@ pub(crate) fn place_turner_marker(w: &mut World) {
             let head = w.view.head;
             let size = screen.size;
             let scale = size.y / 200.0;
-            let left = screen
-                .cursor(window)
-                .is_none_or(|p| !riding_right_half(head, size, p));
+            // With a gamepad (its pointer hidden), the arrow takes turns
+            // between the halves, as the D-pad picks either.
+            let first = ((time.elapsed_secs() / ARROW_SWAP) as u32).is_multiple_of(2);
+            let left = if gamepad {
+                first
+            } else {
+                screen
+                    .cursor(window)
+                    .is_none_or(|p| !riding_right_half(head, size, p))
+            };
             let (right, down) = riding_axes(head);
             let side = if left { -1.0 } else { 1.0 };
             let offset = Vec2::new(
@@ -460,7 +468,8 @@ pub(crate) fn place_turner_marker(w: &mut World) {
         let clear = pointer.is_some_and(|p| p.distance(at) > ARROW_CLEAR_DISTANCE * scale)
             && (fit[0] - fit[1]).abs() > ARROW_CLEAR_MARGIN;
         let first = ((time.elapsed_secs() / ARROW_SWAP) as u32).is_multiple_of(2);
-        let visible = if clear {
+        // With a gamepad the hidden pointer picks nothing: they take turns.
+        let visible = if clear && !gamepad {
             [fit[0] >= fit[1], fit[1] > fit[0]]
         } else {
             [first, !first]

@@ -39,6 +39,10 @@ const REPEAT_EVERY: f32 = 0.07;
 /// What the gamepad pressed for the game, let go again.
 #[derive(Default)]
 pub struct GamepadState {
+    /// When a replay was last running (real seconds), and whether the A
+    /// that took over from it is still held: that A gives no skill.
+    replay_seen: f32,
+    a_took_over: bool,
     /// Keys pressed for a frame, let go the next.
     tapped: Vec<KeyCode>,
     /// Keys held while a button is: (button, key).
@@ -402,6 +406,9 @@ fn frame(w: &mut World, rect: Option<Rect>) {
     }
 }
 
+/// How long after a replay ends by itself A still only takes over (s).
+const REPLAY_GRACE: f32 = 1.0;
+
 /// In a level.
 fn level(w: &mut World, pad: &l3d_engine::input::Pad) {
     let b = &pad.buttons;
@@ -409,15 +416,27 @@ fn level(w: &mut World, pad: &l3d_engine::input::Pad) {
     // the one highlighted is gone.
     // During a replay, stepping to a lemming takes over from it (as a click
     // does, `hud::take_over`) and steps; A only takes over.
-    let mut took_over = false;
-    if w.game.replay.is_some()
+    // A pressed just after a replay ended by itself (it reached where the
+    // player restarted) is meant to stop it too, so it only takes over.
+    let now = w.e.time.real.elapsed_secs();
+    let replaying = w.game.replay.is_some();
+    if replaying
         && [PadButton::Left, PadButton::Right, PadButton::South]
             .into_iter()
             .any(|p| b.just_pressed(p))
     {
         w.game.replay = None;
-        took_over = b.just_pressed(PadButton::South);
     }
+    if b.just_pressed(PadButton::South) && (replaying || now - w.gamepad.replay_seen < REPLAY_GRACE)
+    {
+        w.gamepad.a_took_over = true;
+    } else if !b.pressed(PadButton::South) {
+        w.gamepad.a_took_over = false;
+    }
+    if replaying {
+        w.gamepad.replay_seen = now;
+    }
+    let took_over = w.gamepad.a_took_over;
     let size = w.screen.size;
     let (sim, highlight) = (w.game.sim.as_mut(), &mut w.highlight);
     let Some(sim) = sim else { return };
