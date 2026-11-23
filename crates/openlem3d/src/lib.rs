@@ -1426,9 +1426,8 @@ impl Game {
 
 /// Whether cell `c` of the level holds nothing drawn: an invisible block (ids
 /// 3 and 4, or a definition all placeholder faces, as block 25 of "Alpine
-/// Assault Course") with no object or decal of its own.
-
-/// The same, given the level's terrain (shareable between threads).
+/// Assault Course") with no object or decal of its own; given the level's
+/// terrain (shareable between threads).
 fn unseen_in(
     terrain: Option<&(l3d_formats::level::Level, l3d_formats::blk::BlockSet, usize)>,
     c: [i32; 3],
