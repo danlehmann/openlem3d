@@ -1864,7 +1864,7 @@ impl Simulation {
         l.set_state(State::OnRope { to });
     }
 
-    /// Springs: a walker stepping onto a sender is thrown in an arc onto its
+    /// Springs: a walker reaching a sender's centre is thrown in an arc onto its
     /// receiver ([`Self::sender_at`]) and lands unhurt, walking on in its old direction.
     /// Flight time and arc height are unmeasured. A sender still resting
     /// from a throw ([`SPRING_REST_PER_UNIT`]) lets a walker walk over it; the
@@ -1885,6 +1885,15 @@ impl Simulation {
         let Some((sender, receiver)) = pair else {
             return;
         };
+        // A walker is thrown at the sender's centre, walking onto the plate
+        // first (recorded in the original's Practice "Catapults", 2026-11-22:
+        // over its middle on the frame before the throw, about 7 ticks after
+        // stepping on).
+        let centre = self.objects[sender].feet();
+        let d = l.dir.delta();
+        if (0..3).any(|a| (centre[a] - l.pos[a]) * d[a] > 0) {
+            return;
+        }
         if self.objects[sender].rest > 0 {
             l.passing = Some((sender, l.dir));
         }
