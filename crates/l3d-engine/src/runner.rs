@@ -117,7 +117,12 @@ impl<G: Game> Runner<G> {
             return;
         };
         let engine = self.game.engine();
-        if let Some(p) = engine.window.warp.take() {
+        if let Some(p) = engine
+            .window
+            .warp
+            .take()
+            .map(|p| p / engine.window.resolution.ratio())
+        {
             let _ = window
                 .set_cursor_position(winit::dpi::PhysicalPosition::new(p.x as f64, p.y as f64));
         }
@@ -219,13 +224,14 @@ impl<G: Game> ApplicationHandler for Runner<G> {
                 self.engine().window.focused = focused;
                 self.events.push(Raw::Focus(focused));
             }
-            WindowEvent::CursorMoved { position, .. } => self
-                .engine()
-                .window
-                .set_physical_cursor_position(Some(Vec2::new(
-                    position.x as f32,
-                    position.y as f32,
-                ))),
+            WindowEvent::CursorMoved { position, .. } => {
+                // In the pixels drawn, which may be fewer than the window's.
+                let w = &mut self.engine().window;
+                let k = w.resolution.ratio();
+                w.set_physical_cursor_position(Some(
+                    Vec2::new(position.x as f32, position.y as f32) * k,
+                ))
+            }
             WindowEvent::CursorLeft { .. } => {
                 self.engine().window.set_physical_cursor_position(None)
             }
@@ -268,8 +274,9 @@ impl<G: Game> ApplicationHandler for Runner<G> {
                 }));
             }
             WindowEvent::Touch(t) => {
-                let scale = self.engine().window.scale_factor();
-                let p = Vec2::new(t.location.x as f32, t.location.y as f32) / scale;
+                let w = &self.engine().window;
+                let (scale, k) = (w.scale_factor(), w.resolution.ratio());
+                let p = Vec2::new(t.location.x as f32, t.location.y as f32) * k / scale;
                 self.events.push(Raw::Touch(t.id, t.phase, p));
             }
             WindowEvent::PinchGesture { delta, .. } => self.events.push(Raw::Pinch(delta as f32)),

@@ -740,11 +740,14 @@ struct Quad {
 
 /// Floats per instance: rectangle, texture coordinates, colour, rectangle in
 /// pixels.
-const QUAD_FLOATS: usize = 16;
+const QUAD_FLOATS: usize = 20;
 
 pub struct UiGpu {
     layout: wgpu::BindGroupLayout,
     pipeline: wgpu::RenderPipeline,
+    /// The same for drawing in a pass with a depth buffer of the format
+    /// given to [`UiGpu::new`].
+    depth_pipeline: Option<wgpu::RenderPipeline>,
     /// The format of the targets it draws into.
     pub format: wgpu::TextureFormat,
     /// Every picture is pixel art, sampled sharp.
@@ -755,6 +758,11 @@ pub struct UiGpu {
     quads: Option<wgpu::Buffer>,
     /// The pictures drawn so far.
     images: HashMap<AssetId<Image>, Uploaded>,
+    /// This frame's draws, made ready by [`UiGpu::prepare`]: each run's
+    /// picture, scissor rectangle and instances; and the viewport's corner
+    /// and size.
+    runs: Vec<(Option<AssetId<Image>>, URect, std::ops::Range<u32>)>,
+    view: (Vec2, Vec2),
 }
 
 /// A picture on the GPU.
@@ -765,7 +773,7 @@ struct Uploaded {
 
 impl UiGpu {
     /// The UI's GPU side, drawing into targets of `format`.
-    pub fn new(gpu: &Gpu, format: wgpu::TextureFormat) -> Self {
+    pub fn new(gpu: &Gpu, format: wgpu::TextureFormat, depth: Option<wgpu::TextureFormat>) -> Self {
         let device = &gpu.device;
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("ui"),
@@ -797,7 +805,10 @@ impl UiGpu {
             bind_group_layouts: &[Some(&layout)],
             ..Default::default()
         });
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        // Drawn in a pass of its own, or over the scene in a pass with its
+        // depth buffer (`depth`), which it doesn't test.
+        let make = |depth: Option<wgpu::TextureFormat>| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("ui"),
             layout: Some(&pl),
             vertex: wgpu::VertexState {
@@ -807,7 +818,7 @@ impl UiGpu {
                     array_stride: (QUAD_FLOATS * 4) as u64,
                     step_mode: wgpu::VertexStepMode::Instance,
                     attributes: &wgpu::vertex_attr_array![
-                        0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Float32x4
+                        0 => Float32x4, 1 => Float32x4, 2 => Float32x4, 3 => Float32x4, 4 => Float32x4
                     ],
                 }],
                 compilation_options: Default::default(),
@@ -826,11 +837,20 @@ impl UiGpu {
                 topology: wgpu::PrimitiveTopology::TriangleStrip,
                 ..Default::default()
             },
-            depth_stencil: None,
+            depth_stencil: depth.map(|format| wgpu::DepthStencilState {
+                format,
+                depth_write_enabled: Some(false),
+                depth_compare: Some(wgpu::CompareFunction::Always),
+                stencil: Default::default(),
+                bias: Default::default(),
+            }),
             multisample: Default::default(),
             multiview_mask: None,
             cache: None,
-        });
+        })
+        };
+        let pipeline = make(None);
+        let depth_pipeline = depth.map(|d| make(Some(d)));
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("ui"),
             // Linear, sampled by `ui.wgsl`'s `sharp_uv` so that texels stay
@@ -850,10 +870,13 @@ impl UiGpu {
         UiGpu {
             layout,
             pipeline,
+            depth_pipeline,
             format,
             sampler,
             white,
             quads: None,
+            runs: Vec::new(),
+            view: (Vec2::ZERO, Vec2::ONE),
             images: HashMap::new(),
         }
     }
@@ -909,6 +932,9 @@ impl UiGpu {
 
     /// Draws the UI into `viewport` (x, y, width, height) of `target`, in
     /// order, a call per run of rectangles sharing a picture and a clip.
+    /// Draws the UI in a pass of its own onto `target` (the headset's
+    /// panel).
+    #[cfg_attr(not(all(target_os = "android", feature = "xr")), allow(dead_code))]
     pub fn draw(
         &mut self,
         gpu: &Gpu,
@@ -918,6 +944,34 @@ impl UiGpu {
         ui: &Ui,
         images: &mut Assets<Image>,
     ) {
+        if !self.prepare(gpu, viewport, ui, images) {
+            return;
+        }
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("ui"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            ..Default::default()
+        });
+        self.record(&mut pass, false);
+    }
+
+    /// Makes this frame's UI ready to draw, uploading what it needs;
+    /// whether there is anything to draw.
+    pub fn prepare(
+        &mut self,
+        gpu: &Gpu,
+        viewport: UVec4,
+        ui: &Ui,
+        images: &mut Assets<Image>,
+    ) -> bool {
         self.update_images(gpu, images);
         let (origin, size) = (
             Vec2::new(viewport.x as f32, viewport.y as f32),
@@ -930,6 +984,10 @@ impl UiGpu {
         let mut data: Vec<f32> = Vec::with_capacity(quads.len() * QUAD_FLOATS);
         for q in &quads {
             let mut rect = q.rect;
+            // The picture's size in texels, and screen pixels per texel
+            // across and down (worked out here rather than per pixel: on a
+            // weak GPU that was most of the UI's cost).
+            let mut texels = Vec2::ONE;
             if let Some(id) = q.image {
                 let Some(image) = self.image(gpu, id, images) else {
                     continue;
@@ -940,7 +998,9 @@ impl UiGpu {
                     rect.center(),
                     source * (rect.size() / source).min_element(),
                 );
+                texels = source;
             }
+            let per_texel = rect.size() / texels;
             let clip = q
                 .clip
                 .unwrap_or(Rect::from_corners(Vec2::ZERO, size))
@@ -961,8 +1021,26 @@ impl UiGpu {
             let c = q.color.to_f32_array();
             let (min, max) = (rect.min + origin, rect.max + origin);
             data.extend_from_slice(&[
-                a.x, a.y, b.x, b.y, u0, 0.0, u1, 1.0, c[0], c[1], c[2], c[3], min.x, min.y, max.x,
+                a.x,
+                a.y,
+                b.x,
+                b.y,
+                u0,
+                0.0,
+                u1,
+                1.0,
+                c[0],
+                c[1],
+                c[2],
+                c[3],
+                min.x,
+                min.y,
+                max.x,
                 max.y,
+                texels.x,
+                texels.y,
+                per_texel.x,
+                per_texel.y,
             ]);
             let i = (data.len() / QUAD_FLOATS) as u32 - 1;
             match runs.last_mut() {
@@ -970,8 +1048,10 @@ impl UiGpu {
                 _ => runs.push((q.image, scissor, i..i + 1)),
             }
         }
+        self.view = (origin, size);
         if runs.is_empty() {
-            return;
+            self.runs.clear();
+            return false;
         }
         let bytes: Vec<u8> = data.iter().flat_map(|f| f.to_le_bytes()).collect();
         if self
@@ -988,23 +1068,27 @@ impl UiGpu {
         }
         let quads = self.quads.as_ref().expect("made above");
         gpu.queue.write_buffer(quads, 0, &bytes);
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("ui"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: target,
-                depth_slice: None,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Load,
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            ..Default::default()
-        });
+        self.runs = runs;
+        true
+    }
+
+    /// Records the UI made ready by [`UiGpu::prepare`] into `pass` (whose
+    /// target is in its format), over what the pass drew before.
+    /// `depth`: the pass has a depth buffer (of the format given to
+    /// [`UiGpu::new`]).
+    pub fn record(&self, pass: &mut wgpu::RenderPass<'_>, depth: bool) {
+        let (Some(quads), false) = (&self.quads, self.runs.is_empty()) else {
+            return;
+        };
+        let (origin, size) = self.view;
         pass.set_viewport(origin.x, origin.y, size.x, size.y, 0.0, 1.0);
-        pass.set_pipeline(&self.pipeline);
+        let pipeline = match &self.depth_pipeline {
+            Some(p) if depth => p,
+            _ => &self.pipeline,
+        };
+        pass.set_pipeline(pipeline);
         pass.set_vertex_buffer(0, quads.slice(..));
-        for (image, scissor, range) in runs {
+        for (image, scissor, range) in &self.runs {
             let group = match image {
                 Some(id) => &self.images[&id].bind_group,
                 None => &self.white,
@@ -1012,7 +1096,7 @@ impl UiGpu {
             pass.set_bind_group(0, group, &[]);
             let s = scissor.size();
             pass.set_scissor_rect(scissor.min.x, scissor.min.y, s.x, s.y);
-            pass.draw(0..4, range);
+            pass.draw(0..4, range.clone());
         }
         // The Pixel 11 Pro's PowerVR driver keeps only what lies inside the
         // scissor rectangle set when the pass ends, losing the rest of the pass.

@@ -525,7 +525,7 @@ pub(crate) fn render(w: &mut World) {
             // works. Compiling before the window is attached lets OpenGL ES
             // take over cleanly.
             let mut sc = SceneGpu::new(&g.device, &g.adapter);
-            sc.compile(&g.device);
+            sc.compile(&g.device, TARGET_FORMAT);
             if g.lost.load(Ordering::Acquire)
                 && g.adapter.get_info().backend == wgpu::Backend::Vulkan
             {
@@ -632,67 +632,70 @@ pub(crate) fn render(w: &mut World) {
         let view = texture.create_view(&Default::default());
         *previous = Some((size, format, texture, view));
     }
+    // Straight onto the window when nothing needs the frame afterwards (a
+    // screenshot, a screen in the level showing it, HDR's own target): a
+    // copy of the whole frame less, which a weak GPU feels.
+    let s = surface.as_ref().expect("checked above");
+    let window_view = frame.as_ref().map(|f| {
+        f.texture.create_view(&wgpu::TextureViewDescriptor {
+            format: Some(s.view_format),
+            ..Default::default()
+        })
+    });
+    let direct = !s.hdr && screenshots.0.is_empty() && !shows_screen;
+    let (draw_view, format) = match &window_view {
+        Some(v) if direct => (v, s.view_format),
+        _ => (&target.view, format),
+    };
     let mut encoder = device.create_command_encoder(&Default::default());
     profile.stamp(&mut encoder, Stamp::Start);
+    // The scene's first pass clears the frame (`SceneInput::clear`).
     let c = clear.0.to_linear();
-    encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-        label: Some("clear"),
-        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-            view: &target.view,
-            depth_slice: None,
-            resolve_target: None,
-            ops: wgpu::Operations {
-                load: wgpu::LoadOp::Clear(wgpu::Color {
-                    r: c.red as f64,
-                    g: c.green as f64,
-                    b: c.blue as f64,
-                    a: c.alpha as f64,
-                }),
-                store: wgpu::StoreOp::Store,
-            },
-        })],
-        ..Default::default()
-    });
+    let clear_colour = wgpu::Color {
+        r: c.red as f64,
+        g: c.green as f64,
+        b: c.blue as f64,
+        a: c.alpha as f64,
+    };
     profile.stamp(&mut encoder, Stamp::Clear);
     let viewport = screen.pixels;
-    scene
-        .get_or_insert_with(|| SceneGpu::new(device, &gpu.adapter))
-        .draw(
-            gpu,
-            &mut encoder,
-            &target.view,
-            size,
-            viewport,
-            &SceneInput {
-                content: &w.scene,
-                sprites: &w.sprites,
-                camera: &w.camera,
-                profile,
-                format,
-                headroom,
-                screen: previous.as_ref().map(|p| &p.3),
-                signals: w.signals.as_mut().map(|f| {
-                    let dirty = f.dirty.take();
-                    (&*f, dirty)
-                }),
-                marks: w.marks.as_mut().map(|f| {
-                    let dirty = f.dirty.take();
-                    (&*f, dirty)
-                }),
-            },
-        );
-    profile.stamp(&mut encoder, Stamp::Scene);
+    // The UI, made ready here and drawn in the scene's last pass.
     if ui.as_ref().is_some_and(|u| u.format != format) {
         *ui = None;
     }
-    ui.get_or_insert_with(|| UiGpu::new(gpu, format)).draw(
+    let scene = scene.get_or_insert_with(|| SceneGpu::new(device, &gpu.adapter));
+    let depth = scene.depth_format();
+    let ui = ui.get_or_insert_with(|| UiGpu::new(gpu, format, Some(depth)));
+    ui.prepare(gpu, viewport, &w.ui, &mut w.e.images);
+    let ui = &*ui;
+    let overlay = |pass: &mut wgpu::RenderPass<'_>, depth: bool| ui.record(pass, depth);
+    scene.draw(
         gpu,
         &mut encoder,
-        &target.view,
+        draw_view,
+        size,
         viewport,
-        &w.ui,
-        &mut w.e.images,
+        &SceneInput {
+            content: &w.scene,
+            sprites: &w.sprites,
+            camera: &w.camera,
+            profile,
+            format,
+            headroom,
+            screen: previous.as_ref().map(|p| &p.3),
+            signals: w.signals.as_mut().map(|f| {
+                let dirty = f.dirty.take();
+                (&*f, dirty)
+            }),
+            marks: w.marks.as_mut().map(|f| {
+                let dirty = f.dirty.take();
+                (&*f, dirty)
+            }),
+            clear: clear_colour,
+            overlay: Some(&overlay),
+        },
     );
+    profile.stamp(&mut encoder, Stamp::Scene);
     profile.stamp(&mut encoder, Stamp::Ui);
     // This frame, for the next one's screen.
     if let Some((_, _, texture, _)) = previous.as_ref() {
@@ -706,17 +709,12 @@ pub(crate) fn render(w: &mut World) {
             },
         );
     }
-    let s = surface.as_ref().expect("checked above");
-    if let Some(frame) = &frame {
-        let view = frame.texture.create_view(&wgpu::TextureViewDescriptor {
-            format: Some(s.view_format),
-            ..Default::default()
-        });
+    if let Some(view) = window_view.as_ref().filter(|_| !direct) {
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("copy"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
+                    view,
                     depth_slice: None,
                     resolve_target: None,
                     ops: wgpu::Operations {

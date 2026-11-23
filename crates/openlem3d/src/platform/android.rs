@@ -176,11 +176,26 @@ pub fn insets() -> jni::errors::Result<[u32; 4]> {
     })
 }
 
+/// `WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON`.
+const FLAG_KEEP_SCREEN_ON: i32 = 0x80;
+
 /// See `platform::full_screen`: with the screen to itself (not in a window
 /// among others, as on a desktop or in split screen), draws into cutouts and
 /// hides the system bars.
 pub fn full_screen() {
     on_main_thread("go full screen", |env, activity| {
+        // The screen stays on while the game is in front: a level played
+        // with a gamepad (or watched) has no touches to keep it awake, and
+        // a TV starts its screensaver within minutes. (On this thread:
+        // asked from the game's, through the native activity, it hung the
+        // game.)
+        let shown = window(env, activity)?;
+        env.call_method(
+            &shown,
+            "addFlags",
+            "(I)V",
+            &[JValue::Int(FLAG_KEEP_SCREEN_ON)],
+        )?;
         let fill = !in_multi_window(env, activity)?;
         FULL_SCREEN.store(fill, Ordering::Relaxed);
         if !fill {

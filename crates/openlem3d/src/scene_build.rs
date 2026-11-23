@@ -8,7 +8,7 @@ use l3d_formats::level::{BlockCell, LandVertex, Level, SIZE_X, SIZE_Z};
 use crate::glow;
 use crate::level_mesh::{self, LevelMesh};
 use crate::light::{self, Light};
-use crate::scene_render::{RgbaImage, SceneData, SceneLayer, VERTEX_FLOATS};
+use crate::scene_render::{LayerKind, RgbaImage, SceneData, SceneLayer, VERTEX_FLOATS};
 
 /// Height of the ground plane (sea and land): the top of grid layer 0.
 pub const GROUND_Y: f32 = 1.0;
@@ -272,6 +272,7 @@ impl LayerBuilder {
             texture,
             smooth: false,
             screen: false,
+            kind: LayerKind::Blocks,
         }
     }
 }
@@ -615,6 +616,7 @@ fn plane_layer(
     }
     SceneLayer {
         smooth: true,
+        kind: LayerKind::Sea,
         ..b.finish(texture)
     }
 }
@@ -668,6 +670,7 @@ fn land_layer(
     }
     SceneLayer {
         smooth: true,
+        kind: LayerKind::Land,
         ..b.finish(texture)
     }
 }
@@ -753,8 +756,9 @@ fn trap_layer(data: &mut GameData, level: &Level, pal: &Palette) -> Option<Scene
         );
     }
     let trap = level.trap_type;
-    (!b.indices.is_empty()).then(|| {
-        b.finish(glowing_rgba(&traps, 64, pal, |p| {
+    (!b.indices.is_empty()).then(|| SceneLayer {
+        kind: LayerKind::Objects,
+        ..b.finish(glowing_rgba(&traps, 64, pal, |p| {
             glow::trap(trap, traps[p], pal)
         }))
     })
@@ -901,13 +905,19 @@ fn object_layers(data: &mut GameData, level: &Level, pal: &Palette) -> Vec<Scene
         && !statics.indices.is_empty()
     {
         let lit = glow::static_objects(level.object_set, &obj, pal, obj_rect);
-        layers.push(statics.finish(glowing_rgba(&obj, 64, pal, |p| lit[p])));
+        layers.push(SceneLayer {
+            kind: LayerKind::Objects,
+            ..statics.finish(glowing_rgba(&obj, 64, pal, |p| lit[p]))
+        });
     }
     if let Some(anim) = anim
         && !animated.indices.is_empty()
     {
         let lit = glow::anim_object(level.anim_object, &anim, pal);
-        layers.push(animated.finish(glowing_rgba(&anim, 64, pal, |p| lit[p])));
+        layers.push(SceneLayer {
+            kind: LayerKind::Objects,
+            ..animated.finish(glowing_rgba(&anim, 64, pal, |p| lit[p]))
+        });
     }
     layers
 }
@@ -1176,6 +1186,7 @@ fn decal_layers(
         }
         layers.push(SceneLayer {
             screen: true,
+            kind: LayerKind::Screen,
             ..screen_b.finish(black)
         });
     }
@@ -1799,6 +1810,7 @@ fn snow_cover(
         texture: snow_texture(),
         smooth: true,
         screen: false,
+        kind: LayerKind::Snow,
     })
 }
 
@@ -1919,6 +1931,7 @@ pub fn build(data: &mut GameData, n: u32, show: Show) -> Result<BuiltLevel, l3d_
                 flags & level_flags::LAND_INVISIBLE == 0 && show.land,
             )
         });
+        scene.waves = waves.is_some();
         if waves.is_some() && show.mirror {
             scene.mirror = Some(SEA_Y);
         }

@@ -273,12 +273,24 @@ fn vs(v: VIn, @builtin(instance_index) instance: u32) -> VOut {
     return o;
 }
 
+// What a level's scene shows (ours): its geometry's pipelines are compiled
+// with only these on (`scene_render::Features`), so that no pixel pays for
+// the rest; a weak GPU spends much of its frame on them otherwise.
+override WINDOWS: bool = true;
+override SCREENS: bool = true;
+override SEA: bool = true;
+override CIRCUIT: bool = true;
+override SNOW: bool = true;
+override GLOSS: bool = true;
+override STORM: bool = true;
+override MIRROR: bool = true;
+
 @fragment
 fn fs(v: VOut) -> @location(0) vec4<f32> {
     // A glossy floor lies just under its mirror, which leaves out only what
     // is below it, so that blocks meet their reflections.
     let clip = select(MIRROR_CLIP, GLOSS_CLIP, u.gloss.x > 0.5);
-    if (v.mirror.x > 0.5 && (v.mirror.y < clip || v.tile.x > 0.0)) {
+    if (MIRROR && v.mirror.x > 0.5 && (v.mirror.y < clip || v.tile.x > 0.0)) {
         discard;
     }
     var uv = v.uv;
@@ -302,7 +314,7 @@ fn fs(v: VOut) -> @location(0) vec4<f32> {
     // On a window's face (`VIn::params`, its tile in thousandths) the
     // texture is taken from inside the tile only: at the face's edge a
     // pixel can fall a little beyond it, onto the frame across the tile.
-    if (v.params.y < -1.5) {
+    if (WINDOWS && v.params.y < -1.5) {
         let tile = round(fract(-v.params.y) * 1000.0);
         let half = 0.5 / size;
         uv = clamp(uv, vec2(half.x, tile / TILES + half.y), vec2(1.0 - half.x, (tile + 1.0) / TILES - half.y));
@@ -325,7 +337,7 @@ fn fs(v: VOut) -> @location(0) vec4<f32> {
     let shaded = pow(srgb * (lowered / max(top, 1e-5)), vec3(2.2));
     // A window's glass (its alpha marked, `scene_build::WINDOW_ALPHA`)
     // looks out on space.
-    let window = u.snow.w > 0.5 && v.params.y < -1.5 && c.a > 0.15 && c.a < 0.4;
+    let window = WINDOWS && u.snow.w > 0.5 && v.params.y < -1.5 && c.a > 0.15 && c.a < 0.4;
     // Glass not shown as a window (on a face showing a sliver of one)
     // stays as painted, without glow.
     let glass = v.params.y < 0.5 && c.a > 0.15 && c.a < 0.4;
@@ -345,38 +357,38 @@ fn fs(v: VOut) -> @location(0) vec4<f32> {
     let untouched = v.world - vec3(0.0, v.cover.z, 0.0);
     let ground = normalize(cross(dpdx(untouched), dpdy(untouched)) + vec3(0.0, 1e-9, 0.0));
     // Glass with more of the level behind it stays as painted.
-    if (window && v.mirror.x < 0.5 && !sees_level(v.world, look)) {
+    if (WINDOWS && window && v.mirror.x < 0.5 && !sees_level(v.world, look)) {
         // The glass as painted (near black, with light glare streaks)
         // shows as a reflection over the view.
         return vec4(space(look, look_px) + shaded, 1.0);
     }
-    if (v.screen > 0.5 && u.post.w > 0.5) {
+    if (SCREENS && v.screen > 0.5 && u.post.w > 0.5) {
         return vec4(crt(v.uv, footprint), 1.0);
     }
-    if (v.wave.z > 0.0 || v.wave.w > 0.0) {
+    if (SEA && (v.wave.z > 0.0 || v.wave.w > 0.0)) {
         return vec4(sea(v, shaded), 1.0);
     }
     var lit = (shaded + c.rgb * v.light) * (1.0 + glow * u.post.x);
-    if (v.circuit > 0.5) {
+    if (CIRCUIT && v.circuit > 0.5) {
         let texel = max(length(gx * size), length(gy * size));
         lit += sent_signal(v.world, texel);
     }
-    if (v.cover.x > 0.5) {
+    if (SNOW && v.cover.x > 0.5) {
         lit = snow_lit(lit, facing, ground, v.cover.y);
-    } else if (u.snow.z > 0.0 && v.mirror.x < 0.5 && abs(facing.y) > 0.7) {
+    } else if (SNOW && u.snow.z > 0.0 && v.mirror.x < 0.5 && abs(facing.y) > 0.7) {
         lit = marked(lit, v.world, srgb);
     }
-    if (u.gloss.x > 0.5 && v.mirror.x < 0.5) {
+    if (GLOSS && u.gloss.x > 0.5 && v.mirror.x < 0.5) {
         lit = glossy(lit, v, facing);
     }
-    if (u.weather.x > 0.0) {
+    if (STORM && u.weather.x > 0.0) {
         // Sand drifting over the desert floor, then the dust in the air.
         if (v.tile.x > 0.0) {
             lit *= drift(v.world.xz);
         }
         lit = dust(lit, v.world);
     }
-    return vec4(lit, heat_of(v.world));
+    return vec4(lit, select(1.0, heat_of(v.world), STORM));
 }
 
 // Shadows (ours, enhanced mode): soft round discs multiplied onto what is

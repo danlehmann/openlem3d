@@ -6,12 +6,13 @@
 //! each frame (`crate::gpu`) uploads what changed and draws the scene, before
 //! the UI.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use l3d_engine::prelude::*;
 use wgpu::util::DeviceExt;
 
-use crate::gpu::{Gpu, TARGET_FORMAT};
+use crate::gpu::Gpu;
 use crate::profile::Stamp;
 
 /// Floats per vertex: position (3), uv (2), shade (1), cutout flag (1),
@@ -55,6 +56,8 @@ pub struct SceneData {
     pub mirror: Option<f32>,
     /// A sandstorm blows over the level (ours, Ultra mode).
     pub storm: bool,
+    /// The sea has waves (ours; the scene shader's `SEA`).
+    pub waves: bool,
     /// Snow falls gently over the level (ours, Enhanced and Ultra modes).
     pub snow: bool,
     /// The lemmings leave marks in the snow and on the ice (ours, Ultra
@@ -111,6 +114,29 @@ pub struct SceneLayer {
     /// over uv 0–1 (top left to bottom right), in place of `texture`,
     /// which stands in until there is one.
     pub screen: bool,
+    /// What the layer is, which decides the scene shader's features it is
+    /// drawn with ([`Features::for_layer`]).
+    pub kind: LayerKind,
+}
+
+/// What a scene layer is, for the features its pixels can show.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum LayerKind {
+    /// The level's blocks (and builders' bricks): windows, snow, the
+    /// circuit board, polished floors.
+    #[default]
+    Blocks,
+    /// A screen showing the game: as a cathode-ray tube.
+    Screen,
+    /// The sea: waves and surf.
+    Sea,
+    /// The land, and other ground planes: polished, marked in snow,
+    /// sand drifting over it.
+    Land,
+    /// Objects, traps and signs, and the sprites: none of them.
+    Objects,
+    /// Snow lying on the blocks.
+    Snow,
 }
 
 /// RGBA8 sRGB texels, row-major.
@@ -178,6 +204,16 @@ pub struct SceneInput<'a> {
     /// The marks in snow, if the level shows them, and the part of them
     /// changed since the last frame.
     pub marks: Option<(&'a crate::marks::MarkField, Option<[u32; 4]>)>,
+    /// The colour the target is cleared to by the first pass drawing into
+    /// it (rather than by a pass of its own: on a tiling GPU each pass over
+    /// the whole frame costs).
+    pub clear: wgpu::Color,
+    /// Drawn over the scene in the last pass onto the target (the UI), so
+    /// that a tiling GPU needn't write the frame out and read it back for
+    /// it.
+    /// Told whether the pass has the scene's depth buffer
+    /// ([`SceneGpu::depth_format`]).
+    pub overlay: Option<&'a dyn Fn(&mut wgpu::RenderPass<'_>, bool)>,
 }
 
 /// Which field the level's field texture holds.
@@ -223,7 +259,7 @@ pub struct SceneGpu {
     mipmapped: wgpu::Sampler,
     uniforms: wgpu::Buffer,
     /// Pipelines per colour format drawn into.
-    pipelines: Vec<(wgpu::TextureFormat, Pipelines)>,
+    pipelines: HashMap<(wgpu::TextureFormat, Which, Features), wgpu::RenderPipeline>,
     /// The low-resolution colour target: its size and format, its view, and
     /// the bind group that samples it.
     low: Option<(
@@ -277,30 +313,111 @@ pub struct SceneGpu {
     textures: Vec<(Arc<[u8]>, bool, Bound)>,
 }
 
-struct Pipelines {
-    geometry: wgpu::RenderPipeline,
+/// The features a level's scene shows, each an override constant of the
+/// scene shader (`scene.wgsl`): its pipelines are compiled with only these,
+/// so that no pixel pays for the others (on a weak GPU a large share of
+/// the frame).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Default)]
+struct Features {
+    windows: bool,
+    screens: bool,
+    sea: bool,
+    circuit: bool,
+    snow: bool,
+    gloss: bool,
+    storm: bool,
+    mirror: bool,
+}
+
+impl Features {
+    /// Those of the level's features a layer of `kind` can show (a sandstorm's
+    /// dust and the sea's mirror apply to every surface).
+    fn for_layer(self, kind: LayerKind) -> Features {
+        let only = Features {
+            storm: self.storm,
+            mirror: self.mirror,
+            ..Features::default()
+        };
+        match kind {
+            LayerKind::Blocks => Features {
+                windows: self.windows,
+                circuit: self.circuit,
+                snow: self.snow,
+                gloss: self.gloss,
+                ..only
+            },
+            LayerKind::Screen => Features {
+                screens: self.screens,
+                ..only
+            },
+            LayerKind::Sea => Features {
+                sea: self.sea,
+                ..only
+            },
+            LayerKind::Land => Features {
+                snow: self.snow,
+                gloss: self.gloss,
+                ..only
+            },
+            LayerKind::Snow => Features {
+                snow: self.snow,
+                ..only
+            },
+            LayerKind::Objects => only,
+        }
+    }
+
+    fn constants(self) -> Vec<(&'static str, f64)> {
+        let on = |b: bool| if b { 1.0 } else { 0.0 };
+        vec![
+            ("WINDOWS", on(self.windows)),
+            ("SCREENS", on(self.screens)),
+            ("SEA", on(self.sea)),
+            ("CIRCUIT", on(self.circuit)),
+            ("SNOW", on(self.snow)),
+            ("GLOSS", on(self.gloss)),
+            ("STORM", on(self.storm)),
+            ("MIRROR", on(self.mirror)),
+        ]
+    }
+}
+
+impl Which {
+    /// The features pipeline `self` is made for: the geometry's, the
+    /// level's; the rest don't use them.
+    fn specialised(self, features: Features) -> Features {
+        match self {
+            Which::Geometry | Which::Mirrored => features,
+            _ => Features::default(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+enum Which {
+    Geometry,
     /// The geometry mirrored in the sea (drawn as its second instance).
-    mirrored: wgpu::RenderPipeline,
-    sky: wgpu::RenderPipeline,
+    Mirrored,
+    Sky,
     /// Copies an offscreen scene onto the screen: stretched, or glowing.
-    stretch: wgpu::RenderPipeline,
-    present: wgpu::RenderPipeline,
+    Stretch,
+    Present,
     /// Presenting with the bloom chain's top level blurred up and added in
     /// the same pass, which spares the full-size picture a pass of its own.
-    present_glow: wgpu::RenderPipeline,
+    PresentGlow,
     /// Bloom: the glow above white, halved; a further halving; and a level
     /// blurred back up and added to the one above.
-    bloom_first: wgpu::RenderPipeline,
-    bloom_down: wgpu::RenderPipeline,
-    bloom_up: wgpu::RenderPipeline,
+    BloomFirst,
+    BloomDown,
+    BloomUp,
     /// Shadows: multiplied onto what is drawn, behind what is in front.
-    shadow: wgpu::RenderPipeline,
+    Shadow,
     /// Sheets of dust sweeping across the view in a sandstorm.
-    dust_sheets: wgpu::RenderPipeline,
+    DustSheets,
     /// Sand grains blown along the wind in a sandstorm.
-    sand: wgpu::RenderPipeline,
+    Sand,
     /// Snowflakes falling gently.
-    snow: wgpu::RenderPipeline,
+    Snow,
 }
 
 /// The scene drawn in [`HDR_FORMAT`], and the bloom chain's levels, each
@@ -322,6 +439,7 @@ struct UploadedLayer {
     bind_group: Bound,
     /// Shows the last frame drawn ([`SceneLayer::screen`]).
     screen: bool,
+    kind: LayerKind,
 }
 
 /// An uploaded texture's bind groups: sampled nearest at full size, and,
@@ -489,7 +607,7 @@ impl SceneGpu {
             linear,
             mipmapped,
             uniforms,
-            pipelines: Vec::new(),
+            pipelines: HashMap::new(),
             low: None,
             version: None,
             layers: Vec::new(),
@@ -506,17 +624,38 @@ impl SceneGpu {
         }
     }
 
-    /// The pipelines drawing into `format`, made on first use.
-    /// Compiles the shaders for drawing into the usual target, ahead of the
-    /// first frame.
-    pub fn compile(&mut self, device: &wgpu::Device) {
-        self.pipelines(device, TARGET_FORMAT);
+    /// The format of the depth buffer the scene draws with.
+    pub fn depth_format(&self) -> wgpu::TextureFormat {
+        self.depth_format
     }
 
-    fn pipelines(&mut self, device: &wgpu::Device, format: wgpu::TextureFormat) -> &Pipelines {
-        if let Some(i) = self.pipelines.iter().position(|(f, _)| *f == format) {
-            return &self.pipelines[i].1;
-        }
+    /// Compiles the shaders every level draws with into the usual target,
+    /// ahead of the first frame (and Present, which an old Vulkan driver
+    /// fails to compile, before the window is attached: see `gpu`); the
+    /// rest wait until they are drawn with.
+    pub fn compile(&mut self, device: &wgpu::Device, format: wgpu::TextureFormat) {
+        self.pipelines(
+            device,
+            format,
+            &[Which::Geometry, Which::Sky, Which::Stretch, Which::Present],
+            Features::default(),
+        );
+    }
+
+    /// Makes pipeline `which` drawing into `format`.
+    fn make(
+        &self,
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+        which: Which,
+        features: Features,
+    ) -> wgpu::RenderPipeline {
+        // The level's features, as the scene shader's override constants.
+        let constants = features.constants();
+        let specialised = wgpu::PipelineCompilationOptions {
+            constants: &constants,
+            ..Default::default()
+        };
         let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("scene"),
             bind_group_layouts: &[Some(&self.layout)],
@@ -556,7 +695,7 @@ impl SceneGpu {
                 module: &self.shader,
                 entry_point: Some("fs"),
                 targets: &[Some(format.into())],
-                compilation_options: Default::default(),
+                compilation_options: specialised.clone(),
             }),
             primitive: wgpu::PrimitiveState { cull_mode: Some(cull), ..Default::default() },
             depth_stencil: Some(wgpu::DepthStencilState {
@@ -606,11 +745,13 @@ impl SceneGpu {
                 cache: None,
             })
         };
-        let dust_sheets = over_scene(
-            "scene dust sheets",
-            "fs_dust_sheets",
-            Some(wgpu::BlendState::ALPHA_BLENDING),
-        );
+        let dust_sheets = || {
+            over_scene(
+                "scene dust sheets",
+                "fs_dust_sheets",
+                Some(wgpu::BlendState::ALPHA_BLENDING),
+            )
+        };
         // Particles in the world (snowflakes, sand grains): a quad each,
         // hidden by what is nearer.
         let particles = |label, vs, fs| {
@@ -646,35 +787,37 @@ impl SceneGpu {
                 cache: None,
             })
         };
-        let snow = particles("scene snow", "vs_snow", "fs_snow");
-        let sand = particles("scene sand", "vs_sand", "fs_sand");
-        let sky = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("scene sky"),
-            layout: Some(&pl_scene),
-            vertex: wgpu::VertexState {
-                module: &self.shader,
-                entry_point: Some("vs_sky"),
-                buffers: &[],
-                compilation_options: Default::default(),
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &self.shader,
-                entry_point: Some("fs_sky"),
-                targets: &[Some(format.into())],
-                compilation_options: Default::default(),
-            }),
-            primitive: Default::default(),
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: self.depth_format,
-                depth_write_enabled: Some(false),
-                depth_compare: Some(wgpu::CompareFunction::Always),
-                stencil: Default::default(),
-                bias: Default::default(),
-            }),
-            multisample: Default::default(),
-            multiview_mask: None,
-            cache: None,
-        });
+        let snow = || particles("scene snow", "vs_snow", "fs_snow");
+        let sand = || particles("scene sand", "vs_sand", "fs_sand");
+        let sky = || {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("scene sky"),
+                layout: Some(&pl_scene),
+                vertex: wgpu::VertexState {
+                    module: &self.shader,
+                    entry_point: Some("vs_sky"),
+                    buffers: &[],
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &self.shader,
+                    entry_point: Some("fs_sky"),
+                    targets: &[Some(format.into())],
+                    compilation_options: Default::default(),
+                }),
+                primitive: Default::default(),
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: self.depth_format,
+                    depth_write_enabled: Some(false),
+                    depth_compare: Some(wgpu::CompareFunction::Always),
+                    stencil: Default::default(),
+                    bias: Default::default(),
+                }),
+                multisample: Default::default(),
+                multiview_mask: None,
+                cache: None,
+            })
+        };
         // A full-screen triangle with no depth, optionally added onto what
         // is there.
         let full_screen = |label, vertex, fragment, add: bool, layout| {
@@ -712,7 +855,8 @@ impl SceneGpu {
                 cache: None,
             })
         };
-        let shadow = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        let shadow = || {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("scene shadows"),
             layout: Some(&pl_scene),
             vertex: wgpu::VertexState {
@@ -756,31 +900,54 @@ impl SceneGpu {
             multisample: Default::default(),
             multiview_mask: None,
             cache: None,
-        });
-        let pipelines = Pipelines {
-            dust_sheets,
-            sand,
-            snow,
-            shadow,
-            geometry: geometry("scene geometry", wgpu::Face::Back),
+        })
+        };
+        match which {
+            Which::DustSheets => dust_sheets(),
+            Which::Sand => sand(),
+            Which::Snow => snow(),
+            Which::Shadow => shadow(),
+            Which::Geometry => geometry("scene geometry", wgpu::Face::Back),
             // Mirrored, the faces turn over.
-            mirrored: geometry("scene mirrored", wgpu::Face::Front),
-            sky,
-            stretch: full_screen("scene stretch", "vs_sky", "fs_stretch", false, &pl),
-            present: full_screen("scene present", "vs_sky", "fs_present", false, &pl),
-            present_glow: full_screen(
+            Which::Mirrored => geometry("scene mirrored", wgpu::Face::Front),
+            Which::Sky => sky(),
+            Which::Stretch => full_screen("scene stretch", "vs_sky", "fs_stretch", false, &pl),
+            Which::Present => full_screen("scene present", "vs_sky", "fs_present", false, &pl),
+            Which::PresentGlow => full_screen(
                 "scene present glow",
                 "vs_sky",
                 "fs_present_glow",
                 false,
                 &pl_two,
             ),
-            bloom_first: full_screen("bloom first", "vs_post", "fs_bloom_first", false, &pl),
-            bloom_down: full_screen("bloom down", "vs_post", "fs_bloom_down", false, &pl),
-            bloom_up: full_screen("bloom up", "vs_post", "fs_bloom_up", true, &pl),
-        };
-        self.pipelines.push((format, pipelines));
-        &self.pipelines.last().unwrap().1
+            Which::BloomFirst => {
+                full_screen("bloom first", "vs_post", "fs_bloom_first", false, &pl)
+            }
+            Which::BloomDown => full_screen("bloom down", "vs_post", "fs_bloom_down", false, &pl),
+            Which::BloomUp => full_screen("bloom up", "vs_post", "fs_bloom_up", true, &pl),
+        }
+    }
+
+    /// Makes the pipelines `need` drawing into `format` that aren't made
+    /// yet: each the first time it is drawn with, as compiling them is slow
+    /// on some GPUs (seconds on a Mali-G31 for them all), and many are only
+    /// for Enhanced or Ultra, or a few levels.
+    /// Geometry pipelines are made for the level's `features` (others
+    /// ignore them).
+    fn pipelines(
+        &mut self,
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+        need: &[Which],
+        features: Features,
+    ) {
+        for &w in need {
+            let key = (format, w, w.specialised(features));
+            if !self.pipelines.contains_key(&key) {
+                let p = self.make(device, format, w, key.2);
+                self.pipelines.insert(key, p);
+            }
+        }
     }
 
     /// A bind group sampling `view` with `sampler`.
@@ -1198,6 +1365,7 @@ fn prepare(
             index_count: l.indices.len() as u32,
             bind_group,
             screen: l.screen,
+            kind: l.kind,
         });
     }
     gpu.layers = layers;
@@ -1378,9 +1546,6 @@ fn draw(
     });
     let hdr = (camera.glow && low.is_none()).then(|| gpu.hdr_targets(&device, size));
     let scene_format = if hdr.is_some() { HDR_FORMAT } else { format };
-    gpu.pipelines(&device, scene_format);
-    gpu.pipelines(&device, HDR_FORMAT);
-    gpu.pipelines(&device, format);
     let depth_size = match (&low, &hdr) {
         (Some(l), _) => l.0,
         (_, Some(h)) => h.size,
@@ -1396,6 +1561,69 @@ fn draw(
     let reflection = mirror.then(|| gpu.reflection_target(&device, depth_size, scene_format));
     let storm = input.content.data.as_ref().is_some_and(|d| d.storm);
     let snow = input.content.data.as_ref().is_some_and(|d| d.snow);
+    // The pipelines this frame draws with, made the first time (`pipelines`).
+    let mut need = Vec::new();
+    for (on, which) in [
+        (gpu.sky.is_some(), Which::Sky),
+        (gpu.shadows.as_ref().is_some_and(|s| s.2 > 0), Which::Shadow),
+        (snow, Which::Snow),
+        (storm, Which::Sand),
+        (storm, Which::DustSheets),
+    ] {
+        if on {
+            need.push(which);
+        }
+    }
+    // What the level shows, which its geometry's shader is compiled for.
+    let features = input
+        .content
+        .data
+        .as_ref()
+        .map_or(Features::default(), |d| Features {
+            windows: d.windows,
+            screens: camera.crt && d.layers.iter().any(|l| l.screen),
+            sea: d.waves,
+            circuit: input.signals.is_some(),
+            snow: d.snow || d.snow_tiles.is_some() || input.marks.is_some(),
+            gloss: d.glossy > 0.0,
+            storm: d.storm,
+            mirror: d.mirror.is_some(),
+        });
+    gpu.pipelines(&device, scene_format, &need, features);
+    // The geometry's pipelines, one for each kind of layer the level has
+    // (and the sprites).
+    let kinds: Vec<LayerKind> = gpu
+        .layers
+        .iter()
+        .map(|l| l.kind)
+        .chain([LayerKind::Objects])
+        .collect();
+    for kind in kinds {
+        let geometry: &[Which] = if mirror {
+            &[Which::Geometry, Which::Mirrored]
+        } else {
+            &[Which::Geometry]
+        };
+        gpu.pipelines(&device, scene_format, geometry, features.for_layer(kind));
+    }
+    let bloom = hdr.as_ref().is_some_and(|h| !h.levels.is_empty());
+    if bloom {
+        gpu.pipelines(
+            &device,
+            HDR_FORMAT,
+            &[Which::BloomFirst, Which::BloomDown, Which::BloomUp],
+            features,
+        );
+    }
+    let shown = match (&low, &hdr) {
+        (Some(_), _) => Some(Which::Stretch),
+        (_, Some(_)) if bloom => Some(Which::PresentGlow),
+        (_, Some(_)) => Some(Which::Present),
+        _ => None,
+    };
+    if let Some(w) = shown {
+        gpu.pipelines(&device, format, &[w], features);
+    }
     // Only bare skies are sampled smoothly: stars, planets and clouds gain;
     // scenery along a horizon (trees, castles, hills) only blurs.
     let bare = input.content.data.as_ref().is_some_and(|d| d.sky_bare);
@@ -1431,12 +1659,33 @@ fn draw(
         })
     };
     if gpu.layers.is_empty() && gpu.sky.is_none() && gpu.sprites.is_none() {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("scene clear"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: target,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(input.clear),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            ..Default::default()
+        });
+        if let Some(overlay) = input.overlay {
+            overlay(&mut pass, false);
+        }
+        drop(pass);
         profile.stamp(encoder, Stamp::Geometry);
         profile.stamp(encoder, Stamp::Bloom);
         return;
     }
-    let find = |f| &gpu.pipelines.iter().find(|(g, _)| *g == f).unwrap().1;
-    let (scene_p, hdr_p, screen_p) = (find(scene_format), find(HDR_FORMAT), find(format));
+    let pipeline = |f, w: Which| {
+        gpu.pipelines
+            .get(&(f, w, w.specialised(features)))
+            .expect("made above")
+    };
+    let scene_p = |w| pipeline(scene_format, w);
     let clear = wgpu::LoadOp::Clear(wgpu::Color {
         r: camera.clear.x as f64,
         g: camera.clear.y as f64,
@@ -1452,29 +1701,41 @@ fn draw(
             store: wgpu::StoreOp::Store,
         },
     };
-    // The frame is already cleared to the clear colour.
+    // The first pass onto the target clears it; the later ones draw over.
+    let cleared = std::cell::Cell::new(false);
     let onto_target = || wgpu::RenderPassColorAttachment {
         view: target,
         depth_slice: None,
         resolve_target: None,
         ops: wgpu::Operations {
-            load: wgpu::LoadOp::Load,
+            load: if cleared.replace(true) {
+                wgpu::LoadOp::Load
+            } else {
+                wgpu::LoadOp::Clear(input.clear)
+            },
             store: wgpu::StoreOp::Store,
         },
     };
     // The sky, the geometry and the sprites, either mirrored in the sea
     // (their second instance, without shadows) or as they are, with
     // `second` bound as the reflection.
+    // The geometry's pipeline for a kind of layer.
+    let geometry_for = |mirrored: bool, kind: LayerKind| {
+        let w = if mirrored {
+            Which::Mirrored
+        } else {
+            Which::Geometry
+        };
+        gpu.pipelines
+            .get(&(scene_format, w, features.for_layer(kind)))
+            .expect("made above")
+    };
     let scene = |pass: &mut wgpu::RenderPass, mirrored: bool, second: &wgpu::BindGroup| {
         let instance = if mirrored { 1..2 } else { 0..1 };
-        let geometry = if mirrored {
-            &scene_p.mirrored
-        } else {
-            &scene_p.geometry
-        };
+        let geometry = geometry_for(mirrored, LayerKind::Objects);
         pass.set_bind_group(1, second, &[]);
         if let Some(sky) = &gpu.sky {
-            pass.set_pipeline(&scene_p.sky);
+            pass.set_pipeline(scene_p(Which::Sky));
             let sky = match &sky.filtered {
                 Some(f) if camera.filtered && bare => f,
                 _ => &sky.plain,
@@ -1482,8 +1743,8 @@ fn draw(
             pass.set_bind_group(0, sky, &[]);
             pass.draw(0..3, instance.clone());
         }
-        pass.set_pipeline(geometry);
         for layer in &gpu.layers {
+            pass.set_pipeline(geometry_for(mirrored, layer.kind));
             let filtered = layer
                 .bind_group
                 .filtered
@@ -1503,7 +1764,7 @@ fn draw(
         if let (false, Some(atlas), Some((v, i, n))) = (mirrored, &gpu.sprite_atlas, &gpu.shadows)
             && *n > 0
         {
-            pass.set_pipeline(&scene_p.shadow);
+            pass.set_pipeline(scene_p(Which::Shadow));
             pass.set_bind_group(0, atlas, &[]);
             pass.set_vertex_buffer(0, v.slice(..));
             pass.set_index_buffer(i.slice(..), wgpu::IndexFormat::Uint32);
@@ -1513,6 +1774,7 @@ fn draw(
         if let (Some(atlas), Some((v, i, n))) = (&gpu.sprite_atlas, &gpu.sprites)
             && *n > 0
         {
+            pass.set_pipeline(geometry);
             pass.set_bind_group(0, atlas, &[]);
             pass.set_vertex_buffer(0, v.slice(..));
             pass.set_index_buffer(i.slice(..), wgpu::IndexFormat::Uint32);
@@ -1520,17 +1782,17 @@ fn draw(
         }
         // Snowflakes, behind what is nearer.
         if snow && !mirrored {
-            pass.set_pipeline(&scene_p.snow);
+            pass.set_pipeline(scene_p(Which::Snow));
             pass.set_bind_group(0, &gpu.blank, &[]);
             pass.draw(0..6, 0..SNOW_FLAKES);
         }
         // Sand grains blown along the wind, behind what is nearer; then
         // sheets of dust sweeping across the view, over everything.
         if storm && !mirrored {
-            pass.set_pipeline(&scene_p.sand);
+            pass.set_pipeline(scene_p(Which::Sand));
             pass.set_bind_group(0, &gpu.blank, &[]);
             pass.draw(0..6, 0..SAND_GRAINS);
-            pass.set_pipeline(&scene_p.dust_sheets);
+            pass.set_pipeline(scene_p(Which::DustSheets));
             pass.draw(0..3, 0..1);
         }
     };
@@ -1575,6 +1837,13 @@ fn draw(
         false,
         &extras(reflection.as_ref().map(|(view, _)| view)),
     );
+    // Drawn straight onto the target: the last pass there.
+    if low.is_none()
+        && hdr.is_none()
+        && let Some(overlay) = input.overlay
+    {
+        overlay(&mut pass, true);
+    }
     drop(pass);
     profile.stamp(encoder, Stamp::Geometry);
     // Bloom: halve the glow above white down the chain, then blur each
@@ -1601,25 +1870,35 @@ fn draw(
         let black = wgpu::LoadOp::Clear(wgpu::Color::BLACK);
         for (k, (view, _)) in h.levels.iter().enumerate() {
             match k {
-                0 => step(view, black, &hdr_p.bloom_first, &h.smooth),
-                _ => step(view, black, &hdr_p.bloom_down, &h.levels[k - 1].1),
+                0 => step(
+                    view,
+                    black,
+                    pipeline(HDR_FORMAT, Which::BloomFirst),
+                    &h.smooth,
+                ),
+                _ => step(
+                    view,
+                    black,
+                    pipeline(HDR_FORMAT, Which::BloomDown),
+                    &h.levels[k - 1].1,
+                ),
             }
         }
         for k in (1..h.levels.len()).rev() {
             step(
                 &h.levels[k - 1].0,
                 wgpu::LoadOp::Load,
-                &hdr_p.bloom_up,
+                pipeline(HDR_FORMAT, Which::BloomUp),
                 &h.levels[k].1,
             );
         }
     }
     profile.stamp(encoder, Stamp::Bloom);
     let shown = match (&low, &hdr) {
-        (Some((_, (_, bind))), _) => Some((bind, &screen_p.stretch, None)),
+        (Some((_, (_, bind))), _) => Some((bind, pipeline(format, Which::Stretch), None)),
         (_, Some(h)) => Some(match h.levels.first() {
-            Some((_, first)) => (&h.sharp, &screen_p.present_glow, Some(first)),
-            None => (&h.sharp, &screen_p.present, None),
+            Some((_, first)) => (&h.sharp, pipeline(format, Which::PresentGlow), Some(first)),
+            None => (&h.sharp, pipeline(format, Which::Present), None),
         }),
         _ => None,
     };
@@ -1636,6 +1915,9 @@ fn draw(
             pass.set_bind_group(1, bloom, &[]);
         }
         pass.draw(0..3, 0..1);
+        if let Some(overlay) = input.overlay {
+            overlay(&mut pass, false);
+        }
     }
 }
 
@@ -1693,4 +1975,42 @@ fn mip_chain(img: &RgbaImage) -> (u32, Vec<u8>) {
         levels += 1;
     }
     (levels, out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Features;
+    use wgpu::naga;
+
+    fn module() -> naga::Module {
+        let source = include_str!("scene.wgsl");
+        naga::front::wgsl::parse_str(source)
+            .unwrap_or_else(|e| panic!("{}", e.emit_to_string(source)))
+    }
+
+    /// The scene's shaders parse and validate, as a GPU would take them.
+    #[test]
+    fn scene_shader_is_valid() {
+        naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::all(),
+        )
+        .validate(&module())
+        .unwrap_or_else(|e| panic!("{e:?}"));
+    }
+
+    /// Every feature constant the pipelines set is one of the shader's
+    /// overrides (wgpu refuses a pipeline naming one that isn't).
+    #[test]
+    fn feature_constants_are_overrides() {
+        let module = module();
+        let names: Vec<_> = module
+            .overrides
+            .iter()
+            .filter_map(|(_, o)| o.name.clone())
+            .collect();
+        for (name, _) in Features::default().constants() {
+            assert!(names.iter().any(|n| n == name), "no override {name}");
+        }
+    }
 }

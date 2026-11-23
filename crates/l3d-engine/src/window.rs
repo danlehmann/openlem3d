@@ -41,7 +41,14 @@ pub enum WindowMode {
 /// takes.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct WindowResolution {
+    /// The size drawn at: the window's own, or less with `max_height`.
     physical: UVec2,
+    /// The window's own size.
+    actual: UVec2,
+    /// At most this many rows are drawn, the system stretching them over
+    /// the window (on Android, the compositor scales the window's buffers
+    /// for free): for slow GPUs on large screens.
+    max_height: Option<u32>,
     scale_factor: f32,
     scale_factor_override: Option<f32>,
     /// The size asked for when the window opens, in physical pixels; the
@@ -53,6 +60,8 @@ impl Default for WindowResolution {
     fn default() -> Self {
         WindowResolution {
             physical: UVec2::new(1280, 720),
+            actual: UVec2::new(1280, 720),
+            max_height: None,
             scale_factor: 1.0,
             scale_factor_override: None,
             requested: None,
@@ -66,6 +75,7 @@ impl WindowResolution {
         let size = UVec2::new(width, height);
         WindowResolution {
             physical: size,
+            actual: size,
             requested: Some(size),
             ..Default::default()
         }
@@ -78,8 +88,22 @@ impl WindowResolution {
         self
     }
 
+    /// Logical pixels are the window's own: drawing at fewer rows, each
+    /// physical pixel drawn covers more of them.
     pub fn scale_factor(&self) -> f32 {
-        self.scale_factor_override.unwrap_or(self.scale_factor)
+        self.scale_factor_override.unwrap_or(self.scale_factor) * self.ratio()
+    }
+
+    /// Pixels drawn per pixel of the window (1 unless `max_height` lowers
+    /// it).
+    pub fn ratio(&self) -> f32 {
+        self.physical.y as f32 / self.actual.y.max(1) as f32
+    }
+
+    /// Draws at most `rows` rows (none: the window's own size).
+    pub fn set_max_height(&mut self, rows: Option<u32>) {
+        self.max_height = rows;
+        self.set_physical(self.actual);
     }
 
     pub(crate) fn requested(&self) -> Option<UVec2> {
@@ -87,7 +111,14 @@ impl WindowResolution {
     }
 
     pub(crate) fn set_physical(&mut self, size: UVec2) {
-        self.physical = size;
+        self.actual = size;
+        self.physical = match self.max_height {
+            Some(rows) if rows > 0 && size.y > rows => {
+                let k = rows as f32 / size.y as f32;
+                UVec2::new(((size.x as f32 * k).round() as u32).max(1), rows)
+            }
+            _ => size,
+        };
     }
 
     pub(crate) fn set_scale_factor(&mut self, scale: f32) {

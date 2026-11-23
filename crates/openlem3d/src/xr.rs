@@ -196,7 +196,7 @@ unsafe fn try_start(profile: bool) -> Result<(Box<Xr>, Gpu), Error> {
         session.create_reference_space(xr::ReferenceSpaceType::LOCAL, xr::Posef::IDENTITY)?;
     let controls = controls(&instance, &session)?;
     let mut scene = SceneGpu::new(&gpu.device, &gpu.adapter);
-    scene.compile(&gpu.device);
+    scene.compile(&gpu.device, TARGET_FORMAT);
     let xr = Xr {
         instance,
         system,
@@ -713,7 +713,7 @@ pub(crate) fn render(w: &mut World) {
         let camera = eye_camera(&w.camera, anchor, view);
         let target = &eyes.images[image].1[eye];
         let mut encoder = device.create_command_encoder(&Default::default());
-        clear(&mut encoder, target, w.clear.0.to_linear());
+        let c = w.clear.0.to_linear();
         x.scene.draw(
             gpu,
             &mut encoder,
@@ -738,6 +738,13 @@ pub(crate) fn render(w: &mut World) {
                     let dirty = f.dirty.take();
                     (&*f, dirty)
                 }),
+                clear: wgpu::Color {
+                    r: c.red as f64,
+                    g: c.green as f64,
+                    b: c.blue as f64,
+                    a: c.alpha as f64,
+                },
+                overlay: None,
             },
         );
         // Each eye on its own: the scene's uniforms are written for each.
@@ -753,7 +760,7 @@ pub(crate) fn render(w: &mut World) {
         let target = &panel.images[image].1[0];
         let mut encoder = device.create_command_encoder(&Default::default());
         clear(&mut encoder, target, LinearRgba::new(0.0, 0.0, 0.0, 0.0));
-        x.ui.get_or_insert_with(|| UiGpu::new(gpu, TARGET_FORMAT))
+        x.ui.get_or_insert_with(|| UiGpu::new(gpu, TARGET_FORMAT, None))
             .draw(
                 gpu,
                 &mut encoder,

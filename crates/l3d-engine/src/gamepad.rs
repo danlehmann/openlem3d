@@ -102,8 +102,9 @@ fn android_button_of(code: u32) -> Option<PadButton> {
         20 => PadButton::Down,
         21 => PadButton::Left,
         22 => PadButton::Right,
-        23 => PadButton::South, // KEYCODE_DPAD_CENTER
-        4 => PadButton::East,   // KEYCODE_BACK, from some pads' B
+        // Not KEYCODE_DPAD_CENTER and KEYCODE_BACK: Android sends them too,
+        // as fallbacks for A and B, which would then count twice (owner:
+        // the mode stepped twice a press).
         _ => return None,
     })
 }
