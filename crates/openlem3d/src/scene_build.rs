@@ -2070,7 +2070,17 @@ pub fn build(data: &mut GameData, n: u32, show: Show) -> Result<BuiltLevel, l3d_
     {
         match sky.len() {
             // 1024×64 panorama above the horizon (verified).
-            65536 => scene.sky = Some(indexed_to_rgba(&sky, 1024, &pal)),
+            65536 => {
+                scene.sky = Some(indexed_to_rgba(&sky, 1024, &pal));
+                // Clouds alone (ours): the bottom 16 rows, where any scenery
+                // stands, are all bluish (blue above red, not below green),
+                // as clouds in a blue sky are. Only sky 7 is; the
+                // others' horizons hold at least 900 other pixels.
+                scene.sky_bare = sky[48 * 1024..].iter().all(|&i| {
+                    let [r, g, b] = pal[i as usize];
+                    b > r && b >= g
+                });
+            }
             // All-round sky stored as 320 rows of 200 pixels: each stored row
             // is one screen column, so the image is transposed into a
             // 320×200 panorama that wraps horizontally (its stored top and
@@ -2084,6 +2094,7 @@ pub fn build(data: &mut GameData, n: u32, show: Show) -> Result<BuiltLevel, l3d_
                 let lit = glow::stars(&transposed, 320, &pal);
                 scene.sky = Some(glowing_rgba(&transposed, 320, &pal, |p| lit[p]));
                 scene.sky_surround = true;
+                scene.sky_bare = true;
                 // A night sky of stars (ours): dark on the whole, as the starry
                 // and nebula skies are and the candy-floss one is not.
                 let mean = transposed

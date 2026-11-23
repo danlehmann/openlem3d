@@ -36,6 +36,9 @@ pub struct SceneData {
     /// The sky is a tiled all-round backdrop covering the whole screen
     /// (space levels) rather than a panorama above the horizon.
     pub sky_surround: bool,
+    /// The sky shows only sky (stars, planets, clouds): an all-round
+    /// backdrop, or a panorama with no scenery along its horizon.
+    pub sky_bare: bool,
     /// The all-round sky is a night sky of stars (ours): its stars twinkle
     /// and shine above white on an HDR screen ([`SceneCamera::ours`]).
     pub starry: bool,
@@ -1393,9 +1396,9 @@ fn draw(
     let reflection = mirror.then(|| gpu.reflection_target(&device, depth_size, scene_format));
     let storm = input.content.data.as_ref().is_some_and(|d| d.storm);
     let snow = input.content.data.as_ref().is_some_and(|d| d.snow);
-    // Only the all-round skies are sampled smoothly: their stars, planets
-    // and candy floss gain; painted skies (trees, hills) only blur.
-    let surround = input.content.data.as_ref().is_some_and(|d| d.sky_surround);
+    // Only bare skies are sampled smoothly: stars, planets and clouds gain;
+    // scenery along a horizon (trees, castles, hills) only blurs.
+    let bare = input.content.data.as_ref().is_some_and(|d| d.sky_bare);
     // The last frame, for layers showing the screen.
     let screen = input
         .screen
@@ -1473,7 +1476,7 @@ fn draw(
         if let Some(sky) = &gpu.sky {
             pass.set_pipeline(&scene_p.sky);
             let sky = match &sky.filtered {
-                Some(f) if camera.filtered && surround => f,
+                Some(f) if camera.filtered && bare => f,
                 _ => &sky.plain,
             };
             pass.set_bind_group(0, sky, &[]);
