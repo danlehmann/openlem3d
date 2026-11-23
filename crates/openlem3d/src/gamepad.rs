@@ -70,6 +70,11 @@ pub struct GamepadState {
     repeat: Option<(i32, f32)>,
 }
 
+/// Whether the gamepad, rather than the mouse, was used last.
+pub(crate) fn in_use(w: &World) -> bool {
+    w.gamepad.in_use
+}
+
 /// Takes in the gamepad, after the frame's other input and before the
 /// game's systems read it.
 pub(crate) fn input(w: &mut World) {
@@ -131,11 +136,15 @@ pub(crate) fn input(w: &mut World) {
         }
         return;
     }
-    // A question (restart the level?): A says yes, B (Esc) no.
+    // The level's menu (restart, carry on, leave): its choices framed,
+    // starting on Cancel in the middle; B (Esc) carries on.
     if w.confirm.question.is_some() {
-        if pad.buttons.just_pressed(PadButton::South) {
-            tap(w, KeyCode::KeyY);
-        }
+        buttons(w, &pad);
+        // The sticks only work the menu, not the camera behind it, nor the
+        // triggers the time.
+        let pad = &mut w.e.input.pad;
+        (pad.left, pad.right) = (Vec2::ZERO, Vec2::ZERO);
+        (pad.left_trigger, pad.right_trigger) = (0.0, 0.0);
     } else if w.state == AppState::Menu {
         list(w, &pad);
     } else if w.state == AppState::Code {
@@ -300,7 +309,16 @@ fn stepped(w: &mut World, pad: &l3d_engine::input::Pad) -> Vec2 {
 /// pointer to the nearest button that way, A clicks it.
 fn buttons(w: &mut World, pad: &l3d_engine::input::Pad) {
     let way = stepped(w, pad);
-    let targets = w.ui.button_rects();
+    // Over a level (its menu, its preview) only the overlay's buttons, not
+    // the panel's under it.
+    let within = if w.confirm.question.is_some() {
+        crate::confirm::root(w)
+    } else if w.preview.active {
+        crate::briefing::preview_overlay_root(w)
+    } else {
+        None
+    };
+    let targets = w.ui.button_rects(within);
     // A new screen starts afresh.
     let screen = (w.state, w.preview.active);
     if w.gamepad.screen != Some(screen) {

@@ -100,6 +100,16 @@ impl WindowResolution {
         self.physical.y as f32 / self.actual.y.max(1) as f32
     }
 
+    /// The window's own rows.
+    pub fn actual_height(&self) -> u32 {
+        self.actual.y
+    }
+
+    /// The most rows drawn, if fewer than the window's are asked for.
+    pub fn max_height(&self) -> Option<u32> {
+        self.max_height
+    }
+
     /// Draws at most `rows` rows (none: the window's own size).
     pub fn set_max_height(&mut self, rows: Option<u32>) {
         self.max_height = rows;

@@ -134,7 +134,7 @@ pub enum LayerKind {
     /// The sea: waves and surf.
     Sea,
     /// The land, and other ground planes: polished, marked in snow,
-    /// sand drifting over it.
+    /// sand drifting over it, a circuit board's signals.
     Land,
     /// Objects, traps and signs, and the sprites: none of them.
     Objects,
@@ -172,9 +172,13 @@ pub struct SceneCamera {
     /// The colour behind the scene, linear RGBA, for the low-resolution
     /// target (the screen itself is cleared to the camera's colour).
     pub clear: Vec4,
-    /// Let glowing texels shine and bloom (`crate::glow`); only when the
-    /// scene is drawn at the screen's resolution.
+    /// Let glowing texels shine (`crate::glow`), and light what is near
+    /// them.
     pub glow: bool,
+    /// With `glow`, let it bloom softly round them too (drawing offscreen in
+    /// floating point, then blurring); only when the scene is drawn at the
+    /// screen's resolution. Without, glowing texels clip at white.
+    pub bloom: bool,
     /// Sample [`SceneLayer::smooth`] textures through their mipmaps.
     pub filtered: bool,
     /// Draw [`SceneLayer::screen`] layers as the glass of a cathode-ray
@@ -360,7 +364,9 @@ impl Features {
                 sea: self.sea,
                 ..only
             },
+            // A circuit board is the land (`scene_build::CIRCUIT_LANDS`).
             LayerKind::Land => Features {
+                circuit: self.circuit,
                 snow: self.snow,
                 gloss: self.gloss,
                 ..only
@@ -1315,7 +1321,7 @@ fn prepare(
     };
     // Heat shimmer goes with the storm, over the same deserts; it is kept
     // in the alpha of the glowing scene, so only while that is drawn.
-    let heat = if glow { storm } else { 0.0 };
+    let heat = if glow && camera.bloom { storm } else { 0.0 };
     // A night sky shows our stars and clouds only in our modes.
     let sky = match content.data.as_ref() {
         Some(d) if camera.ours && d.starry => 1.0,
@@ -1602,7 +1608,8 @@ fn draw(
         let s = (camera.pixels.x, camera.pixels.y);
         (s, gpu.low_target(&device, s, format))
     });
-    let hdr = (camera.glow && low.is_none()).then(|| gpu.hdr_targets(&device, size));
+    let hdr =
+        (camera.glow && camera.bloom && low.is_none()).then(|| gpu.hdr_targets(&device, size));
     let scene_format = if hdr.is_some() { HDR_FORMAT } else { format };
     let depth_size = match (&low, &hdr) {
         (Some(l), _) => l.0,

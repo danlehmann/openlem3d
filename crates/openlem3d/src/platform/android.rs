@@ -124,6 +124,37 @@ fn media_dir(env: &mut JNIEnv, activity: &JObject) -> jni::errors::Result<Option
     Ok(Some(PathBuf::from(path)))
 }
 
+/// Whether the device is a TV (`Configuration.uiMode`'s type is
+/// `UI_MODE_TYPE_TELEVISION`), asked once.
+pub fn is_tv() -> bool {
+    static TV: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *TV.get_or_init(|| {
+        with_activity(|env, activity| {
+            let resources = env
+                .call_method(
+                    activity,
+                    "getResources",
+                    "()Landroid/content/res/Resources;",
+                    &[],
+                )?
+                .l()?;
+            let config = env
+                .call_method(
+                    &resources,
+                    "getConfiguration",
+                    "()Landroid/content/res/Configuration;",
+                    &[],
+                )?
+                .l()?;
+            let mode = env.get_field(&config, "uiMode", "I")?.i()?;
+            const UI_MODE_TYPE_MASK: i32 = 0x0f;
+            const UI_MODE_TYPE_TELEVISION: i32 = 4;
+            Ok(mode & UI_MODE_TYPE_MASK == UI_MODE_TYPE_TELEVISION)
+        })
+        .unwrap_or(false)
+    })
+}
+
 /// `getWindow().getDecorView().getRootWindowInsets().getInsets(...)`.
 pub fn insets() -> jni::errors::Result<[u32; 4]> {
     with_activity(|env, activity| {

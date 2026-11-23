@@ -149,6 +149,14 @@ pub fn insets() -> [u32; 4] {
     [0; 4]
 }
 
+/// Whether the game runs on a TV (where resolutions are named by rows).
+pub fn is_tv() -> bool {
+    #[cfg(target_os = "android")]
+    return android::is_tv();
+    #[cfg(not(target_os = "android"))]
+    false
+}
+
 /// Makes the game fill the screen when it has the screen to itself
 /// (Android: a phone or tablet, not a window among others as on a desktop, a
 /// phone on a monitor, or in split screen): hides the status and navigation

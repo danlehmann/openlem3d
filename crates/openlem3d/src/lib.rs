@@ -129,6 +129,9 @@ pub struct Options {
     hdr_blink: bool,
     /// The presentation mode for this run, not saved (`--mode original|enhanced|ultra`).
     mode: Option<settings::Mode>,
+    /// Enhanced's graphics preset to start with (`--preset`, and
+    /// `--mode ultra`: High).
+    preset: Option<settings::Preset>,
 }
 
 fn parse_args() -> Options {
@@ -160,6 +163,7 @@ fn parse_args() -> Options {
         hdr: false,
         hdr_blink: false,
         mode: None,
+        preset: None,
     };
     let mut args = platform::args().into_iter();
     while let Some(a) = args.next() {
@@ -198,11 +202,19 @@ fn parse_args() -> Options {
             "--profile" => o.profile = true,
             "--hdr" => o.hdr = true,
             "--hdr-blink" => (o.hdr, o.hdr_blink) = (true, true),
+            "--preset" => {
+                o.preset = Some(match val().as_str() {
+                    "low" => settings::Preset::Low,
+                    "medium" => settings::Preset::Medium,
+                    "high" => settings::Preset::High,
+                    _ => panic!("--preset takes low, medium or high"),
+                })
+            }
             "--mode" => {
-                o.mode = Some(
-                    settings::Mode::from_name(&val())
-                        .expect("--mode takes original, enhanced or ultra"),
-                )
+                let (mode, preset) = settings::Mode::from_name(&val())
+                    .expect("--mode takes original, enhanced or ultra");
+                o.mode = Some(mode);
+                o.preset = preset.or(o.preset);
             }
             "--backend" => o.backend = Some(wgpu::Backends::from_comma_list(&val())),
             "--screen" => {
@@ -394,6 +406,9 @@ impl World {
         let mut settings = settings::Settings::load();
         if let Some(mode) = opts.mode {
             settings.mode = mode;
+        }
+        if let Some(p) = opts.preset {
+            settings.graphics = p.graphics(settings.graphics);
         }
         let rating = settings.rating;
         World {
@@ -1508,13 +1523,11 @@ fn update_lemming_sprites(w: &mut World) {
     );
     // Shadows under the lemmings (ours, enhanced mode), on the sea or land
     // too where the level draws one.
-    if w.settings.enhanced() {
+    if w.settings.effects().is_some_and(|g| g.shadows) {
         let ground = game.terrain.as_ref().is_some_and(|(level, _, _)| {
             use scene_build::level_flags::{LAND_INVISIBLE, SURROUND_SKY};
-            let sea = w.settings.sea && level.sea_gfx != 0xFF && level.flags & SURROUND_SKY == 0;
-            let land = w.settings.land
-                && level.flags & LAND_INVISIBLE == 0
-                && !level.land_polygons.is_empty();
+            let sea = level.sea_gfx != 0xFF && level.flags & SURROUND_SKY == 0;
+            let land = level.flags & LAND_INVISIBLE == 0 && !level.land_polygons.is_empty();
             sea || land
         });
         (sprites.shadow_vertices, sprites.shadow_indices) =

@@ -454,12 +454,26 @@ impl Ui {
     /// The buttons shown: each one's rectangle (logical pixels on the
     /// screen) and middle (in physical pixels from the screen's corner, as
     /// [`Ui::focus`] measures the pointer).
-    pub fn button_rects(&self) -> Vec<(Rect, Vec2)> {
+    /// With `within`, only those inside that node (an overlay's).
+    pub fn button_rects(&self, within: Option<NodeId>) -> Vec<(Rect, Vec2)> {
         self.nodes()
             .filter(|(_, n)| n.button && n.computed.visible)
+            .filter(|&(id, _)| within.is_none_or(|root| self.is_within(id, root)))
             .map(|(_, n)| (n.computed.rect, n.computed.pixels.center()))
             .filter(|&(_, p)| self.nodes().any(|(id, n)| n.button && self.over(id, p)))
             .collect()
+    }
+
+    /// Whether node `id` is `root` or lies inside it.
+    pub fn is_within(&self, id: NodeId, root: NodeId) -> bool {
+        let mut at = Some(id);
+        while let Some(i) = at {
+            if i == root {
+                return true;
+            }
+            at = self.get(i).and_then(|n| n.parent);
+        }
+        false
     }
 
     /// Whether any node is pressed.

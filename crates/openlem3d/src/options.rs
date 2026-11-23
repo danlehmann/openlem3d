@@ -14,7 +14,7 @@ use l3d_formats::icons::Icons;
 
 use crate::World;
 use crate::menu::AppState;
-use crate::settings::{Mode, SLIDER_STEPS, Settings};
+use crate::settings::{Graphics, Mode, Preset, SLIDER_STEPS, Settings};
 use crate::texture::indexed_image;
 use crate::ui::{NodeId, Ui, UiNode, px};
 
@@ -33,6 +33,9 @@ pub(crate) struct OptionsScreen {
     entries: Vec<(Rect, Entry)>,
     frame: Option<NodeId>,
     focus: Option<usize>,
+    /// The screen is to be built again (a value it names changed), the
+    /// gamepad's frame where it was.
+    rebuild: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -72,10 +75,6 @@ pub(crate) fn load_lights(w: &mut World) {
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum Item {
-    Land,
-    Sea,
-    Sky,
-    LeftHanded,
     Fullscreen,
     Rewind,
     Fps,
@@ -83,6 +82,18 @@ enum Item {
     Music,
     Effects,
     Camera,
+    /// Enhanced's graphics (ours).
+    Preset(Preset),
+    Resolution,
+    Glow,
+    Waves,
+    Reflections,
+    Shadows,
+    Filtering,
+    Snow,
+    Sandstorm,
+    Crt,
+    Windows,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -97,24 +108,20 @@ enum Target {
 struct Light(Item, u8);
 
 const COLUMNS: [f32; 4] = [0.0, 80.0, 160.0, 240.0];
-const TOGGLE_ROWS: [f32; 2] = [37.0, 69.0];
-const SLIDER_ROWS: [f32; 2] = [101.0, 117.0];
+const TOGGLE_ROWS: [f32; 1] = [28.0];
+const SLIDER_ROWS: [f32; 2] = [44.0, 60.0];
 const SLIDER_COLUMNS: [(f32, f32); 2] = [(0.0, 64.0), (160.0, 224.0)];
 const BOX_HEIGHT: f32 = 14.0;
 const TEXT_SCALE: f32 = 1.0;
 
-const TOGGLES: [(Item, &str, usize, usize); 7] = [
-    (Item::Land, "Land", 0, 0),
-    (Item::Sea, "Sea", 0, 1),
-    (Item::Sky, "Sky", 0, 2),
-    (Item::LeftHanded, "Left Handed", 0, 3),
-    (Item::Fullscreen, "Fullscreen", 1, 0),
-    (Item::Rewind, "Rewind", 1, 1),
-    (Item::Fps, "FPS", 1, 2),
+const TOGGLES: [(Item, &str, usize, usize); 3] = [
+    (Item::Fullscreen, "Fullscreen", 0, 0),
+    (Item::Rewind, "Rewind", 0, 1),
+    (Item::Fps, "FPS", 0, 2),
 ];
 /// The mode's box, in the slider rows' free place, and where its name
 /// starts in it.
-const MODE_BOX: (f32, f32) = (160.0, 117.0);
+const MODE_BOX: (f32, f32) = (160.0, 60.0);
 const MODE_NAME_X: f32 = 224.0;
 const SLIDERS: [(Item, &str, usize, usize); 3] = [
     (Item::Music, "CD Music", 0, 0),
@@ -151,7 +158,6 @@ pub(crate) fn spawn_options(w: &mut World) {
     w.options.targets.clear();
     w.options.shown.clear();
     w.options.entries = entries();
-    w.options.focus = None;
     let font = &lights.font;
     let text = |ui: &mut Ui, s: &str, x: f32, y: f32| {
         let (glyphs, _) = font.layout(s);
@@ -173,6 +179,47 @@ pub(crate) fn spawn_options(w: &mut World) {
     };
     panel_box(ui, canvas, 112.0, 4.0, 96.0, 16.0);
     centred(ui, "CONFIGURATION", 160.0, 8.0);
+    // A box that is a button for `item`, with its label (and, for a
+    // setting with a value, the value at `value_x`).
+    let button = |ui: &mut Ui, item: Target, x: f32, y: f32, w_: f32, label: &str| {
+        let b = panel_box(ui, canvas, x, y, w_, BOX_HEIGHT);
+        if let Some(n) = ui.get_mut(b) {
+            *n = std::mem::take(n).button();
+        }
+        text(ui, &label.to_uppercase(), x + 5.0, y + 3.0);
+        (b, item)
+    };
+    // Enhanced's graphics (ours), under their heading.
+    {
+        panel_box(ui, canvas, 112.0, GRAPHICS_HEADING, 96.0, BOX_HEIGHT);
+        centred(ui, "GRAPHICS", 160.0, GRAPHICS_HEADING + 3.0);
+        let g = w.settings.graphics;
+        let rows = w.e.window.resolution.actual_height();
+        for (rect, entry, label) in graphics_layout(g, rows) {
+            let Entry::Toggle(item) = entry else { continue };
+            let (x, y, wd) = (rect.min.x, rect.min.y, rect.width());
+            let target = button(ui, Target::Toggle(item), x, y, wd, &label);
+            w.options.targets.push(target);
+            if lit(&w.settings, item).is_some() {
+                let l = ui.child(
+                    canvas,
+                    UiNode::image(lights.off.clone()).at(x + wd - 13.0, y + 3.0, 7.0, 8.0),
+                );
+                w.options.shown.push((l, Light(item, 1)));
+            }
+        }
+        // Custom, when no preset matches: shown, not pressed.
+        let (x, y) = (COLUMNS[3], PRESET_ROW);
+        panel_box(ui, canvas, x, y, 80.0, BOX_HEIGHT);
+        text(ui, "CUSTOM", x + 5.0, y + 3.0);
+        let l = ui.child(
+            canvas,
+            UiNode::image(lights.off.clone()).at(x + 67.0, y + 3.0, 7.0, 8.0),
+        );
+        w.options
+            .shown
+            .push((l, Light(Item::Preset(Preset::Custom), 1)));
+    }
     for (item, label, row, col) in TOGGLES {
         let (x, y) = (COLUMNS[col], TOGGLE_ROWS[row]);
         let b = panel_box(ui, canvas, x, y, 80.0, BOX_HEIGHT);
@@ -233,6 +280,7 @@ pub(crate) fn spawn_options(w: &mut World) {
                 .hidden(),
         ),
     );
+    place_frame(w);
 }
 
 /// The settings and buttons a gamepad steps through, with their boxes, as
@@ -260,7 +308,97 @@ fn entries() -> Vec<(Rect, Entry)> {
     ));
     e.push((Rect::new(0.0, 180.0, 80.0, 195.0), Entry::Default));
     e.push((Rect::new(240.0, 180.0, 320.0, 195.0), Entry::Exit));
+    e.extend(
+        graphics_layout(Graphics::default(), 1080)
+            .into_iter()
+            .map(|(r, e, _)| (r, e)),
+    );
     e
+}
+
+/// The graphics' buttons (ours): their boxes, what they press and their
+/// labels, for graphics `g` on a screen of `rows` rows. The presets in a
+/// row (Custom shown beside them, `spawn_options`), the resolution and glow
+/// with their values, the effects as lights.
+fn graphics_layout(g: Graphics, rows: u32) -> Vec<(Rect, Entry, String)> {
+    let mut e = Vec::new();
+    let mut add = |x: f32, y: f32, w: f32, item: Item, label: String| {
+        e.push((
+            Rect::new(x, y, x + w, y + BOX_HEIGHT),
+            Entry::Toggle(item),
+            label,
+        ));
+    };
+    for (i, p) in Preset::CHOICES.into_iter().enumerate() {
+        add(
+            COLUMNS[i],
+            PRESET_ROW,
+            80.0,
+            Item::Preset(p),
+            p.name().into(),
+        );
+    }
+    let row = VALUE_ROW;
+    add(
+        0.0,
+        row,
+        160.0,
+        Item::Resolution,
+        format!(
+            "Resolution {}",
+            crate::settings::resolution_name(g.resolution, rows)
+        ),
+    );
+    add(
+        160.0,
+        row,
+        160.0,
+        Item::Glow,
+        format!("Glow {}", g.glow.name()),
+    );
+    let effects = [
+        (Item::Waves, "Waves"),
+        (Item::Reflections, "Reflections"),
+        (Item::Shadows, "Shadows"),
+        (Item::Filtering, "Filtering"),
+        (Item::Snow, "Snow"),
+        (Item::Sandstorm, "Sandstorm"),
+        (Item::Crt, "CRT"),
+        (Item::Windows, "Windows"),
+    ];
+    for (i, (item, label)) in effects.into_iter().enumerate() {
+        let y = GRAPHICS_ROWS[i / 4];
+        add(COLUMNS[i % 4], y, 80.0, item, label.into());
+    }
+    e
+}
+
+/// The graphics' heading and rows (ours), below the original's settings:
+/// the presets, the resolution and glow, and two rows of effects.
+const GRAPHICS_HEADING: f32 = 80.0;
+const PRESET_ROW: f32 = 98.0;
+const VALUE_ROW: f32 = 114.0;
+const GRAPHICS_ROWS: [f32; 2] = [130.0, 146.0];
+
+/// Whether `item`'s light is lit, for a setting shown with one (none for
+/// the rest).
+fn lit(s: &Settings, item: Item) -> Option<bool> {
+    let g = s.graphics;
+    Some(match item {
+        Item::Fullscreen => s.fullscreen,
+        Item::Rewind => s.rewind,
+        Item::Fps => s.fps,
+        Item::Preset(p) => g.preset == p,
+        Item::Waves => g.waves,
+        Item::Reflections => g.reflections,
+        Item::Shadows => g.shadows,
+        Item::Filtering => g.filtering,
+        Item::Snow => g.snow,
+        Item::Sandstorm => g.sandstorm,
+        Item::Crt => g.crt,
+        Item::Windows => g.windows,
+        _ => return None,
+    })
 }
 
 /// The box next to box `i` the way `way` points (its stronger axis): the
@@ -299,8 +437,10 @@ pub(crate) fn neighbour(boxes: &[Rect], i: usize, way: Vec2) -> Option<usize> {
             if gap < -0.5 || (horizontal && across <= 0.0) {
                 return None;
             }
+            // Lined up counts the same however wide the overlap (a wide box
+            // further on is no nearer); off to the side counts double.
             let side = if across > 0.0 {
-                -across * 0.5
+                -across.min(ALIGNED_BONUS)
             } else {
                 -across * 2.0
             };
@@ -310,9 +450,30 @@ pub(crate) fn neighbour(boxes: &[Rect], i: usize, way: Vec2) -> Option<usize> {
         .map(|(j, _)| j)
 }
 
+/// Puts the gamepad's frame round the setting it is on, if any (the screen
+/// built again keeps it where it was).
+fn place_frame(w: &mut World) {
+    let o = &w.options;
+    let Some((rect, _)) = o.focus.and_then(|i| o.entries.get(i)).copied() else {
+        return;
+    };
+    if let Some(n) = o.frame.and_then(|f| w.ui.get_mut(f)) {
+        n.at = Some(Rect::new(
+            rect.min.x - 2.0,
+            rect.min.y - 2.0,
+            rect.max.x + 2.0,
+            rect.max.y + 2.0,
+        ));
+        n.set_visible(true);
+    }
+}
+
+/// How much being lined up with a box counts, in canvas pixels of distance.
+const ALIGNED_BONUS: f32 = 4.0;
+
 /// A gamepad on this screen: `way` the way the D-pad or stick stepped (or
 /// zero), then A and the bumpers on the setting framed.
-pub(crate) fn gamepad(w: &mut World, way: Vec2, press: bool, slide: i32) {
+pub(crate) fn gamepad(w: &mut World, way: Vec2, pressed: bool, slide: i32) {
     let o = &mut w.options;
     if o.entries.is_empty() {
         return;
@@ -339,18 +500,25 @@ pub(crate) fn gamepad(w: &mut World, way: Vec2, press: bool, slide: i32) {
         ));
         n.set_visible(true);
     }
+    let stepped = matches!(
+        entry,
+        Entry::Toggle(Item::Mode | Item::Resolution | Item::Glow)
+    );
+    if let Entry::Toggle(item) = entry
+        && (pressed || (stepped && slide != 0))
+    {
+        press(w, item);
+        return;
+    }
     let settings = &mut w.settings;
     match entry {
-        Entry::Toggle(item) if press || (item == Item::Mode && slide != 0) => {
-            toggle(settings, item)
-        }
         Entry::Slider(item) if slide != 0 => {
             if let Some(v) = level(settings, item) {
                 *v = (*v as i32 + slide).clamp(0, SLIDER_STEPS as i32) as u8;
             }
         }
-        Entry::Default if press => *settings = Settings::default(),
-        Entry::Exit if press => {
+        Entry::Default if pressed => *settings = Settings::default(),
+        Entry::Exit if pressed => {
             settings.save();
             w.next_state = Some(std::mem::take(&mut w.options_from.0));
         }
@@ -360,15 +528,72 @@ pub(crate) fn gamepad(w: &mut World, way: Vec2, press: bool, slide: i32) {
 
 fn toggle(s: &mut Settings, item: Item) {
     match item {
-        Item::Land => s.land = !s.land,
-        Item::Sea => s.sea = !s.sea,
-        Item::Sky => s.sky = !s.sky,
-        Item::LeftHanded => s.left_handed = !s.left_handed,
         Item::Fullscreen => s.fullscreen = !s.fullscreen,
         Item::Rewind => s.rewind = !s.rewind,
         Item::Fps => s.fps = !s.fps,
         Item::Mode => crate::style::switch(s),
-        _ => {}
+        _ => {
+            if let Some(g) = graphics(s.graphics, item) {
+                s.graphics = g;
+            }
+        }
+    }
+}
+
+/// Enhanced's graphics after pressing `item`: a preset's, or
+/// one setting changed (then named by the preset it matches, or Custom).
+fn graphics(g: Graphics, item: Item) -> Option<Graphics> {
+    let mut next = match item {
+        Item::Preset(p) => return Some(p.graphics(g)),
+        Item::Resolution => Graphics {
+            resolution: (g.resolution + 1) % crate::settings::RESOLUTIONS as u8,
+            ..g
+        },
+        Item::Glow => Graphics {
+            glow: g.glow.next(),
+            ..g
+        },
+        Item::Waves => Graphics {
+            waves: !g.waves,
+            ..g
+        },
+        Item::Reflections => Graphics {
+            reflections: !g.reflections,
+            ..g
+        },
+        Item::Shadows => Graphics {
+            shadows: !g.shadows,
+            ..g
+        },
+        Item::Filtering => Graphics {
+            filtering: !g.filtering,
+            ..g
+        },
+        Item::Snow => Graphics { snow: !g.snow, ..g },
+        Item::Sandstorm => Graphics {
+            sandstorm: !g.sandstorm,
+            ..g
+        },
+        Item::Crt => Graphics { crt: !g.crt, ..g },
+        Item::Windows => Graphics {
+            windows: !g.windows,
+            ..g
+        },
+        _ => return None,
+    };
+    next.preset = Preset::CHOICES
+        .into_iter()
+        .find(|p| Graphics { preset: *p, ..next } == p.graphics(next))
+        .unwrap_or(Preset::Custom);
+    Some(next)
+}
+
+/// Pressing `item` (with a click or a gamepad): settings change; the
+/// screen is built again to name changed graphics values.
+fn press(w: &mut World, item: Item) {
+    toggle(&mut w.settings, item);
+    if graphics(w.settings.graphics, item).is_some() {
+        w.options.rebuild = true;
     }
 }
 
@@ -382,13 +607,26 @@ fn level(s: &mut Settings, item: Item) -> Option<&mut u8> {
 }
 
 pub(crate) fn options_input(w: &mut World) {
+    let pressed: Vec<Item> = w
+        .options
+        .targets
+        .iter()
+        .filter(|&&(id, _)| w.ui.just_pressed(id))
+        .filter_map(|&(_, t)| match t {
+            Target::Toggle(item) => Some(item),
+            _ => None,
+        })
+        .collect();
+    for item in pressed {
+        press(w, item);
+    }
     let settings = &mut w.settings;
     for &(id, t) in &w.options.targets {
         if !w.ui.just_pressed(id) {
             continue;
         }
         match t {
-            Target::Toggle(item) => toggle(settings, item),
+            Target::Toggle(_) => {}
             Target::Light(item, n) => {
                 if let Some(v) = level(settings, item) {
                     // Clicking the top light lit turns the slider off.
@@ -402,10 +640,16 @@ pub(crate) fn options_input(w: &mut World) {
             }
         }
     }
-    if w.e.input.keys.just_pressed(KeyCode::Escape) || crate::touch::four_finger_tap(w) {
+    let leave = w.e.input.keys.just_pressed(KeyCode::Escape) || crate::touch::four_finger_tap(w);
+    if leave {
         let settings = &mut w.settings;
         settings.save();
         w.next_state = Some(std::mem::take(&mut w.options_from.0));
+    }
+    // Built again at once, not next frame: a frame without it flickered.
+    if std::mem::take(&mut w.options.rebuild) && w.next_state.is_none() {
+        crate::title::close_screen(&mut w.ui, &mut w.screen_ui);
+        spawn_options(w);
     }
 }
 
@@ -415,16 +659,7 @@ pub(crate) fn show_lights(w: &mut World) {
     };
     for &(id, l) in &w.options.shown {
         let mut s = w.settings.clone();
-        let on = match l.0 {
-            Item::Land => s.land,
-            Item::Sea => s.sea,
-            Item::Sky => s.sky,
-            Item::LeftHanded => s.left_handed,
-            Item::Fullscreen => s.fullscreen,
-            Item::Rewind => s.rewind,
-            Item::Fps => s.fps,
-            item => level(&mut s, item).is_some_and(|v| *v >= l.1),
-        };
+        let on = lit(&s, l.0).unwrap_or_else(|| level(&mut s, l.0).is_some_and(|v| *v >= l.1));
         w.ui.set_image(id, if on { &lights.on } else { &lights.off });
     }
     show_mode(w);
@@ -533,11 +768,15 @@ mod tests {
         // Straight down the columns, not to the nearest middle (owner:
         // Fullscreen went down to Default Config).
         assert_eq!(step("Fullscreen", Vec2::Y), "Music");
-        assert_eq!(step("Sea", Vec2::Y), "Rewind");
+        assert_eq!(step("Rewind", Vec2::Y), "Music");
         assert_eq!(step("Fps", Vec2::Y), "Camera");
         assert_eq!(step("Mode", Vec2::NEG_Y), "Camera");
-        assert_eq!(step("Effects", Vec2::Y), "Default");
-        assert_eq!(step("Mode", Vec2::Y), "Exit");
+        // Down into the graphics, and out of them to the buttons.
+        assert_eq!(step("Mode", Vec2::Y), "Preset(High)");
+        assert_eq!(step("Preset(Low)", Vec2::X), "Preset(Medium)");
+        assert_eq!(step("Resolution", Vec2::NEG_Y), "Preset(Low)");
+        assert_eq!(step("Snow", Vec2::Y), "Default");
+        assert_eq!(step("Windows", Vec2::Y), "Exit");
         // Left and right stay in the row.
         assert_eq!(step("Fps", Vec2::X), "-");
         // Every setting and button can be reached from the first.
@@ -556,5 +795,19 @@ mod tests {
             .map(|i| name(Some(i)))
             .collect();
         assert!(missed.is_empty(), "unreachable: {missed:?}");
+    }
+
+    /// Changing one setting makes the preset Custom; changing it back, the
+    /// preset again.
+    #[test]
+    fn custom_preset() {
+        let high = Preset::High.graphics(Graphics::default());
+        let changed = graphics(high, Item::Waves).unwrap();
+        assert_eq!(changed.preset, Preset::Custom);
+        assert_eq!(graphics(changed, Item::Waves).unwrap().preset, Preset::High);
+        assert_eq!(
+            graphics(high, Item::Preset(Preset::Low)).unwrap().preset,
+            Preset::Low
+        );
     }
 }

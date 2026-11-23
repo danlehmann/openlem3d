@@ -669,32 +669,56 @@ pub(crate) fn render(w: &mut World) {
     ui.prepare(gpu, viewport, &w.ui, &mut w.e.images);
     let ui = &*ui;
     let overlay = |pass: &mut wgpu::RenderPass<'_>, depth: bool| ui.record(pass, depth);
-    scene.draw(
-        gpu,
-        &mut encoder,
-        draw_view,
-        size,
-        viewport,
-        &SceneInput {
-            content: &w.scene,
-            sprites: &w.sprites,
-            camera: &w.camera,
-            profile,
-            format,
-            headroom,
-            screen: previous.as_ref().map(|p| &p.3),
-            signals: w.signals.as_mut().map(|f| {
-                let dirty = f.dirty.take();
-                (&*f, dirty)
-            }),
-            marks: w.marks.as_mut().map(|f| {
-                let dirty = f.dirty.take();
-                (&*f, dirty)
-            }),
-            clear: clear_colour,
-            overlay: Some(&overlay),
-        },
+    // The full-screen menus cover the level, which is not drawn behind them
+    // (after a level it was, at its settings, slowing the menus).
+    use crate::menu::AppState;
+    let covered = matches!(
+        w.state,
+        AppState::Title | AppState::Code | AppState::Options | AppState::Practice | AppState::Menu
     );
+    if covered {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("menu"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: draw_view,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(clear_colour),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            ..Default::default()
+        });
+        overlay(&mut pass, false);
+    } else {
+        scene.draw(
+            gpu,
+            &mut encoder,
+            draw_view,
+            size,
+            viewport,
+            &SceneInput {
+                content: &w.scene,
+                sprites: &w.sprites,
+                camera: &w.camera,
+                profile,
+                format,
+                headroom,
+                screen: previous.as_ref().map(|p| &p.3),
+                signals: w.signals.as_mut().map(|f| {
+                    let dirty = f.dirty.take();
+                    (&*f, dirty)
+                }),
+                marks: w.marks.as_mut().map(|f| {
+                    let dirty = f.dirty.take();
+                    (&*f, dirty)
+                }),
+                clear: clear_colour,
+                overlay: Some(&overlay),
+            },
+        );
+    }
     profile.stamp(&mut encoder, Stamp::Scene);
     profile.stamp(&mut encoder, Stamp::Ui);
     // This frame, for the next one's screen.

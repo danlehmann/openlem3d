@@ -98,6 +98,8 @@ pub(crate) struct LevelList {
     /// that one.
     selected: Option<usize>,
     selected_rating: Option<usize>,
+    /// The Back button.
+    back: Option<NodeId>,
 }
 
 pub(crate) fn load_labels(w: &mut World) {
@@ -197,8 +199,9 @@ pub(crate) fn ensure_menu(w: &mut World) {
         Color::WHITE,
         None,
     );
-    // Back to the title screen (Esc), for players without a keyboard.
-    crate::key_buttons::spawn_text_button(
+    // Back to the title screen (Esc), for players without a keyboard (a
+    // gamepad's B does it, `menu_input` hides it then).
+    list.back = Some(crate::key_buttons::spawn_text_button(
         ui,
         &mut w.key_buttons,
         canvas,
@@ -208,7 +211,7 @@ pub(crate) fn ensure_menu(w: &mut World) {
         4.0,
         RED,
         KeyCode::Escape,
-    );
+    ));
     for (img, x) in [(&labels.0, 246.0), (&labels.1, 287.0)] {
         ui.child(canvas, UiNode::image(img.clone()).at(x, 18.0, 32.0, 16.0));
     }
@@ -291,6 +294,11 @@ pub(crate) fn ensure_menu(w: &mut World) {
 
 /// Clicks, hover colour, scrolling and rating changes.
 pub(crate) fn menu_input(w: &mut World) {
+    // Played with a gamepad, B goes back: no button for it.
+    if let Some(back) = w.list.back {
+        let shown = !crate::gamepad::in_use(w);
+        w.ui.set_visible(back, shown);
+    }
     let max = (LEVELS_PER_RATING as usize - ROWS_SHOWN) as f32;
     let (keys, touches) = (&w.e.input.keys, &w.e.input.touches);
     let screen = &w.screen;
@@ -422,10 +430,14 @@ pub(crate) fn back_to_menu(w: &mut World) {
             current.loaded = None;
         }
     };
+    // Enhanced's menu (`confirm`): restart, leave, or carry on.
     if let Some(was_paused) = confirm.question {
-        if keys.any_just_pressed([KeyCode::KeyY, KeyCode::Enter, KeyCode::NumpadEnter]) {
+        if keys.any_just_pressed([KeyCode::KeyR, KeyCode::KeyY]) {
             confirm.question = None;
             restart(game, current);
+        } else if keys.just_pressed(KeyCode::KeyX) {
+            confirm.question = None;
+            w.next_state = Some(level_menu(current.number));
         } else if keys.any_just_pressed([KeyCode::KeyN, KeyCode::Escape]) {
             confirm.question = None;
             game.paused = was_paused;
@@ -437,11 +449,13 @@ pub(crate) fn back_to_menu(w: &mut World) {
     if !keys.just_pressed(KeyCode::Escape) {
         return;
     }
-    if game.replay.is_some() {
-        w.next_state = Some(level_menu(current.number));
-    } else if w.settings.enhanced() && game.sim.is_some() {
+    if w.settings.enhanced() && game.sim.is_some() {
         confirm.question = Some(game.paused);
         game.paused = true;
+    } else if game.replay.is_some() {
+        // The original: Esc restarts the level as a replay, and Esc during
+        // the replay leaves it.
+        w.next_state = Some(level_menu(current.number));
     } else {
         restart(game, current);
     }

@@ -9,18 +9,12 @@ use l3d_engine::prelude::*;
 /// What the options screen changes.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Settings {
-    /// Draw the land, sea and sky (off: plain colour), as the original's
-    /// configuration offers.
-    pub land: bool,
-    pub sea: bool,
-    pub sky: bool,
-    /// Swap the mouse buttons: the right one gives skills, the left one
-    /// turns the camera.
-    pub left_handed: bool,
     pub fullscreen: bool,
     /// How the game is presented: as the original, or with our
     /// improvements (`Mode`).
     pub mode: Mode,
+    /// Enhanced's graphics (ours).
+    pub graphics: Graphics,
     /// Show the frames per second in a corner (ours).
     pub fps: bool,
     /// Backspace runs the level back in time (ours); off, no snapshots are
@@ -44,11 +38,9 @@ pub struct Settings {
 pub enum Mode {
     /// As the original: its 3D view at 320×200, its camera cuts.
     Original,
-    /// Ours: full resolution, smooth camera moves, waves, shadows.
+    /// Ours: full resolution, smooth camera moves, and the effects its
+    /// [`Graphics`] choose.
     Enhanced,
-    /// Enhanced, with effects a slower GPU may not keep up with: glow,
-    /// the level mirrored in the sea, sandstorms and heat shimmer.
-    Ultra,
 }
 
 impl Mode {
@@ -57,7 +49,6 @@ impl Mode {
         match self {
             Mode::Original => "Original",
             Mode::Enhanced => "Enhanced",
-            Mode::Ultra => "Ultra",
         }
     }
 
@@ -66,23 +57,211 @@ impl Mode {
         match self {
             Mode::Original => "original",
             Mode::Enhanced => "enhanced",
-            Mode::Ultra => "ultra",
         }
     }
 
-    pub fn from_name(key: &str) -> Option<Self> {
-        [Mode::Original, Mode::Enhanced, Mode::Ultra]
-            .into_iter()
-            .find(|m| m.key() == key)
+    /// The mode named `key`, and for the Ultra there once was, the High
+    /// preset it now is.
+    pub fn from_name(key: &str) -> Option<(Self, Option<Preset>)> {
+        match key {
+            "original" => Some((Mode::Original, None)),
+            "enhanced" => Some((Mode::Enhanced, None)),
+            "ultra" => Some((Mode::Enhanced, Some(Preset::High))),
+            _ => None,
+        }
     }
 
-    /// The mode after this one, round from Ultra to Original.
+    /// The other mode.
     pub fn next(self) -> Self {
         match self {
             Mode::Original => Mode::Enhanced,
-            Mode::Enhanced => Mode::Ultra,
-            Mode::Ultra => Mode::Original,
+            Mode::Enhanced => Mode::Original,
         }
+    }
+}
+
+/// A set of Enhanced's graphics settings, for weaker or stronger machines;
+/// Custom once one of them is changed by hand.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Preset {
+    Low,
+    Medium,
+    High,
+    Custom,
+}
+
+impl Preset {
+    pub const CHOICES: [Preset; 3] = [Preset::Low, Preset::Medium, Preset::High];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Preset::Low => "Low",
+            Preset::Medium => "Medium",
+            Preset::High => "High",
+            Preset::Custom => "Custom",
+        }
+    }
+
+    fn key(self) -> &'static str {
+        match self {
+            Preset::Low => "low",
+            Preset::Medium => "medium",
+            Preset::High => "high",
+            Preset::Custom => "custom",
+        }
+    }
+
+    fn from_key(key: &str) -> Option<Self> {
+        [Preset::Low, Preset::Medium, Preset::High, Preset::Custom]
+            .into_iter()
+            .find(|p| p.key() == key)
+    }
+
+    /// Its settings (Custom keeps `current`'s).
+    pub fn graphics(self, current: Graphics) -> Graphics {
+        let base = self.graphics_base();
+        match self {
+            Preset::High => base,
+            Preset::Medium => Graphics {
+                reflections: false,
+                glow: Glow::On,
+                ..base
+            },
+            Preset::Low => Graphics {
+                resolution: 2,
+                filtering: false,
+                waves: false,
+                reflections: false,
+                shadows: false,
+                glow: Glow::Off,
+                snow: false,
+                sandstorm: false,
+                crt: false,
+                windows: false,
+                ..base
+            },
+            Preset::Custom => Graphics {
+                preset: Preset::Custom,
+                ..current
+            },
+        }
+    }
+}
+
+/// Enhanced's glow: none; glowing things (flames, lamps) drawn bright and
+/// lighting the walls near them; and that glow blooming softly round them
+/// too, which costs a weak GPU much.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Glow {
+    Off,
+    On,
+    Bloom,
+}
+
+impl Glow {
+    pub fn name(self) -> &'static str {
+        match self {
+            Glow::Off => "Off",
+            Glow::On => "On",
+            Glow::Bloom => "Bloom",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            Glow::Off => Glow::On,
+            Glow::On => Glow::Bloom,
+            Glow::Bloom => Glow::Off,
+        }
+    }
+
+    fn key(self) -> &'static str {
+        match self {
+            Glow::Off => "off",
+            Glow::On => "on",
+            Glow::Bloom => "bloom",
+        }
+    }
+}
+
+/// Enhanced's graphics (ours): a [`Preset`]'s, or chosen one by one.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Graphics {
+    pub preset: Preset,
+    /// The resolution drawn at, as a step of [`RESOLUTIONS`]: 0 the
+    /// screen's own, then fewer rows, stretched over it.
+    pub resolution: u8,
+    /// Distant textures sampled smoothly (mipmaps, anisotropic), rather
+    /// than nearest.
+    pub filtering: bool,
+    /// The sea's waves and surf.
+    pub waves: bool,
+    /// The level mirrored in the sea, and polished floors shining.
+    pub reflections: bool,
+    /// Soft shadows under the lemmings.
+    pub shadows: bool,
+    pub glow: Glow,
+    /// Snow falling and lying on snowy levels.
+    pub snow: bool,
+    /// Sandstorms (and heat shimmer) on desert levels.
+    pub sandstorm: bool,
+    /// Screens in the levels drawn as cathode-ray tubes.
+    pub crt: bool,
+    /// Windows looking out on space (each of their pixels follows the line
+    /// of sight through the level).
+    pub windows: bool,
+}
+
+impl Default for Graphics {
+    fn default() -> Self {
+        Preset::High.graphics_base()
+    }
+}
+
+impl Preset {
+    /// High's settings, named `self`.
+    fn graphics_base(self) -> Graphics {
+        Graphics {
+            preset: self,
+            resolution: 0,
+            filtering: true,
+            waves: true,
+            reflections: true,
+            shadows: true,
+            glow: Glow::Bloom,
+            snow: true,
+            sandstorm: true,
+            crt: true,
+            windows: true,
+        }
+    }
+}
+
+/// The resolutions offered: fractions of the screen's rows. On a TV they
+/// are named by rows, as TVs are (1080p, 720p, 540p on a 1080-row
+/// screen); elsewhere, where windows take any size, as percentages.
+const RESOLUTIONS_TV: [f32; 3] = [1.0, 2.0 / 3.0, 0.5];
+const RESOLUTIONS_WINDOWED: [f32; 3] = [1.0, 0.75, 0.5];
+pub const RESOLUTIONS: usize = 3;
+
+/// The fraction of the screen's rows resolution step `step` draws.
+pub fn resolution(step: u8) -> f32 {
+    let steps = if crate::platform::is_tv() {
+        RESOLUTIONS_TV
+    } else {
+        RESOLUTIONS_WINDOWED
+    };
+    steps[(step as usize).min(RESOLUTIONS - 1)]
+}
+
+/// Resolution step `step`'s name on a screen of `rows` rows: on a TV its
+/// rows ("720p"), elsewhere a percentage.
+pub fn resolution_name(step: u8, rows: u32) -> String {
+    let f = resolution(step);
+    if crate::platform::is_tv() {
+        format!("{}p", (rows as f32 * f).round() as u32)
+    } else {
+        format!("{}%", (f * 100.0).round() as u32)
     }
 }
 
@@ -92,12 +271,9 @@ pub const SLIDER_STEPS: u8 = 10;
 impl Default for Settings {
     fn default() -> Self {
         Settings {
-            land: true,
-            sea: true,
-            sky: true,
-            left_handed: false,
             fullscreen: false,
             mode: Mode::Enhanced,
+            graphics: Graphics::default(),
             fps: false,
             rewind: true,
             music: 8,
@@ -126,24 +302,29 @@ impl Settings {
         completed || new != old
     }
 
-    /// Whether the game is presented with our improvements (Enhanced or
-    /// Ultra), rather than as the original.
+    /// Whether the game is presented with our improvements (Enhanced),
+    /// rather than as the original.
     pub fn enhanced(&self) -> bool {
         self.mode != Mode::Original
+    }
+
+    /// Enhanced's graphics, or none of them in Original.
+    pub fn effects(&self) -> Option<Graphics> {
+        self.enhanced().then_some(self.graphics)
     }
 
     /// The scene parts and style to draw.
     pub fn show(&self) -> crate::scene_build::Show {
         crate::scene_build::Show {
-            land: self.land,
-            sea: self.sea,
-            sky: self.sky,
+            land: true,
+            sea: true,
+            sky: true,
             bottom_sides: self.enhanced(),
-            waves: self.enhanced(),
-            mirror: self.mode == Mode::Ultra,
-            storm: self.mode == Mode::Ultra,
-            snow: self.enhanced(),
-            windows: self.enhanced(),
+            waves: self.effects().is_some_and(|g| g.waves),
+            mirror: self.effects().is_some_and(|g| g.reflections),
+            storm: self.effects().is_some_and(|g| g.sandstorm),
+            snow: self.effects().is_some_and(|g| g.snow),
+            windows: self.effects().is_some_and(|g| g.windows),
             signals: self.enhanced(),
         }
     }
@@ -164,20 +345,12 @@ impl Settings {
 
     /// The mouse button that gives skills and picks lemmings.
     pub fn action_button(&self) -> MouseButton {
-        if self.left_handed {
-            MouseButton::Right
-        } else {
-            MouseButton::Left
-        }
+        MouseButton::Left
     }
 
     /// The mouse button that turns the camera when dragged.
     pub fn turn_button(&self) -> MouseButton {
-        if self.left_handed {
-            MouseButton::Left
-        } else {
-            MouseButton::Right
-        }
+        MouseButton::Right
     }
 
     fn path() -> Option<PathBuf> {
@@ -201,12 +374,45 @@ impl Settings {
             let flag = v == "on";
             let level = v.parse::<u8>().ok().map(|n| n.min(SLIDER_STEPS));
             match k {
-                "land" => s.land = flag,
-                "sea" => s.sea = flag,
-                "sky" => s.sky = flag,
-                "left_handed" => s.left_handed = flag,
                 "fullscreen" => s.fullscreen = flag,
-                "mode" => s.mode = Mode::from_name(v).unwrap_or(s.mode),
+                "mode" => {
+                    if let Some((mode, preset)) = Mode::from_name(v) {
+                        s.mode = mode;
+                        if let Some(p) = preset {
+                            s.graphics = p.graphics(s.graphics);
+                        }
+                    }
+                }
+                "preset" => {
+                    if let Some(p) = Preset::from_key(v) {
+                        s.graphics.preset = p;
+                    }
+                }
+                "resolution" => {
+                    s.graphics.resolution = v
+                        .parse()
+                        .ok()
+                        .filter(|&r: &u8| (r as usize) < RESOLUTIONS)
+                        .unwrap_or(s.graphics.resolution)
+                }
+                "filtering" => s.graphics.filtering = flag,
+                "waves" => s.graphics.waves = flag,
+                "reflections" => s.graphics.reflections = flag,
+                "shadows" => s.graphics.shadows = flag,
+                "glow" => {
+                    s.graphics.glow = match v {
+                        "off" => Glow::Off,
+                        "on" => Glow::On,
+                        "bloom" => Glow::Bloom,
+                        _ => s.graphics.glow,
+                    }
+                }
+                "snow" => s.graphics.snow = flag,
+                "sandstorm" => s.graphics.sandstorm = flag,
+                "crt" => s.graphics.crt = flag,
+                // Before CRT and windows were apart.
+                "screens" => (s.graphics.crt, s.graphics.windows) = (flag, flag),
+                "windows" => s.graphics.windows = flag,
                 // Before there were three modes.
                 "enhanced" => s.mode = if flag { Mode::Enhanced } else { Mode::Original },
                 "fps" => s.fps = flag,
@@ -249,13 +455,20 @@ impl Settings {
         let Some(path) = Self::path() else { return };
         let on = |b: bool| if b { "on" } else { "off" };
         let text = format!(
-            "land = {}\nsea = {}\nsky = {}\nleft_handed = {}\nfullscreen = {}\nmode = {}\nfps = {}\nrewind = {}\nmusic = {}\neffects = {}\ncamera = {}\nrating = {}\ncompleted = {}\nbest = {}\n",
-            on(self.land),
-            on(self.sea),
-            on(self.sky),
-            on(self.left_handed),
+            "fullscreen = {}\nmode = {}\npreset = {}\nresolution = {}\nfiltering = {}\nwaves = {}\nreflections = {}\nshadows = {}\nglow = {}\nsnow = {}\nsandstorm = {}\ncrt = {}\nwindows = {}\nfps = {}\nrewind = {}\nmusic = {}\neffects = {}\ncamera = {}\nrating = {}\ncompleted = {}\nbest = {}\n",
             on(self.fullscreen),
             self.mode.key(),
+            self.graphics.preset.key(),
+            self.graphics.resolution,
+            on(self.graphics.filtering),
+            on(self.graphics.waves),
+            on(self.graphics.reflections),
+            on(self.graphics.shadows),
+            self.graphics.glow.key(),
+            on(self.graphics.snow),
+            on(self.graphics.sandstorm),
+            on(self.graphics.crt),
+            on(self.graphics.windows),
             on(self.fps),
             on(self.rewind),
             self.music,

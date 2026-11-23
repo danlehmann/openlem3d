@@ -196,6 +196,12 @@ pub(crate) fn spawn_briefing(w: &mut World) {
     }
 }
 
+/// What a gamepad picks among while previewing: the preview's overlay
+/// (not the level's panel under it).
+pub(crate) fn preview_overlay_root(w: &World) -> Option<NodeId> {
+    w.briefing.overlay
+}
+
 /// The choice a gamepad starts on, on the briefing and previewing:
 /// Continue (owner).
 pub(crate) fn first_choice(w: &World) -> Option<NodeId> {

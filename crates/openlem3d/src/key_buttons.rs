@@ -1,7 +1,7 @@
 //! On-screen buttons that press a key, for players without a keyboard (on a
 //! touchscreen, say): "Back" (Esc) on the level list and the code screen,
 //! "Press Return when finished" (Return) on the code screen, "Restart" or
-//! "Menu" (Esc) in a level, and the answers to the restart question (Y, N).
+//! "Menu" (Esc) in a level, and the choices of the menu it opens (R, N, X).
 //! Pressing one sends that key's input, so the key's own handling serves
 //! both (ours).
 
@@ -129,7 +129,7 @@ pub(crate) fn spawn_text_button(
     y: f32,
     colour: Color,
     key: KeyCode,
-) {
+) -> NodeId {
     let (glyphs, width) = font.layout(text);
     let button = ui.child(parent, UiNode::new().button().at(x, y, width, font.size.y));
     buttons.add(button, KeyButton { key, colour });
@@ -141,26 +141,33 @@ pub(crate) fn spawn_text_button(
                 .at(gx, 0.0, font.size.x, font.size.y),
         );
     }
+    button
 }
 
 /// The button in a level, at the bottom right under the panel's icons, or
 /// centred at the top of the screen when the window is too narrow for it to
 /// clear the skill row there (the panel keeps the row to the left and the
-/// icons to the right): "Restart" (Esc restarts the level, or asks to in Enhanced mode), or
-/// "Menu" during a replay (Esc leaves for the level list). Hidden in the lemming view
-/// (where Esc leaves the view; the panel's arrow does that) and while the
-/// restart question is up.
+/// icons to the right): "Menu" in Enhanced mode (Esc opens its menu:
+/// restart, carry on or leave); in the original's mode "Restart" (Esc
+/// restarts the level), or "Menu" during a replay (Esc leaves for the level
+/// list). Hidden in the lemming view
+/// (where Esc leaves the view; the panel's arrow does that), while the
+/// restart question is up, and during the preview, where Esc leaves the level
+/// (owner: "Restart" there left it).
 pub(crate) fn level_button(w: &mut World) {
     let label = (w.state == AppState::Playing
         && w.lemming_cam == LemmingCam::Off
-        && w.confirm.question.is_none())
-    .then(|| {
-        if w.game.replay.is_some() {
-            "Menu"
-        } else {
-            "Restart"
-        }
-    });
+        && w.confirm.question.is_none()
+        && !w.preview.active)
+        .then(|| {
+            // Enhanced's Esc opens its menu; the original's restarts,
+            // and leaves during the replay.
+            if w.settings.enhanced() || w.game.replay.is_some() {
+                "Menu"
+            } else {
+                "Restart"
+            }
+        });
     let size = w.screen.size;
     let shown = w.key_buttons.level.map(|(_, t, s)| (t, s));
     let wanted = label.map(|l| (l, size));
