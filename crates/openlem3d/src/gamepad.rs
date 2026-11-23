@@ -512,6 +512,8 @@ fn level(w: &mut World, pad: &l3d_engine::input::Pad) {
         b.just_pressed(PadButton::RightBumper) as i32 - b.just_pressed(PadButton::LeftBumper) as i32
     };
     if step != 0 {
+        // Another skill: a turner waiting for its side is let go.
+        w.pending.0 = None;
         w.gamepad.before_bumper = Some(w.selected.0);
         let at = w
             .selected
