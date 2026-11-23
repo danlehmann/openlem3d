@@ -1134,7 +1134,7 @@ pub(crate) fn show_in_play(w: &mut World) {
 /// The line of large text at the bottom left, above the arrow and the face
 /// (position estimated): "Replaying" and "Click to Play" during a replay,
 /// otherwise the state of the lemming under the pointer, as in the original
-/// ("Walker", "Sliding").
+/// ("Walker", "Sliding"), or the one a gamepad highlights.
 const CAPTION_AT: Vec2 = Vec2::new(3.0, 158.0);
 /// Seconds each replay message shows (estimated).
 const REPLAY_BLINK: f32 = 1.5;
@@ -1168,6 +1168,7 @@ fn caption(w: &mut World) {
     let Some(font) = w.art.as_ref().and_then(|a| a.large.as_ref()) else {
         return;
     };
+    let pad = crate::gamepad::in_use(w);
     let Some((node, shown)) = &mut w.panel.caption else {
         return;
     };
@@ -1182,11 +1183,17 @@ fn caption(w: &mut World) {
         }
     } else {
         (|| {
+            let sim = game.sim.as_ref()?;
+            // With a gamepad, the lemming it highlights (its pointer is
+            // hidden).
+            if pad {
+                let i = w.highlight.lemming.filter(|_| w.highlight.on)?;
+                return sim.lemmings.get(i).filter(|l| !l.gone).and_then(state_name);
+            }
             let point = w.screen.cursor(&w.e.window)?;
             if w.ui.any_active() {
                 return None;
             }
-            let sim = game.sim.as_ref()?;
             // Riding along, not the lemming ridden with.
             let i = crate::hud::lemming_near(
                 sim,
