@@ -119,6 +119,17 @@ const TOGGLES: [(Item, &str, usize, usize); 3] = [
     (Item::Rewind, "Rewind", 0, 1),
     (Item::Fps, "FPS", 0, 2),
 ];
+/// The toggles offered, each with its column: on a TV, which always fills
+/// the screen, no Fullscreen (the others move left).
+fn toggles() -> impl Iterator<Item = (Item, &'static str, usize, usize)> {
+    let tv = crate::platform::is_tv();
+    TOGGLES
+        .into_iter()
+        .filter(move |&(item, ..)| !(tv && item == Item::Fullscreen))
+        .enumerate()
+        .map(|(col, (item, label, row, _))| (item, label, row, col))
+}
+
 /// The mode's box, in the slider rows' free place, and where its name
 /// starts in it.
 const MODE_BOX: (f32, f32) = (160.0, 60.0);
@@ -229,7 +240,7 @@ pub(crate) fn spawn_options(w: &mut World) {
             .shown
             .push((l, Light(Item::Preset(Preset::Custom), 1)));
     }
-    for (item, label, row, col) in TOGGLES {
+    for (item, label, row, col) in toggles() {
         let (x, y) = (COLUMNS[col], TOGGLE_ROWS[row]);
         let b = panel_box(ui, canvas, x, y, 80.0, BOX_HEIGHT);
         if let Some(n) = ui.get_mut(b) {
@@ -296,7 +307,7 @@ pub(crate) fn spawn_options(w: &mut World) {
 /// `spawn_options` lays them out.
 fn entries() -> Vec<(Rect, Entry)> {
     let mut e = Vec::new();
-    for (item, _, row, col) in TOGGLES {
+    for (item, _, row, col) in toggles() {
         let (x, y) = (COLUMNS[col], TOGGLE_ROWS[row]);
         e.push((
             Rect::new(x, y, x + 80.0, y + BOX_HEIGHT),
