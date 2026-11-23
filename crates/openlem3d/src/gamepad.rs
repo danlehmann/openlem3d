@@ -5,12 +5,12 @@
 //! (`camera_controls`). On the other screens the D-pad and the left stick
 //! jump the pointer from button to button, A presses and B goes back.
 //!
-//! In a level: A gives the skill, B opens the level's menu, X rides along with the
+//! In a level: A gives the skill, B pauses, X rides along with the
 //! highlighted lemming (and back), Y the next camera view; the D-pad's up
 //! and down the release rate; the left trigger runs the level back and the
 //! right one forward as fast as they are pulled (`backspace_rewind`); the
 //! right stick's click highlights the lemming nearest the middle again;
-//! Menu opens the options and View pauses.
+//! Menu opens the options and View is Esc.
 
 use l3d_engine::input::{KeyCode, MouseButton, PadButton};
 use l3d_engine::math::Vec2;
@@ -122,10 +122,8 @@ pub(crate) fn input(w: &mut World) {
         w.gamepad.in_use = true;
     }
     w.e.window.cursor_hidden = w.gamepad.in_use;
-    // Outside a level's play, View and B both go back (Esc); in play, B
-    // opens the level's menu (Esc) and View pauses (`level`).
-    let playing = !menu && !w.preview.active;
-    if (!playing && pad.buttons.just_pressed(PadButton::Select))
+    // View is Esc everywhere; B goes back outside levels.
+    if pad.buttons.just_pressed(PadButton::Select)
         || (menu && w.state != AppState::Code && pad.buttons.just_pressed(PadButton::East))
         || (w.state == AppState::Options && pad.buttons.just_pressed(PadButton::Start))
     {
@@ -642,12 +640,7 @@ fn level(w: &mut World, pad: &l3d_engine::input::Pad) {
         w.lemming_cam.face(highlight, &mut w.selected, &mut w.view);
         (w.selected.0, w.selected.1) = selected;
     }
-    // B the level's menu (owner: swapped with pause, on View), unless it
-    // lets a waiting turner go.
     if b.just_pressed(PadButton::East) && pending.is_none() {
-        tap(w, KeyCode::Escape);
-    }
-    if b.just_pressed(PadButton::Select) {
         tap(w, KeyCode::KeyP);
     }
     if b.just_pressed(PadButton::North) {
