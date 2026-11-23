@@ -371,8 +371,11 @@ impl Features {
                 screens: self.screens,
                 ..only
             },
+            // A sea of ice shines with the level (`scene_build`'s
+            // `ICE_GLOSS`).
             LayerKind::Sea => Features {
                 sea: self.sea,
+                gloss: self.gloss,
                 ..only
             },
             // A circuit board is the land (`scene_build::CIRCUIT_LANDS`).
