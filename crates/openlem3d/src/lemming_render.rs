@@ -1852,6 +1852,75 @@ mod tests {
         None
     }
 
+    /// A shadow worked out from a plane through nine of its points lies
+    /// where the full search puts it, but for something narrower than the
+    /// probes' spacing: on every level with a recorded solution as it is
+    /// played, few points differ, and none by much.
+    #[test]
+    fn shadow_shortcut_matches() {
+        use l3d_formats::gamedata::{DATA_ENV, GameData};
+        let dir = std::env::var_os(DATA_ENV)
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../gamedata")
+            });
+        if !dir.is_dir() {
+            eprintln!("game data not found; skipping");
+            return;
+        }
+        let mut data = GameData::open(&dir).expect("open game data");
+        let none = |_: [i32; 3]| false;
+        let (mut shadows, mut points, mut off, mut worst) = (0u64, 0u64, 0u64, 0f32);
+        for n in 0..100 {
+            let (Ok(level), Ok(blocks)) = (data.level(n), data.blocks(n)) else {
+                continue;
+            };
+            let Some(log) = l3d_sim::demos::demo(n, &level, &blocks) else {
+                continue;
+            };
+            let mut sim = Simulation::new(&level, &blocks);
+            let mut next = 0;
+            for tick in 0..3000u64 {
+                while let Some(&(_, c)) = log.get(next).filter(|(t, _)| *t <= sim.tick) {
+                    sim.apply(c);
+                    next += 1;
+                }
+                sim.step();
+                if tick % 50 != 0 {
+                    continue;
+                }
+                for l in sim.lemmings.iter().filter(|l| !l.gone) {
+                    let p = l.pos.map(crate::units);
+                    let fast = shadow_points_with(&sim, &none, p, true, true);
+                    let full = shadow_points_with(&sim, &none, p, true, false);
+                    let (Some(fast), Some(full)) = (fast, full) else {
+                        assert_eq!(fast.is_some(), full.is_some(), "level {n}");
+                        continue;
+                    };
+                    shadows += 1;
+                    for (a, b) in fast.iter().zip(&full) {
+                        points += 1;
+                        let dy = (a[1] - b[1]).abs();
+                        if dy > 0.01 || (a[5] - b[5]).abs() > 1e-6 {
+                            off += 1;
+                            worst = worst.max(dy);
+                        }
+                    }
+                }
+            }
+        }
+        eprintln!(
+            "{shadows} shadows, {points} points; {off} differ ({:.4}%), by up to {worst} units",
+            off as f64 / points.max(1) as f64 * 100.0
+        );
+        assert!(shadows > 0);
+        assert!(
+            (off as f64) < points as f64 * 0.001,
+            "too many points differ"
+        );
+        assert!(worst <= 0.3, "a point lies far off");
+    }
+
     /// The faster floor search finds the same floors as the stepwise one,
     /// on every level with a recorded solution, as its terrain is dug and
     /// built on: under each lemming's shadow and across the level, with
@@ -2173,9 +2242,11 @@ const SHADOW_GRID: u32 = 6;
 /// Points of a shadow's grid.
 const SHADOW_POINTS: usize = ((SHADOW_GRID + 1) * (SHADOW_GRID + 1)) as usize;
 /// The most threads the shadows are worked out on, and the fewest shadows
-/// worth a thread of their own.
-const SHADOW_THREADS: usize = 4;
-const SHADOWS_PER_THREAD: usize = 8;
+/// worth a thread of their own (starting one costs about half a
+/// millisecond a frame on the Chromecast with Google TV: with 15 shadows
+/// two threads took 2.45 ms, one 2.0; with 80, 4.5 against 6.3).
+const SHADOW_THREADS: usize = 2;
+const SHADOWS_PER_THREAD: usize = 32;
 
 /// A shadow's grid points, row by row: each its place (x, y, z), where on
 /// the shadow's disc (u, v, −1 to 1) and how dark its middle is.
@@ -2188,6 +2259,26 @@ fn shadow_points(
     unseen: &dyn Fn([i32; 3]) -> bool,
     p: [f32; 3],
     ground: bool,
+) -> Option<ShadowPoints> {
+    shadow_points_with(sim, unseen, p, ground, true)
+}
+
+/// How far a floor may lie off the middle's and still count as level with
+/// it, in units (a little over a sub-unit, which floors are found to).
+const PLANE_SLACK: f32 = 0.006;
+
+/// The same, with `shortcut`: where the floor under the corners, the
+/// edges' middles and the middle of the grid is level (a lemming on a flat
+/// floor, most of the time), the rest of the grid is taken to be too,
+/// rather than each point's floor being looked for. Something narrower
+/// than a third of the shadow between those nine could be missed
+/// (`shadow_shortcut_matches`).
+fn shadow_points_with(
+    sim: &Simulation,
+    unseen: &dyn Fn([i32; 3]) -> bool,
+    p: [f32; 3],
+    ground: bool,
+    shortcut: bool,
 ) -> Option<ShadowPoints> {
     /// How far above its floor a shadow is drawn, against fighting it and
     /// against the straight edges between its points dipping under a
@@ -2214,15 +2305,55 @@ fn shadow_points(
     let dark = SHADOW_DARK * (1.0 - up * 2.0 / 3.0);
     let r = SHADOW_RADIUS * (1.0 - up / 2.0);
     let coord = |j: u32| j as f32 / GRID as f32 * 2.0 - 1.0;
-    // Every grid point's floor first: a point's halfway point is another
-    // grid point where both its indices are odd (so is not looked for
-    // again).
-    let mut floors = [None; SHADOW_POINTS];
-    for (j, k) in (0..=GRID).flat_map(|j| (0..=GRID).map(move |k| (j, k))) {
-        let (u, v) = (coord(j), coord(k));
-        floors[(j * (GRID + 1) + k) as usize] =
-            floor_under(sim, unseen, p[0] + u * r, top, p[2] + v * r, ground);
+    let at = |j: u32, k: u32| (j * (GRID + 1) + k) as usize;
+    let search = |j: u32, k: u32| {
+        floor_under(
+            sim,
+            unseen,
+            p[0] + coord(j) * r,
+            top,
+            p[2] + coord(k) * r,
+            ground,
+        )
+    };
+    let reach = |a: f32, b: f32, across: f32| (a - b).abs() <= across + SLOPE_SLACK;
+    // Every grid point's floor first (`None` inside: not looked for yet):
+    // a point's halfway point is another grid point where both its
+    // indices are odd (so is not looked for again).
+    let mut floors: [Option<Option<f32>>; SHADOW_POINTS] = [None; SHADOW_POINTS];
+    let ends = [0, GRID / 2, GRID];
+    if shortcut {
+        for j in ends {
+            for k in ends {
+                floors[at(j, k)] = Some(search(j, k));
+            }
+        }
+        let h = |j: u32, k: u32| floors[at(j, k)].flatten();
+        let nine: Option<Vec<f32>> = ends
+            .iter()
+            .flat_map(|&j| ends.iter().map(move |&k| (j, k)))
+            .map(|(j, k)| h(j, k))
+            .collect();
+        if let Some(nine) = nine {
+            let e = nine[4];
+            // Flat: all nine at the middle's height. Not merely in one
+            // plane: stairs of quarter-unit steps can put the nine on a
+            // line (the full search fades the shadow at their edge).
+            let flat = nine.iter().all(|&y| (y - floor).abs() <= PLANE_SLACK);
+            if flat {
+                let mut points = [[0.0; 6]; SHADOW_POINTS];
+                for (j, k) in (0..=GRID).flat_map(|j| (0..=GRID).map(move |k| (j, k))) {
+                    let (u, v) = (coord(j), coord(k));
+                    points[at(j, k)] = [p[0] + u * r, e + LIFT, p[2] + v * r, u, v, dark];
+                }
+                return Some(points);
+            }
+        }
     }
+    let floors: [Option<f32>; SHADOW_POINTS] = std::array::from_fn(|n| {
+        let (j, k) = (n as u32 / (GRID + 1), n as u32 % (GRID + 1));
+        floors[n].unwrap_or_else(|| search(j, k))
+    });
     let mut points = [[0.0; 6]; SHADOW_POINTS];
     for (j, k) in (0..=GRID).flat_map(|j| (0..=GRID).map(move |k| (j, k))) {
         let (u, v) = (coord(j), coord(k));
@@ -2232,7 +2363,6 @@ fn shadow_points(
         // step of builder's bricks, against a wall), stays at the
         // middle's height and is clear, so the shadow fades out there
         // rather than float or hang down over the step.
-        let reach = |a: f32, b: f32, across: f32| (a - b).abs() <= across + SLOPE_SLACK;
         let d = (u * u + v * v).sqrt() * r;
         let half = if j % 2 == 1 && k % 2 == 1 {
             let half_of = |i: u32| (GRID as i32 / 2 + (i as i32 - GRID as i32 / 2) / 2) as u32;
