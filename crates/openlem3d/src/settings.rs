@@ -411,6 +411,12 @@ impl Settings {
         MouseButton::Right
     }
 
+    /// The folder the settings are kept in, for other things kept between
+    /// runs.
+    pub fn dir() -> Option<PathBuf> {
+        Self::path()?.parent().map(PathBuf::from)
+    }
+
     fn path() -> Option<PathBuf> {
         let base = crate::platform::config_dir()
             .or_else(|| std::env::var_os("APPDATA").map(PathBuf::from))

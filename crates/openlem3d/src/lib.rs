@@ -279,6 +279,7 @@ pub fn main() {
         eprintln!("{}", platform::DATA_HINT);
         std::process::exit(1);
     });
+    scene_build::prepare_atlas(dir.clone());
     let window = Window {
         title: "openlem3d".into(),
         present_mode: if opts.turbo {

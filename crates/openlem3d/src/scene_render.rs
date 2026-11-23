@@ -268,6 +268,9 @@ pub struct SceneGpu {
     sampler: wgpu::Sampler,
     /// Smooth sampling, for the bloom chain.
     linear: wgpu::Sampler,
+    /// Compiled pipelines kept between runs (where the driver can: Vulkan),
+    /// and the file they are kept in.
+    cache: Option<(wgpu::PipelineCache, std::path::PathBuf)>,
     /// Trilinear, anisotropic and repeating, for [`SceneLayer::smooth`];
     /// and the same without anisotropy.
     mipmapped: wgpu::Sampler,
@@ -492,6 +495,49 @@ impl Bound {
     }
 }
 
+/// The pipeline cache for `adapter`'s driver, with what an earlier run kept
+/// of it, if the device can keep one (`gpu`'s device asks for the feature).
+fn pipeline_cache(
+    device: &wgpu::Device,
+    adapter: &wgpu::Adapter,
+) -> Option<(wgpu::PipelineCache, std::path::PathBuf)> {
+    if !device.features().contains(wgpu::Features::PIPELINE_CACHE) {
+        return None;
+    }
+    let key = wgpu::util::pipeline_cache_key(&adapter.get_info())?;
+    let path = crate::settings::Settings::dir()?.join(key);
+    let data = std::fs::read(&path).ok();
+    // SAFETY: the data is only ever what `get_data` gave for this driver
+    // (its file is named for it), and `fallback` makes wgpu start an empty
+    // cache should the driver reject it.
+    let cache = unsafe {
+        device.create_pipeline_cache(&wgpu::PipelineCacheDescriptor {
+            label: Some("scene pipelines"),
+            data: data.as_deref(),
+            fallback: true,
+        })
+    };
+    l3d_engine::log::info!(
+        "pipeline cache {} ({} bytes kept)",
+        path.display(),
+        data.map_or(0, |d| d.len())
+    );
+    Some((cache, path))
+}
+
+/// Keeps `cache`'s compiled pipelines in `path` for the next run, replacing
+/// the file whole (written aside, then renamed over it).
+fn save_pipeline_cache(cache: &wgpu::PipelineCache, path: &std::path::Path) {
+    let Some(data) = cache.get_data() else { return };
+    let aside = path.with_extension("new");
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    if let Err(e) = std::fs::write(&aside, &data).and_then(|()| std::fs::rename(&aside, path)) {
+        l3d_engine::log::warn!("could not keep the pipeline cache: {e}");
+    }
+}
+
 impl SceneGpu {
     pub fn new(device: &wgpu::Device, adapter: &wgpu::Adapter) -> Self {
         let depth_format = [
@@ -658,6 +704,7 @@ impl SceneGpu {
             ],
         });
         SceneGpu {
+            cache: pipeline_cache(device, adapter),
             reflection: None,
             wave_field: None,
             blank,
@@ -771,7 +818,7 @@ impl SceneGpu {
             }),
             multisample: Default::default(),
             multiview_mask: None,
-            cache: None,
+            cache: self.cache.as_ref().map(|(c, _)| c),
         })
         };
         // A full-screen triangle over the scene, ignoring its depth:
@@ -806,7 +853,7 @@ impl SceneGpu {
                 }),
                 multisample: Default::default(),
                 multiview_mask: None,
-                cache: None,
+                cache: self.cache.as_ref().map(|(c, _)| c),
             })
         };
         let dust_sheets = || {
@@ -848,7 +895,7 @@ impl SceneGpu {
                 }),
                 multisample: Default::default(),
                 multiview_mask: None,
-                cache: None,
+                cache: self.cache.as_ref().map(|(c, _)| c),
             })
         };
         let snow = || particles("scene snow", "vs_snow", "fs_snow");
@@ -881,7 +928,7 @@ impl SceneGpu {
                 }),
                 multisample: Default::default(),
                 multiview_mask: None,
-                cache: None,
+                cache: self.cache.as_ref().map(|(c, _)| c),
             })
         };
         // A full-screen triangle with no depth, optionally added onto what
@@ -918,7 +965,7 @@ impl SceneGpu {
                 depth_stencil: None,
                 multisample: Default::default(),
                 multiview_mask: None,
-                cache: None,
+                cache: self.cache.as_ref().map(|(c, _)| c),
             })
         };
         let shadow = || {
@@ -965,7 +1012,7 @@ impl SceneGpu {
             }),
             multisample: Default::default(),
             multiview_mask: None,
-            cache: None,
+            cache: self.cache.as_ref().map(|(c, _)| c),
         })
         };
         match which {
@@ -991,7 +1038,7 @@ impl SceneGpu {
                 depth_stencil: None,
                 multisample: Default::default(),
                 multiview_mask: None,
-                cache: None,
+                cache: self.cache.as_ref().map(|(c, _)| c),
             }),
             Which::Shadow => shadow(),
             Which::Geometry => geometry("scene geometry", wgpu::Face::Back),
@@ -1028,12 +1075,17 @@ impl SceneGpu {
         need: &[Which],
         features: Features,
     ) {
+        let mut made = false;
         for &w in need {
             let key = (format, w, w.specialised(features));
             if !self.pipelines.contains_key(&key) {
                 let p = self.make(device, format, w, key.2);
                 self.pipelines.insert(key, p);
+                made = true;
             }
+        }
+        if made && let Some((cache, path)) = &self.cache {
+            save_pipeline_cache(cache, path);
         }
     }
 

@@ -1248,8 +1248,16 @@ fn lemming_atlas(
     let base = match ATLAS_BASE.get() {
         Some(b) => b,
         None => {
-            let b = atlas_base(data, pal)?;
-            ATLAS_BASE.get_or_init(|| b)
+            // Made in the background since the start (`prepare_atlas`)
+            // unless that failed: waiting for it, or making it here.
+            let _making = ATLAS_MAKING.lock();
+            match ATLAS_BASE.get() {
+                Some(b) => b,
+                None => {
+                    let b = atlas_base(data, pal)?;
+                    ATLAS_BASE.get_or_init(|| b)
+                }
+            }
         }
     };
     let w = ATLAS_COLUMNS * LEMMING_CELL;
@@ -1308,8 +1316,32 @@ fn lemming_atlas(
     })
 }
 
-/// The atlas's texels every level shares, made once ([`atlas_base`]).
+/// The atlas's texels every level shares, made once ([`atlas_base`]), and
+/// held while it is being made.
 static ATLAS_BASE: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+static ATLAS_MAKING: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Makes the atlas's shared part in the background, from the game data in
+/// `dir`, while the title shows (a second on a slow TV), so that the first
+/// level needn't.
+pub fn prepare_atlas(dir: std::path::PathBuf) {
+    std::thread::spawn(move || {
+        let _making = ATLAS_MAKING.lock();
+        if ATLAS_BASE.get().is_some() {
+            return;
+        }
+        let made = GameData::open(&dir).and_then(|mut data| {
+            let pal = data.palette("GFX/LM3D.PAL")?;
+            atlas_base(&mut data, &pal)
+        });
+        match made {
+            Ok(b) => {
+                let _ = ATLAS_BASE.set(b);
+            }
+            Err(e) => l3d_engine::log::warn!("sprite atlas: {e}"),
+        }
+    });
+}
 
 /// The atlas without a level's own cells (left clear): the lemming cells,
 /// the countdown digits and the crack frames.

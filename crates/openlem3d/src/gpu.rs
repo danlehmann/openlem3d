@@ -143,11 +143,14 @@ impl Gpu {
         info!("{:?}", adapter.get_info());
         let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("openlem3d"),
-            required_features: if profile {
-                adapter.features() & profile::FEATURES
-            } else {
-                wgpu::Features::empty()
-            },
+            // Compiled pipelines kept between runs where the driver can
+            // (`scene_render::pipeline_cache`).
+            required_features: adapter.features() & wgpu::Features::PIPELINE_CACHE
+                | if profile {
+                    adapter.features() & profile::FEATURES
+                } else {
+                    wgpu::Features::empty()
+                },
             required_limits: adapter.limits(),
             ..Default::default()
         }))
