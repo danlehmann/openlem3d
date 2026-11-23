@@ -199,6 +199,15 @@ pub(crate) fn spawn_options(w: &mut World) {
             let Entry::Toggle(item) = entry else { continue };
             let (x, y, wd) = (rect.min.x, rect.min.y, rect.width());
             let target = button(ui, Target::Toggle(item), x, y, wd, &label);
+            // Reflections come with the waves: without them, dimmed.
+            if item == Item::Reflections && !g.waves {
+                ui.child(
+                    canvas,
+                    UiNode::new()
+                        .at(x, y, wd, BOX_HEIGHT)
+                        .background(Color::srgba(0.0, 0.0, 0.0, 0.55)),
+                );
+            }
             w.options.targets.push(target);
             if lit(&w.settings, item).is_some() {
                 let l = ui.child(
@@ -390,7 +399,7 @@ fn lit(s: &Settings, item: Item) -> Option<bool> {
         Item::Fps => s.fps,
         Item::Preset(p) => g.preset == p,
         Item::Waves => g.waves,
-        Item::Reflections => g.reflections,
+        Item::Reflections => g.reflections && g.waves,
         Item::Shadows => g.shadows,
         Item::Filtering => g.filtering,
         Item::Snow => g.snow,
@@ -610,6 +619,10 @@ fn graphics_by(g: Graphics, item: Item, step: i32) -> Option<Graphics> {
 /// Pressing `item` (with a click or a gamepad): settings change; the
 /// screen is built again to name changed graphics values.
 fn press(w: &mut World, item: Item) {
+    // Reflections come with the waves; without them, nothing to change.
+    if item == Item::Reflections && !w.settings.graphics.waves {
+        return;
+    }
     toggle(&mut w.settings, item);
     if graphics(w.settings.graphics, item).is_some() {
         w.options.rebuild = true;
