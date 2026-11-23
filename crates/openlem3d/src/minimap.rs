@@ -94,7 +94,33 @@ pub struct Minimap {
     marks: Vec<((usize, usize), [u8; 3])>,
     /// Enhanced mode: the terrain sampled from the simulation's world.
     detail: Option<Detail>,
+    /// Enhanced mode: each sample's colour shaded for a light direction,
+    /// and the terrain's version and light step (of [`LIGHT_STEPS`]) it is
+    /// for.
+    shaded: Vec<[u8; 3]>,
+    shaded_for: Option<(u64, i32)>,
+    /// What the map was last drawn for (camera, tick, terrain), so that an
+    /// unchanged map isn't drawn again.
+    drawn_for: Option<DrawnFor>,
+    /// The simulation tick the terrain was last sampled at.
+    sampled_tick: Option<u64>,
 }
+
+/// What a drawn map shows: the camera's place and direction, the
+/// simulation's tick (lemmings and objects move only then), the terrain's
+/// version and the image's size.
+#[derive(Clone, Copy, PartialEq)]
+struct DrawnFor {
+    centre: (f32, f32),
+    up: (f32, f32),
+    tick: u64,
+    terrain: u64,
+    side: usize,
+}
+
+/// The light's directions the shading is worked out for, round a turn
+/// (about 3° apart): turning the view shades the map again only past one.
+const LIGHT_STEPS: f32 = 128.0;
 
 /// Enhanced mode: the terrain's top, [`SAMPLES`] × [`SAMPLES`] samples per
 /// grid cell, indexed `(z * SAMPLES + sz) * GRID + x * SAMPLES + sx`.
@@ -105,6 +131,8 @@ struct Detail {
     colour: Vec<[u8; 3]>,
     /// Per grid column, a digest of its blocks and bricks when sampled.
     digest: Vec<u64>,
+    /// Counts the samplings that changed something.
+    version: u64,
 }
 
 /// The pixels of the 70×70 frame: brown planks with a dark inner edge;
@@ -274,6 +302,10 @@ pub(crate) fn build_base(w: &mut World) {
         top_colour,
         marks,
         detail: None,
+        shaded: Vec::new(),
+        shaded_for: None,
+        drawn_for: None,
+        sampled_tick: None,
     });
 }
 
@@ -359,15 +391,21 @@ fn refresh_detail(map: &mut Minimap, world: &l3d_sim::World) {
         height: vec![f32::NAN; GRID * GRID],
         colour: vec![[0; 3]; GRID * GRID],
         digest: vec![u64::MAX; SIZE_X * SIZE_Z],
+        version: 0,
     });
+    let mut changed = false;
     for z in 0..SIZE_Z {
         for x in 0..SIZE_X {
             let digest = column_digest(world, x as i32, z as i32);
             if detail.digest[z * SIZE_X + x] != digest {
                 detail.digest[z * SIZE_X + x] = digest;
                 sample_column(map, world, x, z, &mut detail);
+                changed = true;
             }
         }
+    }
+    if changed {
+        detail.version += 1;
     }
     map.detail = Some(detail);
 }
@@ -391,7 +429,24 @@ pub(crate) fn draw(w: &mut World) {
         );
     }
     if enhanced {
-        refresh_detail(map, &sim.world);
+        // The terrain changes only as the simulation steps.
+        if map.sampled_tick != Some(sim.tick) || map.detail.is_none() {
+            map.sampled_tick = Some(sim.tick);
+            refresh_detail(map, &sim.world);
+        }
+        let frame = MapFrame::of(&w.view);
+        let now = DrawnFor {
+            centre: frame.centre,
+            up: frame.up,
+            tick: sim.tick,
+            terrain: map.detail.as_ref().map_or(0, |d| d.version),
+            side,
+        };
+        if map.drawn_for == Some(now) {
+            return;
+        }
+        map.drawn_for = Some(now);
+        shade(map, frame.up);
         let Some(image) = w.e.images.get_mut(&map.image) else {
             return;
         };
@@ -430,6 +485,79 @@ pub(crate) fn draw(w: &mut World) {
     dot(w.view.pos.x, w.view.pos.z, CAMERA);
 }
 
+/// Shades the terrain's samples for the map turned to `up` (its light from
+/// the map's top left), unless already shaded for that light's step and
+/// this terrain: facing the light brighter, higher tops a little brighter,
+/// an edge where a neighbour is much higher or lower.
+fn shade(map: &mut Minimap, up: (f32, f32)) {
+    let Some(detail) = &map.detail else { return };
+    let step = (up.1.atan2(up.0) / std::f32::consts::TAU * LIGHT_STEPS).round() as i32;
+    if map.shaded_for == Some((detail.version, step)) {
+        return;
+    }
+    map.shaded_for = Some((detail.version, step));
+    let angle = step as f32 / LIGHT_STEPS * std::f32::consts::TAU;
+    let (ux, uz) = (angle.cos(), angle.sin());
+    // The light comes from the map's top left, whichever way it is turned:
+    // up less right, the map's right being (−up.z, up.x) in the level.
+    let lit = ((ux + uz) * FRAC_1_SQRT_2, (uz - ux) * FRAC_1_SQRT_2);
+    let n = GRID as isize;
+    let height = |i: isize, j: isize| {
+        if (0..n).contains(&i) && (0..n).contains(&j) {
+            let h = detail.height[(j * n + i) as usize];
+            if h.is_nan() { 0.0 } else { h }
+        } else {
+            0.0
+        }
+    };
+    let mut shaded = std::mem::take(&mut map.shaded);
+    shaded.resize(GRID * GRID, [0; 3]);
+    for j in 0..n {
+        for i in 0..n {
+            let k = (j * n + i) as usize;
+            let h = detail.height[k];
+            let base = detail.colour[k];
+            shaded[k] = if h.is_nan() {
+                base
+            } else {
+                let gx = height(i + 1, j) - height(i - 1, j);
+                let gz = height(i, j + 1) - height(i, j - 1);
+                let slope = (1.0 - 1.5 * (gx * lit.0 + gz * lit.1)).clamp(0.55, 1.35);
+                let lift = 0.75 + 0.25 * (h / 8.0).min(1.0);
+                let step = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+                    .iter()
+                    .map(|&(di, dj)| (height(i + di, j + dj) - h).abs())
+                    .fold(0.0f32, f32::max);
+                let edge = if step > 0.3 { 0.55 } else { 1.0 };
+                let k = slope * lift * edge;
+                base.map(|c| (c as f32 * k).clamp(0.0, 255.0) as u8)
+            };
+        }
+    }
+    map.shaded = shaded;
+}
+
+/// The map pixels the camera's faint cone covers, as indices into its
+/// texels: fixed, as the map turns with the camera.
+fn cone_pixels() -> &'static [usize] {
+    static CONE: std::sync::OnceLock<Vec<usize>> = std::sync::OnceLock::new();
+    CONE.get_or_init(|| {
+        let side = MAP * HI;
+        let (cu, cv) = (CENTRE * HI as f32, CENTRE * HI as f32);
+        let mut cone = Vec::new();
+        for v in 0..side {
+            for u in 0..side {
+                let (du, dv) = (u as f32 + 0.5 - cu, v as f32 + 0.5 - cv);
+                let r = du.hypot(dv);
+                if r > 2.0 && r < CONE_LEN && (du.atan2(-dv)).abs() < CONE_HALF {
+                    cone.push((v * side + u) * 4);
+                }
+            }
+        }
+        cone
+    })
+}
+
 /// Enhanced mode: draws the sampled terrain, shaded by height and by its
 /// slope lit from the map's top left, with dark edges where the top steps,
 /// then hatches, exits, objects, the camera's view cone and the lemmings.
@@ -439,52 +567,20 @@ fn draw_detailed(
     view: &crate::ViewCamera,
     px: &mut [u8],
 ) {
-    let Some(detail) = &map.detail else { return };
+    if map.detail.is_none() || map.shaded.len() != GRID * GRID {
+        return;
+    }
     let side = MAP * HI;
     let frame = MapFrame::of(view);
     let s = SAMPLES as f32;
-    let at = |x: f32, z: f32| -> Option<usize> {
-        let (i, j) = ((x * s).floor(), (z * s).floor());
-        ((0.0..GRID as f32).contains(&i) && (0.0..GRID as f32).contains(&j))
-            .then(|| j as usize * GRID + i as usize)
-    };
-    let height = |x: f32, z: f32| at(x, z).map_or(f32::NAN, |i| detail.height[i]);
-    // The light comes from the map's top left, whichever way it is turned:
-    // up less right, the map's right being (−up.z, up.x) in the level.
-    let (ux, uz) = frame.up;
-    let lit = ((ux + uz) * FRAC_1_SQRT_2, (uz - ux) * FRAC_1_SQRT_2);
     for v in 0..side {
         for u in 0..side {
             let (x, z) = frame.to_world((u as f32 + 0.5) / HI as f32, (v as f32 + 0.5) / HI as f32);
-            let c = match at(x, z) {
-                None => map.background,
-                Some(i) => {
-                    let h = detail.height[i];
-                    let base = detail.colour[i];
-                    if h.is_nan() {
-                        base
-                    } else {
-                        let d = 1.0 / s;
-                        let hh = |dx: f32, dz: f32| {
-                            let n = height(x + dx, z + dz);
-                            if n.is_nan() { 0.0 } else { n }
-                        };
-                        let gx = hh(d, 0.0) - hh(-d, 0.0);
-                        let gz = hh(0.0, d) - hh(0.0, -d);
-                        // Facing the light brightens, facing away darkens.
-                        let slope = (1.0 - 1.5 * (gx * lit.0 + gz * lit.1)).clamp(0.55, 1.35);
-                        // Higher tops a little brighter.
-                        let lift = 0.75 + 0.25 * (h / 8.0).min(1.0);
-                        // An edge where a neighbour is much lower or higher.
-                        let step = [(d, 0.0), (-d, 0.0), (0.0, d), (0.0, -d)]
-                            .iter()
-                            .map(|&(dx, dz)| (hh(dx, dz) - h).abs())
-                            .fold(0.0f32, f32::max);
-                        let edge = if step > 0.3 { 0.55 } else { 1.0 };
-                        let k = slope * lift * edge;
-                        base.map(|c| (c as f32 * k).clamp(0.0, 255.0) as u8)
-                    }
-                }
+            let (i, j) = ((x * s).floor(), (z * s).floor());
+            let c = if (0.0..GRID as f32).contains(&i) && (0.0..GRID as f32).contains(&j) {
+                map.shaded[j as usize * GRID + i as usize]
+            } else {
+                map.background
             };
             let i = (v * side + u) * 4;
             px[i..i + 3].copy_from_slice(&c);
@@ -523,16 +619,9 @@ fn draw_detailed(
     }
     // The camera: a faint cone along its view, and a dot.
     let (cu, cv) = (CENTRE * HI as f32, CENTRE * HI as f32);
-    for v in 0..side {
-        for u in 0..side {
-            let (du, dv) = (u as f32 + 0.5 - cu, v as f32 + 0.5 - cv);
-            let r = du.hypot(dv);
-            if r > 2.0 && r < CONE_LEN && (du.atan2(-dv)).abs() < CONE_HALF {
-                let i = (v * side + u) * 4;
-                for k in 0..3 {
-                    px[i + k] = ((px[i + k] as u16 * 3 + CAMERA[k] as u16) / 4) as u8;
-                }
-            }
+    for &i in cone_pixels() {
+        for k in 0..3 {
+            px[i + k] = ((px[i + k] as u16 * 3 + CAMERA[k] as u16) / 4) as u8;
         }
     }
     for dv in -2..=2isize {
