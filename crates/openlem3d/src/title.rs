@@ -385,6 +385,9 @@ pub(crate) struct Title {
     slots: Vec<NodeId>,
     correct: Vec<NodeId>,
     area: Option<NodeId>,
+    /// The code screen's "Back", hidden while a gamepad is in use (B
+    /// leaves there).
+    back: Option<NodeId>,
 }
 
 /// The Play button, where a gamepad starts (so that A plays).
@@ -851,7 +854,7 @@ fn spawn_code(w: &mut World) {
             Color::WHITE,
             KeyCode::Enter,
         );
-        crate::key_buttons::spawn_text_button(
+        t.back = Some(crate::key_buttons::spawn_text_button(
             ui,
             &mut w.key_buttons,
             canvas,
@@ -861,7 +864,7 @@ fn spawn_code(w: &mut World) {
             4.0,
             Color::WHITE,
             KeyCode::Escape,
-        );
+        ));
     }
     // Tapping the code brings the on-screen keyboard back, if put away.
     t.area = Some(
@@ -1051,6 +1054,10 @@ pub(crate) fn attract(w: &mut World) {
 /// The code screen's systems, in order.
 pub(crate) fn update_code(w: &mut World) {
     spawn_code(w);
+    if let Some(back) = w.title.back {
+        let shown = !crate::gamepad::in_use(w);
+        w.ui.set_visible(back, shown);
+    }
     code_input(w);
     animate_slots(w);
     keyboard_again(w);

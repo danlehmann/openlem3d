@@ -73,6 +73,8 @@ pub struct GamepadState {
     /// Letters typed on the code screen, and the last one's.
     letters: usize,
     letter: u8,
+    /// The last letter is still being chosen (up and down change it).
+    choosing: bool,
     /// The way held on the D-pad or left stick in a list, and when it
     /// steps next (real seconds).
     repeat: Option<(i32, f32)>,
@@ -131,7 +133,7 @@ pub(crate) fn input(w: &mut World) {
         tap(w, KeyCode::Escape);
     }
     if w.state != AppState::Code {
-        w.gamepad.letters = 0;
+        (w.gamepad.letters, w.gamepad.choosing) = (0, false);
     }
     // The frame is on a button only where `buttons` puts it, this frame.
     frame(w, None);
@@ -218,48 +220,59 @@ fn type_key(w: &mut World, key_code: Option<KeyCode>, logical: l3d_engine::input
     });
 }
 
-/// The code screen: up and down step the last letter through the
-/// alphabet (the first push types an A), right starts the next letter,
-/// left and B rub one out, A enters the code; View leaves.
+/// The code screen: up and down step the letter being chosen through the
+/// alphabet (the first push types an A), A confirms it (the eighth enters
+/// the code; with none being chosen, A enters what is there), B rubs out
+/// the last letter or, with none, goes back to the title, as Menu does.
+/// The screen reads typed keys only, so keys are typed here rather than
+/// pressed (`tap`).
 fn code(w: &mut World, pad: &l3d_engine::input::Pad) {
     use l3d_engine::input::{Key, NamedKey};
     let b = &pad.buttons;
     let letter = |c: u8| Key::Character((c as char).to_string().into());
-    let mut typed = None;
-    if let Some(way) = repeated(w, pad) {
-        let g = &mut w.gamepad;
-        if g.letters == 0 {
-            typed = Some(b'A');
-        } else {
-            // Down goes on through the alphabet, up back.
-            let c = (g.letter - b'A' + if way > 0 { 1 } else { 25 }) % 26 + b'A';
-            type_key(w, Some(KeyCode::Backspace), Key::Named(NamedKey::Backspace));
-            w.gamepad.letters -= 1;
-            typed = Some(c);
-        }
-    }
-    if b.just_pressed(PadButton::Right) && w.gamepad.letters < 8 {
-        typed = Some(if w.gamepad.letters == 0 {
-            b'A'
-        } else {
-            w.gamepad.letter
-        });
-    }
-    if let Some(c) = typed {
-        type_key(w, None, letter(c));
-        w.gamepad.letters += 1;
-        w.gamepad.letter = c;
-    }
-    if (b.just_pressed(PadButton::Left) || b.just_pressed(PadButton::East)) && w.gamepad.letters > 0
-    {
+    let rub_out = |w: &mut World| {
         type_key(w, Some(KeyCode::Backspace), Key::Named(NamedKey::Backspace));
         w.gamepad.letters -= 1;
+    };
+    if b.just_pressed(PadButton::Start)
+        || (b.just_pressed(PadButton::East) && w.gamepad.letters == 0)
+    {
+        type_key(w, Some(KeyCode::Escape), Key::Named(NamedKey::Escape));
+        return;
+    }
+    if b.just_pressed(PadButton::East) {
+        rub_out(w);
+        w.gamepad.choosing = false;
+        return;
+    }
+    if let Some(way) = repeated(w, pad) {
+        let g = &w.gamepad;
+        let c = if g.choosing {
+            // Down goes on through the alphabet, up back.
+            let c = (g.letter - b'A' + if way > 0 { 1 } else { 25 }) % 26 + b'A';
+            rub_out(w);
+            Some(c)
+        } else {
+            (g.letters < CODE_LETTERS).then_some(b'A')
+        };
+        if let Some(c) = c {
+            type_key(w, None, letter(c));
+            let g = &mut w.gamepad;
+            (g.letters, g.letter, g.choosing) = (g.letters + 1, c, true);
+        }
     }
     if b.just_pressed(PadButton::South) {
-        type_key(w, Some(KeyCode::Enter), Key::Named(NamedKey::Enter));
-        w.gamepad.letters = 0;
+        let g = &mut w.gamepad;
+        let chose = std::mem::take(&mut g.choosing);
+        if (!chose && g.letters > 0) || g.letters == CODE_LETTERS {
+            type_key(w, Some(KeyCode::Enter), Key::Named(NamedKey::Enter));
+            w.gamepad.letters = 0;
+        }
     }
 }
+
+/// A level code's length (`codes::LEVEL_CODES`).
+const CODE_LETTERS: usize = 8;
 
 /// The level list: up and down (held, quickly) move the highlighted row,
 /// the bumpers a page, left and right the rating, A chooses (the keys'

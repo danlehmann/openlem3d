@@ -532,7 +532,9 @@ impl World {
         use menu::AppState::*;
         music::enter(self, s);
         match s {
-            Code => title::keyboard(self, true),
+            // Not with a gamepad: it types with the D-pad, and on a TV the
+            // system's keyboard would take the D-pad for itself.
+            Code => title::keyboard(self, !gamepad::in_use(self)),
             Briefing => {
                 self.game.replay = None;
                 hud::enter_briefing(self);
