@@ -420,7 +420,19 @@ fn fs_shadow(v: VOut) -> @location(0) vec4<f32> {
         discard;
     }
     let dark = v.params.x * (1.0 - smoothstep(0.55, 1.0, d));
-    return vec4(vec3(1.0 - dark), 1.0);
+    // The factor what is under it is multiplied by, in the alpha (the
+    // darkest kept where shadows overlap, `scene_render`'s `ShadowMask`).
+    return vec4(vec3(1.0 - dark), 1.0 - dark);
+}
+
+/// A shadow's circle, white and opaque: to reset the alpha under it, then
+/// to multiply the colour there by the alpha (`scene_render`'s shadows).
+@fragment
+fn fs_shadow_cover(v: VOut) -> @location(0) vec4<f32> {
+    if (length(v.uv) >= 1.0) {
+        discard;
+    }
+    return vec4(1.0);
 }
 
 // Sky: a full-screen triangle. Above the horizon the sky image is stretched

@@ -436,8 +436,11 @@ enum Which {
     BloomFirst,
     BloomDown,
     BloomUp,
-    /// Shadows: multiplied onto what is drawn, behind what is in front.
+    /// Shadows: multiplied onto what is drawn, behind what is in front
+    /// (after `ShadowReset` and `ShadowMask`, see `make`).
     Shadow,
+    ShadowReset,
+    ShadowMask,
     /// Sheets of dust sweeping across the view in a sandstorm.
     DustSheets,
     /// Sand grains blown along the wind in a sandstorm.
@@ -971,9 +974,16 @@ impl SceneGpu {
                 cache: self.cache.as_ref().map(|(c, _)| c),
             })
         };
-        let shadow = || {
+        // Shadows, in three draws of their circles so that overlapping ones
+        // darken no more than the darkest (as one light's shadows do, rather
+        // than each multiplying the last): the target's alpha set to 1 under
+        // them, then the darkest's factor kept there (Min), then the colour
+        // multiplied by it once and the alpha reset (a second circle over
+        // the same spot finds 1). The alpha was the heat shimmer's, lost
+        // under shadows on a desert level.
+        let shadow = |label, entry, blend, write_mask| {
             device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("scene shadows"),
+            label: Some(label),
             layout: Some(&pl_scene),
             vertex: wgpu::VertexState {
                 module: &self.shader,
@@ -989,19 +999,11 @@ impl SceneGpu {
             },
             fragment: Some(wgpu::FragmentState {
                 module: &self.shader,
-                entry_point: Some("fs_shadow"),
-                // What is there, times the shadow's colour.
+                entry_point: Some(entry),
                 targets: &[Some(wgpu::ColorTargetState {
                     format,
-                    blend: Some(wgpu::BlendState {
-                        color: wgpu::BlendComponent {
-                            src_factor: wgpu::BlendFactor::Zero,
-                            dst_factor: wgpu::BlendFactor::Src,
-                            operation: wgpu::BlendOperation::Add,
-                        },
-                        alpha: wgpu::BlendComponent::OVER,
-                    }),
-                    write_mask: wgpu::ColorWrites::COLOR,
+                    blend,
+                    write_mask,
                 })],
                 compilation_options: Default::default(),
             }),
@@ -1043,7 +1045,39 @@ impl SceneGpu {
                 multiview_mask: None,
                 cache: self.cache.as_ref().map(|(c, _)| c),
             }),
-            Which::Shadow => shadow(),
+            Which::ShadowReset => shadow(
+                "scene shadows' reset",
+                "fs_shadow_cover",
+                None,
+                wgpu::ColorWrites::ALPHA,
+            ),
+            Which::ShadowMask => shadow(
+                "scene shadows' darkest",
+                "fs_shadow",
+                Some(wgpu::BlendState {
+                    color: wgpu::BlendComponent::REPLACE,
+                    alpha: wgpu::BlendComponent {
+                        src_factor: wgpu::BlendFactor::One,
+                        dst_factor: wgpu::BlendFactor::One,
+                        operation: wgpu::BlendOperation::Min,
+                    },
+                }),
+                wgpu::ColorWrites::ALPHA,
+            ),
+            // What is there, times the darkest shadow's factor, once.
+            Which::Shadow => shadow(
+                "scene shadows",
+                "fs_shadow_cover",
+                Some(wgpu::BlendState {
+                    color: wgpu::BlendComponent {
+                        src_factor: wgpu::BlendFactor::Zero,
+                        dst_factor: wgpu::BlendFactor::DstAlpha,
+                        operation: wgpu::BlendOperation::Add,
+                    },
+                    alpha: wgpu::BlendComponent::REPLACE,
+                }),
+                wgpu::ColorWrites::ALL,
+            ),
             Which::Geometry => geometry("scene geometry", wgpu::Face::Back),
             // Mirrored, the faces turn over.
             Which::Mirrored => geometry("scene mirrored", wgpu::Face::Front),
@@ -1718,6 +1752,14 @@ fn draw(
     let mut need = Vec::new();
     for (on, which) in [
         (gpu.sky.is_some(), Which::Sky),
+        (
+            gpu.shadows.as_ref().is_some_and(|s| s.2 > 0),
+            Which::ShadowReset,
+        ),
+        (
+            gpu.shadows.as_ref().is_some_and(|s| s.2 > 0),
+            Which::ShadowMask,
+        ),
         (gpu.shadows.as_ref().is_some_and(|s| s.2 > 0), Which::Shadow),
         (snow, Which::Snow),
         (storm, Which::Sand),
@@ -1938,11 +1980,13 @@ fn draw(
         if let (false, Some(atlas), Some((v, i, n))) = (mirrored, &gpu.sprite_atlas, &gpu.shadows)
             && *n > 0
         {
-            pass.set_pipeline(scene_p(Which::Shadow));
             pass.set_bind_group(0, atlas, &[]);
             pass.set_vertex_buffer(0, v.slice(..));
             pass.set_index_buffer(i.slice(..), wgpu::IndexFormat::Uint32);
-            pass.draw_indexed(0..*n, 0, 0..1);
+            for which in [Which::ShadowReset, Which::ShadowMask, Which::Shadow] {
+                pass.set_pipeline(scene_p(which));
+                pass.draw_indexed(0..*n, 0, 0..1);
+            }
             pass.set_pipeline(geometry);
         }
         if let (Some(atlas), Some((v, i, n))) = (&gpu.sprite_atlas, &gpu.sprites)
