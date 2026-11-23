@@ -1809,6 +1809,127 @@ pub fn build(
 
 #[cfg(test)]
 mod tests {
+    /// The floor search as it was, a step at a time through
+    /// `World::solid`: what the faster one must find.
+    fn floor_under_stepwise(
+        sim: &Simulation,
+        unseen: &dyn Fn([i32; 3]) -> bool,
+        x: f32,
+        top: f32,
+        z: f32,
+        ground: bool,
+    ) -> Option<f32> {
+        const STEP: i32 = l3d_sim::SUB / 32;
+        let sub = |v: f32| (v * l3d_sim::SUB as f32).floor() as i32;
+        let (sx, sz) = (sub(x), sub(z));
+        let ground_y = crate::scene_build::GROUND_Y;
+        let lowest = sub((top - SHADOW_REACH).max(0.0));
+        let solid = |y: i32| {
+            sim.world.solid([sx, y, sz]) && !unseen([sx, y, sz].map(|v| v.div_euclid(l3d_sim::SUB)))
+        };
+        let mut y = sub(top) - 1;
+        if solid(y) {
+            return None;
+        }
+        while y >= lowest {
+            if solid(y) {
+                let (mut lo, mut hi) = (y, y + STEP);
+                while hi - lo > 1 {
+                    let mid = (lo + hi) / 2;
+                    if solid(mid) {
+                        lo = mid;
+                    } else {
+                        hi = mid;
+                    }
+                }
+                return Some(crate::units(hi));
+            }
+            if ground && crate::units(y) < ground_y {
+                return Some(ground_y);
+            }
+            y -= STEP;
+        }
+        None
+    }
+
+    /// The faster floor search finds the same floors as the stepwise one,
+    /// on every level with a recorded solution, as its terrain is dug and
+    /// built on: under each lemming's shadow and across the level, with
+    /// and without the ground plane and with some cells not drawn.
+    #[test]
+    fn floor_search_matches_stepwise() {
+        use l3d_formats::gamedata::{DATA_ENV, GameData};
+        let dir = std::env::var_os(DATA_ENV)
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../gamedata")
+            });
+        if !dir.is_dir() {
+            eprintln!("game data not found; skipping");
+            return;
+        }
+        let mut data = GameData::open(&dir).expect("open game data");
+        let hidden = |c: [i32; 3]| (c[0] * 7 + c[1] * 3 + c[2] * 5) % 11 == 0;
+        let none = |_: [i32; 3]| false;
+        let mut checked = 0u64;
+        for n in 0..100 {
+            let (Ok(level), Ok(blocks)) = (data.level(n), data.blocks(n)) else {
+                continue;
+            };
+            let Some(log) = l3d_sim::demos::demo(n, &level, &blocks) else {
+                continue;
+            };
+            let mut sim = Simulation::new(&level, &blocks);
+            let mut next = 0;
+            for tick in 0..3000u64 {
+                while let Some(&(_, c)) = log.get(next).filter(|(t, _)| *t <= sim.tick) {
+                    sim.apply(c);
+                    next += 1;
+                }
+                sim.step();
+                if tick % 400 != 0 {
+                    continue;
+                }
+                let mut points: Vec<(f32, f32, f32)> = sim
+                    .lemmings
+                    .iter()
+                    .filter(|l| !l.gone)
+                    .flat_map(|l| {
+                        let p = l.pos.map(crate::units);
+                        (-3..=3).flat_map(move |i| {
+                            (-3..=3).map(move |k| {
+                                (p[0] + i as f32 * 0.1, p[1] + 0.7, p[2] + k as f32 * 0.1)
+                            })
+                        })
+                    })
+                    .collect();
+                for i in 0..32 {
+                    for k in 0..32 {
+                        let (x, z) = (i as f32 + 0.13, k as f32 + 0.37);
+                        for top in [2.0, 6.5, 12.25, 17.0] {
+                            points.push((x, top, z));
+                        }
+                    }
+                }
+                for &(x, top, z) in &points {
+                    for ground in [false, true] {
+                        for unseen in [&none as &dyn Fn([i32; 3]) -> bool, &hidden] {
+                            assert_eq!(
+                                floor_under(&sim, unseen, x, top, z, ground),
+                                floor_under_stepwise(&sim, unseen, x, top, z, ground),
+                                "level {n}, tick {}, ({x}, {top}, {z}), ground {ground}",
+                                sim.tick
+                            );
+                            checked += 1;
+                        }
+                    }
+                }
+            }
+        }
+        assert!(checked > 0);
+        eprintln!("{checked} floors compared");
+    }
+
     use super::*;
     use std::f32::consts::{FRAC_PI_2, PI};
 
@@ -1903,18 +2024,54 @@ fn floor_under(
 ) -> Option<f32> {
     // Steps of 1/32 unit (8 sub-units).
     const STEP: i32 = l3d_sim::SUB / 32;
-    let sub = |v: f32| (v * l3d_sim::SUB as f32).floor() as i32;
+    const SUB: i32 = l3d_sim::SUB;
+    let sub = |v: f32| (v * SUB as f32).floor() as i32;
     let (sx, sz) = (sub(x), sub(z));
+    let (cx, cz) = (sx.div_euclid(SUB), sz.div_euclid(SUB));
     let ground_y = crate::scene_build::GROUND_Y;
     let lowest = sub((top - SHADOW_REACH).max(0.0));
+    // The builders' bricks standing in this column, found once rather
+    // than at every step (`World::solid` goes through them all).
+    let column: Vec<&l3d_sim::Brick> = sim
+        .world
+        .bricks
+        .iter()
+        .filter(|b| b.min[0] <= sx && sx < b.max[0] && b.min[2] <= sz && sz < b.max[2])
+        .collect();
     let solid = |y: i32| {
-        sim.world.solid([sx, y, sz]) && !unseen([sx, y, sz].map(|v| v.div_euclid(l3d_sim::SUB)))
+        (column.iter().any(|b| b.min[1] <= y && y < b.max[1])
+            || sim.world.terrain_solid([sx, y, sz]))
+            && !unseen([cx, y.div_euclid(SUB), cz])
+    };
+    // A cell holding nothing in this column: no block (or one not drawn)
+    // and no brick.
+    let empty = |cy: i32| {
+        unseen([cx, cy, cz])
+            || (sim.world.block([cx, cy, cz]).is_none()
+                && !column
+                    .iter()
+                    .any(|b| b.min[1] < (cy + 1) * SUB && b.max[1] > cy * SUB))
     };
     let mut y = sub(top) - 1;
     if solid(y) {
         return None;
     }
+    // Down the same steps as one by one, but past an empty cell's at once
+    // (what they would find: open space, or the ground plane below
+    // `GROUND_Y`), so that the floor found is the same.
     while y >= lowest {
+        let cy = y.div_euclid(SUB);
+        if empty(cy) {
+            // The steps in this cell, down to the last at or above both
+            // its bottom and the lowest looked at.
+            let bottom = (cy * SUB).max(lowest);
+            let last = y - (y - bottom) / STEP * STEP;
+            if ground && crate::units(last) < ground_y {
+                return Some(ground_y);
+            }
+            y = last - STEP;
+            continue;
+        }
         if solid(y) {
             // The surface is between here and the open step above: halve
             // the gap down to a sub-unit.
