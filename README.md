@@ -1,7 +1,8 @@
 # openlem3d
 
 An open-source, clean-room reimplementation of the 1995 DOS game
-*Lemmings 3D*, written in Rust with Bevy. It renders at high resolution
+*Lemmings 3D*, written in Rust on a small engine of its own (winit for the
+window and input, wgpu for drawing). It renders at high resolution
 and plays with a mouse, a keyboard or a touch screen.
 
 openlem3d contains **no game data**. You need your own copy of the
@@ -59,7 +60,7 @@ extracting.
    the numbering).
 
    For testing without touching the keyboard: `--size WxH`, `--camera 1-4`,
-   `--assign TICK:LEMMING:SKILL[:cw|acw]`, `--press SECONDS:KEY[:HOLD]` (Bevy key
+   `--assign TICK:LEMMING:SKILL[:cw|acw]`, `--press SECONDS:KEY[:HOLD]` (key
    names such as `Escape`, `F12`, `KeyP`, or `Click`), and
    `--screenshot FILE --wait SECONDS`, which saves the window and quits.
    `--solve` plays the level's stored solution (Practice levels and Fun 1)
@@ -116,7 +117,8 @@ once. In detail:
 |---|---|
 | `crates/l3d-formats` | Parsers for the CD image and every game file format |
 | `crates/l3d-sim` | Deterministic game simulation, with no engine dependency |
-| `crates/openlem3d` | The game (Bevy) |
+| `crates/l3d-engine` | The engine the game runs on: window and input (winit), clocks, sound and the frame loop |
+| `crates/openlem3d` | The game, drawn with wgpu |
 | `crates/l3d-tool` | Command-line inspector for the game data |
 | `docs/GROUNDRULES.md` | The project's clean-room rules |
 | `docs/spec/` | Our own description of the formats and behaviour |
