@@ -58,6 +58,9 @@ pub struct SceneData {
     pub storm: bool,
     /// The sea has waves (ours; the scene shader's `SEA`).
     pub waves: bool,
+    /// The area around the level whose waves are worked out ahead each
+    /// frame (`WaveField`): its corner's x and z and its size, in units.
+    pub wave_area: Option<[f32; 3]>,
     /// Snow falls gently over the level (ours, Enhanced and Ultra modes).
     pub snow: bool,
     /// The lemmings leave marks in the snow and on the ice (ours, Ultra
@@ -225,7 +228,7 @@ enum Field {
 
 /// The scene's colour format while glowing: room above white.
 const HDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
-const UNIFORM_SIZE: u64 = 272 + SOLID_WORDS as u64 * 4;
+const UNIFORM_SIZE: u64 = 288 + SOLID_WORDS as u64 * 4;
 /// Words of [`SceneData::solid`]: a bit per cell of the 32 × 16 × 32 grid.
 pub const SOLID_WORDS: usize = 16 * 32;
 /// Snowflakes (`scene.wgsl`'s `SNOW_FLAKES`).
@@ -291,6 +294,9 @@ pub struct SceneGpu {
         wgpu::TextureView,
         wgpu::BindGroup,
     )>,
+    /// The waves worked out ahead for the area around the level, each
+    /// frame (`WaveField`).
+    wave_field: Option<wgpu::TextureView>,
     /// A one-texel picture bound in place of a picture there is not: as a
     /// bind group in the second place, and as a view.
     blank: wgpu::BindGroup,
@@ -418,7 +424,17 @@ enum Which {
     Sand,
     /// Snowflakes falling gently.
     Snow,
+    /// The waves worked out ahead into [`WAVE_FIELD_FORMAT`].
+    WaveField,
 }
+
+/// The waves' heights and slopes for the area around the level are worked
+/// out once a frame into a texture of this many texels across, which the
+/// sea's pixels and vertices near the camera read (`scene.wgsl`'s
+/// `waves_at`): on a weak GPU, working them out for every pixel was most
+/// of the frame (a Mali-G31: 125 ms at 720p).
+const WAVE_FIELD: u32 = 256;
+const WAVE_FIELD_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 
 /// The scene drawn in [`HDR_FORMAT`], and the bloom chain's levels, each
 /// half the size of the one before.
@@ -558,6 +574,17 @@ impl SceneGpu {
                     },
                     count: None,
                 },
+                // The waves worked out ahead (`WaveField`).
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
             ],
         });
         let blank = device
@@ -597,6 +624,7 @@ impl SceneGpu {
         });
         SceneGpu {
             reflection: None,
+            wave_field: None,
             blank,
             blank_view,
             extras_layout,
@@ -806,10 +834,12 @@ impl SceneGpu {
                     compilation_options: Default::default(),
                 }),
                 primitive: Default::default(),
+                // At the far plane (depth 0, the clear), so drawn only where
+                // nothing is in front.
                 depth_stencil: Some(wgpu::DepthStencilState {
                     format: self.depth_format,
                     depth_write_enabled: Some(false),
-                    depth_compare: Some(wgpu::CompareFunction::Always),
+                    depth_compare: Some(wgpu::CompareFunction::GreaterEqual),
                     stencil: Default::default(),
                     bias: Default::default(),
                 }),
@@ -906,6 +936,27 @@ impl SceneGpu {
             Which::DustSheets => dust_sheets(),
             Which::Sand => sand(),
             Which::Snow => snow(),
+            Which::WaveField => device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("scene wave field"),
+                layout: Some(&pl_scene),
+                vertex: wgpu::VertexState {
+                    module: &self.shader,
+                    entry_point: Some("vs_sky"),
+                    buffers: &[],
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &self.shader,
+                    entry_point: Some("fs_wave_field"),
+                    targets: &[Some(WAVE_FIELD_FORMAT.into())],
+                    compilation_options: Default::default(),
+                }),
+                primitive: Default::default(),
+                depth_stencil: None,
+                multisample: Default::default(),
+                multiview_mask: None,
+                cache: None,
+            }),
             Which::Shadow => shadow(),
             Which::Geometry => geometry("scene geometry", wgpu::Face::Back),
             // Mirrored, the faces turn over.
@@ -1297,6 +1348,13 @@ fn prepare(
         marks.unwrap_or(0.0),
         if windows { 1.0 } else { 0.0 },
     ]);
+    // The waves worked out ahead for the area around the level
+    // (`WaveField`): its corner, the units a texel spans and its size in
+    // texels; none, zero.
+    uniforms.extend(match content.data.as_ref().and_then(|d| d.wave_area) {
+        Some([x, z, extent]) => [x, z, extent / WAVE_FIELD as f32, WAVE_FIELD as f32],
+        None => [0.0; 4],
+    });
     // From clip space back to the world, for rays through the screen.
     uniforms.extend(camera.view_proj.inverse().to_cols_array());
     // The cells the sand grains are kept out of the lee of.
@@ -1624,6 +1682,36 @@ fn draw(
     if let Some(w) = shown {
         gpu.pipelines(&device, format, &[w], features);
     }
+    // The waves worked out ahead, where the sea has them.
+    let wave_area = input
+        .content
+        .data
+        .as_ref()
+        .and_then(|d| d.wave_area)
+        .filter(|_| features.sea);
+    if wave_area.is_some() {
+        gpu.pipelines(&device, WAVE_FIELD_FORMAT, &[Which::WaveField], features);
+        if gpu.wave_field.is_none() {
+            let view = device
+                .create_texture(&wgpu::TextureDescriptor {
+                    label: Some("scene wave field"),
+                    size: wgpu::Extent3d {
+                        width: WAVE_FIELD,
+                        height: WAVE_FIELD,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: WAVE_FIELD_FORMAT,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                        | wgpu::TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
+                })
+                .create_view(&Default::default());
+            gpu.wave_field = Some(view);
+        }
+    }
     // Only bare skies are sampled smoothly: stars, planets and clouds gain;
     // scenery along a horizon (trees, castles, hills) only blurs.
     let bare = input.content.data.as_ref().is_some_and(|d| d.sky_bare);
@@ -1633,9 +1721,10 @@ fn draw(
         .filter(|_| gpu.layers.iter().any(|l| l.screen))
         .map(|view| gpu.bind_view(&device, view, &gpu.linear));
     let gpu = &*gpu;
+    let waves = wave_area.and(gpu.wave_field.as_ref());
     // The scene's second bind group: the reflection when it is drawn, the
     // level's field (signals or marks), either blank.
-    let extras = |reflection: Option<&wgpu::TextureView>| {
+    let extras = |reflection: Option<&wgpu::TextureView>, waves: Option<&wgpu::TextureView>| {
         let field = gpu.field.as_ref().map(|(_, _, _, view)| view);
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("scene extras"),
@@ -1654,6 +1743,10 @@ fn draw(
                 wgpu::BindGroupEntry {
                     binding: 3,
                     resource: wgpu::BindingResource::TextureView(field.unwrap_or(&gpu.blank_view)),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::TextureView(waves.unwrap_or(&gpu.blank_view)),
                 },
             ],
         })
@@ -1734,15 +1827,6 @@ fn draw(
         let instance = if mirrored { 1..2 } else { 0..1 };
         let geometry = geometry_for(mirrored, LayerKind::Objects);
         pass.set_bind_group(1, second, &[]);
-        if let Some(sky) = &gpu.sky {
-            pass.set_pipeline(scene_p(Which::Sky));
-            let sky = match &sky.filtered {
-                Some(f) if camera.filtered && bare => f,
-                _ => &sky.plain,
-            };
-            pass.set_bind_group(0, sky, &[]);
-            pass.draw(0..3, instance.clone());
-        }
         for layer in &gpu.layers {
             pass.set_pipeline(geometry_for(mirrored, layer.kind));
             let filtered = layer
@@ -1778,7 +1862,19 @@ fn draw(
             pass.set_bind_group(0, atlas, &[]);
             pass.set_vertex_buffer(0, v.slice(..));
             pass.set_index_buffer(i.slice(..), wgpu::IndexFormat::Uint32);
-            pass.draw_indexed(0..*n, 0, instance);
+            pass.draw_indexed(0..*n, 0, instance.clone());
+        }
+        // The sky last, where nothing else is (its depth test passes only
+        // where nothing was drawn): drawn first, it was drawn under the sea
+        // and the land too, each of their pixels twice.
+        if let Some(sky) = &gpu.sky {
+            pass.set_pipeline(scene_p(Which::Sky));
+            let sky = match &sky.filtered {
+                Some(f) if camera.filtered && bare => f,
+                _ => &sky.plain,
+            };
+            pass.set_bind_group(0, sky, &[]);
+            pass.draw(0..3, instance.clone());
         }
         // Snowflakes, behind what is nearer.
         if snow && !mirrored {
@@ -1806,6 +1902,26 @@ fn draw(
             stencil_ops: None,
         })
     };
+    // This frame's waves, ahead of everything reading them.
+    if let Some(view) = waves {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("scene wave field"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            ..Default::default()
+        });
+        pass.set_pipeline(pipeline(WAVE_FIELD_FORMAT, Which::WaveField));
+        pass.set_bind_group(0, &gpu.blank, &[]);
+        pass.set_bind_group(1, &extras(None, None), &[]);
+        pass.draw(0..3, 0..1);
+    }
     if let Some((view, _)) = &reflection {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("scene reflection"),
@@ -1816,7 +1932,7 @@ fn draw(
         if low.is_none() && hdr.is_none() {
             set_viewport(&mut pass, viewport);
         }
-        scene(&mut pass, true, &extras(None));
+        scene(&mut pass, true, &extras(None, waves));
     }
     let color = match (&low, &hdr) {
         (Some((_, (view, _))), _) => offscreen(view),
@@ -1835,7 +1951,7 @@ fn draw(
     scene(
         &mut pass,
         false,
-        &extras(reflection.as_ref().map(|(view, _)| view)),
+        &extras(reflection.as_ref().map(|(view, _)| view), waves),
     );
     // Drawn straight onto the target: the last pass there.
     if low.is_none()

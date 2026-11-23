@@ -1932,6 +1932,9 @@ pub fn build(data: &mut GameData, n: u32, show: Show) -> Result<BuiltLevel, l3d_
             )
         });
         scene.waves = waves.is_some();
+        // The sea's finely divided area, which the waves lift.
+        let extent = SIZE_X.max(SIZE_Z) as f32 + 2.0 * WAVE_NEAR;
+        scene.wave_area = waves.is_some().then_some([-WAVE_NEAR, -WAVE_NEAR, extent]);
         if waves.is_some() && show.mirror {
             scene.mirror = Some(SEA_Y);
         }

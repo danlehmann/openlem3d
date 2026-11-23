@@ -44,6 +44,10 @@ struct Uniforms {
     // (`crate::marks`), 0 without. w: 1 when windows look out on space
     // (ours, `space`), else 0.
     snow: vec4<f32>,
+    // The waves worked out ahead (`wave_tex`): xy the area's corner (world
+    // x and z), z the units a texel spans, w the texels across; w 0 when
+    // there are none.
+    waves: vec4<f32>,
     // From clip space back to the world.
     inv_view_proj: mat4x4<f32>,
     // On a level with a sandstorm, the grid cells holding a visible block:
@@ -115,6 +119,9 @@ fn sees_level(p: vec3<f32>, d: vec3<f32>) -> bool {
 // While drawing the scene, the circuit board's signal field
 // (`crate::signals`), or a blank texel.
 @group(1) @binding(3) var field_tex: texture_2d<f32>;
+// While drawing the scene, the waves worked out ahead for the area around
+// the level (`fs_wave_field`): height and slopes, as `waves` gives them.
+@group(1) @binding(4) var wave_tex: texture_2d<f32>;
 
 struct VIn {
     @location(0) pos: vec3<f32>,
@@ -234,7 +241,7 @@ fn vs(v: VIn, @builtin(instance_index) instance: u32) -> VOut {
     if (v.anim.y < 0.0) {
         var p = v.pos;
         if (v.light.y > 0.0) {
-            p.y += v.light.y * WAVE_HEIGHT * waves(p.xz, t, 0.0).x;
+            p.y += v.light.y * WAVE_HEIGHT * waves_at(p.xz, t, 0.0).x;
         }
         o.clip = u.view_proj * vec4(mirror_of(p, mirrored), 1.0);
         o.light = vec3(0.0);
@@ -331,10 +338,15 @@ fn fs(v: VOut) -> @location(0) vec4<f32> {
     // the darkest grey the original shades to (palette index 254; other
     // ramps end higher, unmodelled). Glowing texels (alpha below 1) are
     // lifted above white.
-    let srgb = pow(c.rgb, vec3(1.0 / 2.2));
-    let top = max(srgb.r, max(srgb.g, srgb.b));
-    let lowered = max(top - v.params.x, min(top, SHADE_FLOOR));
-    let shaded = pow(srgb * (lowered / max(top, 1e-5)), vec3(2.2));
+    // Unshaded (the sea, the land, the sprites), the colour is as it is,
+    // which spares those pixels six slow powers.
+    var shaded = c.rgb;
+    if (v.params.x > 0.0) {
+        let srgb = pow(c.rgb, vec3(1.0 / 2.2));
+        let top = max(srgb.r, max(srgb.g, srgb.b));
+        let lowered = max(top - v.params.x, min(top, SHADE_FLOOR));
+        shaded = pow(srgb * (lowered / max(top, 1e-5)), vec3(2.2));
+    }
     // A window's glass (its alpha marked, `scene_build::WINDOW_ALPHA`)
     // looks out on space.
     let window = WINDOWS && u.snow.w > 0.5 && v.params.y < -1.5 && c.a > 0.15 && c.a < 0.4;
@@ -342,6 +354,13 @@ fn fs(v: VOut) -> @location(0) vec4<f32> {
     // stays as painted, without glow.
     let glass = v.params.y < 0.5 && c.a > 0.15 && c.a < 0.4;
     let glow = select(glow_of(c.a), 0.0, glass);
+    // A tiled surface showing none of the level's effects (the sea without
+    // waves, the land of a level without snow, sand or polish): lit as at
+    // the end, without the rest, which made such a flat sea cost a weak GPU
+    // as much as the rest of the scene.
+    if (v.tile.x > 0.0 && !SEA && !GLOSS && !SNOW && !STORM) {
+        return vec4((shaded + c.rgb * v.light) * (1.0 + glow * u.post.x), 1.0);
+    }
     // Taken here, where every fragment still runs: how much of the screen
     // one pixel spans.
     let footprint = fwidth(v.uv);
@@ -376,7 +395,7 @@ fn fs(v: VOut) -> @location(0) vec4<f32> {
     if (SNOW && v.cover.x > 0.5) {
         lit = snow_lit(lit, facing, ground, v.cover.y);
     } else if (SNOW && u.snow.z > 0.0 && v.mirror.x < 0.5 && abs(facing.y) > 0.7) {
-        lit = marked(lit, v.world, srgb);
+        lit = marked(lit, v.world, pow(c.rgb, vec3(1.0 / 2.2)));
     }
     if (GLOSS && u.gloss.x > 0.5 && v.mirror.x < 0.5) {
         lit = glossy(lit, v, facing);
@@ -680,8 +699,8 @@ const WAVE_SHADE: f32 = 8.0;
 /// Ripples summed.
 const RIPPLE_COUNT: i32 = 8;
 
-/// The ripples: direction in radians (x), wavelength in units (y) and
-/// relative height (z).
+/// The ripples, longest first: direction in radians (x), wavelength in
+/// units (y) and relative height (z).
 const RIPPLES = array<vec3<f32>, 8>(
     vec3(0.0, 13.0, 0.30),
     vec3(0.65, 9.1, 0.25),
@@ -734,18 +753,47 @@ fn waves(p: vec2<f32>, t: f32, blur: f32) -> vec3<f32> {
     var h = vec3(0.0);
     for (var i = 0; i < RIPPLE_COUNT; i++) {
         let r = RIPPLES[i];
+        // Faded out where a pixel spans too much of it: so are the shorter
+        // ones after it, and none need working out.
+        let fade = 1.0 - smoothstep(r.y / 10.0, r.y / 3.0, blur);
+        if (fade <= 0.0) {
+            break;
+        }
         let k = 6.2832 / r.y;
         let d = vec2(cos(r.x), sin(r.x));
         // Deep-water waves: their speed grows with the root of the length.
         let w = sqrt(9.8 * k) * 0.55;
         // Each ripple's own patches, some 20 units across, drifting slowly.
         let swell = value_noise(p * 0.05 + vec2(f32(i) * 17.3, f32(i) * 5.1) + t * 0.02);
-        let a = r.z * (0.25 + 1.5 * swell * swell)
-            * (1.0 - smoothstep(r.y / 10.0, r.y / 3.0, blur));
+        let a = r.z * (0.25 + 1.5 * swell * swell) * fade;
         let phase = k * dot(d, q) - w * t + f32(i) * 1.7;
         h += a * vec3(sin(phase), k * d.x * cos(phase), k * d.y * cos(phase));
     }
     return h;
+}
+
+/// A pixel spanning at most this many units shows every ripple in full
+/// (the shortest's wavelength over ten, `waves`' fade).
+const WAVE_FIELD_BLUR: f32 = 0.19;
+
+/// `waves` at `p`: read from those worked out ahead where it can be (in
+/// their area, every ripple in full), else worked out here.
+fn waves_at(p: vec2<f32>, t: f32, blur: f32) -> vec3<f32> {
+    if (u.waves.w > 0.0 && blur <= WAVE_FIELD_BLUR) {
+        let uv = (p - u.waves.xy) / (u.waves.z * u.waves.w);
+        if (all(uv >= vec2(0.0)) && all(uv <= vec2(1.0))) {
+            return textureSampleLevel(wave_tex, second_samp, uv, 0.0).xyz;
+        }
+    }
+    return waves(p, t, blur);
+}
+
+// The waves worked out ahead: a full-screen triangle over the wave
+// texture, each texel the waves at its middle (`Uniforms::waves`).
+@fragment
+fn fs_wave_field(v: SkyOut) -> @location(0) vec4<f32> {
+    let p = u.waves.xy + v.clip.xy * u.waves.z;
+    return vec4(waves(p, u.sky.w, 0.0), 1.0);
 }
 
 /// How much of the mirrored level the sea shows looking straight down, and
@@ -793,7 +841,7 @@ fn sea(v: VOut, shaded: vec3<f32>) -> vec3<f32> {
     let p = v.wave.xy;
     let t = u.sky.w;
     let blur = length(fwidth(p));
-    let w = waves(p, t, blur) * v.wave.z;
+    let w = waves_at(p, t, blur) * v.wave.z;
     let slope = w.yz * WAVE_HEIGHT * WAVE_SHADE;
     let n = normalize(vec3(-slope.x, 1.0, -slope.y));
     let l = normalize(vec3(-0.5, 1.0, -0.35));
@@ -808,14 +856,15 @@ fn sea(v: VOut, shaded: vec3<f32>) -> vec3<f32> {
         let mirrored = textureSampleLevel(second_tex, second_samp, at, 0.0);
         c = mix(c, mirrored.rgb, amount * clamp(mirrored.a, 0.0, 1.0));
     }
-    if (water) {
-        // Surf: froth at the shore, and a line of it washing in and out,
-        // both frayed and torn by drifting noise; faded out where a pixel
-        // spans much of a unit. The froth is lit as a bumpy surface from
-        // the waves' light, thin froth lets the sea through, and the water
-        // just around it is darkened, as if it stood a little proud.
-        let shore = clamp(v.wave.w - 1.0, 0.0, 1.0);
-        let fade = 1.0 - smoothstep(0.3, 0.8, blur);
+    // Surf: froth at the shore, and a line of it washing in and out, both
+    // frayed and torn by drifting noise; faded out where a pixel spans much
+    // of a unit. The froth is lit as a bumpy surface from the waves' light,
+    // thin froth lets the sea through, and the water just around it is
+    // darkened, as if it stood a little proud. Only worked out near the
+    // scenery, where there is surf, and where it isn't faded out.
+    let shore = clamp(v.wave.w - 1.0, 0.0, 1.0);
+    let fade = 1.0 - smoothstep(0.3, 0.8, blur);
+    if (water && shore > 0.0 && fade > 0.0) {
         let here = surf(p, t, shore);
         // The same a little towards the light, for the froth's slope.
         let towards = surf(p + l.xz * 0.06, t, shore);
