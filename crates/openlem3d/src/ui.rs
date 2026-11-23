@@ -1111,7 +1111,7 @@ impl UiGpu {
         pass.set_vertex_buffer(0, quads.slice(..));
         for (image, scissor, range) in &self.runs {
             let group = match image {
-                Some(id) => &self.images[&id].bind_group,
+                Some(id) => &self.images[id].bind_group,
                 None => &self.white,
             };
             pass.set_bind_group(0, group, &[]);

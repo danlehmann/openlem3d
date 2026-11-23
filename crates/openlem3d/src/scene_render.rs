@@ -191,6 +191,10 @@ pub struct SceneCamera {
     pub shelter: f32,
 }
 
+/// Draws over a pass's drawing (the UI): given the pass, and whether it has
+/// a depth buffer.
+pub type Overlay<'a> = dyn Fn(&mut wgpu::RenderPass<'_>, bool) + 'a;
+
 /// What a frame draws of the scene.
 pub struct SceneInput<'a> {
     pub content: &'a SceneContent,
@@ -220,7 +224,7 @@ pub struct SceneInput<'a> {
     /// it.
     /// Told whether the pass has the scene's depth buffer
     /// ([`SceneGpu::depth_format`]).
-    pub overlay: Option<&'a dyn Fn(&mut wgpu::RenderPass<'_>, bool)>,
+    pub overlay: Option<&'a Overlay<'a>>,
 }
 
 /// Which field the level's field texture holds.
@@ -1244,6 +1248,7 @@ impl SceneGpu {
 
 /// Uploads the uniforms, this frame's sprites and, when it changed, the
 /// content.
+#[allow(clippy::too_many_arguments)] // the frame's inputs, each its own
 fn prepare(
     gpu: &mut SceneGpu,
     device: &wgpu::Device,
