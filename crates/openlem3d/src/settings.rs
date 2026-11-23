@@ -200,8 +200,8 @@ pub struct Graphics {
     pub filtering: bool,
     /// The sea's waves and surf.
     pub waves: bool,
-    /// The level mirrored in the sea, and polished floors shining (only
-    /// with `waves`).
+    /// The level mirrored in the sea (water only with `waves`), in ice and
+    /// in polished floors.
     pub reflections: bool,
     /// Soft shadows under the lemmings.
     pub shadows: bool,
@@ -326,9 +326,9 @@ impl Settings {
             sky: true,
             bottom_sides: self.enhanced(),
             waves: self.effects().is_some_and(|g| g.waves),
-            // The mirror is made with the waves (and polished floors shine
-            // with it).
-            mirror: self.effects().is_some_and(|g| g.reflections && g.waves),
+            // Water mirrors the level only with its waves; ice and polished
+            // floors shine without (`scene_build`).
+            mirror: self.effects().is_some_and(|g| g.reflections),
             storm: self.effects().is_some_and(|g| g.sandstorm),
             snow: self.effects().is_some_and(|g| g.snow),
             windows: self.effects().is_some_and(|g| g.windows),
