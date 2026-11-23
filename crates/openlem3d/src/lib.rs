@@ -668,6 +668,10 @@ impl l3d_engine::Game for World {
         touch::watch_four_finger_tap(self);
         key_buttons::press(self);
         self.change_state();
+        // The new screen's resolution at once, measured again if it changed.
+        if pixels::apply_resolution(self) {
+            screen::update(self);
+        }
         // A step is one simulation tick, so fast-forward steps more often
         // and every sprite frame is still drawn.
         let pace = self.game.pace(self.time_control());

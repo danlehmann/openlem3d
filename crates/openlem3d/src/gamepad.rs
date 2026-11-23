@@ -32,9 +32,11 @@ const FRAME_Z: i32 = 1000;
 /// How long both bumpers must be held to nuke (seconds).
 const NUKE_HOLD: f32 = 1.0;
 /// Held, the D-pad (or a stick pushed) steps again after this long, then
-/// this often (seconds): quickly down a list.
-const REPEAT_AFTER: f32 = 0.35;
-const REPEAT_EVERY: f32 = 0.07;
+/// this often (seconds): quickly down a list or through a screen's
+/// settings. Android's own key repeat (`ViewConfiguration`'s key repeat
+/// timeout and delay), so that holding feels as elsewhere on a TV.
+const REPEAT_AFTER: f32 = 0.4;
+const REPEAT_EVERY: f32 = 0.05;
 
 /// What the gamepad pressed for the game, let go again.
 #[derive(Default)]
@@ -51,6 +53,8 @@ pub struct GamepadState {
     clicked: bool,
     /// The left stick is back near the middle, so a push steps again.
     stick_ready: bool,
+    /// The way held on a screen of buttons, and when it steps again.
+    step_repeat: Option<(Vec2, f32)>,
     /// The gamepad has been used in this level: it keeps a lemming
     /// highlighted.
     playing: Option<u32>,
@@ -288,6 +292,7 @@ fn list(w: &mut World, pad: &l3d_engine::input::Pad) {
 /// frame, screen down positive; zero if neither.
 fn stepped(w: &mut World, pad: &l3d_engine::input::Pad) -> Vec2 {
     let mut way = Vec2::ZERO;
+    let mut held = Vec2::ZERO;
     for (button, dir) in [
         (PadButton::Up, Vec2::NEG_Y),
         (PadButton::Down, Vec2::Y),
@@ -297,7 +302,11 @@ fn stepped(w: &mut World, pad: &l3d_engine::input::Pad) -> Vec2 {
         if pad.buttons.just_pressed(button) {
             way += dir;
         }
+        if pad.buttons.pressed(button) {
+            held += dir;
+        }
     }
+    let now = w.e.time.real.elapsed_secs();
     let g = &mut w.gamepad;
     let stick = Vec2::new(pad.left.x, -pad.left.y);
     if stick.length() < STICK_REST {
@@ -305,6 +314,20 @@ fn stepped(w: &mut World, pad: &l3d_engine::input::Pad) -> Vec2 {
     } else if g.stick_ready && stick.length() > STICK_STEP {
         g.stick_ready = false;
         way += stick;
+    }
+    if held == Vec2::ZERO && stick.length() > STICK_STEP {
+        held = stick;
+    }
+    // Held, it steps again: after a while, then often.
+    if held == Vec2::ZERO {
+        g.step_repeat = None;
+    } else if way != Vec2::ZERO {
+        g.step_repeat = Some((held, now + REPEAT_AFTER));
+    } else if let Some((_, next)) = g.step_repeat
+        && now >= next
+    {
+        g.step_repeat = Some((held, now + REPEAT_EVERY));
+        way = held;
     }
     way
 }

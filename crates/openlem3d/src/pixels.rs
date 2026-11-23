@@ -12,6 +12,30 @@ use crate::settings::Glow;
 const ORIGINAL: Vec2 = Vec2::new(320.0, 200.0);
 const ORIGINAL_ASPECT: f32 = 4.0 / 3.0;
 
+/// Enhanced's resolution, in levels (the menus are cheap, and stay sharp):
+/// fewer rows drawn, the system stretching them over the window
+/// (`--max-height` overrides it). Whether it changed: done as the screen
+/// changes, before the UI is laid out, so that a frame isn't laid out for
+/// one size and drawn at the other (owner: the options flashed up enlarged
+/// when opened in a level).
+pub(crate) fn apply_resolution(w: &mut World) -> bool {
+    let in_level = w.state == crate::menu::AppState::Playing;
+    let fraction = w
+        .settings
+        .effects()
+        .filter(|_| in_level)
+        .map_or(1.0, |g| crate::settings::resolution(g.resolution));
+    let window = &mut w.e.window.resolution;
+    let rows = w.opts.max_height.or_else(|| {
+        (fraction < 1.0).then(|| (window.actual_height() as f32 * fraction).round() as u32)
+    });
+    if window.max_height() == rows {
+        return false;
+    }
+    window.set_max_height(rows);
+    true
+}
+
 pub(crate) fn update(w: &mut World) {
     let settings = &w.settings;
     let camera = &mut w.camera;
@@ -26,20 +50,9 @@ pub(crate) fn update(w: &mut World) {
     // Screens as cathode-ray tubes: always in Enhanced (it costs nothing).
     camera.crt = effects.is_some();
     camera.ours = settings.enhanced();
-    // Enhanced's resolution, in levels (the menus are cheap, and stay
-    // sharp): fewer rows drawn, the system stretching them over the window
-    // (`--max-height` overrides it).
-    let in_level = w.state == crate::menu::AppState::Playing;
-    let fraction = effects
-        .filter(|_| in_level)
-        .map_or(1.0, |g| crate::settings::resolution(g.resolution));
-    let window = &mut w.e.window.resolution;
-    let rows = w.opts.max_height.or_else(|| {
-        (fraction < 1.0).then(|| (window.actual_height() as f32 * fraction).round() as u32)
-    });
-    if window.max_height() != rows {
-        window.set_max_height(rows);
-    }
+    apply_resolution(w);
+    let settings = &w.settings;
+    let camera = &mut w.camera;
     let screen = (w.screen.size * w.e.window.scale_factor()).round();
     // Enhanced (or no screen yet): the window's own size (zero).
     camera.pixels = if screen.min_element() < 1.0 || settings.enhanced() {
