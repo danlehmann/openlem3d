@@ -412,6 +412,20 @@ const REPLAY_GRACE: f32 = 1.0;
 /// In a level.
 fn level(w: &mut World, pad: &l3d_engine::input::Pad) {
     let b = &pad.buttons;
+    // A demo (shown while idle) can't be taken over: any button ends it, as
+    // any key does (`briefing::end_demo`).
+    if let Some(back_to) = w.game.replay.as_ref().and_then(|r| r.demo) {
+        // A trigger pulled (which would run the time) ends it too.
+        let pulled = pad.left_trigger > 0.5 || pad.right_trigger > 0.5;
+        let p = &mut w.e.input.pad;
+        (p.left_trigger, p.right_trigger) = (0.0, 0.0);
+        if b.get_just_pressed().len() > 0 || pulled {
+            w.game.replay = None;
+            w.current.loaded = None;
+            w.next_state = Some(back_to);
+        }
+        return;
+    }
     // The gamepad highlights the lemming nearest the middle, again when
     // the one highlighted is gone.
     // During a replay, stepping to a lemming takes over from it (as a click

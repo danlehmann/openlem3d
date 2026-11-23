@@ -125,13 +125,14 @@ impl Preset {
         match self {
             Preset::High => base,
             Preset::Medium => Graphics {
+                filtering: Filtering::Smooth,
                 reflections: false,
                 glow: Glow::On,
                 ..base
             },
             Preset::Low => Graphics {
                 resolution: 2,
-                filtering: false,
+                filtering: Filtering::Smooth,
                 waves: false,
                 reflections: false,
                 shadows: false,
@@ -145,6 +146,56 @@ impl Preset {
                 preset: Preset::Custom,
                 ..current
             },
+        }
+    }
+}
+
+/// How Enhanced samples textures: their texels as they are (as the
+/// original); smoothly, through mipmaps; and with that, anisotropically
+/// (16×), keeping floors seen at a slant sharp, which costs a weak GPU some.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Filtering {
+    Off,
+    Smooth,
+    Sharp,
+}
+
+impl Filtering {
+    pub fn name(self) -> &'static str {
+        match self {
+            Filtering::Off => "Off",
+            Filtering::Smooth => "Smooth",
+            Filtering::Sharp => "Sharp",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        match self {
+            Filtering::Off => Filtering::Smooth,
+            Filtering::Smooth => Filtering::Sharp,
+            Filtering::Sharp => Filtering::Off,
+        }
+    }
+
+    pub fn previous(self) -> Self {
+        self.next().next()
+    }
+
+    fn key(self) -> &'static str {
+        match self {
+            Filtering::Off => "off",
+            Filtering::Smooth => "smooth",
+            Filtering::Sharp => "sharp",
+        }
+    }
+
+    /// From its key; "on" is from when filtering was on or off (and on was
+    /// sharp).
+    fn from_key(v: &str) -> Self {
+        match v {
+            "smooth" => Filtering::Smooth,
+            "sharp" | "on" => Filtering::Sharp,
+            _ => Filtering::Off,
         }
     }
 }
@@ -196,9 +247,8 @@ pub struct Graphics {
     /// The resolution drawn at, as a step of [`RESOLUTIONS`]: 0 the
     /// screen's own, then fewer rows, stretched over it.
     pub resolution: u8,
-    /// Distant textures sampled smoothly (mipmaps, anisotropic), rather
-    /// than nearest.
-    pub filtering: bool,
+    /// How textures are sampled.
+    pub filtering: Filtering,
     /// The sea's waves and surf.
     pub waves: bool,
     /// The level mirrored in the sea, and polished floors shining (only
@@ -228,7 +278,7 @@ impl Preset {
         Graphics {
             preset: self,
             resolution: 0,
-            filtering: true,
+            filtering: Filtering::Sharp,
             waves: true,
             reflections: true,
             shadows: true,
@@ -403,7 +453,7 @@ impl Settings {
                         .filter(|&r: &u8| (r as usize) < RESOLUTIONS)
                         .unwrap_or(s.graphics.resolution)
                 }
-                "filtering" => s.graphics.filtering = flag,
+                "filtering" => s.graphics.filtering = Filtering::from_key(v),
                 "waves" => s.graphics.waves = flag,
                 "reflections" => s.graphics.reflections = flag,
                 "shadows" => s.graphics.shadows = flag,
@@ -468,7 +518,7 @@ impl Settings {
             self.mode.key(),
             self.graphics.preset.key(),
             self.graphics.resolution,
-            on(self.graphics.filtering),
+            self.graphics.filtering.key(),
             on(self.graphics.waves),
             on(self.graphics.reflections),
             on(self.graphics.shadows),

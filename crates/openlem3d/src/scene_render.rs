@@ -179,8 +179,10 @@ pub struct SceneCamera {
     /// floating point, then blurring); only when the scene is drawn at the
     /// screen's resolution. Without, glowing texels clip at white.
     pub bloom: bool,
-    /// Sample [`SceneLayer::smooth`] textures through their mipmaps.
+    /// Sample [`SceneLayer::smooth`] textures through their mipmaps, and
+    /// with `anisotropic`, anisotropically too.
     pub filtered: bool,
+    pub anisotropic: bool,
     /// Draw [`SceneLayer::screen`] layers as the glass of a cathode-ray
     /// tube (ours).
     pub crt: bool,
@@ -266,8 +268,10 @@ pub struct SceneGpu {
     sampler: wgpu::Sampler,
     /// Smooth sampling, for the bloom chain.
     linear: wgpu::Sampler,
-    /// Trilinear, anisotropic and repeating, for [`SceneLayer::smooth`].
+    /// Trilinear, anisotropic and repeating, for [`SceneLayer::smooth`];
+    /// and the same without anisotropy.
     mipmapped: wgpu::Sampler,
+    trilinear: wgpu::Sampler,
     uniforms: wgpu::Buffer,
     /// Pipelines per colour format drawn into.
     pipelines: HashMap<(wgpu::TextureFormat, Which, Features), wgpu::RenderPipeline>,
@@ -469,11 +473,23 @@ struct UploadedLayer {
 }
 
 /// An uploaded texture's bind groups: sampled nearest at full size, and,
-/// for a [`SceneLayer::smooth`] texture, through its mipmaps.
+/// for a [`SceneLayer::smooth`] texture, through its mipmaps:
+/// anisotropically, and not.
 #[derive(Clone)]
 struct Bound {
     plain: wgpu::BindGroup,
-    filtered: Option<wgpu::BindGroup>,
+    filtered: Option<(wgpu::BindGroup, wgpu::BindGroup)>,
+}
+
+impl Bound {
+    /// The bind group `camera`'s filtering samples it with.
+    fn for_camera(&self, camera: &SceneCamera) -> &wgpu::BindGroup {
+        match &self.filtered {
+            Some((sharp, _)) if camera.filtered && camera.anisotropic => sharp,
+            Some((_, smooth)) if camera.filtered => smooth,
+            _ => &self.plain,
+        }
+    }
 }
 
 impl SceneGpu {
@@ -547,6 +563,15 @@ impl SceneGpu {
             min_filter: wgpu::FilterMode::Linear,
             mipmap_filter: wgpu::MipmapFilterMode::Linear,
             anisotropy_clamp: 16,
+            ..Default::default()
+        });
+        let trilinear = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("scene trilinear"),
+            address_mode_u: wgpu::AddressMode::Repeat,
+            address_mode_v: wgpu::AddressMode::Repeat,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::MipmapFilterMode::Linear,
             ..Default::default()
         });
         let uniforms = device.create_buffer(&wgpu::BufferDescriptor {
@@ -644,6 +669,7 @@ impl SceneGpu {
             sampler,
             linear,
             mipmapped,
+            trilinear,
             uniforms,
             pipelines: HashMap::new(),
             low: None,
@@ -1240,8 +1266,10 @@ impl SceneGpu {
         });
         Bound {
             plain: group(&full_size, &self.sampler),
-            filtered: smooth
-                .then(|| group(&texture.create_view(&Default::default()), &self.mipmapped)),
+            filtered: smooth.then(|| {
+                let view = texture.create_view(&Default::default());
+                (group(&view, &self.mipmapped), group(&view, &self.trilinear))
+            }),
         }
     }
 }
@@ -1841,12 +1869,7 @@ fn draw(
         pass.set_bind_group(1, second, &[]);
         for layer in &gpu.layers {
             pass.set_pipeline(geometry_for(mirrored, layer.kind));
-            let filtered = layer
-                .bind_group
-                .filtered
-                .as_ref()
-                .filter(|_| camera.filtered);
-            let own = filtered.unwrap_or(&layer.bind_group.plain);
+            let own = layer.bind_group.for_camera(camera);
             let bind = match &screen {
                 Some(s) if layer.screen => s,
                 _ => own,
@@ -1881,9 +1904,10 @@ fn draw(
         // and the land too, each of their pixels twice.
         if let Some(sky) = &gpu.sky {
             pass.set_pipeline(scene_p(Which::Sky));
-            let sky = match &sky.filtered {
-                Some(f) if camera.filtered && bare => f,
-                _ => &sky.plain,
+            let sky = if bare {
+                sky.for_camera(camera)
+            } else {
+                &sky.plain
             };
             pass.set_bind_group(0, sky, &[]);
             pass.draw(0..3, instance.clone());

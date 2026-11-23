@@ -1233,6 +1233,11 @@ pub const TRAP_FRAME: u32 = 64;
 /// (cell `i` at column `i % ATLAS_COLUMNS`, row `i / ATLAS_COLUMNS`), then
 /// the level's `TRAPS` frames from [`TRAP_ATLAS_FIRST`] and the further
 /// pictures listed with the other `*_ATLAS_FIRST` constants.
+///
+/// What every level shares (the lemmings, the countdown digits, the crack
+/// frames) is made once (`ATLAS_BASE`; a second each time on a slow TV);
+/// each level copies it and adds its own: the trap's frames, the exit door
+/// and its texture set's tiles.
 fn lemming_atlas(
     data: &mut GameData,
     pal: &Palette,
@@ -1240,6 +1245,75 @@ fn lemming_atlas(
     door: &[u8],
     tiles: &[u8],
 ) -> Result<RgbaImage, l3d_formats::Error> {
+    let base = match ATLAS_BASE.get() {
+        Some(b) => b,
+        None => {
+            let b = atlas_base(data, pal)?;
+            ATLAS_BASE.get_or_init(|| b)
+        }
+    };
+    let w = ATLAS_COLUMNS * LEMMING_CELL;
+    let mut texels = base.to_vec();
+    // Writes a `size`-wide square of palette indices into cell `cell` at
+    // (`ox`, `oy`) within it, glowing by `glow` of each index.
+    let mut put = |cell: u32, ox: u32, oy: u32, src: &[u8], size: u32, glow: &dyn Fn(u8) -> f32| {
+        let (cx, cy) = (
+            (cell % ATLAS_COLUMNS) * LEMMING_CELL + ox,
+            (cell / ATLAS_COLUMNS) * LEMMING_CELL + oy,
+        );
+        for y in 0..size {
+            for x in 0..size {
+                let i = src[(y * size + x) as usize];
+                let [r, g, b] = pal[i as usize];
+                let at = (((cy + y) * w + cx + x) * 4) as usize;
+                texels[at..at + 4].copy_from_slice(&[r, g, b, glow::alpha(i, glow(i))]);
+            }
+        }
+    };
+    let frame = (TRAP_FRAME * TRAP_FRAME) as usize;
+    let (trap, trap_pixels) = traps.unwrap_or_default();
+    for (k, f) in trap_pixels
+        .chunks_exact(frame)
+        .take(TRAP_ATLAS_CELLS as usize)
+        .enumerate()
+    {
+        // Only the trap frames (and some lemming cells) glow.
+        put(TRAP_ATLAS_FIRST + k as u32, 0, 0, f, TRAP_FRAME, &|i| {
+            glow::trap(trap, i, pal)
+        });
+    }
+    for (k, f) in door
+        .as_chunks::<{ 64 * 64 }>()
+        .0
+        .iter()
+        .take(DOOR_FRAMES as usize)
+        .enumerate()
+    {
+        put(DOOR_ATLAS_FIRST + k as u32, 0, 0, f, 64, &|_| 0.0);
+    }
+    for (t, f) in tiles
+        .as_chunks::<{ 64 * 64 }>()
+        .0
+        .iter()
+        .take(4 * TILE_ATLAS_CELLS as usize)
+        .enumerate()
+    {
+        let (ox, oy) = ((t as u32 % 2) * 64, (t as u32 / 2 % 2) * 64);
+        put(TILE_ATLAS_FIRST + t as u32 / 4, ox, oy, f, 64, &|_| 0.0);
+    }
+    Ok(RgbaImage {
+        width: w,
+        height: ATLAS_ROWS * LEMMING_CELL,
+        texels: texels.into(),
+    })
+}
+
+/// The atlas's texels every level shares, made once ([`atlas_base`]).
+static ATLAS_BASE: std::sync::OnceLock<Vec<u8>> = std::sync::OnceLock::new();
+
+/// The atlas without a level's own cells (left clear): the lemming cells,
+/// the countdown digits and the crack frames.
+fn atlas_base(data: &mut GameData, pal: &Palette) -> Result<Vec<u8>, l3d_formats::Error> {
     // The 128-pixel sprites; the 64-pixel set (same cells) doubled if missing.
     let (raw, scale) = match data.read("LEMM/LEMM128.MHC") {
         Ok(raw) => (raw, 1),
@@ -1275,17 +1349,6 @@ fn lemming_atlas(
             put(i, &doubled);
         }
     }
-    let frame = (TRAP_FRAME * TRAP_FRAME) as usize;
-    let (trap, trap_pixels) = traps.unwrap_or_default();
-    for (k, f) in trap_pixels
-        .chunks_exact(frame)
-        .take(TRAP_ATLAS_CELLS as usize)
-        .enumerate()
-    {
-        put_sized(TRAP_ATLAS_FIRST + k as u32, f, TRAP_FRAME);
-    }
-    // Only the trap frames and some lemming cells glow.
-    let trap_cells = TRAP_ATLAS_FIRST..TRAP_ATLAS_FIRST + TRAP_ATLAS_CELLS;
     let cell_of = |p: usize| {
         let (x, y) = (p as u32 % w, p as u32 / w);
         y / LEMMING_CELL * ATLAS_COLUMNS + x / LEMMING_CELL
@@ -1296,47 +1359,18 @@ fn lemming_atlas(
             put_sized(BOMBNUMB_ATLAS_FIRST + k as u32, &d.pixels, d.width as u32);
         }
     }
-    for (k, f) in door
-        .as_chunks::<{ 64 * 64 }>()
-        .0
-        .iter()
-        .take(DOOR_FRAMES as usize)
-        .enumerate()
-    {
-        put_sized(DOOR_ATLAS_FIRST + k as u32, f, 64);
-    }
-    for (t, f) in tiles
-        .as_chunks::<{ 64 * 64 }>()
-        .0
-        .iter()
-        .take(4 * TILE_ATLAS_CELLS as usize)
-        .enumerate()
-    {
-        let (ox, oy) = ((t as u32 % 2) * 64, (t as u32 / 2 % 2) * 64);
-        let cell = TILE_ATLAS_FIRST + t as u32 / 4;
-        let (cx, cy) = (
-            (cell % ATLAS_COLUMNS) * LEMMING_CELL + ox,
-            (cell / ATLAS_COLUMNS) * LEMMING_CELL + oy,
-        );
-        for y in 0..64 {
-            let dst = ((cy + y) * w + cx) as usize;
-            pixels[dst..dst + 64].copy_from_slice(&f[(y * 64) as usize..(y * 64 + 64) as usize]);
-        }
-    }
-    let mut image = glowing_rgba(&pixels, w, pal, |p| {
+    let image = glowing_rgba(&pixels, w, pal, |p| {
         let cell = cell_of(p);
-        if trap_cells.contains(&cell) {
-            glow::trap(trap, pixels[p], pal)
-        } else if cell < n {
+        if cell < n {
             glow::lemming(cell, pixels[p], pal)
         } else {
             0.0
         }
     });
+    let mut texels = image.texels.to_vec();
     // The crack frames: `OVERLAY.000` holds 1-bit 64×64 frames, 8 bytes per
     // row, the most significant bit leftmost (`docs/spec/graphics.md`).
     if let Ok(overlay) = data.read("GFX/OVERLAY.000") {
-        let mut texels = image.texels.to_vec();
         for (k, frame) in overlay
             .as_chunks::<{ 64 * 8 }>()
             .0
@@ -1358,9 +1392,8 @@ fn lemming_atlas(
                 }
             }
         }
-        image.texels = texels.into();
     }
-    Ok(image)
+    Ok(texels)
 }
 
 /// A loaded level with its renderable content.

@@ -379,7 +379,6 @@ fn graphics_layout(g: Graphics, rows: u32) -> Vec<(Rect, Entry, String)> {
         (Item::Waves, "Waves"),
         (Item::Reflections, "Reflections"),
         (Item::Shadows, "Shadows"),
-        (Item::Filtering, "Filtering"),
         (Item::Snow, "Snow"),
         (Item::Sandstorm, "Sandstorm"),
         (Item::Windows, "Windows"),
@@ -388,6 +387,14 @@ fn graphics_layout(g: Graphics, rows: u32) -> Vec<(Rect, Entry, String)> {
         let y = GRAPHICS_ROWS[i / 4];
         add(COLUMNS[i % 4], y, 80.0, item, label.into());
     }
+    // The filtering, with its value, in the second row's other half.
+    add(
+        COLUMNS[2],
+        GRAPHICS_ROWS[1],
+        160.0,
+        Item::Filtering,
+        format!("Filtering {}", g.filtering.name()),
+    );
     e
 }
 
@@ -410,7 +417,6 @@ fn lit(s: &Settings, item: Item) -> Option<bool> {
         Item::Waves => g.waves,
         Item::Reflections => g.reflections && g.waves,
         Item::Shadows => g.shadows,
-        Item::Filtering => g.filtering,
         Item::Snow => g.snow,
         Item::Sandstorm => g.sandstorm,
         Item::Windows => g.windows,
@@ -519,7 +525,7 @@ pub(crate) fn gamepad(w: &mut World, way: Vec2, pressed: bool, slide: i32) {
     }
     let stepped = matches!(
         entry,
-        Entry::Toggle(Item::Mode | Item::Resolution | Item::Glow)
+        Entry::Toggle(Item::Mode | Item::Resolution | Item::Glow | Item::Filtering)
     );
     if let Entry::Toggle(item) = entry
         && (pressed || (stepped && slide != 0))
@@ -603,7 +609,11 @@ fn graphics_by(g: Graphics, item: Item, step: i32) -> Option<Graphics> {
             ..g
         },
         Item::Filtering => Graphics {
-            filtering: !g.filtering,
+            filtering: if step < 0 {
+                g.filtering.previous()
+            } else {
+                g.filtering.next()
+            },
             ..g
         },
         Item::Snow => Graphics { snow: !g.snow, ..g },
@@ -817,8 +827,9 @@ mod tests {
         assert_eq!(step("Mode", Vec2::Y), "Preset(High)");
         assert_eq!(step("Preset(Low)", Vec2::X), "Preset(Medium)");
         assert_eq!(step("Resolution", Vec2::NEG_Y), "Preset(Low)");
-        assert_eq!(step("Snow", Vec2::Y), "Default");
-        assert_eq!(step("Windows", Vec2::Y), "Exit");
+        assert_eq!(step("Snow", Vec2::Y), "Filtering");
+        assert_eq!(step("Sandstorm", Vec2::Y), "Default");
+        assert_eq!(step("Filtering", Vec2::Y), "Exit");
         // Left and right stay in the row.
         assert_eq!(step("Fps", Vec2::X), "-");
         // Every setting and button can be reached from the first.

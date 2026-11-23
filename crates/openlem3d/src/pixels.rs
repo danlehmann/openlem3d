@@ -20,7 +20,9 @@ pub(crate) fn update(w: &mut World) {
     let glow = effects.map_or(Glow::Off, |g| g.glow);
     camera.glow = glow != Glow::Off && !w.opts.no_glow;
     camera.bloom = glow == Glow::Bloom;
-    camera.filtered = effects.is_some_and(|g| g.filtering);
+    let filtering = effects.map_or(crate::settings::Filtering::Off, |g| g.filtering);
+    camera.filtered = filtering != crate::settings::Filtering::Off;
+    camera.anisotropic = filtering == crate::settings::Filtering::Sharp;
     // Screens as cathode-ray tubes: always in Enhanced (it costs nothing).
     camera.crt = effects.is_some();
     camera.ours = settings.enhanced();
