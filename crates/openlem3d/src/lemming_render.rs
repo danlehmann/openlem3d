@@ -2112,28 +2112,50 @@ fn floor_under(
             || sim.world.terrain_solid([sx, y, sz]))
             && !unseen([cx, y.div_euclid(SUB), cz])
     };
-    // A cell holding nothing in this column: no block (or one not drawn)
-    // and no brick.
-    let empty = |cy: i32| {
-        unseen([cx, cy, cz])
-            || (sim.world.block([cx, cy, cz]).is_none()
-                && !column
-                    .iter()
-                    .any(|b| b.min[1] < (cy + 1) * SUB && b.max[1] > cy * SUB))
+    // Which quarters of a cell hold nothing in this column (bit set): a
+    // quarter is solid only where the block has a segment present there
+    // (`World::present`, as `World::terrain_solid` decides) or a brick
+    // reaches into it; nothing in a cell not drawn. Worked out once per
+    // cell met.
+    const QUARTER: i32 = SUB / 4;
+    let open_quarters = |cy: i32| -> u8 {
+        if unseen([cx, cy, cz]) {
+            return 0b1111;
+        }
+        let present = sim.world.present([cx, cy, cz]);
+        (0..4).fold(0, |open, q| {
+            let (lo, hi) = (cy * SUB + q * QUARTER, cy * SUB + (q + 1) * QUARTER);
+            let brick = column.iter().any(|b| b.min[1] < hi && b.max[1] > lo);
+            if present & (1 << q) == 0 && !brick {
+                open | 1 << q
+            } else {
+                open
+            }
+        })
     };
     let mut y = sub(top) - 1;
     if solid(y) {
         return None;
     }
-    // Down the same steps as one by one, but past an empty cell's at once
-    // (what they would find: open space, or the ground plane below
-    // `GROUND_Y`), so that the floor found is the same.
+    // Down the same steps as one by one, but past an empty quarter of a
+    // cell at once (what they would find: open space, or the ground plane
+    // below `GROUND_Y`), so that the floor found is the same.
+    let mut cell: Option<(i32, u8)> = None;
     while y >= lowest {
         let cy = y.div_euclid(SUB);
-        if empty(cy) {
-            // The steps in this cell, down to the last at or above both
+        let open = match cell {
+            Some((c, open)) if c == cy => open,
+            _ => {
+                let open = open_quarters(cy);
+                cell = Some((cy, open));
+                open
+            }
+        };
+        let q = (y - cy * SUB) / QUARTER;
+        if open & (1 << q) != 0 {
+            // The steps in this quarter, down to the last at or above both
             // its bottom and the lowest looked at.
-            let bottom = (cy * SUB).max(lowest);
+            let bottom = (cy * SUB + q * QUARTER).max(lowest);
             let last = y - (y - bottom) / STEP * STEP;
             if ground && crate::units(last) < ground_y {
                 return Some(ground_y);
