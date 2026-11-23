@@ -1393,9 +1393,9 @@ fn draw(
     let reflection = mirror.then(|| gpu.reflection_target(&device, depth_size, scene_format));
     let storm = input.content.data.as_ref().is_some_and(|d| d.storm);
     let snow = input.content.data.as_ref().is_some_and(|d| d.snow);
-    // Only a night sky is sampled smoothly: its stars and planets gain;
-    // painted skies (trees, hills) only blur.
-    let starry = input.content.data.as_ref().is_some_and(|d| d.starry);
+    // Only the all-round skies are sampled smoothly: their stars, planets
+    // and candy floss gain; painted skies (trees, hills) only blur.
+    let surround = input.content.data.as_ref().is_some_and(|d| d.sky_surround);
     // The last frame, for layers showing the screen.
     let screen = input
         .screen
@@ -1473,7 +1473,7 @@ fn draw(
         if let Some(sky) = &gpu.sky {
             pass.set_pipeline(&scene_p.sky);
             let sky = match &sky.filtered {
-                Some(f) if camera.filtered && starry => f,
+                Some(f) if camera.filtered && surround => f,
                 _ => &sky.plain,
             };
             pass.set_bind_group(0, sky, &[]);
