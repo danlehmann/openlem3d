@@ -345,12 +345,15 @@ fn fs(v: VOut) -> @location(0) vec4<f32> {
     // lifted above white.
     // Unshaded (the sea, the land, the sprites), the colour is as it is,
     // which spares those pixels six slow powers.
+    // Worked out on the brightest channel alone (the sRGB curve keeps the
+    // channels' order), the others scaled by the same factor, raised once
+    // to the curve's power: two powers rather than six, which a weak GPU
+    // paid for on every block pixel (1.2-1.6 ms on a Mali-G31 at 540p).
     var shaded = c.rgb;
     if (v.params.x > 0.0) {
-        let srgb = pow(c.rgb, vec3(1.0 / 2.2));
-        let top = max(srgb.r, max(srgb.g, srgb.b));
+        let top = pow(max(c.r, max(c.g, c.b)), 1.0 / 2.2);
         let lowered = max(top - v.params.x, min(top, SHADE_FLOOR));
-        shaded = pow(srgb * (lowered / max(top, 1e-5)), vec3(2.2));
+        shaded = c.rgb * pow(lowered / max(top, 1e-5), 2.2);
     }
     // A window's glass (its alpha marked, `scene_build::WINDOW_ALPHA`)
     // looks out on space.
