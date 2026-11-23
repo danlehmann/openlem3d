@@ -92,7 +92,6 @@ enum Item {
     Filtering,
     Snow,
     Sandstorm,
-    Crt,
     Windows,
 }
 
@@ -383,7 +382,6 @@ fn graphics_layout(g: Graphics, rows: u32) -> Vec<(Rect, Entry, String)> {
         (Item::Filtering, "Filtering"),
         (Item::Snow, "Snow"),
         (Item::Sandstorm, "Sandstorm"),
-        (Item::Crt, "CRT"),
         (Item::Windows, "Windows"),
     ];
     for (i, (item, label)) in effects.into_iter().enumerate() {
@@ -415,7 +413,6 @@ fn lit(s: &Settings, item: Item) -> Option<bool> {
         Item::Filtering => g.filtering,
         Item::Snow => g.snow,
         Item::Sandstorm => g.sandstorm,
-        Item::Crt => g.crt,
         Item::Windows => g.windows,
         _ => return None,
     })
@@ -614,7 +611,6 @@ fn graphics_by(g: Graphics, item: Item, step: i32) -> Option<Graphics> {
             sandstorm: !g.sandstorm,
             ..g
         },
-        Item::Crt => Graphics { crt: !g.crt, ..g },
         Item::Windows => Graphics {
             windows: !g.windows,
             ..g

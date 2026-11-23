@@ -21,7 +21,8 @@ pub(crate) fn update(w: &mut World) {
     camera.glow = glow != Glow::Off && !w.opts.no_glow;
     camera.bloom = glow == Glow::Bloom;
     camera.filtered = effects.is_some_and(|g| g.filtering);
-    camera.crt = effects.is_some_and(|g| g.crt);
+    // Screens as cathode-ray tubes: always in Enhanced (it costs nothing).
+    camera.crt = effects.is_some();
     camera.ours = settings.enhanced();
     // Enhanced's resolution, in levels (the menus are cheap, and stay
     // sharp): fewer rows drawn, the system stretching them over the window

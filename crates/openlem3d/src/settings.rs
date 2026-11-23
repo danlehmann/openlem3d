@@ -138,7 +138,6 @@ impl Preset {
                 glow: Glow::Off,
                 snow: false,
                 sandstorm: false,
-                crt: false,
                 windows: false,
                 ..base
             },
@@ -212,8 +211,6 @@ pub struct Graphics {
     pub snow: bool,
     /// Sandstorms (and heat shimmer) on desert levels.
     pub sandstorm: bool,
-    /// Screens in the levels drawn as cathode-ray tubes.
-    pub crt: bool,
     /// Windows looking out on space (each of their pixels follows the line
     /// of sight through the level).
     pub windows: bool,
@@ -238,7 +235,6 @@ impl Preset {
             glow: Glow::Bloom,
             snow: true,
             sandstorm: true,
-            crt: true,
             windows: true,
         }
     }
@@ -421,9 +417,8 @@ impl Settings {
                 }
                 "snow" => s.graphics.snow = flag,
                 "sandstorm" => s.graphics.sandstorm = flag,
-                "crt" => s.graphics.crt = flag,
-                // Before CRT and windows were apart.
-                "screens" => (s.graphics.crt, s.graphics.windows) = (flag, flag),
+                // Before windows had a setting of their own.
+                "screens" => s.graphics.windows = flag,
                 "windows" => s.graphics.windows = flag,
                 "calibrated" => s.calibrated = flag,
                 // Before there were three modes.
@@ -468,7 +463,7 @@ impl Settings {
         let Some(path) = Self::path() else { return };
         let on = |b: bool| if b { "on" } else { "off" };
         let text = format!(
-            "fullscreen = {}\nmode = {}\npreset = {}\nresolution = {}\nfiltering = {}\nwaves = {}\nreflections = {}\nshadows = {}\nglow = {}\nsnow = {}\nsandstorm = {}\ncrt = {}\nwindows = {}\ncalibrated = {}\nfps = {}\nrewind = {}\nmusic = {}\neffects = {}\ncamera = {}\nrating = {}\ncompleted = {}\nbest = {}\n",
+            "fullscreen = {}\nmode = {}\npreset = {}\nresolution = {}\nfiltering = {}\nwaves = {}\nreflections = {}\nshadows = {}\nglow = {}\nsnow = {}\nsandstorm = {}\nwindows = {}\ncalibrated = {}\nfps = {}\nrewind = {}\nmusic = {}\neffects = {}\ncamera = {}\nrating = {}\ncompleted = {}\nbest = {}\n",
             on(self.fullscreen),
             self.mode.key(),
             self.graphics.preset.key(),
@@ -480,7 +475,6 @@ impl Settings {
             self.graphics.glow.key(),
             on(self.graphics.snow),
             on(self.graphics.sandstorm),
-            on(self.graphics.crt),
             on(self.graphics.windows),
             on(self.calibrated),
             on(self.fps),
