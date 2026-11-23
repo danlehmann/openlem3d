@@ -974,7 +974,8 @@ impl UiGpu {
             })],
             ..Default::default()
         });
-        self.record(&mut pass, false);
+        let s = target.texture().size();
+        self.record(&mut pass, false, UVec2::new(s.width, s.height));
     }
 
     /// Makes this frame's UI ready to draw, uploading what it needs;
@@ -1089,12 +1090,18 @@ impl UiGpu {
     /// Records the UI made ready by [`UiGpu::prepare`] into `pass` (whose
     /// target is in its format), over what the pass drew before.
     /// `depth`: the pass has a depth buffer (of the format given to
-    /// [`UiGpu::new`]).
-    pub fn record(&self, pass: &mut wgpu::RenderPass<'_>, depth: bool) {
+    /// [`UiGpu::new`]). `bound`: the target's size, which the UI's scissor
+    /// rectangles are kept within (on the frame the resolution changes,
+    /// the UI was laid out for the size before).
+    pub fn record(&self, pass: &mut wgpu::RenderPass<'_>, depth: bool, bound: UVec2) {
         let (Some(quads), false) = (&self.quads, self.runs.is_empty()) else {
             return;
         };
         let (origin, size) = self.view;
+        let clip = |x: u32, y: u32, w: u32, h: u32| {
+            let (x, y) = (x.min(bound.x), y.min(bound.y));
+            (x, y, w.min(bound.x - x), h.min(bound.y - y))
+        };
         pass.set_viewport(origin.x, origin.y, size.x, size.y, 0.0, 1.0);
         let pipeline = match &self.depth_pipeline {
             Some(p) if depth => p,
@@ -1109,17 +1116,22 @@ impl UiGpu {
             };
             pass.set_bind_group(0, group, &[]);
             let s = scissor.size();
-            pass.set_scissor_rect(scissor.min.x, scissor.min.y, s.x, s.y);
+            let (x, y, w, h) = clip(scissor.min.x, scissor.min.y, s.x, s.y);
+            if w == 0 || h == 0 {
+                continue;
+            }
+            pass.set_scissor_rect(x, y, w, h);
             pass.draw(0..4, range.clone());
         }
         // The Pixel 11 Pro's PowerVR driver keeps only what lies inside the
         // scissor rectangle set when the pass ends, losing the rest of the pass.
-        pass.set_scissor_rect(
+        let (x, y, w, h) = clip(
             origin.x as u32,
             origin.y as u32,
             size.x as u32,
             size.y as u32,
         );
+        pass.set_scissor_rect(x, y, w.max(1).min(bound.x), h.max(1).min(bound.y));
     }
 }
 

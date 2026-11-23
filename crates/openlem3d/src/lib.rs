@@ -335,6 +335,9 @@ pub struct World {
     camera: SceneCamera,
     sprites: SceneSprites,
     scenery_shown: Option<(u32, scene_build::Show)>,
+    /// The level last built, as it was before play changed it, so that a
+    /// restart needn't build it again.
+    pristine: Option<Pristine>,
     clear: gpu::ClearColor,
     screenshots: gpu::Screenshots,
     renderer: gpu::Renderer,
@@ -435,6 +438,7 @@ impl World {
             camera: SceneCamera::default(),
             sprites: SceneSprites::default(),
             scenery_shown: None,
+            pristine: None,
             clear: gpu::ClearColor(Color::srgb(0.35, 0.55, 0.85)),
             screenshots: gpu::Screenshots::default(),
             renderer: gpu::Renderer::default(),
@@ -1615,35 +1619,63 @@ pub(crate) fn load_level(w: &mut World) {
     }
     let n = current.number;
     current.loaded = Some(n);
-    let scene_build::BuiltLevel {
-        level,
-        blocks,
-        scene: content,
-        mesh,
-        block_layer,
-    } = match scene_build::build(&mut data.0, n, settings.show()) {
-        Ok(v) => v,
-        Err(e) => {
-            error!("level {n}: {e}");
-            return;
+    let show = settings.show();
+    // The same level again (a restart, or play after its preview): as it
+    // was built, its textures already on the GPU.
+    let kept = w
+        .pristine
+        .as_ref()
+        .filter(|p| p.number == n && p.show == show);
+    let (level, blocks, content, block_layer) = if let Some(p) = kept {
+        (
+            p.level.clone(),
+            p.blocks.clone(),
+            p.scene.clone(),
+            p.block_layer,
+        )
+    } else {
+        let started = std::time::Instant::now();
+        let scene_build::BuiltLevel {
+            level,
+            blocks,
+            scene: content,
+            mesh,
+            block_layer,
+        } = match scene_build::build(&mut data.0, n, show) {
+            Ok(v) => v,
+            Err(e) => {
+                error!("level {n}: {e}");
+                return;
+            }
+        };
+        if !mesh.unsupported_shapes.is_empty() {
+            warn!(
+                "level {n}: unsupported shapes (shape, cells): {:?}",
+                mesh.unsupported_shapes
+            );
         }
-    };
-    if !mesh.unsupported_shapes.is_empty() {
-        warn!(
-            "level {n}: unsupported shapes (shape, cells): {:?}",
-            mesh.unsupported_shapes
+        info!(
+            "level {n:03} {:?}: texture set {}, {} opaque + {} cutout triangles, built in {:?}",
+            level.title,
+            level.texture_set,
+            mesh.opaque.indices.len() / 3,
+            mesh.cutout.indices.len() / 3,
+            started.elapsed()
         );
-    }
-    info!(
-        "level {n:03} {:?}: texture set {}, {} opaque + {} cutout triangles",
-        level.title,
-        level.texture_set,
-        mesh.opaque.indices.len() / 3,
-        mesh.cutout.indices.len() / 3
-    );
+        let content = Arc::new(content);
+        w.pristine = Some(Pristine {
+            number: n,
+            show,
+            level: level.clone(),
+            blocks: blocks.clone(),
+            scene: content.clone(),
+            block_layer,
+        });
+        (level, blocks, content, block_layer)
+    };
     w.e.window.title = format!("openlem3d - LEVEL.{n:03} {}", level.title);
     scene.version += 1;
-    scene.data = Some(Arc::new(content));
+    scene.data = Some(content);
     let preset = opts.camera.filter(|c| (1..=4).contains(c)).unwrap_or(1) - 1;
     w.preset.set(preset);
     game.fast_forward = false;
@@ -1685,6 +1717,16 @@ pub(crate) fn load_level(w: &mut World) {
     // A new level: the camera's last free spot was in the old one.
     w.camera_controls.last_free = None;
     panel::select_first_skill(w);
+}
+
+/// A level as built, before play changed its blocks (`World::pristine`).
+struct Pristine {
+    number: u32,
+    show: scene_build::Show,
+    level: l3d_formats::level::Level,
+    blocks: l3d_formats::blk::BlockSet,
+    scene: Arc<scene_render::SceneData>,
+    block_layer: usize,
 }
 
 /// What the camera controls keep between frames: where the camera last

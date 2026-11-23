@@ -387,6 +387,15 @@ pub(crate) struct Title {
     area: Option<NodeId>,
 }
 
+/// The Play button, where a gamepad starts (so that A plays).
+pub(crate) fn play_button(w: &crate::World) -> Option<NodeId> {
+    w.title
+        .buttons
+        .iter()
+        .find(|&&(_, b)| b == TitleButton::Play)
+        .map(|&(id, _)| id)
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum TitleButton {
     Play,

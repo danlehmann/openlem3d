@@ -331,11 +331,17 @@ fn buttons(w: &mut World, pad: &l3d_engine::input::Pad) {
         .and_then(|m| targets.iter().position(|t| t.1.distance(m) < 1.0));
     if focus.is_none() && w.gamepad.in_use && !targets.is_empty() {
         // On the briefing and previewing, Continue, so that A carries on
-        // (owner); elsewhere the button nearest the middle.
+        // (owner); on the title, Play; elsewhere the button nearest the
+        // middle.
         let briefing = w.state == AppState::Briefing || w.preview.active;
-        let first = briefing
-            .then(|| crate::briefing::first_choice(w).and_then(|id| w.ui.middle(id)))
-            .flatten();
+        let first = if briefing {
+            crate::briefing::first_choice(w)
+        } else if w.state == AppState::Title {
+            crate::title::play_button(w)
+        } else {
+            None
+        }
+        .and_then(|id| w.ui.middle(id));
         let mid = Vec2::new(w.screen.pixels.z as f32, w.screen.pixels.w as f32) / 2.0;
         let goal = first.unwrap_or(mid);
         focus = (0..targets.len()).min_by(|&a, &b| {
