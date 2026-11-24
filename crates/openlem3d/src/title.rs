@@ -388,6 +388,9 @@ pub(crate) struct Title {
     /// The code screen's "Back", hidden while a gamepad is in use (B
     /// leaves there).
     back: Option<NodeId>,
+    /// The code screen's prompt for the keyboard ("Return") and for a
+    /// gamepad ("A"), the one shown as the gamepad is in use or not.
+    prompts: Option<(NodeId, NodeId)>,
 }
 
 /// The Play button, where a gamepad starts (so that A plays).
@@ -841,19 +844,21 @@ fn spawn_code(w: &mut World) {
         t.correct = centred_line(ui, canvas, font, "Password Correct", 140.0, false);
         // Tapping the prompt is Return, for players without a keyboard, as
         // "Back" is Esc.
-        let prompt = "Press Return when finished";
-        let (_, width) = font.layout(prompt);
-        crate::key_buttons::spawn_text_button(
-            ui,
-            &mut w.key_buttons,
-            canvas,
-            font,
-            prompt,
-            (160.0 - width / 2.0).round(),
-            160.0,
-            Color::WHITE,
-            KeyCode::Enter,
-        );
+        let [keys, pad] = ["Press Return when finished", "Press A when finished"].map(|prompt| {
+            let (_, width) = font.layout(prompt);
+            crate::key_buttons::spawn_text_button(
+                ui,
+                &mut w.key_buttons,
+                canvas,
+                font,
+                prompt,
+                (160.0 - width / 2.0).round(),
+                160.0,
+                Color::WHITE,
+                KeyCode::Enter,
+            )
+        });
+        t.prompts = Some((keys, pad));
         t.back = Some(crate::key_buttons::spawn_text_button(
             ui,
             &mut w.key_buttons,
@@ -1054,9 +1059,13 @@ pub(crate) fn attract(w: &mut World) {
 /// The code screen's systems, in order.
 pub(crate) fn update_code(w: &mut World) {
     spawn_code(w);
+    let pad = crate::gamepad::in_use(w);
     if let Some(back) = w.title.back {
-        let shown = !crate::gamepad::in_use(w);
-        w.ui.set_visible(back, shown);
+        w.ui.set_visible(back, !pad);
+    }
+    if let Some((keys, gamepad)) = w.title.prompts {
+        w.ui.set_visible(keys, !pad);
+        w.ui.set_visible(gamepad, pad);
     }
     code_input(w);
     animate_slots(w);
