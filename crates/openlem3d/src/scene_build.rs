@@ -287,6 +287,7 @@ fn block_layer(
     blocks: &BlockSet,
 ) -> SceneLayer {
     let mut b = LayerBuilder::default();
+    let reach = Reach::of(level, blocks);
     for (part, cutout) in [(&mesh.opaque, false), (&mesh.cutout, true)] {
         let base = b.base();
         // A face's vertices are its own, so its triangles mark them.
@@ -308,6 +309,7 @@ fn block_layer(
                 && high - low > 0.9
                 && wide > 0.9
                 && part.normals[a][1].abs() < 0.5
+                && reach.nothing_behind(part.positions[a], part.normals[a])
             {
                 // Whether a pixel of its glass looks out on space or onto more
                 // of the level is for the shader to see (`scene.wgsl`'s
@@ -1657,10 +1659,58 @@ const ICE_GLOSS: f32 = 0.6;
 /// see-through texels' (`scene.wgsl`'s `fs` reads 0.15–0.4 as glass).
 const WINDOW_ALPHA: u8 = 64;
 
-/// Levels whose windows keep their black glass (ours): "3D - A Lemming
-/// Odyssey" (`LEVEL.044`), where a tunnel leaves through the window wall,
-/// which a view of space outside could not show.
-const WINDOWLESS_LEVELS: [u32; 1] = [44];
+/// How far the level reaches along X and Z, for [`Reach::nothing_behind`]:
+/// the lowest and highest cell holding a drawn block or an object, and the
+/// lowest and highest land corner (land corners lie on cell corners).
+struct Reach {
+    cells: [(i32, i32); 2],
+    land: [(i32, i32); 2],
+}
+
+impl Reach {
+    fn of(level: &Level, blocks: &BlockSet) -> Self {
+        let none = [(i32::MAX, i32::MIN); 2];
+        let widen = |r: &mut [(i32, i32); 2], x: i32, z: i32| {
+            for (k, c) in [x, z].into_iter().enumerate() {
+                r[k] = (r[k].0.min(c), r[k].1.max(c));
+            }
+        };
+        let mut reach = Reach {
+            cells: none,
+            land: none,
+        };
+        for (x, _, z, b, o) in level.cells() {
+            if shows(blocks, b) || o.kind != 0 {
+                widen(&mut reach.cells, x as i32, z as i32);
+            }
+        }
+        for v in level.land_polygons.iter().flatten() {
+            widen(&mut reach.land, v.x as i32, v.z as i32);
+        }
+        reach
+    }
+
+    /// Whether nothing of the level lies behind an upright face at `at`
+    /// facing `normal`: no block, object or land beyond the block the face
+    /// belongs to. Only such a window looks out on space; one in a wall with
+    /// more of the level past it hid that (owner: on "Lemlab", things
+    /// behind a window vanished, seen close up), which the shader's line of
+    /// sight through the blocks alone missed. It keeps the black glass of
+    /// "3D - A Lemming Odyssey" (`LEVEL.044`) too, where a tunnel leaves
+    /// through the window wall.
+    fn nothing_behind(&self, at: [f32; 3], normal: [f32; 3]) -> bool {
+        let k = (normal[2].abs() > normal[0].abs()) as usize;
+        let plane = at[k * 2].round() as i32;
+        let (cells, land) = (self.cells[k], self.land[k]);
+        if normal[k * 2] > 0.0 {
+            // Its block spans `plane - 1..plane`.
+            cells.0 >= plane - 1 && land.0 >= plane - 1
+        } else {
+            // Its block spans `plane..plane + 1`.
+            cells.1 <= plane && land.1 <= plane + 1
+        }
+    }
+}
 
 /// Whether block `b` is drawn: not empty, invisible or a placeholder.
 fn shows(blocks: &BlockSet, b: BlockCell) -> bool {
@@ -2079,7 +2129,7 @@ pub fn build(data: &mut GameData, n: u32, show: Show) -> Result<BuiltLevel, l3d_
             let current = glow::electric(&tex, &glow::electric_runs(&level, &blocks), &pal);
             let ice = glow::ice(&tex, &glow::ice_tiles(&blocks), &pal);
             let mut img = glowing_rgba(&tex, 64, &pal, |p| torches[p].max(current[p]).max(ice[p]));
-            if show.windows && !WINDOWLESS_LEVELS.contains(&n) {
+            if show.windows {
                 let mut texels = img.texels.to_vec();
                 const TILE: usize = 64 * 64;
                 for t in (0..tex.len() / TILE).filter(|&t| glow::window_tile(level.texture_set, t))
