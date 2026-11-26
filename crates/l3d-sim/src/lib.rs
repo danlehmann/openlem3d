@@ -2299,7 +2299,9 @@ impl Simulation {
             .world
             .terrain_solid([l.pos[0], l.pos[1] + HEAD_HEIGHT + CLIMB_SPEED, l.pos[2]])
         {
-            // Ceiling: let go and fall back. Bricks are no ceiling: in the
+            // Ceiling: let go and fall back (verified with a changed
+            // Practice "Climber": a slab jutting from the top of the wall
+            // over the climbers). Bricks are no ceiling: in the
             // original a climber climbed a wall straight past the first
             // brick of a builder standing at its top edge.
             l.dir = l.dir.reverse();
@@ -2659,7 +2661,8 @@ impl Simulation {
     /// with more wall in the next cell it walks on through the gap to it and
     /// bashes on, so walls thicker than a cell can be bashed through (Tricky
     /// 3 "This Is the Army"); otherwise it walks on as soon as nothing is
-    /// left to bash (provisional).
+    /// left to bash (verified in the Practice "Basher" demo: walking on the
+    /// tick its last stroke's segments vanish).
     fn bash(&mut self, l: &mut Lemming) {
         let d = l.dir.delta();
         let (cell, mask) = Self::bash_cell(l);
