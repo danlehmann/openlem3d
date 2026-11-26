@@ -124,9 +124,13 @@ pub(crate) fn input(w: &mut World) {
         w.gamepad.in_use = true;
     }
     w.e.window.cursor_hidden = w.gamepad.in_use;
-    // Menu is Esc everywhere (owner: swapped with View, the options); B
-    // goes back outside levels; View closes the options again.
-    if pad.buttons.just_pressed(PadButton::Start)
+    // Menu is Esc everywhere (owner: swapped with View, the options),
+    // except that in a level it opens the level's menu in either mode
+    // (`confirm`); B goes back outside levels; View closes the options again.
+    let in_level = w.state == AppState::Playing && !w.preview.active;
+    if in_level && pad.buttons.just_pressed(PadButton::Start) {
+        w.confirm.asked = true;
+    } else if pad.buttons.just_pressed(PadButton::Start)
         || (menu && w.state != AppState::Code && pad.buttons.just_pressed(PadButton::East))
         || (w.state == AppState::Options && pad.buttons.just_pressed(PadButton::Select))
     {

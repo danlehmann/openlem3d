@@ -25,6 +25,11 @@ pub(crate) struct Confirm {
     area: Rect,
     /// Shown as a popup: its card, no darkening of the screen (set by VR).
     pub(crate) popup: bool,
+    /// A controller's menu button (a gamepad's or a VR controller's) was
+    /// pressed in the level: it opens the menu in either mode, so that the
+    /// options and the way out stay in reach (the keyboard's Esc keeps the
+    /// original's restart in Original mode), and closes it again.
+    pub(crate) asked: bool,
 }
 
 /// The overlay's canvas: the briefing's, shared with the mode notice.

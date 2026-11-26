@@ -713,8 +713,13 @@ pub(crate) fn input(w: &mut World) {
         .ok()
         .map(|(_, v)| pose(v[0].pose));
 
-    // The menu and pausing: the game's own keys.
-    for (down, key) in [(menu, KeyCode::Escape), (pause, KeyCode::KeyP)] {
+    // The menu button opens the level's menu in either mode (`confirm`),
+    // elsewhere it is Esc; pausing is the game's own key.
+    let in_level = w.state == crate::menu::AppState::Playing && !w.preview.active;
+    if menu && in_level {
+        w.confirm.asked = true;
+    }
+    for (down, key) in [(menu && !in_level, KeyCode::Escape), (pause, KeyCode::KeyP)] {
         if down && x.key.is_none() {
             w.e.input.keys.press(key);
             x.key = Some(key);

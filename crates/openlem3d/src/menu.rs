@@ -471,7 +471,9 @@ pub(crate) fn back_to_menu(w: &mut World) {
             current.loaded = None;
         }
     };
-    // Enhanced's menu (`confirm`): restart, leave, or carry on.
+    // Enhanced's menu (`confirm`): restart, leave, or carry on; a
+    // controller's menu button opens it in either mode.
+    let asked = std::mem::take(&mut confirm.asked);
     if let Some(was_paused) = confirm.question {
         if keys.any_just_pressed([KeyCode::KeyR, KeyCode::KeyY]) {
             confirm.question = None;
@@ -485,7 +487,7 @@ pub(crate) fn back_to_menu(w: &mut World) {
             // it was.
             confirm.question = None;
             game.paused = was_paused;
-        } else if keys.any_just_pressed([KeyCode::KeyN, KeyCode::Escape]) {
+        } else if keys.any_just_pressed([KeyCode::KeyN, KeyCode::Escape]) || asked {
             confirm.question = None;
             game.paused = was_paused;
         } else {
@@ -493,10 +495,10 @@ pub(crate) fn back_to_menu(w: &mut World) {
         }
         return;
     }
-    if !keys.just_pressed(KeyCode::Escape) {
+    if !keys.just_pressed(KeyCode::Escape) && !asked {
         return;
     }
-    if w.settings.enhanced() && game.sim.is_some() {
+    if (w.settings.enhanced() || asked) && game.sim.is_some() {
         confirm.question = Some(game.paused);
         game.paused = true;
     } else if game.replay.is_some() {
