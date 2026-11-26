@@ -22,6 +22,11 @@ pub struct Settings {
     /// Backspace runs the level back in time (ours); off, no snapshots are
     /// kept for it.
     pub rewind: bool,
+    /// The replay camera is Original: a replay, and running the level back,
+    /// also show what the player saw (the camera's moves, the lemming view,
+    /// highlighting), and a change to the view ends the replay, as in the
+    /// original. Free (false): the viewer moves the view freely (ours).
+    pub original_replays: bool,
     /// In the headset, moves to another camera view glide as on the
     /// screen (ours); off, the view cuts there in the dark.
     pub vr_glide: bool,
@@ -173,8 +178,8 @@ impl Filtering {
     pub fn name(self) -> &'static str {
         match self {
             Filtering::Off => "Off",
-            Filtering::Smooth => "Smooth",
-            Filtering::Sharp => "Sharp",
+            Filtering::Smooth => "Smooth (bilinear)",
+            Filtering::Sharp => "Sharp (anisotropic)",
         }
     }
 
@@ -341,6 +346,7 @@ impl Default for Settings {
             calibrated: false,
             fps: false,
             rewind: true,
+            original_replays: false,
             vr_glide: true,
             smooth_turn: false,
             vr_vignette: true,
@@ -493,6 +499,7 @@ impl Settings {
                 "enhanced" => s.mode = if flag { Mode::Enhanced } else { Mode::Original },
                 "fps" => s.fps = flag,
                 "rewind" => s.rewind = flag,
+                "replay_camera" => s.original_replays = v == "original",
                 "vr_glide" => s.vr_glide = flag,
                 "smooth_turn" => s.smooth_turn = flag,
                 "vr_vignette" => s.vr_vignette = flag,
@@ -534,7 +541,7 @@ impl Settings {
         let Some(path) = Self::path() else { return };
         let on = |b: bool| if b { "on" } else { "off" };
         let text = format!(
-            "fullscreen = {}\nmode = {}\npreset = {}\nresolution = {}\nfiltering = {}\nwaves = {}\nreflections = {}\nshadows = {}\nglow = {}\nsnow = {}\nsandstorm = {}\nwindows = {}\ncalibrated = {}\nfps = {}\nrewind = {}\nvr_glide = {}\nsmooth_turn = {}\nvr_vignette = {}\nmusic = {}\neffects = {}\ncamera = {}\nrating = {}\ncompleted = {}\nbest = {}\n",
+            "fullscreen = {}\nmode = {}\npreset = {}\nresolution = {}\nfiltering = {}\nwaves = {}\nreflections = {}\nshadows = {}\nglow = {}\nsnow = {}\nsandstorm = {}\nwindows = {}\ncalibrated = {}\nfps = {}\nrewind = {}\nreplay_camera = {}\nvr_glide = {}\nsmooth_turn = {}\nvr_vignette = {}\nmusic = {}\neffects = {}\ncamera = {}\nrating = {}\ncompleted = {}\nbest = {}\n",
             on(self.fullscreen),
             self.mode.key(),
             self.graphics.preset.key(),
@@ -550,6 +557,11 @@ impl Settings {
             on(self.calibrated),
             on(self.fps),
             on(self.rewind),
+            if self.original_replays {
+                "original"
+            } else {
+                "free"
+            },
             on(self.vr_glide),
             on(self.smooth_turn),
             on(self.vr_vignette),

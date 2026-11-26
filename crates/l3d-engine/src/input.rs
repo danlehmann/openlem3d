@@ -396,8 +396,11 @@ pub(crate) fn take_in(input: &mut Input, events: Vec<Raw>) {
     for e in events {
         match e {
             Raw::Key(k) => {
+                // A key held repeats: that is no new press (and a key the
+                // game let go of stays up until pressed again).
                 if let Some(code) = k.key_code {
                     match k.state {
+                        ButtonState::Pressed if k.repeat => {}
                         ButtonState::Pressed => input.keys.press(code),
                         ButtonState::Released => input.keys.release(code),
                     }

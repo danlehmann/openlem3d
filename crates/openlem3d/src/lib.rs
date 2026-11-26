@@ -47,6 +47,7 @@ mod title;
 mod touch;
 mod trackpad;
 mod ui;
+mod view_replay;
 #[cfg(all(target_os = "android", feature = "xr"))]
 mod xr;
 
@@ -627,6 +628,8 @@ impl World {
                 trackpad::trackpad_camera(self);
                 trackpad::gesture_camera(self);
                 camera_controls(self);
+                view_replay::play(self);
+                view_replay::record(self);
                 #[cfg(all(target_os = "android", feature = "xr"))]
                 xr::aim(self);
                 minimap::build_base(self);
@@ -730,6 +733,7 @@ impl PresetIndex {
 /// Where each of the current level's four cameras is now, starting at its
 /// preset: a camera keeps its own position and facing when the player
 /// switches away, and comes back to them (verified).
+#[derive(Clone, Copy, PartialEq)]
 struct LevelInfo {
     slots: [(Vec3, f32); 4],
     /// The lemming each camera other than the current one rides along with,
@@ -1120,6 +1124,13 @@ pub struct Game {
     /// With Rewind on, the level as it was every [`SNAPSHOT_TICKS`] ticks,
     /// oldest first, for running it back.
     snapshots: Vec<l3d_sim::Simulation>,
+    /// What the player saw at each tick of this attempt.
+    views: view_replay::ViewLog,
+    /// The view last shown from a record, with the replay camera Original,
+    /// while a replay or running back shows it.
+    view_shown: Option<view_replay::ViewMoment>,
+    /// A glide shown from a record is under way.
+    view_gliding: bool,
 }
 
 /// Ticks between rewind snapshots: two seconds, about 140 KB each.
@@ -1200,6 +1211,8 @@ pub struct Replay {
     /// For a demo rather than the player's own attempt: the screen any input,
     /// or the level ending, returns to.
     pub demo: Option<menu::AppState>,
+    /// What the player saw during the attempt; none for a demo.
+    views: Option<view_replay::ViewLog>,
 }
 
 impl Replay {
@@ -1209,7 +1222,17 @@ impl Replay {
             next: 0,
             logged: 0,
             demo: None,
+            views: None,
         }
+    }
+
+    /// The player's attempt: its commands and what they saw.
+    pub fn attempt(game: &Game) -> Option<Self> {
+        let sim = game.sim.as_ref()?;
+        Some(Replay {
+            views: Some(game.views.clone()),
+            ..Replay::new(sim.log.clone())
+        })
     }
 
     pub fn demo(log: Vec<(u64, l3d_sim::Command)>, back_to: menu::AppState) -> Self {
@@ -1471,8 +1494,9 @@ const TURN_RATE: f32 = std::f32::consts::FRAC_PI_2 / 0.25;
 
 impl Game {
     /// Turns each lemming's drawn facing towards the way it faces, by `dt`
-    /// seconds of game time at the game's speed (none while paused); at once
-    /// in Original mode, and for lemmings just released.
+    /// seconds of game time at the game's speed (none while paused), the
+    /// short way round; at once in Original mode (the original shows no
+    /// turning, verified), and for lemmings just released.
     fn turn_yaws(&mut self, enhanced: bool, dt: f32) {
         use std::f32::consts::{PI, TAU};
         let Some(sim) = &self.sim else { return };
@@ -1483,7 +1507,15 @@ impl Game {
                 self.yaws.push(target);
                 continue;
             };
-            let diff = (target - *yaw + PI).rem_euclid(TAU) - PI;
+            let mut diff = (target - *yaw + PI).rem_euclid(TAU) - PI;
+            // A turner about-facing spins through the way it sends walkers
+            // (yaw grows clockwise seen from above); other half turns, the
+            // way rounding gives (owner: it spun away from its arrow).
+            if let l3d_sim::State::Turning { to } = l.state
+                && diff.abs() > PI - 0.01
+            {
+                diff = if to == l.dir.clockwise() { PI } else { -PI };
+            }
             *yaw = if enhanced && diff.abs() > step {
                 (*yaw + step * diff.signum()).rem_euclid(TAU)
             } else {
@@ -1730,6 +1762,8 @@ pub(crate) fn load_level(w: &mut World) {
     });
     game.sim = Some(l3d_sim::Simulation::new(&level, &blocks));
     game.snapshots.clear();
+    game.views.clear();
+    (game.view_shown, game.view_gliding) = (None, false);
     if opts.solve
         && let Some(log) = l3d_sim::demos::demo(n, &level, &blocks)
     {
@@ -1997,7 +2031,8 @@ pub(crate) fn camera_controls(w: &mut World) {
         }
         // The camera can't enter blocks (unless they are marked passable for
         // it); it slides along them. Preset jumps and glides, the lemming
-        // view and the preview are exempt; after a glide the camera moves
+        // view, the preview and a view replayed as played (`view_replay`)
+        // are exempt; after a glide the camera moves
         // freely until it is clear of blocks.
         // Where the game places the camera (the preview handing over to
         // play) it starts afresh: a walk from where it was before would run
@@ -2013,7 +2048,8 @@ pub(crate) fn camera_controls(w: &mut World) {
             let jumped = keys.any_just_pressed(presets)
                 || lemming_cam.following().is_some()
                 || preview.active
-                || gliding;
+                || gliding
+                || game.view_shown.is_some();
             // The way there is walked in short steps, so that a long move in
             // one frame (a burst of wheel notches) can't pass through a wall.
             if let Some(free) = *last_free

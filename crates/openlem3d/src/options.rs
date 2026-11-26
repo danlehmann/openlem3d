@@ -68,8 +68,44 @@ pub(crate) fn load_lights(w: &mut World) {
         Some(images.add(indexed_image(g, &pal, true)))
     };
     if let (Some(on), Some(off)) = (add(b'#'), add(b'$')) {
-        let font = crate::title::glyphs(&icons.small_font, &pal, 4.0, 1.0, images);
+        let mut small = icons.small_font.clone();
+        with_percent(&mut small);
+        let font = crate::title::glyphs(&small, &pal, 4.0, 1.0, images);
         w.options.lights = Some(Lights { on, off, font });
+    }
+}
+
+/// The small font's '%' is an arrow: our own percent sign in its place, in
+/// the colours of its '0' (face, and the shadow one pixel right and down).
+fn with_percent(f: &mut l3d_formats::font::Font) {
+    const FACE: [&str; 7] = [
+        "11...1", "11..1.", "...1..", "..1...", ".1....", "1...11", "....11",
+    ];
+    let Some(zero) = f.glyph(b'0').cloned() else {
+        return;
+    };
+    let (face, shadow) = (zero.pixels[0], zero.pixels[zero.width + 2]);
+    let Some(i) = b'%'.checked_sub(f.first).map(usize::from) else {
+        return;
+    };
+    let Some(g) = f.glyphs.get_mut(i) else {
+        return;
+    };
+    g.pixels.fill(0);
+    let on = |x: usize, y: usize| {
+        FACE.get(y)
+            .is_some_and(|r| r.as_bytes().get(x) == Some(&b'1'))
+    };
+    for y in 0..g.height {
+        for x in 0..g.width {
+            g.pixels[y * g.width + x] = if on(x, y) {
+                face
+            } else if x > 0 && y > 0 && on(x - 1, y - 1) {
+                shadow
+            } else {
+                0
+            };
+        }
     }
 }
 
@@ -77,6 +113,9 @@ pub(crate) fn load_lights(w: &mut World) {
 enum Item {
     Fullscreen,
     Rewind,
+    /// What a replay's camera does: Original shows the view as played,
+    /// Free leaves it to the viewer (ours).
+    ReplayCamera,
     Fps,
     VrGlide,
     SmoothTurn,
@@ -146,10 +185,29 @@ fn toggles() -> impl Iterator<Item = (Item, &'static str, usize, usize)> {
         })
 }
 
-/// The mode's box, in the slider rows' free place, and where its name
-/// starts in it.
-const MODE_BOX: (f32, f32) = (160.0, 60.0);
-const MODE_NAME_X: f32 = 224.0;
+/// The mode's box, "Graphics" with the mode's name: the heading of the
+/// graphics settings, centred above them; and where the name starts.
+const MODE_BOX: (f32, f32) = (80.0, 80.0);
+const MODE_NAME_X: f32 = MODE_BOX.0 + LIGHT_X;
+/// The replay camera's box (ours), in the slider rows' free place, and
+/// where its value starts in it.
+const REPLAY_BOX: Rect = Rect {
+    min: Vec2::new(160.0, 60.0),
+    max: Vec2::new(320.0, 60.0 + BOX_HEIGHT),
+};
+const REPLAY_VALUE_X: f32 = 80.0;
+/// Where a light, or a value, starts in its box: lined up with the
+/// sliders' first lights.
+const LIGHT_X: f32 = 64.0;
+
+/// The replay camera's value.
+fn replay_value(s: &Settings) -> &'static str {
+    if s.original_replays {
+        "Original"
+    } else {
+        "Free"
+    }
+}
 const SLIDERS: [(Item, &str, usize, usize); 3] = [
     (Item::Music, "CD Music", 0, 0),
     (Item::Effects, "Effects", 1, 0),
@@ -184,7 +242,9 @@ pub(crate) fn spawn_options(w: &mut World) {
     w.screen_ui = Some(screen);
     w.options.targets.clear();
     w.options.shown.clear();
-    w.options.entries = entries();
+    // Original mode has none of Enhanced's graphics: not shown, but kept.
+    let enhanced = w.settings.enhanced();
+    w.options.entries = entries(enhanced);
     let font = &lights.font;
     let text = |ui: &mut Ui, s: &str, x: f32, y: f32| {
         let (glyphs, _) = font.layout(s);
@@ -206,26 +266,28 @@ pub(crate) fn spawn_options(w: &mut World) {
     };
     panel_box(ui, canvas, 112.0, 4.0, 96.0, 16.0);
     centred(ui, "CONFIGURATION", 160.0, 8.0);
-    // A box that is a button for `item`, with its label (and, for a
-    // setting with a value, the value at `value_x`).
-    let button = |ui: &mut Ui, item: Target, x: f32, y: f32, w_: f32, label: &str| {
+    // A box that is a button for `item` (pressable or not), with its label
+    // and, for a setting with a value, the value `value_x` in.
+    let button = |ui: &mut Ui, x: f32, y: f32, w_: f32, label: &str, pressable: bool| {
         let b = panel_box(ui, canvas, x, y, w_, BOX_HEIGHT);
-        if let Some(n) = ui.get_mut(b) {
+        if pressable && let Some(n) = ui.get_mut(b) {
             *n = std::mem::take(n).button();
         }
         text(ui, &label.to_uppercase(), x + 5.0, y + 3.0);
-        (b, item)
+        b
     };
-    // Enhanced's graphics (ours), under their heading.
-    {
-        panel_box(ui, canvas, 112.0, GRAPHICS_HEADING, 96.0, BOX_HEIGHT);
-        centred(ui, "GRAPHICS", 160.0, GRAPHICS_HEADING + 3.0);
+    let value = |ui: &mut Ui, s: &str, x: f32, y: f32| text(ui, &s.to_uppercase(), x, y + 3.0);
+    // Enhanced's graphics (ours), under the mode's box.
+    if enhanced {
         let g = w.settings.graphics;
         let rows = w.e.window.resolution.actual_height();
-        for (rect, entry, label) in graphics_layout(g, rows) {
+        for (rect, entry, label, shown) in graphics_layout(g, rows) {
             let Entry::Toggle(item) = entry else { continue };
             let (x, y, wd) = (rect.min.x, rect.min.y, rect.width());
-            let target = button(ui, Target::Toggle(item), x, y, wd, &label);
+            let b = button(ui, x, y, wd, label, true);
+            if let Some(v) = &shown {
+                value(ui, v, x + LIGHT_X, y);
+            }
             // Reflections come with the waves: without them, dimmed.
             if item == Item::Reflections && !g.waves {
                 ui.child(
@@ -235,11 +297,11 @@ pub(crate) fn spawn_options(w: &mut World) {
                         .background(Color::srgba(0.0, 0.0, 0.0, 0.55)),
                 );
             }
-            w.options.targets.push(target);
+            w.options.targets.push((b, Target::Toggle(item)));
             if lit(&w.settings, item).is_some() {
                 let l = ui.child(
                     canvas,
-                    UiNode::image(lights.off.clone()).at(x + wd - 13.0, y + 3.0, 7.0, 8.0),
+                    UiNode::image(lights.off.clone()).at(x + LIGHT_X, y + 3.0, 7.0, 8.0),
                 );
                 w.options.shown.push((l, Light(item, 1)));
             }
@@ -250,7 +312,7 @@ pub(crate) fn spawn_options(w: &mut World) {
         text(ui, "CUSTOM", x + 5.0, y + 3.0);
         let l = ui.child(
             canvas,
-            UiNode::image(lights.off.clone()).at(x + 67.0, y + 3.0, 7.0, 8.0),
+            UiNode::image(lights.off.clone()).at(x + LIGHT_X, y + 3.0, 7.0, 8.0),
         );
         w.options
             .shown
@@ -266,7 +328,7 @@ pub(crate) fn spawn_options(w: &mut World) {
         text(ui, &label.to_uppercase(), x + 5.0, y + 3.0);
         let l = ui.child(
             canvas,
-            UiNode::image(lights.off.clone()).at(x + 67.0, y + 3.0, 7.0, 8.0),
+            UiNode::image(lights.off.clone()).at(x + LIGHT_X, y + 3.0, 7.0, 8.0),
         );
         w.options.shown.push((l, Light(item, 1)));
     }
@@ -294,8 +356,16 @@ pub(crate) fn spawn_options(w: &mut World) {
         *n = std::mem::take(n).button();
     }
     w.options.targets.push((b, Target::Toggle(Item::Mode)));
-    text(ui, "MODE", x + 5.0, y + 3.0);
+    text(ui, "GRAPHICS", x + 5.0, y + 3.0);
     w.options.mode = None;
+    {
+        let (x, y) = (REPLAY_BOX.min.x, REPLAY_BOX.min.y);
+        let b = button(ui, x, y, REPLAY_BOX.width(), "Replay camera", true);
+        value(ui, replay_value(&w.settings), x + REPLAY_VALUE_X, y);
+        w.options
+            .targets
+            .push((b, Target::Toggle(Item::ReplayCamera)));
+    }
     for (target, label, x) in [
         (Target::Default, "Default Config", 0.0),
         (Target::Exit, "Exit and Save", 240.0),
@@ -320,8 +390,8 @@ pub(crate) fn spawn_options(w: &mut World) {
 }
 
 /// The settings and buttons a gamepad steps through, with their boxes, as
-/// `spawn_options` lays them out.
-fn entries() -> Vec<(Rect, Entry)> {
+/// `spawn_options` lays them out; the graphics only when `enhanced`.
+fn entries(enhanced: bool) -> Vec<(Rect, Entry)> {
     let mut e = Vec::new();
     for (item, _, row, col) in toggles() {
         let (x, y) = (COLUMNS[col], TOGGLE_ROWS[row]);
@@ -342,55 +412,61 @@ fn entries() -> Vec<(Rect, Entry)> {
         Rect::new(x, y, x + 160.0, y + BOX_HEIGHT),
         Entry::Toggle(Item::Mode),
     ));
+    e.push((REPLAY_BOX, Entry::Toggle(Item::ReplayCamera)));
     e.push((Rect::new(0.0, 180.0, 80.0, 195.0), Entry::Default));
     e.push((Rect::new(240.0, 180.0, 320.0, 195.0), Entry::Exit));
-    e.extend(
-        graphics_layout(Graphics::default(), 1080)
-            .into_iter()
-            .map(|(r, e, _)| (r, e)),
-    );
+    if enhanced {
+        e.extend(
+            graphics_layout(Graphics::default(), 1080)
+                .into_iter()
+                .map(|(r, e, ..)| (r, e)),
+        );
+    }
     e
 }
 
-/// The graphics' buttons (ours): their boxes, what they press and their
-/// labels, for graphics `g` on a screen of `rows` rows. The presets in a
-/// row (Custom shown beside them, `spawn_options`), the resolution and glow
-/// with their values, the effects as lights.
-fn graphics_layout(g: Graphics, rows: u32) -> Vec<(Rect, Entry, String)> {
+/// The graphics' buttons (ours): their boxes, what they press, their
+/// labels and values, for graphics `g` on a screen of `rows` rows. The
+/// presets in a row (Custom shown beside them, `spawn_options`), the
+/// resolution, glow and filtering with their values, the effects as lights.
+fn graphics_layout(g: Graphics, rows: u32) -> Vec<(Rect, Entry, &'static str, Option<String>)> {
     let mut e = Vec::new();
-    let mut add = |x: f32, y: f32, w: f32, item: Item, label: String| {
-        e.push((
-            Rect::new(x, y, x + w, y + BOX_HEIGHT),
-            Entry::Toggle(item),
-            label,
-        ));
-    };
+    let mut add =
+        |x: f32, y: f32, w: f32, item: Item, label: &'static str, value: Option<String>| {
+            e.push((
+                Rect::new(x, y, x + w, y + BOX_HEIGHT),
+                Entry::Toggle(item),
+                label,
+                value,
+            ));
+        };
     for (i, p) in Preset::CHOICES.into_iter().enumerate() {
         add(
             COLUMNS[i],
             PRESET_ROW,
             80.0,
             Item::Preset(p),
-            p.name().into(),
+            p.name(),
+            None,
         );
     }
     let row = VALUE_ROW;
+    let resolution = crate::settings::resolution_name(g.resolution, rows);
     add(
         0.0,
         row,
         160.0,
         Item::Resolution,
-        format!(
-            "Resolution {}",
-            crate::settings::resolution_name(g.resolution, rows)
-        ),
+        "Resolution",
+        Some(resolution),
     );
     add(
         160.0,
         row,
         160.0,
         Item::Glow,
-        format!("Glow {}", g.glow.name()),
+        "Glow",
+        Some(g.glow.name().into()),
     );
     let effects = [
         (Item::Waves, "Waves"),
@@ -402,7 +478,7 @@ fn graphics_layout(g: Graphics, rows: u32) -> Vec<(Rect, Entry, String)> {
     ];
     for (i, (item, label)) in effects.into_iter().enumerate() {
         let y = GRAPHICS_ROWS[i / 4];
-        add(COLUMNS[i % 4], y, 80.0, item, label.into());
+        add(COLUMNS[i % 4], y, 80.0, item, label, None);
     }
     // The filtering, with its value, in the second row's other half.
     add(
@@ -410,14 +486,14 @@ fn graphics_layout(g: Graphics, rows: u32) -> Vec<(Rect, Entry, String)> {
         GRAPHICS_ROWS[1],
         160.0,
         Item::Filtering,
-        format!("Filtering {}", g.filtering.name()),
+        "Filter",
+        Some(g.filtering.name().into()),
     );
     e
 }
 
-/// The graphics' heading and rows (ours), below the original's settings:
-/// the presets, the resolution and glow, and two rows of effects.
-const GRAPHICS_HEADING: f32 = 80.0;
+/// The graphics' rows (ours), under the mode's box: the presets, the
+/// resolution and glow, and two rows of effects.
 const PRESET_ROW: f32 = 98.0;
 const VALUE_ROW: f32 = 114.0;
 const GRAPHICS_ROWS: [f32; 2] = [130.0, 146.0];
@@ -582,6 +658,7 @@ fn toggle(s: &mut Settings, item: Item) {
     match item {
         Item::Fullscreen => s.fullscreen = !s.fullscreen,
         Item::Rewind => s.rewind = !s.rewind,
+        Item::ReplayCamera => s.original_replays = !s.original_replays,
         Item::Fps => s.fps = !s.fps,
         Item::VrGlide => s.vr_glide = !s.vr_glide,
         Item::SmoothTurn => s.smooth_turn = !s.smooth_turn,
@@ -665,6 +742,10 @@ fn press(w: &mut World, item: Item) {
         return;
     }
     toggle(&mut w.settings, item);
+    // The replay camera names its value; the mode dims the graphics or not.
+    if matches!(item, Item::ReplayCamera | Item::Mode) {
+        w.options.rebuild = true;
+    }
     if graphics(w.settings.graphics, item).is_some() {
         // Chosen by hand: the automatic choice leaves it be.
         w.settings.calibrated = true;
@@ -820,7 +901,7 @@ mod tests {
     /// them all).
     #[test]
     fn gamepad_steps() {
-        let e = entries();
+        let e = entries(true);
         let name = |i: Option<usize>| match i.map(|i| e[i].1) {
             None => "-".to_string(),
             Some(Entry::Toggle(item) | Entry::Slider(item)) => format!("{item:?}"),
@@ -845,9 +926,10 @@ mod tests {
         assert_eq!(step("Fullscreen", Vec2::Y), "Music");
         assert_eq!(step("Rewind", Vec2::Y), "Music");
         assert_eq!(step("Fps", Vec2::Y), "Camera");
-        assert_eq!(step("Mode", Vec2::NEG_Y), "Camera");
+        assert_eq!(step("ReplayCamera", Vec2::NEG_Y), "Camera");
+        assert_eq!(step("ReplayCamera", Vec2::Y), "Mode");
         // Down into the graphics, and out of them to the buttons.
-        assert_eq!(step("Mode", Vec2::Y), "Preset(High)");
+        assert_eq!(step("Mode", Vec2::Y), "Preset(Medium)");
         assert_eq!(step("Preset(Low)", Vec2::X), "Preset(Medium)");
         assert_eq!(step("Resolution", Vec2::NEG_Y), "Preset(Low)");
         assert_eq!(step("Snow", Vec2::Y), "Filtering");
