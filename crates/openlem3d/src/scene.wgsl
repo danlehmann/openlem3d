@@ -200,7 +200,34 @@ struct VOut {
     // there, 0–1 of its depth, z how far it is moved up from where it lies
     // untouched; else 0.
     @location(9) cover: vec3<f32>,
+    // 1 on a sea whose texture holds its horizon band's shades
+    // ([`HORIZON_BAND_SHADES`]), else 0.
+    @location(10) band: f32,
 };
+
+/// The height of one row of the horizon band in the original's 400-row
+/// screen: one of its 200 rows.
+const HORIZON_BAND_ROW: f32 = 2.0;
+/// The shades a banded sea's texture holds, stacked: the sea as it is, then
+/// one, two, three and four palette entries further on (`scene_build`); the
+/// band is a row for each but the first.
+const HORIZON_BAND_SHADES: f32 = 5.0;
+
+/// Which of a banded sea's shades a pixel at framebuffer position `clip`
+/// takes: the first whole row of pixels below the horizon the fourth, the
+/// next band row the third, and so on; below the band, 0 (the sea as it
+/// is). The band starts at a whole row, as the original's, whose horizon
+/// lies between two of its rows: rendered at its 200 rows, ours lies
+/// across one, which shows the sky.
+fn horizon_band_shade(clip: vec2<f32>) -> f32 {
+    let horizon = u.sky.y / u.view.w + u.origin.y;
+    let first = floor(horizon + 0.5);
+    let row = floor((clip.y - first) / (HORIZON_BAND_ROW * u.sky.z / u.view.w));
+    if (row < 0.0 || row >= HORIZON_BAND_SHADES - 1.0) {
+        return 0.0;
+    }
+    return HORIZON_BAND_SHADES - 1.0 - row;
+}
 
 /// `p` mirrored in the sea when `mirrored`.
 fn mirror_of(p: vec3<f32>, mirrored: bool) -> vec3<f32> {
@@ -249,6 +276,7 @@ fn vs(v: VIn, @builtin(instance_index) instance: u32) -> VOut {
         o.world = p;
         o.uv = v.uv + v.offset * u.sky.w;
         o.tile = vec2(max(v.anim.x, 1.0), frame);
+        o.band = select(0.0, 1.0, v.anim.y < -1.5);
         return o;
     }
     var world = v.pos + u.right.xyz * v.offset.x + vec3(0.0, v.offset.y, 0.0);
@@ -314,11 +342,14 @@ fn fs(v: VOut) -> @location(0) vec4<f32> {
     // other textures, sampled nearest, the snap changes nothing). Water
     // with waves (ours) is not snapped: it stays smooth up close.
     let size = vec2<f32>(textureDimensions(tex));
+    // A banded sea's texture holds its frames once for each shade.
+    let shades = select(1.0, HORIZON_BAND_SHADES, v.band > 0.5);
     let frames = max(v.tile.x, 1.0);
-    let gx = dpdx(v.uv) / vec2(1.0, frames);
-    let gy = dpdy(v.uv) / vec2(1.0, frames);
+    let gx = dpdx(v.uv) / vec2(1.0, frames * shades);
+    let gy = dpdy(v.uv) / vec2(1.0, frames * shades);
     if (v.tile.x > 0.0) {
-        uv = vec2(uv.x, (fract(uv.y) + v.tile.y) / v.tile.x);
+        let shade = select(0.0, horizon_band_shade(v.clip.xy), v.band > 0.5);
+        uv = vec2(uv.x, (fract(uv.y) + v.tile.y + shade * v.tile.x) / (v.tile.x * shades));
     }
     if (v.wave.w <= 0.0 && max(length(gx * size), length(gy * size)) < 1.0) {
         uv = (floor(uv * size) + 0.5) / size;

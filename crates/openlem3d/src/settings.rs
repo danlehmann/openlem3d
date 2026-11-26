@@ -390,6 +390,7 @@ impl Settings {
             snow: self.effects().is_some_and(|g| g.snow),
             windows: self.effects().is_some_and(|g| g.windows),
             signals: self.enhanced(),
+            horizon_band: !self.enhanced(),
         }
     }
 

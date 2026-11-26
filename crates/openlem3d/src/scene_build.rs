@@ -31,11 +31,20 @@ pub(crate) mod level_flags {
     pub const SURROUND_SKY: u16 = 0x0200;
     pub const DECALS_SHOW_SCREEN: u16 = 0x0400;
     pub const LAND_HALF_SCALE: u16 = 0x0800;
+    pub const NO_HORIZON_BAND: u16 = 0x2000;
     pub const SEA_DOUBLE_SCALE: u16 = 0x4000;
 }
 
+/// The shades a banded sea's texture holds (`scene.wgsl`'s
+/// `HORIZON_BAND_SHADES`): the sea itself and its four band rows.
+const HORIZON_BAND_SHADES: u8 = 5;
+
 /// How far the sea plane extends beyond the grid, in grid units.
 const SEA_MARGIN: f32 = 4000.0;
+/// How much further the sea plane reaches in a few large quads beyond
+/// [`SEA_MARGIN`], in grid units: far enough that it stops less than a
+/// pixel below the horizon from any camera.
+pub(crate) const SEA_HORIZON: f32 = 40000.0;
 /// How much bigger the original draws a 128×128 sea, and land drawn at
 /// half scale, than whole grid units: 75/64 (measured with marked textures
 /// in the original, 2026-10-25: 2.34–2.36 times our old 2-unit sea on Fun 1, 1.17 times the
@@ -549,6 +558,7 @@ fn plane_layer(
     tile: f32,
     texture: RgbaImage,
     frames: u32,
+    banded: bool,
     drift: [f32; 2],
     waves: Option<&Waves>,
 ) -> SceneLayer {
@@ -570,10 +580,11 @@ fn plane_layer(
             (x0 + size, z0),
         ] {
             let mut v = Vertex::fixed([x, y, z], [x / tile, z / tile], 0.0, false);
-            // A tiled surface (see `scene.wgsl`): frames, and the drift;
-            // with waves, how strongly they shade and lift it, and that it
-            // is water, with its surf.
-            v.anim = [frames as f32, -1.0];
+            // A tiled surface (see `scene.wgsl`): frames, whether its
+            // texture holds the horizon band's shades, and the drift; with
+            // waves, how strongly they shade and lift it, and that it is
+            // water, with its surf.
+            v.anim = [frames as f32, if banded { -2.0 } else { -1.0 }];
             v.offset = drift;
             if let Some(w) = waves {
                 let s = w.strength(x, z);
@@ -615,6 +626,27 @@ fn plane_layer(
                 quad(&mut b, x0, z0, COARSE);
             }
         }
+    }
+    // Beyond, out to [`SEA_HORIZON`], a ring of four large quads, so that
+    // the sea reaches the horizon within a fraction of a pixel, as the
+    // original's does (its last rows hold the horizon band).
+    let (lo, hi) = (start, start + steps as f32 * COARSE);
+    let (far_lo, far_hi) = (lo - SEA_HORIZON, hi + SEA_HORIZON);
+    for (x0, z0, x1, z1) in [
+        (far_lo, far_lo, far_hi, lo),
+        (far_lo, hi, far_hi, far_hi),
+        (far_lo, lo, lo, hi),
+        (hi, lo, far_hi, hi),
+    ] {
+        let base = b.base();
+        for (x, z) in [(x0, z0), (x0, z1), (x1, z1), (x1, z0)] {
+            let mut v = Vertex::fixed([x, y, z], [x / tile, z / tile], 0.0, false);
+            v.anim = [frames as f32, if banded { -2.0 } else { -1.0 }];
+            v.offset = drift;
+            v.push(&mut b.vertices);
+        }
+        b.indices
+            .extend([base, base + 1, base + 2, base, base + 2, base + 3]);
     }
     SceneLayer {
         smooth: true,
@@ -1633,6 +1665,11 @@ pub struct Show {
     /// A spaceship's windows look out on space (ours, in Enhanced and Ultra
     /// modes; see [`glow::window_tile`]).
     pub windows: bool,
+    /// The four rows of a textured sea just below the horizon are drawn a
+    /// palette entry further down its ramp each, darker towards the
+    /// horizon, unless the level's flag `0x2000` says not (the original,
+    /// measured 2026-11-26: `docs/spec/level.md`).
+    pub horizon_band: bool,
 }
 
 /// The sea graphics that are sand.
@@ -2006,9 +2043,9 @@ pub fn build(data: &mut GameData, n: u32, show: Show) -> Result<BuiltLevel, l3d_
         // the sea is still. A 128×128 sea spans 4 units times [`FLOOR_SCALE`]
         // (Fun 1), a 64×64 frame 4 units (Fun 2 and Tricky 11), whatever the
         // half-scale flag (measured with marked textures, `docs/spec/camera.md`).
-        let (img, tile, size, frames) = if flags & level_flags::SEA_128 != 0 {
+        let (pixels, tile, size, frames) = if flags & level_flags::SEA_128 != 0 {
             (
-                indexed_to_rgba(&sea[..(128 * 128).min(sea.len())], 128, &pal),
+                &sea[..(128 * 128).min(sea.len())],
                 4.0 * FLOOR_SCALE,
                 128.0,
                 1,
@@ -2020,11 +2057,22 @@ pub fn build(data: &mut GameData, n: u32, show: Show) -> Result<BuiltLevel, l3d_
                 (sea.len() / (64 * 64)).max(1) as u32
             };
             (
-                indexed_to_rgba(&sea[..(64 * 64 * frames as usize).min(sea.len())], 64, &pal),
+                &sea[..(64 * 64 * frames as usize).min(sea.len())],
                 4.0,
                 64.0,
                 frames,
             )
+        };
+        // With the horizon band, the frames again for each of its rows'
+        // shades, each a palette entry further on than the last.
+        let banded = show.horizon_band && flags & level_flags::NO_HORIZON_BAND == 0;
+        let img = if banded {
+            let shaded: Vec<u8> = (0..HORIZON_BAND_SHADES)
+                .flat_map(|k| pixels.iter().map(move |&p| p.saturating_add(k)))
+                .collect();
+            indexed_to_rgba(&shaded, size as u32, &pal)
+        } else {
+            indexed_to_rgba(pixels, size as u32, &pal)
         };
         // The flag `0x4000` draws it at twice that scale (measured with a
         // marked sea on Tricky 11 "A Head Above the Rest", `docs/spec/camera.md`).
@@ -2053,9 +2101,15 @@ pub fn build(data: &mut GameData, n: u32, show: Show) -> Result<BuiltLevel, l3d_
         if waves.is_some() && show.mirror {
             scene.mirror = Some(SEA_Y);
         }
-        scene
-            .layers
-            .push(plane_layer(SEA_Y, tile, img, frames, drift, waves.as_ref()));
+        scene.layers.push(plane_layer(
+            SEA_Y,
+            tile,
+            img,
+            frames,
+            banded,
+            drift,
+            waves.as_ref(),
+        ));
     }
     // Ice on a level mirrored in its sea shines with it, where its top lies
     // at the sea (Practice "Slippery").

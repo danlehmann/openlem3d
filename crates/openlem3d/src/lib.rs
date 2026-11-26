@@ -1037,7 +1037,8 @@ fn projection(fov_y_deg: f32, aspect: f32, horizon: f32) -> Mat4 {
     // Reversed depth: the near plane at 1, the far one at 0, which keeps
     // depth precise far off, so surfaces a thousandth of a unit apart (the
     // stacked land polygons) stay apart across the level.
-    let mut p = Mat4::perspective_rh(fov_y_deg.to_radians(), aspect, 8000.0, 0.05);
+    let far = 2.0 * (scene_build::SEA_HORIZON + 4000.0);
+    let mut p = Mat4::perspective_rh(fov_y_deg.to_radians(), aspect, far, 0.05);
     p.z_axis.y -= shift;
     p
 }
