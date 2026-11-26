@@ -151,21 +151,32 @@ fn sides_of(l: &l3d_sim::Lemming) -> [Vec3; 2] {
 }
 
 /// The side of lemming `l` (0 anticlockwise, 1 clockwise) a ray passes
-/// nearer, as seen from above, and whether clearly so.
-fn ray_turner_side(l: &l3d_sim::Lemming, from: Vec3, dir: Vec3) -> (usize, bool) {
-    let c = lemming_centre(l);
-    let t = (c - from).dot(dir).max(0.0);
-    let off = (from + dir * t - c).with_y(0.0);
+/// nearer, as seen from above, and whether clearly so; riding along with
+/// it, the side the ray points to.
+fn ray_turner_side(l: &l3d_sim::Lemming, from: Vec3, dir: Vec3, riding: bool) -> (usize, bool) {
+    let off = if riding {
+        dir.with_y(0.0) * RAY_TURNER_CLEAR * 2.0
+    } else {
+        let c = lemming_centre(l);
+        let t = (c - from).dot(dir).max(0.0);
+        (from + dir * t - c).with_y(0.0)
+    };
     let fit = sides_of(l).map(|s| s.dot(off.normalize_or_zero()));
     let clear = off.length() > RAY_TURNER_CLEAR && (fit[0] - fit[1]).abs() > ARROW_CLEAR_MARGIN;
     (if fit[0] >= fit[1] { 0 } else { 1 }, clear)
 }
 
 /// Gives lemming `i` its waiting turner, pointing to the side a ray passes
-/// nearer; whether the sim took it.
-fn give_turner_on_ray(sim: &mut l3d_sim::Simulation, i: usize, from: Vec3, dir: Vec3) -> bool {
+/// nearer (riding along with it, points to); whether the sim took it.
+fn give_turner_on_ray(
+    sim: &mut l3d_sim::Simulation,
+    i: usize,
+    from: Vec3,
+    dir: Vec3,
+    riding: bool,
+) -> bool {
     let l = &sim.lemmings[i];
-    let (side, _) = ray_turner_side(l, from, dir);
+    let (side, _) = ray_turner_side(l, from, dir, riding);
     let to = [l.dir.anticlockwise(), l.dir.clockwise()][side];
     sim.assign_turner(i, to)
 }
@@ -339,7 +350,7 @@ pub(crate) fn assign_on_pointer(w: &mut World) {
     let size = screen.size;
     let give_turner = |sim: &mut l3d_sim::Simulation, riding: Option<f32>, i: usize| match at {
         At::Point(point) => give_pending_turner(sim, camera, size, riding, i, point),
-        At::Ray(from, dir) => Some(give_turner_on_ray(sim, i, from, dir)),
+        At::Ray(from, dir) => Some(give_turner_on_ray(sim, i, from, dir, riding.is_some())),
     };
     // Riding along, nothing is selected (verified): a turner given to the
     // lemming ridden with points to the side of the screen clicked (left
@@ -433,20 +444,36 @@ fn turner_sides(
 /// For VR, where the arrows are drawn in the level: the lemming waiting for
 /// its turner's side, its centre, its two sides (anticlockwise, clockwise;
 /// level unit vectors), and the side a click along the controller's ray
-/// would pick now, if clearly one (none while it points elsewhere). Not
-/// riding along.
+/// would pick now, if clearly one (none while it points elsewhere). Riding
+/// along with that lemming, the arrows show a little ahead of it, where the
+/// rider sees them, and pointing left or right of its way picks.
 #[cfg_attr(not(feature = "xr"), allow(dead_code))]
 pub(crate) fn pending_turner_sides(w: &World) -> Option<(Vec3, [Vec3; 2], Option<usize>)> {
-    if w.state != AppState::Playing || w.lemming_cam.following().is_some() {
+    if w.state != AppState::Playing {
         return None;
     }
-    let l = w.game.sim.as_ref()?.lemmings.get(w.pending.0?)?;
+    let i = w.pending.0?;
+    let following = w.lemming_cam.following();
+    if following.is_some_and(|f| f != i) {
+        return None;
+    }
+    let riding = following.is_some();
+    let l = w.game.sim.as_ref()?.lemmings.get(i)?;
     let chosen = w.level_aim.ray.and_then(|(from, dir)| {
-        let (side, clear) = ray_turner_side(l, from, dir);
+        let (side, clear) = ray_turner_side(l, from, dir, riding);
         clear.then_some(side)
     });
-    Some((lemming_centre(l), sides_of(l), chosen))
+    let mut centre = lemming_centre(l);
+    if riding {
+        let [x, _, z] = l.dir.delta();
+        centre += Vec3::new(x as f32, 0.0, z as f32).normalize_or_zero() * RIDING_ARROWS_AHEAD;
+    }
+    Some((centre, sides_of(l), chosen))
 }
+
+/// Riding along in VR, how far ahead of the lemming its turner's arrows
+/// show (world units).
+const RIDING_ARROWS_AHEAD: f32 = 1.0;
 
 /// Gives lemming `i` its waiting turner, pointing to the side a click at
 /// `point` lands on: riding along with it, the side of the screen (head
