@@ -1106,6 +1106,9 @@ pub struct Game {
     /// Each lemming's place before the last tick, for drawing it
     /// moving smoothly over the step ([`Game::drawn_pos`]).
     prev_pos: Vec<[i32; 3]>,
+    /// Whether the last step left the level where it was or ran it back
+    /// (paused, the dial held still, running back) instead of a tick on.
+    held: bool,
     /// The way each lemming is drawn facing, turning towards the way it
     /// faces ([`Game::turn_yaws`]).
     yaws: Vec<f32>,
@@ -1311,6 +1314,7 @@ fn step_simulation(w: &mut World) {
         fast_forward,
         speed,
         prev_pos,
+        held,
         replay,
         doors,
         snapshots,
@@ -1319,6 +1323,8 @@ fn step_simulation(w: &mut World) {
     else {
         return;
     };
+    // Until this step ticks the level on.
+    *held = true;
     // Speeding up gradually, after a pause and into fast-forward, and
     // stopping or slowing at once, so the player keeps control; the ticks
     // are the same ones, so only their pace changes.
@@ -1398,6 +1404,7 @@ fn step_simulation(w: &mut World) {
     if replay.as_mut().is_some_and(|r| !r.feed(sim)) {
         *replay = None;
     }
+    *held = false;
     sim.step();
     lemming_render::step_doors(doors, sim);
     for &step in &options.assign {
@@ -1432,9 +1439,11 @@ impl Game {
 
     /// How far the game is through its current step towards the next, 0
     /// to 1, for drawing lemmings between their places; 1 (where they are)
-    /// in Original mode, which moves them in steps as the original did.
+    /// in Original mode, which moves them in steps as the original did, and
+    /// while the level is held or running back, so that nothing replays the
+    /// last tick's motion over and over.
     fn tick_progress(&self, enhanced: bool, overstep: f32) -> f32 {
-        if enhanced {
+        if enhanced && !self.held {
             overstep.clamp(0.0, 1.0)
         } else {
             1.0
