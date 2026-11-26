@@ -324,9 +324,14 @@ builder still building walks past it and off the staircase's unfinished end
 (same test, release rate 50); it is not turned back.
 
 Terrain is changed one quarter-height segment at a time. The basher and the
-digger were seen to remove segments across a whole cell at once. Whether
-steel stops them, and when exactly a basher stops, is untested; the
-implementation never removes steel (provisional). None of the levels
+digger were seen to remove segments across a whole cell at once. Steel stops the
+basher and the bomber's blast (**verified with changed levels**,
+2026-11-26): in the Practice "Basher" demo with the crate's block given the
+steel flag, the basher walked up to it and turned back, with no cracks or
+pieces, and the crate stayed whole; in the Practice "Bomber" demo with both
+blocks of its wall given the flag, the blast holed the path under the bomber
+as usual and left the wall whole. Ours does the same, and never removes
+steel; the miner at steel is untested. None of the levels
 reachable so far (level 1 of each rating, Fun 2 and 3, the Practice levels)
 puts a basher, miner or digger next to steel: their only steel cells
 (`level-map --steel`) are the entrance and exit blocks, which are flagged
