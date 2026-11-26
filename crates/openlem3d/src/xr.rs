@@ -864,9 +864,12 @@ pub(crate) fn input(w: &mut World) {
                 let view_proj = crate::projection(AIM_FOV_Y, size.x / size.y.max(1.0), 0.5)
                     * Mat4::look_to_rh(from, toward, up);
                 x.aim = Some(view_proj);
+                // The pointer in the middle of the whole screen, where no
+                // button is (not of the palette's or popup's part of it).
+                let whole = w.screen.pixels;
                 window.set_physical_cursor_position(Some(Vec2::new(
-                    (panel.x + panel.z / 2) as f32,
-                    (panel.y + panel.w / 2) as f32,
+                    (whole.x + whole.z / 2) as f32,
+                    (whole.y + whole.w / 2) as f32,
                 )));
                 let aim_camera = SceneCamera {
                     view_proj,
