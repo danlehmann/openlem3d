@@ -71,6 +71,17 @@ const STICK_DEAD: f32 = 0.2;
 const LIST_ROWS_PER_SEC: f32 = 8.0;
 /// A snap turn with the right stick, in radians.
 const SNAP_TURN: f32 = std::f32::consts::FRAC_PI_6;
+/// Smooth turning (the Smooth Turn setting) with the stick fully over,
+/// radians per second.
+const SMOOTH_TURN_SPEED: f32 = 1.75;
+/// The comfort vignette (the Vignette setting): clear inside this radius
+/// of each eye's view (as a fraction of its half-height and half-width), at
+/// its darkest from the edge out, and how long it takes to come and go
+/// (seconds).
+const VIGNETTE_INNER: f32 = 0.45;
+const VIGNETTE_EDGE: f32 = 0.95;
+const VIGNETTE_DARK: f32 = 0.9;
+const VIGNETTE_FADE: f32 = 0.2;
 /// The field of view of the game's camera along the ray (degrees): only
 /// the middle, where the pointer is, matters.
 const AIM_FOV_Y: f32 = 30.0;
@@ -185,6 +196,8 @@ pub(crate) struct Xr {
     /// Whether the right stick has been back in the middle since its last
     /// snap turn.
     turn_ready: bool,
+    /// How far the comfort vignette is in (0–1).
+    vignette: f32,
     /// Where the head is in the level, in units, and its heading (the
     /// camera-yaw convention), as of this frame's input.
     seen_from: Option<(Vec3, f32)>,
@@ -327,6 +340,7 @@ unsafe fn try_start(profile: bool) -> Result<(Box<Xr>, Gpu), Error> {
         beam: None,
         overlay: None,
         turn_ready: true,
+        vignette: 0.0,
         seen_from: None,
         place: Place {
             pos: Vec3::ZERO,
@@ -751,20 +765,38 @@ pub(crate) fn input(w: &mut World) {
         let right = Vec3::new(-ahead.z, 0.0, ahead.x);
         place.pos += (ahead * walk.y + right * walk.x) * crate::CAMERA_SPEED * dt;
     }
-    if !listing && turn.y.abs() > STICK_DEAD && turn.y.abs() > turn.x.abs() {
+    let rising = !listing && turn.y.abs() > STICK_DEAD && turn.y.abs() > turn.x.abs();
+    if rising {
         place.pos.y += turn.y * RISE_SPEED * dt;
     }
-    if turn.x.abs() < STICK_DEAD {
+    // Turning about the head, in steps or (Smooth Turn) smoothly; a push
+    // right turns right: the heading's yaw goes up.
+    let smooth = w.settings.smooth_turn;
+    let turning = turn.x.abs() > STICK_DEAD && turn.x.abs() > turn.y.abs();
+    let angle = if turn.x.abs() < STICK_DEAD {
         x.turn_ready = true;
-    } else if x.turn_ready && turn.x.abs() > turn.y.abs() {
+        0.0
+    } else if smooth && turning {
+        turn.x * SMOOTH_TURN_SPEED * dt
+    } else if x.turn_ready && turning {
         x.turn_ready = false;
+        SNAP_TURN * turn.x.signum()
+    } else {
+        0.0
+    };
+    if angle != 0.0 {
         let at = head.map_or(Vec3::ZERO, |h| h.0);
         let before = place.world_from_space().transform_point3(at);
-        // A push right turns right: the heading's yaw goes up.
-        place.yaw += SNAP_TURN * turn.x.signum();
+        place.yaw += angle;
         let after = place.world_from_space().transform_point3(at);
         place.pos += before - after;
     }
+    // The comfort vignette comes in while the sticks move the player
+    // smoothly (not for a step's turn), and goes again after.
+    let moving = walk.length() > STICK_DEAD || rising || (smooth && turning);
+    let target = (w.settings.vr_vignette && moving) as u8 as f32;
+    let step = dt / VIGNETTE_FADE;
+    x.vignette += (target - x.vignette).clamp(-step, step);
     // The game's camera follows (not in the lemming view, which is the
     // lemming's, or while moving to another view).
     if !following && x.jump.is_none() && x.gliding.is_none() {
@@ -1127,7 +1159,8 @@ pub(crate) fn render(w: &mut World) {
         let mut encoder = device.create_command_encoder(&Default::default());
         for (eye, view) in views.iter().enumerate() {
             let target = &overlay.chain.images[image].1[eye];
-            let mut vertices = triangle_vertices(&arrows, view);
+            let mut vertices = vignette_vertices(x.vignette);
+            vertices.extend(triangle_vertices(&arrows, view));
             vertices.extend(x.beam.map(|b| beam_vertices(&b, view)).unwrap_or_default());
             let buffer = (!vertices.is_empty()).then(|| {
                 wgpu::util::DeviceExt::create_buffer_init(
@@ -1567,6 +1600,38 @@ fn turner_arrows(centre: Vec3, dirs: [Vec3; 2], chosen: Option<usize>) -> Vec<(V
                 ]
                 .map(|v| (v, colour)),
             );
+        }
+    }
+    out
+}
+
+/// The comfort vignette, `k` of the way in, for the overlay: a dark ring
+/// round the view, straight in clip space (the same for each eye).
+fn vignette_vertices(k: f32) -> Vec<f32> {
+    if k <= 0.01 {
+        return Vec::new();
+    }
+    const SEGMENTS: usize = 48;
+    let dark = k * VIGNETTE_DARK;
+    // Clear inside, then darker to the edge, then dark past the corners.
+    let rings = [(VIGNETTE_INNER, 0.0), (VIGNETTE_EDGE, dark), (2.0, dark)];
+    let mut out = Vec::with_capacity(SEGMENTS * 12 * VERTEX_FLOATS);
+    let mut corner = |r: f32, angle: f32, alpha: f32| {
+        out.extend([r * angle.cos(), r * angle.sin(), 0.0, 1.0]);
+        out.extend([0.0, 0.0, 0.0, alpha]);
+        out.extend([0.0, 0.0]);
+    };
+    for i in 0..SEGMENTS {
+        let step = std::f32::consts::TAU / SEGMENTS as f32;
+        let (a0, a1) = (step * i as f32, step * (i + 1) as f32);
+        for pair in rings.windows(2) {
+            let [(ri, ai), (ro, ao)] = [pair[0], pair[1]];
+            corner(ri, a0, ai);
+            corner(ro, a0, ao);
+            corner(ro, a1, ao);
+            corner(ri, a0, ai);
+            corner(ro, a1, ao);
+            corner(ri, a1, ai);
         }
     }
     out

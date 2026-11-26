@@ -25,6 +25,12 @@ pub struct Settings {
     /// In the headset, moves to another camera view glide as on the
     /// screen (ours); off, the view cuts there in the dark.
     pub vr_glide: bool,
+    /// In the headset, the right stick turns smoothly (ours); off, it turns
+    /// in steps, the usual comfort default.
+    pub smooth_turn: bool,
+    /// In the headset, the view's edges darken while the sticks move the
+    /// player (ours), a comfort aid.
+    pub vr_vignette: bool,
     /// Volumes and camera speed, 0–10 lights as on the original's sliders.
     pub music: u8,
     pub effects: u8,
@@ -336,6 +342,8 @@ impl Default for Settings {
             fps: false,
             rewind: true,
             vr_glide: true,
+            smooth_turn: false,
+            vr_vignette: true,
             music: 8,
             effects: 8,
             camera: 5,
@@ -486,6 +494,8 @@ impl Settings {
                 "fps" => s.fps = flag,
                 "rewind" => s.rewind = flag,
                 "vr_glide" => s.vr_glide = flag,
+                "smooth_turn" => s.smooth_turn = flag,
+                "vr_vignette" => s.vr_vignette = flag,
                 "music" => s.music = level.unwrap_or(s.music),
                 "effects" => s.effects = level.unwrap_or(s.effects),
                 "camera" => s.camera = level.unwrap_or(s.camera),
@@ -524,7 +534,7 @@ impl Settings {
         let Some(path) = Self::path() else { return };
         let on = |b: bool| if b { "on" } else { "off" };
         let text = format!(
-            "fullscreen = {}\nmode = {}\npreset = {}\nresolution = {}\nfiltering = {}\nwaves = {}\nreflections = {}\nshadows = {}\nglow = {}\nsnow = {}\nsandstorm = {}\nwindows = {}\ncalibrated = {}\nfps = {}\nrewind = {}\nvr_glide = {}\nmusic = {}\neffects = {}\ncamera = {}\nrating = {}\ncompleted = {}\nbest = {}\n",
+            "fullscreen = {}\nmode = {}\npreset = {}\nresolution = {}\nfiltering = {}\nwaves = {}\nreflections = {}\nshadows = {}\nglow = {}\nsnow = {}\nsandstorm = {}\nwindows = {}\ncalibrated = {}\nfps = {}\nrewind = {}\nvr_glide = {}\nsmooth_turn = {}\nvr_vignette = {}\nmusic = {}\neffects = {}\ncamera = {}\nrating = {}\ncompleted = {}\nbest = {}\n",
             on(self.fullscreen),
             self.mode.key(),
             self.graphics.preset.key(),
@@ -541,6 +551,8 @@ impl Settings {
             on(self.fps),
             on(self.rewind),
             on(self.vr_glide),
+            on(self.smooth_turn),
+            on(self.vr_vignette),
             self.music,
             self.effects,
             self.camera,

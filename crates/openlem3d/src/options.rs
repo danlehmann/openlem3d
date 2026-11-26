@@ -79,6 +79,8 @@ enum Item {
     Rewind,
     Fps,
     VrGlide,
+    SmoothTurn,
+    VrVignette,
     Mode,
     Music,
     Effects,
@@ -108,31 +110,40 @@ enum Target {
 struct Light(Item, u8);
 
 const COLUMNS: [f32; 4] = [0.0, 80.0, 160.0, 240.0];
-const TOGGLE_ROWS: [f32; 1] = [28.0];
+/// The toggles' rows: the original's, and the headset's own under the
+/// graphics.
+const TOGGLE_ROWS: [f32; 2] = [28.0, 162.0];
 const SLIDER_ROWS: [f32; 2] = [44.0, 60.0];
 const SLIDER_COLUMNS: [(f32, f32); 2] = [(0.0, 64.0), (160.0, 224.0)];
 const BOX_HEIGHT: f32 = 14.0;
 const TEXT_SCALE: f32 = 1.0;
 
-const TOGGLES: [(Item, &str, usize, usize); 4] = [
+const TOGGLES: [(Item, &str, usize, usize); 6] = [
     (Item::Fullscreen, "Fullscreen", 0, 0),
     (Item::Rewind, "Rewind", 0, 1),
     (Item::Fps, "FPS", 0, 2),
-    // Only in the headset build.
-    (Item::VrGlide, "VR Glide", 0, 3),
+    // Only in the headset build, in a row of their own.
+    (Item::VrGlide, "VR Glide", 1, 0),
+    (Item::SmoothTurn, "Smooth Turn", 1, 1),
+    (Item::VrVignette, "Vignette", 1, 2),
 ];
-/// The toggles offered, each with its column: on a TV, which always fills
-/// the screen, no Fullscreen (the others move left).
+/// Whether this is the headset build.
+const XR: bool = cfg!(all(target_os = "android", feature = "xr"));
+/// The toggles offered, each with its row and column: on a TV, which
+/// always fills the screen, and in the headset no Fullscreen (the others
+/// move left); the headset's own only there.
 fn toggles() -> impl Iterator<Item = (Item, &'static str, usize, usize)> {
     let tv = crate::platform::is_tv();
+    let mut next = [0; TOGGLE_ROWS.len()];
     TOGGLES
         .into_iter()
-        .filter(move |&(item, ..)| !(tv && item == Item::Fullscreen))
-        .filter(|&(item, ..)| {
-            item != Item::VrGlide || cfg!(all(target_os = "android", feature = "xr"))
+        .filter(move |&(item, ..)| !((tv || XR) && item == Item::Fullscreen))
+        .filter(|&(_, _, row, _)| row == 0 || XR)
+        .map(move |(item, label, row, _)| {
+            let col = next[row];
+            next[row] += 1;
+            (item, label, row, col)
         })
-        .enumerate()
-        .map(|(col, (item, label, row, _))| (item, label, row, col))
 }
 
 /// The mode's box, in the slider rows' free place, and where its name
@@ -420,6 +431,8 @@ fn lit(s: &Settings, item: Item) -> Option<bool> {
         Item::Rewind => s.rewind,
         Item::Fps => s.fps,
         Item::VrGlide => s.vr_glide,
+        Item::SmoothTurn => s.smooth_turn,
+        Item::VrVignette => s.vr_vignette,
         Item::Preset(p) => g.preset == p,
         Item::Waves => g.waves,
         Item::Reflections => g.reflections && g.waves,
@@ -571,6 +584,8 @@ fn toggle(s: &mut Settings, item: Item) {
         Item::Rewind => s.rewind = !s.rewind,
         Item::Fps => s.fps = !s.fps,
         Item::VrGlide => s.vr_glide = !s.vr_glide,
+        Item::SmoothTurn => s.smooth_turn = !s.smooth_turn,
+        Item::VrVignette => s.vr_vignette = !s.vr_vignette,
         Item::Mode => crate::style::switch(s),
         _ => {
             if let Some(g) = graphics(s.graphics, item) {
