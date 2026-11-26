@@ -50,6 +50,17 @@ const BANNER_LINES: [f32; 2] = [97.0, 111.0];
 const LETTER_FPS: f32 = 70.0 / 6.0;
 /// How long "Password Correct" shows before the level (any key skips it).
 const CORRECT_SHOWN: f32 = 0.6;
+/// The question Exit asks, as the original's: a small box over the middle of
+/// the banner (x 128–192, y 101–138), "CONFIRM" over "Y" and "N".
+const QUIT_BOX: Rect = Rect {
+    min: Vec2::new(128.0, 101.0),
+    max: Vec2::new(192.0, 139.0),
+};
+const QUIT_FILL: Color = Color::srgb(0.0, 0.0, 0.4);
+const QUIT_EDGE: Color = Color::srgb(0.45, 0.6, 1.0);
+/// After Y, the screen fades to black over about a second before the game
+/// ends (observed).
+const QUIT_FADE: f32 = 1.0;
 
 /// A font as uploaded images plus each glyph's advance.
 pub(crate) struct Glyphs {
@@ -391,6 +402,25 @@ pub(crate) struct Title {
     /// The code screen's prompt for the keyboard ("Return") and for a
     /// gamepad ("A"), the one shown as the gamepad is in use or not.
     prompts: Option<(NodeId, NodeId)>,
+    /// The title's own clock for its animations: it stands still while the
+    /// Exit question is up, as the original's menu does.
+    clock: f32,
+    /// The Exit question's box and its "N", while it is up.
+    quit: Option<(NodeId, NodeId)>,
+    /// When Y was answered: the screen fades out, then the game ends.
+    leaving: Option<f32>,
+}
+
+/// The Exit question's box, which a gamepad picks within, and its "N",
+/// where it starts.
+pub(crate) fn quit_box(w: &World) -> Option<(NodeId, NodeId)> {
+    w.title.quit
+}
+
+/// Whether Exit's question is up or the game is fading out after it:
+/// nothing else on the title answers then.
+pub(crate) fn asking(w: &World) -> bool {
+    w.title.quit.is_some() || w.title.leaving.is_some()
 }
 
 /// The Play button, where a gamepad starts (so that A plays).
@@ -458,13 +488,14 @@ fn spawn_title(w: &mut World) {
     if w.screen_ui.is_some() {
         return;
     }
-    let now = w.e.time.game.elapsed_secs();
+    let now = w.title.clock;
     let ui = &mut w.ui;
     let screen = spawn_screen(ui, art, TITLE_SCROLL, Color::WHITE);
     let canvas = screen.canvas;
     w.screen_ui = Some(screen);
     let t = &mut w.title;
     t.canvas = Some(canvas);
+    (t.quit, t.leaving) = (None, None);
     t.winders.clear();
     t.faces.clear();
     t.buttons.clear();
@@ -606,7 +637,7 @@ fn animate_logo(w: &mut World) {
         return;
     }
     let turn = art.logo.len() as f32 / LOGO_FPS;
-    let t = w.e.time.game.elapsed_secs() % (turn + LOGO_HOLD);
+    let t = w.title.clock % (turn + LOGO_HOLD);
     let frame = if t < turn {
         (t * LOGO_FPS) as usize % art.logo.len()
     } else {
@@ -635,7 +666,7 @@ fn animate_banner(w: &mut World) {
     let Some((strip, pages, since)) = w.title.strip else {
         return;
     };
-    let t = w.e.time.game.elapsed_secs() - since;
+    let t = w.title.clock - since;
     // The pages repeat once all have passed.
     let total = pages as f32 * (PAPER.width() / BANNER_SPEED + BANNER_HOLD);
     let (offset, _) = banner_offset(t % total);
@@ -649,14 +680,15 @@ fn animate_winders(w: &mut World) {
     if art.winder.is_empty() {
         return;
     }
-    let time = w.e.time.game;
+    let delta = w.e.time.game.delta_secs();
     let t = &mut w.title;
-    let held = t
-        .strip
-        .is_some_and(|(_, _, since)| banner_offset(time.elapsed_secs() - since).1);
+    let clock = t.clock;
+    let held = t.quit.is_some()
+        || t.strip
+            .is_some_and(|(_, _, since)| banner_offset(clock - since).1);
     let last = &mut t.winder;
     if !held {
-        last.0 += time.delta_secs() * WINDER_FPS;
+        last.0 += delta * WINDER_FPS;
         while last.0 >= 1.0 {
             last.0 -= 1.0;
             last.1 = (last.1 + 1) % art.winder.len();
@@ -672,7 +704,7 @@ fn animate_winders(w: &mut World) {
 fn animate_faces(w: &mut World) {
     const STEPS: [(usize, f32); 3] = [(1, 0.07), (2, 0.05), (1, 0.04)];
     let Some(art) = &w.art else { return };
-    let t = w.e.time.game.elapsed_secs();
+    let t = w.title.clock;
     let blink = &mut w.title.blink;
     let length: f32 = STEPS.iter().map(|s| s.1).sum();
     if t >= blink.0 + length {
@@ -706,6 +738,9 @@ fn animate_faces(w: &mut World) {
 }
 
 fn title_input(w: &mut World) {
+    if quit_input(w) {
+        return;
+    }
     let keys = &w.e.input.keys;
     let mut pressed: Vec<TitleButton> = w
         .title
@@ -739,8 +774,7 @@ fn title_input(w: &mut World) {
             TitleButton::Play => Some("VOXFX/PLAY"),
             TitleButton::Code => Some("VOXFX/CODE"),
             TitleButton::Options => Some("VOXFX/OPTIONS"),
-            TitleButton::Exit => Some("VOXFX/BYEBYE1"),
-            TitleButton::Rating => None,
+            TitleButton::Exit | TitleButton::Rating => None,
         };
         if let Some(v) = voice {
             w.sfx.play(v);
@@ -757,13 +791,98 @@ fn title_input(w: &mut World) {
             TitleButton::Code => w.next_state = Some(AppState::Code),
             TitleButton::Options => w.next_state = Some(AppState::Options),
             TitleButton::Rating => rating.0 = (rating.0 + 1) % 5,
-            TitleButton::Exit => w.e.exit(),
+            TitleButton::Exit => {
+                ask_quit(w);
+                return;
+            }
         }
     }
 }
 
+/// Opens Exit's question: the original's box, which only its keys answer
+/// there; here Y and N can be tapped or clicked too, and Esc (a gamepad's B,
+/// Android's Back) answers N.
+fn ask_quit(w: &mut World) {
+    let (Some(canvas), Some(font)) = (
+        w.title.canvas,
+        w.art.as_ref().and_then(|a| a.large.as_ref()),
+    ) else {
+        w.e.exit();
+        return;
+    };
+    let ui = &mut w.ui;
+    let b = QUIT_BOX;
+    let root = ui.child(
+        canvas,
+        UiNode::new()
+            .at(b.min.x, b.min.y, b.width(), b.height())
+            .background(QUIT_EDGE),
+    );
+    // A one-pixel edge round the fill.
+    let inner = ui.child(
+        root,
+        UiNode::new()
+            .at(1.0, 1.0, b.width() - 2.0, b.height() - 2.0)
+            .background(QUIT_FILL),
+    );
+    let (glyphs, width) = font.layout("CONFIRM");
+    let left = ((b.width() - 2.0 - width) / 2.0).round();
+    for (x, image) in glyphs {
+        ui.child(
+            inner,
+            UiNode::image(image).at(left + x, 3.0, font.size.x, font.size.y),
+        );
+    }
+    let answer = |ui: &mut Ui, keys: &mut crate::key_buttons::KeyButtons, text, x, key| {
+        crate::key_buttons::spawn_text_button(
+            ui,
+            keys,
+            inner,
+            font,
+            text,
+            x,
+            20.0,
+            Color::WHITE,
+            key,
+        )
+    };
+    answer(ui, &mut w.key_buttons, "Y", 6.0, KeyCode::KeyY);
+    let no = answer(ui, &mut w.key_buttons, "N", 48.0, KeyCode::KeyN);
+    w.title.quit = Some((root, no));
+}
+
+/// Answers Exit's question while it is up, and ends the game once the fade
+/// after Y is over; true while either takes the title's input.
+fn quit_input(w: &mut World) -> bool {
+    let now = w.e.time.game.elapsed_secs();
+    if let Some(start) = w.title.leaving {
+        if now - start >= QUIT_FADE {
+            w.e.exit();
+        }
+        return true;
+    }
+    let Some((root, _)) = w.title.quit else {
+        return false;
+    };
+    let keys = &w.e.input.keys;
+    let yes = keys.just_pressed(KeyCode::KeyY);
+    if yes || keys.any_just_pressed([KeyCode::KeyN, KeyCode::Escape]) {
+        w.ui.remove(root);
+        w.title.quit = None;
+    }
+    if yes {
+        w.title.leaving = Some(now);
+        w.sfx.play("VOXFX/BYEBYE1");
+        crate::fade::fade_out(w, QUIT_FADE);
+    }
+    true
+}
+
 /// The title screen's systems, in order.
 pub(crate) fn update_title(w: &mut World) {
+    if w.title.quit.is_none() {
+        w.title.clock += w.e.time.game.delta_secs();
+    }
     spawn_title(w);
     title_input(w);
     animate_logo(w);
@@ -1021,7 +1140,9 @@ pub(crate) fn attract(w: &mut World) {
     let time = w.e.time.game;
     let (data, game, current, next) = (&mut w.data, &mut w.game, &mut w.current, &mut w.next_state);
     let title = &mut w.title;
-    let input = keys.get_pressed().next().is_some()
+    let input = title.quit.is_some()
+        || title.leaving.is_some()
+        || keys.get_pressed().next().is_some()
         || mouse.get_pressed().next().is_some()
         || motion.delta != Vec2::ZERO
         || touches.iter().next().is_some();

@@ -25,6 +25,8 @@ pub(crate) struct Fade {
     node: Option<NodeId>,
     start: f32,
     duration: f32,
+    /// Fading out to black rather than in from it.
+    out: bool,
 }
 
 pub(crate) fn spawn(w: &mut World) {
@@ -53,6 +55,15 @@ pub(crate) fn transition(w: &mut World, exited: AppState, entered: AppState) {
     };
     w.fade.start = w.e.time.game.elapsed_secs();
     w.fade.duration = duration;
+    w.fade.out = false;
+}
+
+/// Fades the screen out to black over `duration` seconds (and keeps it
+/// black).
+pub(crate) fn fade_out(w: &mut World, duration: f32) {
+    w.fade.start = w.e.time.game.elapsed_secs();
+    w.fade.duration = duration;
+    w.fade.out = true;
 }
 
 pub(crate) fn fade(w: &mut World) {
@@ -62,7 +73,8 @@ pub(crate) fn fade(w: &mut World) {
     } else {
         1.0
     };
-    let colour = Color::BLACK.with_alpha((1.0 - t).clamp(0.0, 1.0));
+    let shown = if f.out { t } else { 1.0 - t };
+    let colour = Color::BLACK.with_alpha(shown.clamp(0.0, 1.0));
     if let Some(n) = f.node.and_then(|n| w.ui.get_mut(n)) {
         n.background = Some(colour);
     }

@@ -354,6 +354,8 @@ fn buttons(w: &mut World, pad: &l3d_engine::input::Pad) {
     // the panel's under it.
     let within = if w.confirm.question.is_some() {
         crate::confirm::root(w)
+    } else if let Some((root, _)) = crate::title::quit_box(w) {
+        Some(root)
     } else if w.preview.active {
         crate::briefing::preview_overlay_root(w)
     } else {
@@ -372,13 +374,15 @@ fn buttons(w: &mut World, pad: &l3d_engine::input::Pad) {
         .and_then(|m| targets.iter().position(|t| t.1.distance(m) < 1.0));
     if focus.is_none() && w.gamepad.in_use && !targets.is_empty() {
         // On the briefing and previewing, Continue, so that A carries on
-        // (owner); on the title, Play; elsewhere the button nearest the
-        // middle.
+        // (owner); on the title, Play, or N in Exit's question; elsewhere
+        // the button nearest the middle.
         let briefing = w.state == AppState::Briefing || w.preview.active;
         let first = if briefing {
             crate::briefing::first_choice(w)
         } else if w.state == AppState::Title {
-            crate::title::play_button(w)
+            crate::title::quit_box(w)
+                .map(|(_, no)| no)
+                .or_else(|| crate::title::play_button(w))
         } else {
             None
         }

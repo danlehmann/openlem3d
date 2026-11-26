@@ -376,6 +376,20 @@ rating; Exit opens a confirmation, per the navigation document); there is no
 pressed-button image. Clicks were only reliable with the button held about
 300 ms (estimated; the game seems to poll the mouse once per frame).
 
+**Exit's question** (observed 2026-11-25, six runs, Exit by click and by
+Esc). A small dark-blue box with a light-blue edge, about x 128–192,
+y 101–138, over the middle of the banner: "CONFIRM" in the large menu font
+on top, and below it "Y" on the left, the small Clockwork Games logo in the
+middle and "N" on the right. Nothing else is written. While it is up the
+menu stands still (the logo, the banner and its winders stop) but the
+pointer moves. Only the Y and N keys answer it: Return, a second Esc and
+clicks on Y, N or the logo are ignored. N closes it at once and the menu
+carries on; Y closes it, the screen fades to black over about a second (the
+menu moving again meanwhile) and the game ends. Ours draws the same box
+without the logo; Y and N can also be tapped or clicked there, Esc (a
+gamepad's B, Android's Back) answers N, and the "bye bye" voice plays on Y
+rather than on Exit.
+
 **Attract mode.** About 125 s (a second run: about 118 s) after the title screen is entered, a demo
 level starts (its briefing shows "Rating Demo", and "Demo" is printed at
 the bottom left during play); a click returns to the title. Mouse

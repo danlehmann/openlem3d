@@ -570,8 +570,11 @@ impl World {
             Title => {
                 title::attract(self);
                 title::update_title(self);
-                style::toggle_on_title(self);
-                options::open_on_title(self);
+                // Exit's question freezes the rest of the title.
+                if !title::asking(self) {
+                    style::toggle_on_title(self);
+                    options::open_on_title(self);
+                }
                 style::title_label(self);
                 sfx::watch_rating(self);
                 keep_rating(self);
@@ -2210,6 +2213,8 @@ fn key_code(name: &str) -> Option<KeyCode> {
         "KeyE" => KeyCode::KeyE,
         "KeyR" => KeyCode::KeyR,
         "KeyF" => KeyCode::KeyF,
+        "KeyY" => KeyCode::KeyY,
+        "KeyN" => KeyCode::KeyN,
         "Digit1" => KeyCode::Digit1,
         "Digit2" => KeyCode::Digit2,
         "Digit3" => KeyCode::Digit3,
