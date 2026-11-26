@@ -1327,7 +1327,12 @@ fn camera_cell(yaw: f32, viewer_yaw: f32) -> (u32, bool) {
 
 /// The other cameras: the film camera, centred on the camera's position,
 /// with its number (`BOMBNUMB`) above it. Neither animates.
-fn camera_markers(b: &mut LayerBuilder, markers: &[CameraMarker], viewer_yaw: f32, tex: [f32; 2]) {
+fn camera_markers(
+    b: &mut LayerBuilder,
+    markers: &[CameraMarker],
+    viewer_yaw: &dyn Fn(Vec3) -> f32,
+    tex: [f32; 2],
+) {
     let rect = |cell: u32, size: f32, mirror: bool| {
         let (cx, cy) = (
             ((cell % ATLAS_COLUMNS) * LEMMING_CELL) as f32,
@@ -1340,7 +1345,7 @@ fn camera_markers(b: &mut LayerBuilder, markers: &[CameraMarker], viewer_yaw: f3
         }
     };
     for m in markers {
-        let (cell, mirror) = camera_cell(m.yaw, viewer_yaw);
+        let (cell, mirror) = camera_cell(m.yaw, viewer_yaw(m.pos));
         let size = LEMMING_CELL as f32;
         let body = m.pos - Vec3::Y * (size / LEMMING_TEXELS_PER_UNIT / 2.0);
         b.sprite_scaled(
@@ -1393,7 +1398,9 @@ const RIDE_DIGIT_DISTANCE: f32 = 0.2;
 /// `drawn` is where each lemming is drawn, in units, and the way it faces
 /// (see `Game::drawn_pos` and `Game::turn_yaws`); `progress` is how far
 /// (0–1) the drawing has come from the tick before the last to the last,
-/// as `drawn` (1 when drawn at the ticks themselves).
+/// as `drawn` (1 when drawn at the ticks themselves). With `from_eye`
+/// (in a headset), each sprite is drawn as seen along the way from `eye`
+/// to it instead.
 #[allow(clippy::too_many_arguments)]
 pub fn build(
     sim: &Simulation,
@@ -1401,6 +1408,7 @@ pub fn build(
     blocks: Option<&BlockSet>,
     atlas_rows: u32,
     camera_yaw: f32,
+    from_eye: bool,
     eye: Vec3,
     doors: &[Door],
     eyes: Option<usize>,
@@ -1415,7 +1423,16 @@ pub fn build(
         (atlas_rows * LEMMING_CELL) as f32,
     ];
     objects(&mut b, sim, eye, tex);
-    camera_markers(&mut b, cameras, camera_yaw, tex);
+    // The heading a sprite at `at` is seen with.
+    let seen = |at: Vec3| {
+        let d = at - eye;
+        if from_eye && d.x.hypot(d.z) > 1e-3 {
+            (-d.z).atan2(-d.x)
+        } else {
+            camera_yaw
+        }
+    };
+    camera_markers(&mut b, cameras, &seen, tex);
     bash_effects(&mut b, sim, blocks, tex);
     mine_effects(&mut b, sim, blocks, tex);
     dig_effects(&mut b, sim, blocks, tex);
@@ -1491,7 +1508,12 @@ pub fn build(
         } else {
             yaw
         };
-        let view = ViewAngle::from_yaws(yaw, camera_yaw);
+        let at = drawn
+            .get(i)
+            .map_or(Vec3::from_array(l.pos.map(crate::units)), |d| {
+                Vec3::from_array(d.0)
+            });
+        let view = ViewAngle::from_yaws(yaw, seen(at));
         let (cell, mirror) = match l.state {
             // The stored turner points to its right (cells 30–36, seen from
             // the front, hold out the lemming's right arm); one pointing

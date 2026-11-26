@@ -331,6 +331,36 @@ fn turner_sides(
     Some((at, dirs, dirs.map(|d| d.dot(towards))))
 }
 
+/// For VR, where the arrows are drawn in the level: the lemming waiting for
+/// its turner's side, its centre, its two sides (anticlockwise, clockwise;
+/// level unit vectors), and the side a click would pick now if it is clear,
+/// seen with `camera` (the controller's aim, its pointer in the middle;
+/// none while pointing elsewhere). Not riding along.
+#[cfg_attr(not(feature = "xr"), allow(dead_code))]
+pub(crate) fn pending_turner_sides(
+    w: &World,
+    camera: Option<&SceneCamera>,
+) -> Option<(Vec3, [Vec3; 2], Option<usize>)> {
+    if w.state != AppState::Playing || w.lemming_cam.following().is_some() {
+        return None;
+    }
+    let l = w.game.sim.as_ref()?.lemmings.get(w.pending.0?)?;
+    let side = |d: l3d_sim::Dir| {
+        let [x, _, z] = d.delta();
+        Vec3::new(x as f32, 0.0, z as f32).normalize_or_zero()
+    };
+    let sides = [side(l.dir.anticlockwise()), side(l.dir.clockwise())];
+    let size = w.screen.size;
+    let point = size / 2.0;
+    let chosen = camera.and_then(|camera| {
+        let (at, _, fit) = turner_sides(camera, size, l, Some(point))?;
+        let clear = point.distance(at) > ARROW_CLEAR_DISTANCE * size.y / 200.0
+            && (fit[0] - fit[1]).abs() > ARROW_CLEAR_MARGIN;
+        clear.then_some(if fit[0] >= fit[1] { 0 } else { 1 })
+    });
+    Some((lemming_centre(l), sides, chosen))
+}
+
 /// Gives lemming `i` its waiting turner, pointing to the side a click at
 /// `point` lands on: riding along with it, the side of the screen (head
 /// turned `head` radians); otherwise the side of the lemming as seen on

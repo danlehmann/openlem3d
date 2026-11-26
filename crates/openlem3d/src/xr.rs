@@ -14,6 +14,7 @@
 //! left button.
 
 use std::ffi::c_char;
+use std::time::Instant;
 
 use ash::vk::{self, Handle};
 use l3d_engine::prelude::*;
@@ -28,9 +29,34 @@ use crate::ui::UiGpu;
 const VIEW_TYPE: xr::ViewConfigurationType = xr::ViewConfigurationType::PRIMARY_STEREO;
 /// The headset's images: sRGB RGBA8, the format the game draws in.
 const SWAPCHAIN_FORMAT: vk::Format = vk::Format::R8G8B8A8_SRGB;
-/// Metres per grid unit: how big the level is around the player (ours, to
-/// be tuned in the headset).
+/// Metres per grid unit: the level life-size around the player (ours).
 const METRES_PER_UNIT: f32 = 1.0;
+/// How fast the right stick raises and lowers the player (grid units per
+/// second at full tilt).
+const RISE_SPEED: f32 = 3.0;
+/// The skill palette on the left hand while playing (`panel::palette_pixels`,
+/// a tall strip): its width in metres, its centre from the hand's grip
+/// (metres, in the grip's axes), and how far it leans back from upright
+/// towards the player (radians).
+const PALETTE_WIDTH: f32 = 0.12;
+const PALETTE_OFFSET: Vec3 = Vec3::new(0.06, 0.24, -0.06);
+const PALETTE_TILT: f32 = -0.6;
+/// The level's menu as a popup: its width, how far ahead of the head and
+/// how far below its height it opens (metres), and how far it leans back
+/// (radians).
+const POPUP_WIDTH: f32 = 0.7;
+const POPUP_AHEAD: f32 = 0.9;
+const POPUP_BELOW: f32 = 0.12;
+const POPUP_TILT: f32 = 0.12;
+/// The time control's bar (`time_dial`): on a panel of its own ahead at
+/// eye height while a squeeze runs the time, this wide (metres).
+const DIAL_WIDTH: f32 = 0.6;
+const DIAL_AHEAD: f32 = 1.0;
+/// How long the view stays dark when cutting to a camera view (seconds).
+const JUMP_DARK: f32 = 0.15;
+/// How long a glide to a camera view may take to begin after its key
+/// (seconds).
+const GLIDE_START: f32 = 0.1;
 /// The near plane, in metres.
 const NEAR: f32 = 0.05;
 /// The UI panel: its width in metres, its centre relative to where the head
@@ -40,6 +66,9 @@ const PANEL_CENTRE: Vec3 = Vec3::new(0.0, -0.45, -1.0);
 const PANEL_TILT: f32 = 0.5;
 /// Thumbstick travel below which it counts as centred.
 const STICK_DEAD: f32 = 0.2;
+/// The level list's scrolling with the right stick fully over, rows per
+/// second.
+const LIST_ROWS_PER_SEC: f32 = 8.0;
 /// A snap turn with the right stick, in radians.
 const SNAP_TURN: f32 = std::f32::consts::FRAC_PI_6;
 /// The field of view of the game's camera along the ray (degrees): only
@@ -66,6 +95,49 @@ struct Beam {
     start: Vec3,
     end: Vec3,
     colour: Vec4,
+}
+
+/// Where the level is around the player: the level's point where the head
+/// began (`pos`), the heading there (`yaw`, as `ViewCamera::yaw`), and the
+/// level's size (metres per grid unit).
+#[derive(Clone, Copy, Debug)]
+struct Place {
+    pos: Vec3,
+    yaw: f32,
+    mpu: f32,
+}
+
+impl Place {
+    /// At the game camera, life-size.
+    fn at_view(view: &crate::ViewCamera) -> Place {
+        Place {
+            pos: view.pos,
+            yaw: view.yaw,
+            mpu: METRES_PER_UNIT,
+        }
+    }
+
+    /// The level's coordinates of a point in the headset's space.
+    fn world_from_space(&self) -> Mat4 {
+        Mat4::from_scale_rotation_translation(
+            Vec3::splat(1.0 / self.mpu),
+            anchor_rotation(self.yaw),
+            self.pos,
+        )
+    }
+}
+
+/// Where the UI's image is shown, in the headset's space: its centre, turn
+/// and width; on the palette, pointing through its empty parts reaches the
+/// level.
+#[derive(Clone, Copy)]
+struct PanelPose {
+    centre: Vec3,
+    rotation: Quat,
+    width: f32,
+    palette: bool,
+    /// The level's menu as a popup: only its card.
+    popup: bool,
 }
 
 /// The layer drawn over everything (the panel too) holding the ray.
@@ -113,6 +185,30 @@ pub(crate) struct Xr {
     /// Whether the right stick has been back in the middle since its last
     /// snap turn.
     turn_ready: bool,
+    /// Where the head is in the level, in units, and its heading (the
+    /// camera-yaw convention), as of this frame's input.
+    seen_from: Option<(Vec3, f32)>,
+    place: Place,
+    /// The level the place was set for, whether the lemming view was on,
+    /// and whether the level was being played (not previewed): any of them
+    /// changing sets it afresh.
+    placed_for: (Option<u32>, bool, bool),
+    /// When a cut to a camera view began (real seconds), while the view is
+    /// dark for it.
+    jump: Option<f32>,
+    /// When a glide to a camera view began (real seconds), while the place
+    /// rides along with the game's camera (the VR Glide option).
+    gliding: Option<f32>,
+    /// A key pressed for the game last frame, let go this one.
+    key: Option<KeyCode>,
+    /// Where the frame's time goes, logged now and then.
+    timing: Timing,
+    /// Where the UI was shown last.
+    panel_pose: PanelPose,
+    /// Where the level's menu popped up, ahead of the head when it opened.
+    popup_at: Option<PanelPose>,
+    /// Where the time control's bar shows, ahead of the head when it began.
+    dial_at: Option<PanelPose>,
     scene: SceneGpu,
     ui: Option<UiGpu>,
 }
@@ -127,9 +223,22 @@ struct Chain {
 struct Controls {
     set: xr::ActionSet,
     select: xr::Action<bool>,
+    /// The middle-finger buttons, as far as squeezed: the left runs the
+    /// level back, the right ahead, as a gamepad's triggers do.
+    squeeze: xr::Action<f32>,
     stick: xr::Action<xr::Vector2f>,
-    /// The left and right hands' aim.
+    /// As on a gamepad: Y the next camera view, B pause, X ride along with
+    /// the lemming under the ray (or leave its view); A clicks as the
+    /// trigger does.
+    next: xr::Action<bool>,
+    pause: xr::Action<bool>,
+    ride: xr::Action<bool>,
+    /// The left controller's menu button: the game's menu (Escape: pause,
+    /// restart or leave).
+    menu: xr::Action<bool>,
+    /// The left and right hands' aim and grip.
     aims: [xr::Space; 2],
+    grips: [xr::Space; 2],
     hands: [xr::Path; 2],
 }
 
@@ -218,6 +327,20 @@ unsafe fn try_start(profile: bool) -> Result<(Box<Xr>, Gpu), Error> {
         beam: None,
         overlay: None,
         turn_ready: true,
+        seen_from: None,
+        place: Place {
+            pos: Vec3::ZERO,
+            yaw: 0.0,
+            mpu: METRES_PER_UNIT,
+        },
+        placed_for: (None, false, false),
+        jump: None,
+        gliding: None,
+        key: None,
+        timing: Timing::default(),
+        panel_pose: front_panel(),
+        popup_at: None,
+        dial_at: None,
         scene,
         ui: None,
     };
@@ -384,7 +507,8 @@ unsafe fn vulkan(
     Ok((gpu, raw))
 }
 
-/// The controllers: each hand's aim and trigger, and the thumbsticks.
+/// The controllers: each hand's aim, grip, trigger, grip button and
+/// thumbstick, and the face buttons.
 fn controls(instance: &xr::Instance, session: &xr::Session<xr::Vulkan>) -> xr::Result<Controls> {
     let hands = [
         instance.string_to_path("/user/hand/left")?,
@@ -392,38 +516,64 @@ fn controls(instance: &xr::Instance, session: &xr::Session<xr::Vulkan>) -> xr::R
     ];
     let set = instance.create_action_set("game", "Game", 0)?;
     let aim = set.create_action::<xr::Posef>("aim", "Aim", &hands)?;
+    let grip_pose = set.create_action::<xr::Posef>("grip_pose", "Grip pose", &hands)?;
     let select = set.create_action::<bool>("select", "Select", &hands)?;
+    let squeeze = set.create_action::<f32>("time", "Run time back or ahead", &hands)?;
     let stick = set.create_action::<xr::Vector2f>("stick", "Thumbstick", &hands)?;
+    let next = set.create_action::<bool>("next_view", "Next camera view", &[])?;
+    let pause = set.create_action::<bool>("pause", "Pause", &[])?;
+    let ride = set.create_action::<bool>("ride", "Ride along", &[])?;
+    let menu = set.create_action::<bool>("menu", "Menu", &[])?;
     let path = |p: &str| instance.string_to_path(p);
     let mut bindings = Vec::new();
     for side in ["left", "right"] {
-        bindings.push(xr::Binding::new(
-            &aim,
-            path(&format!("/user/hand/{side}/input/aim/pose"))?,
-        ));
-        bindings.push(xr::Binding::new(
-            &select,
-            path(&format!("/user/hand/{side}/input/trigger/value"))?,
-        ));
-        bindings.push(xr::Binding::new(
-            &stick,
-            path(&format!("/user/hand/{side}/input/thumbstick"))?,
-        ));
+        let input = |what: &str| path(&format!("/user/hand/{side}/input/{what}"));
+        bindings.push(xr::Binding::new(&aim, input("aim/pose")?));
+        bindings.push(xr::Binding::new(&grip_pose, input("grip/pose")?));
+        bindings.push(xr::Binding::new(&select, input("trigger/value")?));
+        bindings.push(xr::Binding::new(&squeeze, input("squeeze/value")?));
+        bindings.push(xr::Binding::new(&stick, input("thumbstick")?));
     }
+    // As a gamepad's: A gives the skill (as the trigger does), B pauses, X
+    // rides along, Y the next camera view.
+    bindings.push(xr::Binding::new(
+        &select,
+        path("/user/hand/right/input/a/click")?,
+    ));
+    bindings.push(xr::Binding::new(
+        &pause,
+        path("/user/hand/right/input/b/click")?,
+    ));
+    bindings.push(xr::Binding::new(
+        &ride,
+        path("/user/hand/left/input/x/click")?,
+    ));
+    bindings.push(xr::Binding::new(
+        &next,
+        path("/user/hand/left/input/y/click")?,
+    ));
+    bindings.push(xr::Binding::new(
+        &menu,
+        path("/user/hand/left/input/menu/click")?,
+    ));
     instance.suggest_interaction_profile_bindings(
         path("/interaction_profiles/oculus/touch_controller")?,
         &bindings,
     )?;
     session.attach_action_sets(&[&set])?;
-    let aims = [
-        aim.create_space(session, hands[0], xr::Posef::IDENTITY)?,
-        aim.create_space(session, hands[1], xr::Posef::IDENTITY)?,
-    ];
+    let space =
+        |a: &xr::Action<xr::Posef>, hand| a.create_space(session, hand, xr::Posef::IDENTITY);
     Ok(Controls {
         set,
         select,
+        squeeze,
         stick,
-        aims,
+        next,
+        pause,
+        ride,
+        menu,
+        aims: [space(&aim, hands[0])?, space(&aim, hands[1])?],
+        grips: [space(&grip_pose, hands[0])?, space(&grip_pose, hands[1])?],
         hands,
     })
 }
@@ -444,16 +594,64 @@ pub(crate) fn active(w: &mut World) -> bool {
     matches!(r.xr, State::On(_))
 }
 
-/// Takes in the controllers, at the start of a frame: the ray meeting the
-/// panel moves the pointer, the trigger presses the left button, the left
-/// stick walks and the right one turns.
+/// Where `space` is at `time` in the headset's space, if tracked.
+fn locate(space: &xr::Space, base: &xr::Space, time: xr::Time) -> Option<(Vec3, Quat)> {
+    let loc = space.locate(base, time).ok()?;
+    loc.location_flags
+        .contains(
+            xr::SpaceLocationFlags::POSITION_VALID | xr::SpaceLocationFlags::ORIENTATION_VALID,
+        )
+        .then(|| pose(loc.pose))
+}
+
+/// Takes in the controllers, at the start of a frame: grabbing moves, turns
+/// and sizes the level; the sticks walk, turn and rise; A moves on
+/// between the level's camera views; and the pointing hand's ray is the
+/// mouse, on the UI or into the level, its trigger the left button.
 pub(crate) fn input(w: &mut World) {
     if !active(w) {
         return;
     }
+    let following = w.lemming_cam.following().is_some();
+    let now = w.e.time.real.elapsed_secs();
     let State::On(x) = &mut w.renderer.xr else {
         return;
     };
+    if let Some(key) = x.key.take() {
+        w.e.input.keys.release(key);
+    }
+    // Where the level is: at the game's camera, whose position and heading
+    // the player's walking, turning and grabbing move (so that each camera
+    // view keeps where the player leaves it); life-size afresh with each
+    // level, the lemming view and play.
+    let playing = w.state == crate::menu::AppState::Playing;
+    let placed_for = (w.current.loaded, following, playing);
+    let mpu = if x.placed_for == placed_for {
+        x.place.mpu
+    } else {
+        METRES_PER_UNIT
+    };
+    x.placed_for = placed_for;
+    x.place = Place {
+        mpu,
+        ..Place::at_view(&w.view)
+    };
+    // Cutting: the game's glide ends at once, so the level need not wait
+    // for it.
+    if let Some(start) = x.jump {
+        w.view.finish_glide();
+        if now - start >= JUMP_DARK {
+            x.jump = None;
+        }
+    }
+    if let Some(start) = x.gliding
+        && w.view.glide.is_none()
+        && now - start >= GLIDE_START
+    {
+        x.gliding = None;
+    }
+    // Squeezes count only while they are read.
+    w.game.squeeze = [0.0; 2];
     let (Some(time), true) = (x.time, x.focused) else {
         return;
     };
@@ -464,26 +662,117 @@ pub(crate) fn input(w: &mut World) {
         return;
     }
     let c = &x.controls;
-    let panel = w.screen.pixels;
-    let mut pressed = [false; 2];
-    let mut rays = [None; 2];
-    for hand in 0..2 {
-        pressed[hand] = c
-            .select
-            .state(&x.session, c.hands[hand])
-            .is_ok_and(|s| s.is_active && s.current_state);
-        let Ok(loc) = c.aims[hand].locate(&x.space, time) else {
-            continue;
-        };
-        if loc.location_flags.contains(
-            xr::SpaceLocationFlags::POSITION_VALID | xr::SpaceLocationFlags::ORIENTATION_VALID,
-        ) {
-            let (origin, rotation) = pose(loc.pose);
-            rays[hand] = Some((origin, rotation));
+    let session = &x.session;
+    let held = |a: &xr::Action<bool>, hand| {
+        a.state(session, hand)
+            .is_ok_and(|s| s.is_active && s.current_state)
+    };
+    let went_down = |a: &xr::Action<bool>| {
+        a.state(session, xr::Path::NULL)
+            .is_ok_and(|s| s.is_active && s.current_state && s.changed_since_last_sync)
+    };
+    let pressed = [held(&c.select, c.hands[0]), held(&c.select, c.hands[1])];
+    let squeezed = [0, 1].map(|h| {
+        c.squeeze
+            .state(session, c.hands[h])
+            .ok()
+            .filter(|s| s.is_active)
+            .map_or(0.0, |s| s.current_state)
+    });
+    let rays = [0, 1].map(|h| locate(&c.aims[h], &x.space, time));
+    let stick = |hand: usize| {
+        c.stick
+            .state(session, c.hands[hand])
+            .ok()
+            .filter(|s| s.is_active)
+            .map_or(Vec2::ZERO, |s| {
+                Vec2::new(s.current_state.x, s.current_state.y)
+            })
+    };
+    let (walk, turn) = (stick(0), stick(1));
+    let next_view = went_down(&c.next);
+    let pause = went_down(&c.pause);
+    let ride = went_down(&c.ride);
+    let menu = went_down(&c.menu);
+    let head = session
+        .locate_views(VIEW_TYPE, time, &x.space)
+        .ok()
+        .map(|(_, v)| pose(v[0].pose));
+
+    // The menu and pausing: the game's own keys.
+    for (down, key) in [(menu, KeyCode::Escape), (pause, KeyCode::KeyP)] {
+        if down && x.key.is_none() {
+            w.e.input.keys.press(key);
+            x.key = Some(key);
         }
     }
-    // The hand pointing: the one clicking, else the one whose trigger went
-    // down last.
+    // Time: the squeezes are a gamepad's triggers (`backspace_rewind`), the
+    // left running the level back and the right ahead, as fast as squeezed.
+    w.game.squeeze = squeezed;
+
+    // A camera view: the game's own keys, in the dark.
+    if next_view && !following && x.jump.is_none() && x.gliding.is_none() && x.key.is_none() {
+        let next = (w.preset.0 + 1) % 4;
+        let key = [
+            KeyCode::Digit1,
+            KeyCode::Digit2,
+            KeyCode::Digit3,
+            KeyCode::Digit4,
+        ][next];
+        w.e.input.keys.press(key);
+        x.key = Some(key);
+        if w.settings.vr_glide {
+            x.gliding = Some(now);
+        } else {
+            x.jump = Some(now);
+        }
+    }
+
+    let place = &mut x.place;
+
+    // The sticks: walking where the head looks, snap turns about the head,
+    // rising and sinking; on the level list the right stick scrolls it
+    // instead of rising.
+    let dt = w.e.time.real.delta_secs();
+    let listing = w.state == crate::menu::AppState::Menu;
+    if listing && turn.y.abs() > STICK_DEAD && turn.y.abs() > turn.x.abs() {
+        use l3d_engine::input::{MouseScrollUnit, MouseWheel};
+        w.e.input.wheel.push(MouseWheel {
+            unit: MouseScrollUnit::Line,
+            x: 0.0,
+            y: turn.y * LIST_ROWS_PER_SEC * dt,
+        });
+    }
+    if walk.length() > STICK_DEAD {
+        let look = head.map_or(Quat::IDENTITY, |h| h.1);
+        let ahead = (anchor_rotation(place.yaw) * look * Vec3::NEG_Z)
+            .with_y(0.0)
+            .normalize_or(Vec3::X);
+        let right = Vec3::new(-ahead.z, 0.0, ahead.x);
+        place.pos += (ahead * walk.y + right * walk.x) * crate::CAMERA_SPEED * dt;
+    }
+    if !listing && turn.y.abs() > STICK_DEAD && turn.y.abs() > turn.x.abs() {
+        place.pos.y += turn.y * RISE_SPEED * dt;
+    }
+    if turn.x.abs() < STICK_DEAD {
+        x.turn_ready = true;
+    } else if x.turn_ready && turn.x.abs() > turn.y.abs() {
+        x.turn_ready = false;
+        let at = head.map_or(Vec3::ZERO, |h| h.0);
+        let before = place.world_from_space().transform_point3(at);
+        // A push right turns right: the heading's yaw goes up.
+        place.yaw += SNAP_TURN * turn.x.signum();
+        let after = place.world_from_space().transform_point3(at);
+        place.pos += before - after;
+    }
+    // The game's camera follows (not in the lemming view, which is the
+    // lemming's, or while moving to another view).
+    if !following && x.jump.is_none() && x.gliding.is_none() {
+        (w.view.pos, w.view.yaw) = (x.place.pos, x.place.yaw);
+    }
+
+    // Pointing: the hand clicking, else the one whose trigger went down
+    // last.
     if x.clicking.is_none()
         && let Some(hand) = (0..2).find(|&h| pressed[h] && rays[h].is_some())
     {
@@ -493,14 +782,34 @@ pub(crate) fn input(w: &mut World) {
         x.hand = 1 - x.hand;
     }
     x.aim = None;
+    let mut under_ray = None;
     x.beam = None;
+    let panel = if x.panel_pose.palette {
+        crate::panel::palette_pixels(&w.screen)
+    } else if x.panel_pose.popup {
+        crate::confirm::popup_pixels(&w.confirm, &w.screen)
+    } else {
+        w.screen.pixels
+    };
     let window = &mut w.e.window;
     match rays[x.hand] {
         Some((origin, rotation)) => {
             let dir = rotation * Vec3::NEG_Z;
-            if let Some((uv, at)) = panel_hit(origin, dir, panel) {
+            let on_ui = panel_hit(&x.panel_pose, origin, dir, panel).filter(|(uv, _)| {
+                // The palette's empty parts let the ray through.
+                !x.panel_pose.palette
+                    || w.ui
+                        .shows_at(*uv * Vec2::new(panel.z as f32, panel.w as f32))
+            });
+            if let Some((uv, at)) = on_ui {
                 let p = Vec2::new(panel.x as f32, panel.y as f32)
                     + uv * Vec2::new(panel.z as f32, panel.w as f32);
+                // Outside levels (where it would drag the camera) the
+                // pointer's moving is the mouse's: it highlights what it is
+                // on, as in the level list.
+                if !playing && let Some(before) = window.physical_cursor_position() {
+                    w.e.input.motion.delta += (p - before) / window.scale_factor();
+                }
                 window.set_physical_cursor_position(Some(p));
                 x.beam = Some(Beam {
                     start: origin,
@@ -510,7 +819,7 @@ pub(crate) fn input(w: &mut World) {
             } else {
                 // Into the level: the game sees it as a view along the ray
                 // with the pointer in its middle.
-                let anchor = world_from_space(w.view.pos, w.view.yaw);
+                let anchor = x.place.world_from_space();
                 let from = anchor.transform_point3(origin);
                 let toward = anchor.transform_vector3(dir).normalize();
                 let up = anchor.transform_vector3(rotation * Vec3::Y).normalize();
@@ -528,6 +837,7 @@ pub(crate) fn input(w: &mut World) {
                 };
                 let picked = w.game.sim.as_ref().and_then(|sim| {
                     let i = crate::hud::lemming_at(sim, &aim_camera, size, size / 2.0)?;
+                    under_ray = Some(i);
                     Some(Vec3::from_array(sim.lemmings[i].pos.map(crate::units)) + Vec3::Y * 0.2)
                 });
                 let solid = || {
@@ -557,6 +867,14 @@ pub(crate) fn input(w: &mut World) {
         None if x.clicking.is_none() => window.set_physical_cursor_position(None),
         None => {}
     }
+    let world_from_space = x.place.world_from_space();
+    x.seen_from = head.map(|(position, rotation)| {
+        let forward = world_from_space.transform_vector3(rotation * Vec3::NEG_Z);
+        (
+            world_from_space.transform_point3(position),
+            (-forward.z).atan2(-forward.x),
+        )
+    });
     let mouse = &mut w.e.input.mouse;
     if x.clicking.is_none() && pressed[x.hand] && rays[x.hand].is_some() {
         x.clicking = Some(x.hand);
@@ -568,52 +886,32 @@ pub(crate) fn input(w: &mut World) {
         x.clicking = None;
         mouse.release(MouseButton::Left);
     }
-    aim(w);
-    let State::On(x) = &mut w.renderer.xr else {
-        return;
-    };
-    let c = &x.controls;
-
-    // Walking and turning.
-    let stick = |hand: usize| {
-        c.stick
-            .state(&x.session, c.hands[hand])
-            .ok()
-            .filter(|s| s.is_active)
-            .map_or(Vec2::ZERO, |s| {
-                Vec2::new(s.current_state.x, s.current_state.y)
-            })
-    };
-    let (walk, turn) = (stick(0), stick(1));
-    let dt = w.e.time.real.delta_secs();
-    if walk.length() > STICK_DEAD {
-        let head = x
-            .session
-            .locate_views(VIEW_TYPE, time, &x.space)
-            .ok()
-            .map(|(_, v)| pose(v[0].pose).1)
-            .unwrap_or(Quat::IDENTITY);
-        let ahead = (anchor_rotation(w.view.yaw) * head * Vec3::NEG_Z).with_y(0.0);
-        let ahead = ahead.normalize_or(Vec3::X);
-        let right = Vec3::new(-ahead.z, 0.0, ahead.x);
-        w.view.pos += (ahead * walk.y + right * walk.x) * crate::CAMERA_SPEED * dt;
+    // X: riding along with the lemming under the ray, as a gamepad's X with
+    // the highlighted one (the skill stays selected); again, or with none
+    // under the ray, the lemming view's own toggle.
+    if ride {
+        let selected = (w.selected.0, w.selected.1);
+        let (cam, highlight, chosen, view) = (
+            &mut w.lemming_cam,
+            &mut w.highlight,
+            &mut w.selected,
+            &mut w.view,
+        );
+        match under_ray {
+            Some(i) if cam.following() != Some(i) => cam.ride(i, highlight, chosen, view),
+            _ => cam.face(highlight, chosen, view),
+        }
+        (w.selected.0, w.selected.1) = selected;
     }
-    if turn.x.abs() < STICK_DEAD {
-        x.turn_ready = true;
-    } else if x.turn_ready {
-        x.turn_ready = false;
-        // Turning about the head, not the anchor: the anchor moves round it.
-        let head = x
-            .session
-            .locate_views(VIEW_TYPE, time, &x.space)
-            .ok()
-            .map(|(_, v)| pose(v[0].pose).0)
-            .unwrap_or(Vec3::ZERO);
-        let before = world_from_space(w.view.pos, w.view.yaw).transform_point3(head);
-        // A push right turns right: the heading's yaw goes down.
-        w.view.yaw -= SNAP_TURN * turn.x.signum();
-        let after = world_from_space(w.view.pos, w.view.yaw).transform_point3(head);
-        w.view.pos += before - after;
+    aim(w);
+}
+
+/// Where the head is in the level, in units, and the way it faces (the
+/// camera-yaw convention), while in the headset: what sprites turn to.
+pub(crate) fn seen_from(w: &World) -> Option<(Vec3, f32)> {
+    match &w.renderer.xr {
+        State::On(x) => x.seen_from,
+        _ => None,
     }
 }
 
@@ -631,6 +929,30 @@ pub(crate) fn aim(w: &mut World) {
 /// Draws the frame for the headset: the level for each eye, and the UI on
 /// its panel.
 pub(crate) fn render(w: &mut World) {
+    // While playing, the UI is the palette on the left hand (but a level's
+    // menu or preview floats ahead, whole).
+    let palette = w.state == crate::menu::AppState::Playing
+        && w.confirm.question.is_none()
+        && !w.preview.active;
+    let on = matches!(w.renderer.xr, State::On(_));
+    // A turner waiting for its side: its arrows, drawn in the level.
+    let aim = match &w.renderer.xr {
+        State::On(x) => x.aim,
+        _ => None,
+    };
+    let aim_camera = aim.map(|view_proj| SceneCamera {
+        view_proj,
+        ..w.camera
+    });
+    let turner = crate::hud::pending_turner_sides(w, aim_camera.as_ref());
+    w.panel.palette = palette && on;
+    // The level's menu pops up ahead instead.
+    let popup = w.state == crate::menu::AppState::Playing && w.confirm.question.is_some();
+    w.confirm.popup = popup && on;
+    let palette_px = crate::panel::palette_pixels(&w.screen);
+    let popup_px = crate::confirm::popup_pixels(&w.confirm, &w.screen);
+    w.time_overlay.vr = on;
+    let dial_px = crate::time_dial::band_pixels(&w.time_overlay, &w.screen);
     let (Some(gpu), State::On(x)) = w.renderer.gpu_and_xr() else {
         return;
     };
@@ -666,9 +988,11 @@ pub(crate) fn render(w: &mut World) {
         std::thread::sleep(std::time::Duration::from_millis(20));
         return;
     }
+    let before_wait = Instant::now();
     let Ok(state) = x.waiter.wait() else {
         return;
     };
+    let after_wait = Instant::now();
     if x.stream.begin().is_err() {
         return;
     }
@@ -707,12 +1031,18 @@ pub(crate) fn render(w: &mut World) {
     let eyes = x.eyes.as_mut().expect("made above");
     let image = eyes.handle.acquire_image().expect("an eye image") as usize;
     let _ = eyes.handle.wait_image(xr::Duration::INFINITE);
-    let anchor = world_from_space(w.view.pos, w.view.yaw);
+    let anchor = x.place.world_from_space();
     let size = eyes.size;
     for (eye, view) in views.iter().enumerate() {
         let camera = eye_camera(&w.camera, anchor, view);
         let target = &eyes.images[image].1[eye];
         let mut encoder = device.create_command_encoder(&Default::default());
+        if x.jump.is_some() {
+            // Dark while jumping to a camera view.
+            clear(&mut encoder, target, LinearRgba::new(0.0, 0.0, 0.0, 1.0));
+            gpu.queue.submit([encoder.finish()]);
+            continue;
+        }
         let c = w.clear.0.to_linear();
         x.scene.draw(
             gpu,
@@ -773,7 +1103,15 @@ pub(crate) fn render(w: &mut World) {
     }
     let _ = panel.handle.release_image();
 
-    // The ray, over everything.
+    // A waiting turner's arrows, in the headset's space.
+    let space_from_world = x.place.world_from_space().inverse();
+    let arrows: Vec<(Vec3, Vec4)> = turner
+        .map(|(centre, dirs, chosen)| turner_arrows(centre, dirs, chosen))
+        .unwrap_or_default()
+        .into_iter()
+        .map(|(p, colour)| (space_from_world.transform_point3(p), colour))
+        .collect();
+    // The ray and the arrows, over everything.
     let eye_size = x.eyes.as_ref().expect("made above").size;
     let overlay = x.overlay.get_or_insert_with(|| Overlay {
         chain: chain(&x.session, device, eye_size / OVERLAY_SCALE, 2),
@@ -789,7 +1127,8 @@ pub(crate) fn render(w: &mut World) {
         let mut encoder = device.create_command_encoder(&Default::default());
         for (eye, view) in views.iter().enumerate() {
             let target = &overlay.chain.images[image].1[eye];
-            let vertices = x.beam.map(|b| beam_vertices(&b, view)).unwrap_or_default();
+            let mut vertices = triangle_vertices(&arrows, view);
+            vertices.extend(x.beam.map(|b| beam_vertices(&b, view)).unwrap_or_default());
             let buffer = (!vertices.is_empty()).then(|| {
                 wgpu::util::DeviceExt::create_buffer_init(
                     device,
@@ -849,7 +1188,49 @@ pub(crate) fn render(w: &mut World) {
         .space(&x.space)
         .views(&projection_views);
     let panel = x.panel.as_ref().expect("made above");
-    let (centre, rotation) = panel_pose();
+    if !popup {
+        x.popup_at = None;
+    } else if x.popup_at.is_none() {
+        x.popup_at = Some(PanelPose {
+            popup: true,
+            ..ahead_of_head(&views, POPUP_AHEAD, POPUP_BELOW, POPUP_TILT, POPUP_WIDTH)
+        });
+    }
+    if dial_px.is_none() {
+        x.dial_at = None;
+    } else if x.dial_at.is_none() {
+        x.dial_at = Some(ahead_of_head(&views, DIAL_AHEAD, 0.0, 0.0, DIAL_WIDTH));
+    }
+    x.panel_pose = if let Some(at) = &x.popup_at {
+        *at
+    } else {
+        palette
+            .then(|| locate(&x.controls.grips[0], &x.space, state.predicted_display_time))
+            .flatten()
+            .map_or_else(front_panel, |(hand, turn)| PanelPose {
+                centre: hand + turn * PALETTE_OFFSET,
+                rotation: turn * Quat::from_rotation_x(PALETTE_TILT),
+                width: PALETTE_WIDTH,
+                palette: true,
+                popup: false,
+            })
+    };
+    let PanelPose {
+        centre,
+        rotation,
+        width,
+        palette: palette_on,
+        popup: popup_on,
+    } = x.panel_pose;
+    // The part of the UI shown: the palette's strip, the popup's card, or
+    // all of it.
+    let part = if palette_on {
+        Some(palette_px)
+    } else if popup_on {
+        Some(popup_px)
+    } else {
+        None
+    };
     let quad = xr::CompositionLayerQuad::new()
         .space(&x.space)
         .layer_flags(xr::CompositionLayerFlags::BLEND_TEXTURE_SOURCE_ALPHA)
@@ -857,7 +1238,19 @@ pub(crate) fn render(w: &mut World) {
         .sub_image(
             xr::SwapchainSubImage::new()
                 .swapchain(&panel.handle)
-                .image_rect(rect(panel.size)),
+                .image_rect(match part {
+                    Some(p) => xr::Rect2Di {
+                        offset: xr::Offset2Di {
+                            x: p.x as i32,
+                            y: p.y as i32,
+                        },
+                        extent: xr::Extent2Di {
+                            width: p.z.min(panel.size.x.saturating_sub(p.x)) as i32,
+                            height: p.w.min(panel.size.y.saturating_sub(p.y)) as i32,
+                        },
+                    },
+                    None => rect(panel.size),
+                }),
         )
         .pose(xr::Posef {
             orientation: xr::Quaternionf {
@@ -873,8 +1266,11 @@ pub(crate) fn render(w: &mut World) {
             },
         })
         .size(xr::Extent2Df {
-            width: PANEL_WIDTH,
-            height: panel_height(panel.size),
+            width,
+            height: match part {
+                Some(p) => width * p.w as f32 / p.z.max(1) as f32,
+                None => width * panel.size.y as f32 / panel.size.x.max(1) as f32,
+            },
         });
     let overlay = x.overlay.as_ref().expect("made above");
     let overlay_views = [0, 1].map(|i| {
@@ -892,12 +1288,86 @@ pub(crate) fn render(w: &mut World) {
         .space(&x.space)
         .layer_flags(xr::CompositionLayerFlags::BLEND_TEXTURE_SOURCE_ALPHA)
         .views(&overlay_views);
-    if let Err(e) = x.stream.end(
-        state.predicted_display_time,
-        x.blend,
-        &[&projection, &quad, &ray],
-    ) {
+    // The time control's bar, from the same UI image.
+    let dial = x.dial_at.zip(dial_px).map(|(at, p)| {
+        xr::CompositionLayerQuad::new()
+            .space(&x.space)
+            .layer_flags(xr::CompositionLayerFlags::BLEND_TEXTURE_SOURCE_ALPHA)
+            .eye_visibility(xr::EyeVisibility::BOTH)
+            .sub_image(
+                xr::SwapchainSubImage::new()
+                    .swapchain(&panel.handle)
+                    .image_rect(xr::Rect2Di {
+                        offset: xr::Offset2Di {
+                            x: p.x as i32,
+                            y: p.y as i32,
+                        },
+                        extent: xr::Extent2Di {
+                            width: p.z.min(panel.size.x.saturating_sub(p.x)) as i32,
+                            height: p.w.min(panel.size.y.saturating_sub(p.y)) as i32,
+                        },
+                    }),
+            )
+            .pose(posef(at.centre, at.rotation))
+            .size(xr::Extent2Df {
+                width: at.width,
+                height: at.width * p.w as f32 / p.z.max(1) as f32,
+            })
+    });
+    let level = w.current.loaded;
+    x.timing.frame(before_wait, after_wait, level);
+    let mut layers: Vec<&xr::CompositionLayerBase<xr::Vulkan>> = vec![&projection, &quad];
+    if let Some(d) = &dial {
+        layers.push(d);
+    }
+    layers.push(&ray);
+    if let Err(e) = x.stream.end(state.predicted_display_time, x.blend, &layers) {
         warn!("VR frame: {e}");
+    }
+}
+
+/// Where the frames' time goes on the CPU, summed and logged every
+/// [`TIMING_SECONDS`]: the game's own work between frames, the wait for the
+/// headset, and drawing (recording and submitting the GPU's work).
+#[derive(Default)]
+struct Timing {
+    since: Option<Instant>,
+    last_end: Option<Instant>,
+    frames: u32,
+    game: f32,
+    waiting: f32,
+    drawing: f32,
+}
+
+const TIMING_SECONDS: f32 = 2.0;
+
+impl Timing {
+    fn frame(&mut self, before_wait: Instant, after_wait: Instant, level: Option<u32>) {
+        let now = Instant::now();
+        let since = *self.since.get_or_insert(now);
+        if let Some(end) = self.last_end {
+            self.game += (before_wait - end).as_secs_f32();
+        }
+        self.waiting += (after_wait - before_wait).as_secs_f32();
+        self.drawing += (now - after_wait).as_secs_f32();
+        self.frames += 1;
+        self.last_end = Some(now);
+        let span = (now - since).as_secs_f32();
+        if span >= TIMING_SECONDS {
+            let ms = |t: f32| t * 1000.0 / self.frames as f32;
+            info!(
+                "VR timing, level {level:?}: {:.1} fps; per frame {:.1} ms game, {:.1} ms drawing, {:.1} ms waiting",
+                self.frames as f32 / span,
+                ms(self.game),
+                ms(self.drawing),
+                ms(self.waiting),
+            );
+            *self = Timing {
+                last_end: self.last_end,
+                since: Some(now),
+                ..Timing::default()
+            };
+        }
     }
 }
 
@@ -1028,42 +1498,23 @@ fn anchor_rotation(yaw: f32) -> Quat {
     Quat::from_rotation_y(std::f32::consts::FRAC_PI_2 - yaw)
 }
 
-/// The level's coordinates of a point in the headset's space (metres, from
-/// where the head began): the head's start is the camera at `pos` facing
-/// its `yaw`.
-fn world_from_space(pos: Vec3, yaw: f32) -> Mat4 {
-    Mat4::from_scale_rotation_translation(
-        Vec3::splat(1.0 / METRES_PER_UNIT),
-        anchor_rotation(yaw),
-        pos,
-    )
-}
-
 /// The scene camera for an eye at `view`, the rest as the game's `base`.
 fn eye_camera(base: &SceneCamera, anchor: Mat4, view: &xr::View) -> SceneCamera {
     let (position, rotation) = pose(view.pose);
     let world_from_eye = anchor * Mat4::from_rotation_translation(rotation, position);
     let view_proj = fov_projection(view.fov) * world_from_eye.inverse();
-    let forward = world_from_eye.transform_vector3(Vec3::NEG_Z).normalize();
     let right = world_from_eye.transform_vector3(Vec3::X).normalize();
-    // The sky: the horizon where the level's horizontal ahead meets the
-    // view, and the panorama turned with the heading.
-    let level = Vec3::new(forward.x, 0.0, forward.z).normalize_or(Vec3::X);
-    let clip = view_proj * level.extend(0.0);
-    let horizon = if clip.w > 1e-4 {
-        (1.0 - clip.y / clip.w) / 2.0
-    } else if forward.y > 0.0 {
-        2.0
-    } else {
-        -1.0
-    };
-    let yaw = (-forward.z).atan2(-forward.x);
+    // The sky all round, fixed in the world: its panorama as high above
+    // the horizon as the screen shows it.
+    let top = crate::DEFAULT_HORIZON * 2.0 * (crate::DEFAULT_FOV_Y.to_radians() / 2.0).tan();
     SceneCamera {
         view_proj,
-        horizon,
-        sky_column: crate::sky_left_column(yaw),
+        horizon: 0.5,
+        sky_column: 0.0,
+        dome: top.atan(),
+        halos: true,
         right,
-        roll: (-right.y).clamp(-1.0, 1.0).asin(),
+        roll: 0.0,
         pixels: UVec2::ZERO,
         ..*base
     }
@@ -1082,35 +1533,122 @@ fn fov_projection(fov: xr::Fovf) -> Mat4 {
     )
 }
 
-/// The panel's centre and turn in the headset's space.
-fn panel_pose() -> (Vec3, Quat) {
-    (PANEL_CENTRE, Quat::from_rotation_x(-PANEL_TILT))
+/// A turner's two arrows, flat beside the lemming at `centre` pointing to
+/// its sides `dirs` (level units): the one a click would pick bright, the
+/// other faint; both half bright while neither is clearly meant. White with
+/// a dark rim, as the panel's arrows.
+fn turner_arrows(centre: Vec3, dirs: [Vec3; 2], chosen: Option<usize>) -> Vec<(Vec3, Vec4)> {
+    let mut out = Vec::new();
+    for (k, d) in dirs.into_iter().enumerate() {
+        let alpha = match chosen {
+            Some(c) if c == k => 1.0,
+            Some(_) => 0.2,
+            None => 0.6,
+        };
+        let across = Vec3::new(-d.z, 0.0, d.x);
+        for (grow, colour) in [
+            (0.05, Vec4::new(0.0, 0.0, 0.0, 0.7 * alpha)),
+            (0.0, Vec4::new(1.0, 1.0, 1.0, alpha)),
+        ] {
+            let (base, tip) = (centre + d * (0.3 - grow), centre + d * (0.85 + grow));
+            let neck = tip - d * (0.25 + grow);
+            let (shaft, head) = (0.06 + grow, 0.18 + grow * 1.5);
+            out.extend(
+                [
+                    base - across * shaft,
+                    base + across * shaft,
+                    neck + across * shaft,
+                    base - across * shaft,
+                    neck + across * shaft,
+                    neck - across * shaft,
+                    neck - across * head,
+                    neck + across * head,
+                    tip,
+                ]
+                .map(|v| (v, colour)),
+            );
+        }
+    }
+    out
 }
 
-/// The panel's height in metres for an image of `size`.
-fn panel_height(size: UVec2) -> f32 {
-    PANEL_WIDTH * size.y as f32 / size.x.max(1) as f32
+/// Triangles (corners in the headset's space, with colours) for the
+/// overlay, as eye `view` sees them.
+fn triangle_vertices(corners: &[(Vec3, Vec4)], view: &xr::View) -> Vec<f32> {
+    let (eye, rotation) = pose(view.pose);
+    let to_clip =
+        fov_projection(view.fov) * Mat4::from_rotation_translation(rotation, eye).inverse();
+    let mut out = Vec::with_capacity(corners.len() * VERTEX_FLOATS);
+    for &(p, colour) in corners {
+        out.extend(to_clip.mul_vec4(p.extend(1.0)).to_array());
+        out.extend(colour.to_array());
+        out.extend([0.0, 0.0]);
+    }
+    out
 }
 
-/// Where a ray from `origin` along `dir` meets the panel showing the screen
-/// `panel` (its pixels' rectangle), as 0–1 across and down, and the point
-/// met; none if it misses.
-fn panel_hit(origin: Vec3, dir: Vec3, panel: UVec4) -> Option<(Vec2, Vec3)> {
-    let (centre, rotation) = panel_pose();
-    let normal = rotation * Vec3::Z;
+/// A panel `ahead` metres ahead of the head and `below` under its height,
+/// level, facing it and leaning back by `tilt` radians, `width` wide.
+fn ahead_of_head(views: &[xr::View], ahead: f32, below: f32, tilt: f32, width: f32) -> PanelPose {
+    let (a, b) = (pose(views[0].pose), pose(views[1].pose));
+    let head = (a.0 + b.0) / 2.0;
+    let forward = (a.1 * Vec3::NEG_Z).with_y(0.0).normalize_or(Vec3::NEG_Z);
+    let turn = Quat::from_rotation_y((-forward.x).atan2(-forward.z));
+    PanelPose {
+        centre: head + forward * ahead - Vec3::Y * below,
+        rotation: turn * Quat::from_rotation_x(-tilt),
+        width,
+        palette: false,
+        popup: false,
+    }
+}
+
+/// An OpenXR pose from a position and rotation.
+fn posef(position: Vec3, rotation: Quat) -> xr::Posef {
+    xr::Posef {
+        orientation: xr::Quaternionf {
+            x: rotation.x,
+            y: rotation.y,
+            z: rotation.z,
+            w: rotation.w,
+        },
+        position: xr::Vector3f {
+            x: position.x,
+            y: position.y,
+            z: position.z,
+        },
+    }
+}
+
+/// The UI floating ahead, where the head began.
+fn front_panel() -> PanelPose {
+    PanelPose {
+        centre: PANEL_CENTRE,
+        rotation: Quat::from_rotation_x(-PANEL_TILT),
+        width: PANEL_WIDTH,
+        palette: false,
+        popup: false,
+    }
+}
+
+/// Where a ray from `origin` along `dir` meets the UI shown at `at`, an
+/// image of the screen `panel` (its pixels' rectangle), as 0–1 across and
+/// down, and the point met; none if it misses.
+fn panel_hit(at: &PanelPose, origin: Vec3, dir: Vec3, panel: UVec4) -> Option<(Vec2, Vec3)> {
+    let normal = at.rotation * Vec3::Z;
     let facing = dir.dot(normal);
     if facing >= -1e-4 {
         return None;
     }
-    let t = (centre - origin).dot(normal) / facing;
+    let t = (at.centre - origin).dot(normal) / facing;
     if t <= 0.0 {
         return None;
     }
-    let at = origin + dir * t;
-    let local = rotation.inverse() * (at - centre);
-    let height = panel_height(UVec2::new(panel.z, panel.w));
-    let uv = Vec2::new(local.x / PANEL_WIDTH + 0.5, 0.5 - local.y / height);
-    (uv.cmpge(Vec2::ZERO).all() && uv.cmple(Vec2::ONE).all()).then_some((uv, at))
+    let hit = origin + dir * t;
+    let local = at.rotation.inverse() * (hit - at.centre);
+    let height = at.width * panel.w as f32 / panel.z.max(1) as f32;
+    let uv = Vec2::new(local.x / at.width + 0.5, 0.5 - local.y / height);
+    (uv.cmpge(Vec2::ZERO).all() && uv.cmple(Vec2::ONE).all()).then_some((uv, hit))
 }
 
 /// Floats per vertex of the ray: clip position, colour (premultiplied

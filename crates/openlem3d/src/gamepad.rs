@@ -379,6 +379,8 @@ fn buttons(w: &mut World, pad: &l3d_engine::input::Pad) {
         let briefing = w.state == AppState::Briefing || w.preview.active;
         let first = if briefing {
             crate::briefing::first_choice(w)
+        } else if w.confirm.question.is_some() {
+            crate::confirm::first_choice(w)
         } else if w.state == AppState::Title {
             crate::title::quit_box(w)
                 .map(|(_, no)| no)

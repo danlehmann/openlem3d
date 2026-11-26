@@ -260,6 +260,9 @@ pub(crate) struct Panel {
     map: Option<NodeId>,
     frame: Option<NodeId>,
     caption: Option<(NodeId, String)>,
+    /// Laid out as the VR palette on the left hand ([`PALETTE`]) rather
+    /// than over the screen.
+    pub(crate) palette: bool,
     /// Each [`Part`]'s node, holding its items.
     parts: Vec<(Part, NodeId)>,
     /// The parts closed by their dots; they stay closed from level to level.
@@ -571,6 +574,88 @@ fn scale(screen: &Screen) -> f32 {
     (screen.size.y / SCREEN.y).max(1.0)
 }
 
+/// The VR palette (ours): the skills in a column on the left, the
+/// right-hand column beside them with the arrow and the face under it, and
+/// the minimap, smaller, under those; no height bar (the player's own
+/// height is the camera's) and no corner dots. Its size in original pixels,
+/// at the screen's top left.
+const PALETTE: Vec2 = Vec2::new(84.0, 272.0);
+/// The palette's skills: one under the other, this far apart.
+const PALETTE_SKILL_PITCH: f32 = 30.0;
+/// The palette's right-hand column: its left edge, and where the arrow, the
+/// face and the minimap go under it.
+const PALETTE_COLUMN_X: f32 = 36.0;
+const PALETTE_FACE_Y: f32 = 152.0;
+const PALETTE_MAP_Y: f32 = 180.0;
+const PALETTE_MAP: f32 = 48.0;
+
+/// Original pixels per screen pixel on the palette.
+fn palette_scale(screen: &Screen) -> f32 {
+    (screen.size.x / PALETTE.x).min(screen.size.y / PALETTE.y)
+}
+
+/// The palette's part of the screen, in physical pixels: left, top, width,
+/// height.
+#[cfg_attr(not(feature = "xr"), allow(dead_code))]
+pub(crate) fn palette_pixels(screen: &Screen) -> UVec4 {
+    let physical = screen.pixels.z as f32 / screen.size.x.max(1.0);
+    let size = (PALETTE * palette_scale(screen) * physical)
+        .round()
+        .as_uvec2();
+    UVec4::new(
+        screen.pixels.x,
+        screen.pixels.y,
+        size.x.max(1),
+        size.y.max(1),
+    )
+}
+
+/// Where the frames-per-second counter goes on the palette, under the
+/// minimap: its top's middle (screen pixels), and screen pixels per glyph
+/// pixel.
+pub(crate) fn palette_fps(screen: &Screen) -> (Vec2, f32) {
+    let s = palette_scale(screen);
+    let at = Vec2::new(
+        PALETTE_COLUMN_X + PALETTE_MAP / 2.0,
+        PALETTE_MAP_Y + PALETTE_MAP + 6.0,
+    );
+    (at * s, s * 0.75)
+}
+
+/// Where an element goes on the palette, and its size (original pixels);
+/// none for those it leaves out.
+fn palette_place(p: &PanelPos) -> Option<(Vec2, Vec2)> {
+    let (at, size) = (p.at, p.size);
+    if at.x >= BAR_X || size == Vec2::splat(3.0) {
+        // The height bar, its knob and the dots.
+        return None;
+    }
+    if at.y < 160.0 && !p.skill_row {
+        if at.x >= 256.0 {
+            return Some((Vec2::new(at.x - 260.0 + PALETTE_COLUMN_X, at.y), size));
+        }
+        // The minimap and its frame, shrunk.
+        let k = PALETTE_MAP / 70.0;
+        return Some((
+            Vec2::new(PALETTE_COLUMN_X, PALETTE_MAP_Y) + at * k,
+            size * k,
+        ));
+    }
+    if at.x < 40.0 {
+        // The arrow and the face.
+        let y = PALETTE_FACE_Y + at.y - 172.0;
+        return Some((Vec2::new(PALETTE_COLUMN_X + at.x, y), size));
+    }
+    // A skill's button, count or umbrella: its row turned into a column.
+    let k = SKILL_BUTTONS
+        .iter()
+        .rposition(|&(x, _)| x <= at.x + 3.0)
+        .unwrap_or(0);
+    let x = SKILL_BUTTONS[k].0;
+    let y = at.y - SKILL_Y + PALETTE_SKILL_PITCH * k as f32;
+    Some((Vec2::new(at.x - x, y), size))
+}
+
 /// Places every element: the skill row keeps to the bottom left, the
 /// right-hand column (x ≥ 256) to the top right and the height bar to the
 /// right edge, the rest to the top left.
@@ -579,6 +664,18 @@ fn layout(w: &mut World) {
     let (width, height) = (w.screen.size.x, w.screen.size.y);
     let panel = &mut w.panel;
     panel.pos.retain(|id, _| w.ui.contains(*id));
+    if panel.palette {
+        let s = palette_scale(&w.screen);
+        for (&id, p) in &panel.pos {
+            let Some(n) = w.ui.get_mut(id) else { continue };
+            let (at, size) = palette_place(p).unwrap_or((Vec2::ZERO, Vec2::ZERO));
+            n.node.left = px(at.x * s);
+            n.node.top = px(at.y * s);
+            n.node.width = px(size.x * s);
+            n.node.height = px(size.y * s);
+        }
+        return;
+    }
     for (&id, p) in &panel.pos {
         let Some(n) = w.ui.get_mut(id) else { continue };
         let x = if p.at.x >= BAR_X || (p.at.y < 160.0 && p.at.x >= 256.0 && !p.skill_row) {
@@ -1123,9 +1220,11 @@ pub(crate) fn show_minimap(w: &mut World) {
 }
 
 /// The panel shows while playing, but not during the level preview (an
-/// interstitial in the original, without the panel).
+/// interstitial in the original, without the panel), nor behind the level's
+/// menu as a VR popup.
 pub(crate) fn show_in_play(w: &mut World) {
-    let shown = w.state == AppState::Playing && !w.opts.no_hud && !w.preview.active;
+    let shown =
+        w.state == AppState::Playing && !w.opts.no_hud && !w.preview.active && !w.confirm.popup;
     if let Some(root) = w.panel.root {
         w.ui.set_visible(root, shown);
     }

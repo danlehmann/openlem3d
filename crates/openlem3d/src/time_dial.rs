@@ -32,6 +32,28 @@ pub struct Overlay {
     marks: Vec<Mark>,
     /// The readout above the bar, and what it shows.
     readout: Option<(NodeId, String)>,
+    /// In VR (set there): no vignette, and the bar's band shows on a panel
+    /// of its own ahead of the player.
+    pub(crate) vr: bool,
+    /// The bar and readout's band on the screen while shown (logical
+    /// pixels).
+    band: Option<Rect>,
+}
+
+/// The overlay's band (the bar, its marks and the readout) while it shows,
+/// in physical pixels: left, top, width, height.
+#[cfg_attr(not(feature = "xr"), allow(dead_code))]
+pub(crate) fn band_pixels(o: &Overlay, screen: &crate::screen::Screen) -> Option<UVec4> {
+    let band = o.band?;
+    let physical = screen.pixels.z as f32 / screen.size.x.max(1.0);
+    let min = (band.min * physical).round().max(Vec2::ZERO);
+    let size = (band.size() * physical).round().max(Vec2::ONE);
+    Some(UVec4::new(
+        screen.pixels.x + min.x as u32,
+        screen.pixels.y + min.y as u32,
+        size.x as u32,
+        size.y as u32,
+    ))
 }
 
 /// A speed marked on the bar: its tick, and its label's glyphs with their
@@ -153,6 +175,7 @@ pub(crate) fn update(w: &mut World) {
     };
     w.ui.set_visible(root, speed.is_some());
     let Some(v) = speed else {
+        w.time_overlay.band = None;
         return;
     };
     let (sw, sh) = (w.screen.size.x, w.screen.size.y);
@@ -173,6 +196,9 @@ pub(crate) fn update(w: &mut World) {
     let ui = &mut w.ui;
     let o = &mut w.time_overlay;
     place(ui, o.vignette, 0.0, 0.0, sw, sh);
+    if let Some(id) = o.vignette {
+        ui.set_visible(id, !o.vr);
+    }
     place(
         ui,
         o.track,
@@ -189,6 +215,14 @@ pub(crate) fn update(w: &mut World) {
         .as_ref()
         .and_then(|a| a.large.as_ref())
         .map_or(10.0, |f| f.size.y);
+    // From the readout's top to the marks' labels' bottom, with a margin.
+    let margin = 8.0 * scale;
+    o.band = Some(Rect::new(
+        (cx - half - margin).max(0.0),
+        (cy - bar - font_h * scale - 6.0 - margin).max(0.0),
+        (cx + half + margin).min(sw),
+        (cy + bar + 4.0 + font_h * scale * 0.5 + margin).min(sh),
+    ));
     for mark in &o.marks {
         let x = cx + offset(mark.speed, sh);
         place(ui, Some(mark.tick), x - 1.0, cy + bar / 2.0, 2.0, bar * 0.6);

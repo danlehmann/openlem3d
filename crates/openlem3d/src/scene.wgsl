@@ -48,6 +48,11 @@ struct Uniforms {
     // x and z), z the units a texel spans, w the texels across; w 0 when
     // there are none.
     waves: vec4<f32>,
+    // In a headset, the sky all round, fixed in the world: x the angle
+    // above the horizon of the panorama's top (0: the sky is laid out on
+    // the screen), yz the target's size in pixels, w the angle a tile of
+    // the all-round sky spans upwards.
+    dome: vec4<f32>,
     // From clip space back to the world.
     inv_view_proj: mat4x4<f32>,
     // On a level with a sandstorm, the grid cells holding a visible block:
@@ -443,6 +448,50 @@ fn fs_shadow_cover(v: VOut) -> @location(0) vec4<f32> {
     return vec4(1.0);
 }
 
+// Halos (ours, in a headset): a disc round each light, facing the eye and
+// brought towards it by its radius, so that the wall the light is on does
+// not cut it in half; its light is added to what is behind it.
+
+struct HaloOut {
+    @builtin(position) clip: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+    @location(1) @interpolate(flat) colour: vec3<f32>,
+};
+
+@vertex
+fn vs_halo(v: VIn) -> HaloOut {
+    let r = v.offset.x;
+    let to_eye = u.eye.xyz - v.pos;
+    let dist = length(to_eye);
+    let back = to_eye / max(dist, 1e-4);
+    var across = cross(vec3(0.0, 1.0, 0.0), back);
+    if (length(across) < 1e-3) {
+        across = u.right.xyz;
+    }
+    across = normalize(across);
+    let up = cross(back, across);
+    let centre = v.pos + back * min(r, dist * 0.5);
+    var o: HaloOut;
+    o.clip = u.view_proj * vec4(centre + (across * v.uv.x + up * v.uv.y) * r, 1.0);
+    o.uv = v.uv;
+    // The lights flicker together, a little, as their light on the blocks.
+    let t = u.sky.w;
+    let flicker = select(1.0, 0.85 + 0.1 * sin(t * 7.3) + 0.05 * sin(t * 17.9 + 1.3), v.params.y > 0.5);
+    o.colour = v.light * v.params.x * flicker;
+    return o;
+}
+
+@fragment
+fn fs_halo(v: HaloOut) -> @location(0) vec4<f32> {
+    let d2 = dot(v.uv, v.uv);
+    if (d2 >= 1.0) {
+        discard;
+    }
+    // Bright in the middle, falling off softly to nothing at the rim.
+    let fall = exp(-5.0 * d2) - exp(-5.0);
+    return vec4(v.colour * fall / (1.0 - exp(-5.0)), 1.0);
+}
+
 // Sky: a full-screen triangle. Above the horizon the sky image is stretched
 // so its full height spans the screen top to the horizon; horizontally each
 // sky texel covers two original-screen pixels, and the image wraps.
@@ -473,14 +522,20 @@ fn fs_sky(v: SkyOut) -> @location(0) vec4<f32> {
     let c = cos(u.view.x);
     let s = sin(u.view.x);
     var p = pivot + vec2(c * d.x - s * d.y, s * d.x + c * d.y);
-    if (v.mirrored > 0.5) {
+    if (u.dome.x > 0.0) {
+        p = sky_dome_point(v.clip.xy, v.mirrored > 0.5);
+    } else if (v.mirrored > 0.5) {
         p.y = 2.0 * u.sky.y - p.y;
     }
     let col = u.sky.x + p.x / (2.0 * u.sky.z);
     if (u.right.w > 0.5) {
         // All-round sky: a horizontally wrapping panorama stretched over the
         // full screen height (provisional).
-        let full = vec2(col / dims.x, clamp(p.y / (400.0 * u.sky.z), 0.0, 0.999));
+        var full = vec2(col / dims.x, clamp(p.y / (400.0 * u.sky.z), 0.0, 0.999));
+        if (u.dome.x > 0.0) {
+            // All round, it tiles upwards too.
+            full.y = fract(p.y / (400.0 * u.sky.z));
+        }
         let starry = u.weather.w > 0.5;
         var c = textureSampleLevel(tex, samp, full, 0.0);
         // In a night sky only a point of light is a star (ours): a glow with
@@ -541,6 +596,40 @@ fn fs_sky(v: SkyOut) -> @location(0) vec4<f32> {
     // With heat shimmer the alpha is how much the sky shimmers instead.
     return vec4(sky, select(kept, heat_of_sky(p), u.weather.z > 0.5));
 }
+
+/// In a headset, the point of the sky laid out on the screen (as `fs_sky`
+/// takes it: pixels, the horizon at `u.sky.y`) that the way through
+/// framebuffer pixel `frag` looks at, the sky fixed in the world; mirrored,
+/// as the sea shows it.
+fn sky_dome_point(frag: vec2<f32>, mirrored: bool) -> vec2<f32> {
+    let ndc = vec2(frag.x / u.dome.y * 2.0 - 1.0, 1.0 - frag.y / u.dome.z * 2.0);
+    let near = u.inv_view_proj * vec4(ndc, 1.0, 1.0);
+    let way = normalize(near.xyz / near.w - u.eye.xyz);
+    // The heading, as the camera's yaw, and the angle above the horizon.
+    let yaw = atan2(-way.z, -way.x);
+    var up = asin(clamp(way.y, -1.0, 1.0));
+    if (mirrored) {
+        up = -up;
+    }
+    // The column at the middle of the screen for that heading
+    // (`sky_left_column`), as the left edge's column is passed.
+    var centre = 928.0 + (yaw - 4.712389) * 1024.0 / 6.2831853;
+    var x = 0.0;
+    var y = 0.0;
+    if (u.right.w > 0.5) {
+        centre *= SURROUND_SKY_TURN / 1024.0;
+        y = (0.5 - up / u.dome.w) * 400.0 * u.sky.z;
+    } else {
+        y = (1.0 - up / u.dome.x) * u.sky.y;
+    }
+    // Whole turns away from the left edge's column, the nearest way round.
+    let turn = select(1024.0, SURROUND_SKY_TURN, u.right.w > 0.5);
+    let along = centre - u.sky.x;
+    x = (along - round(along / turn) * turn) * 2.0 * u.sky.z;
+    return vec2(x, y);
+}
+
+const SURROUND_SKY_TURN: f32 = 960.0;
 
 /// How much of the sky's height, from its top, the mirrored sky fades out
 /// over.

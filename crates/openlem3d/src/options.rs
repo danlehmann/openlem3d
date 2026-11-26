@@ -78,6 +78,7 @@ enum Item {
     Fullscreen,
     Rewind,
     Fps,
+    VrGlide,
     Mode,
     Music,
     Effects,
@@ -113,10 +114,12 @@ const SLIDER_COLUMNS: [(f32, f32); 2] = [(0.0, 64.0), (160.0, 224.0)];
 const BOX_HEIGHT: f32 = 14.0;
 const TEXT_SCALE: f32 = 1.0;
 
-const TOGGLES: [(Item, &str, usize, usize); 3] = [
+const TOGGLES: [(Item, &str, usize, usize); 4] = [
     (Item::Fullscreen, "Fullscreen", 0, 0),
     (Item::Rewind, "Rewind", 0, 1),
     (Item::Fps, "FPS", 0, 2),
+    // Only in the headset build.
+    (Item::VrGlide, "VR Glide", 0, 3),
 ];
 /// The toggles offered, each with its column: on a TV, which always fills
 /// the screen, no Fullscreen (the others move left).
@@ -125,6 +128,9 @@ fn toggles() -> impl Iterator<Item = (Item, &'static str, usize, usize)> {
     TOGGLES
         .into_iter()
         .filter(move |&(item, ..)| !(tv && item == Item::Fullscreen))
+        .filter(|&(item, ..)| {
+            item != Item::VrGlide || cfg!(all(target_os = "android", feature = "xr"))
+        })
         .enumerate()
         .map(|(col, (item, label, row, _))| (item, label, row, col))
 }
@@ -413,6 +419,7 @@ fn lit(s: &Settings, item: Item) -> Option<bool> {
         Item::Fullscreen => s.fullscreen,
         Item::Rewind => s.rewind,
         Item::Fps => s.fps,
+        Item::VrGlide => s.vr_glide,
         Item::Preset(p) => g.preset == p,
         Item::Waves => g.waves,
         Item::Reflections => g.reflections && g.waves,
@@ -563,6 +570,7 @@ fn toggle(s: &mut Settings, item: Item) {
         Item::Fullscreen => s.fullscreen = !s.fullscreen,
         Item::Rewind => s.rewind = !s.rewind,
         Item::Fps => s.fps = !s.fps,
+        Item::VrGlide => s.vr_glide = !s.vr_glide,
         Item::Mode => crate::style::switch(s),
         _ => {
             if let Some(g) = graphics(s.graphics, item) {

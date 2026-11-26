@@ -425,6 +425,15 @@ impl Ui {
         })
     }
 
+    /// Whether something is drawn at `p` (in pixels from the screen's
+    /// corner): a visible picture or coloured rectangle.
+    #[cfg_attr(not(all(target_os = "android", feature = "xr")), allow(dead_code))]
+    pub fn shows_at(&self, p: Vec2) -> bool {
+        self.nodes().any(|(id, n)| {
+            (n.image.is_some() || n.background.is_some_and(|c| c.alpha() > 0.0)) && self.over(id, p)
+        })
+    }
+
     /// The pictures beside `id` (its parent's other children, not buttons)
     /// whose middles lie in its rectangle, with their rectangles: a choice's
     /// prompt and label, say.

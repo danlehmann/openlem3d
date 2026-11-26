@@ -894,7 +894,7 @@ impl ViewCamera {
     }
 
     /// Ends a glide at once, at its destination.
-    fn finish_glide(&mut self) {
+    pub(crate) fn finish_glide(&mut self) {
         if let Some(g) = self.glide.take() {
             (self.pos, self.yaw) = g.to;
         }
@@ -1095,6 +1095,9 @@ pub struct Game {
     pub dial: Option<f32>,
     /// Fast-forward: the level runs [`FAST_FORWARD_TICKS`] times as fast.
     pub fast_forward: bool,
+    /// A VR controller's middle-finger buttons, as far as squeezed (0–1;
+    /// left, right): a gamepad's triggers (`backspace_rewind`).
+    pub squeeze: [f32; 2],
     /// The level's pace now, in ticks per normal tick: 0 paused, 1 normal, up to
     /// [`FAST_FORWARD_TICKS`]. It rises gradually after a pause and into
     /// fast-forward, and drops at once (ours).
@@ -1133,11 +1136,12 @@ pub(crate) fn backspace_rewind(w: &World) -> Option<f32> {
     let pulled =
         |v: f32| (v > PAD_TRIGGER_DEAD).then(|| (v - PAD_TRIGGER_DEAD) / (1.0 - PAD_TRIGGER_DEAD));
     let fast = FAST_FORWARD_TICKS as f32;
+    let [left, right] = w.game.squeeze;
     if !keys.pressed(KeyCode::Backspace) {
-        if let Some(t) = pulled(pad.left_trigger).filter(|_| w.settings.rewind) {
+        if let Some(t) = pulled(pad.left_trigger.max(left)).filter(|_| w.settings.rewind) {
             return Some(-(0.2 + t * (fast - 0.2)));
         }
-        if let Some(t) = pulled(pad.right_trigger) {
+        if let Some(t) = pulled(pad.right_trigger.max(right)) {
             return Some(1.0 + t * (fast - 1.0));
         }
     }
@@ -1490,6 +1494,12 @@ impl Game {
 }
 
 fn update_lemming_sprites(w: &mut World) {
+    // In the headset, as the head sees them.
+    #[cfg(all(target_os = "android", feature = "xr"))]
+    let seen_from = xr::seen_from(w);
+    #[cfg(not(all(target_os = "android", feature = "xr")))]
+    let seen_from: Option<(Vec3, f32)> = None;
+    let headset = in_headset(w);
     let dt = w.e.time.real.delta_secs();
     w.game.turn_yaws(w.settings.enhanced(), dt);
     let f = w
@@ -1499,7 +1509,7 @@ fn update_lemming_sprites(w: &mut World) {
     let (info, preset, sprites) = (&w.info, &w.preset, &mut w.sprites);
     let Some(sim) = &game.sim else { return };
     let cams = std::iter::once(&w.view);
-    let yaw = w.view.yaw;
+    let (eye_pos, yaw) = seen_from.unwrap_or((w.view.pos, w.view.yaw));
     // The other three cameras where they are now (verified); the current
     // one is the view. One right at the view would fill it, so is left out
     // (ours).
@@ -1536,13 +1546,22 @@ fn update_lemming_sprites(w: &mut World) {
         blocks,
         scene_build::ATLAS_ROWS,
         yaw,
-        w.view.pos,
+        seen_from.is_some(),
+        eye_pos,
         &game.doors,
         eyes,
         highlight.lemming,
         &cameras,
         f,
     );
+    // In the headset the lights glow in halos round them, not by blooming
+    // over the whole view (ours, enhanced mode).
+    if headset
+        && w.settings.enhanced()
+        && let Some(data) = &w.scene.data
+    {
+        (sprites.halo_vertices, sprites.halo_indices) = light::halos(&data.lights);
+    }
     // Shadows under the lemmings (ours, enhanced mode), on the sea or land
     // too where the level draws one.
     if w.settings.effects().is_some_and(|g| g.shadows) {
@@ -1756,7 +1775,16 @@ struct CameraControls {
     pivot: Option<[f32; 2]>,
 }
 
+/// Whether the game is shown in a VR headset.
+fn in_headset(_w: &World) -> bool {
+    #[cfg(all(target_os = "android", feature = "xr"))]
+    return matches!(_w.renderer.xr, xr::State::On(_));
+    #[cfg(not(all(target_os = "android", feature = "xr")))]
+    false
+}
+
 pub(crate) fn camera_controls(w: &mut World) {
+    let headset = in_headset(w);
     let opts = &w.opts;
     let input = &w.e.input;
     let (keys, mouse, motion, scroll) = (&input.keys, &input.mouse, &input.motion, &input.scroll);
@@ -1963,7 +1991,10 @@ pub(crate) fn camera_controls(w: &mut World) {
             cam.advance_glide(time.delta_secs());
         }
         // Never below the ground plane (the sea and land).
-        cam.pos.y = cam.pos.y.max(scene_build::GROUND_Y + CAMERA_RADIUS);
+        // In the headset the player walks and grabs the level freely.
+        if !headset {
+            cam.pos.y = cam.pos.y.max(scene_build::GROUND_Y + CAMERA_RADIUS);
+        }
         // The camera can't enter blocks (unless they are marked passable for
         // it); it slides along them. Preset jumps and glides, the lemming
         // view and the preview are exempt; after a glide the camera moves
@@ -1972,7 +2003,10 @@ pub(crate) fn camera_controls(w: &mut World) {
         // play) it starts afresh: a walk from where it was before would run
         // into this level's blocks and stop there (owner: the camera was
         // stuck at the start of "Birthday Cake").
-        if gliding || std::mem::replace(&mut cc.previewing, preview.active) != preview.active {
+        if std::mem::replace(&mut cc.previewing, preview.active) != preview.active
+            || gliding
+            || headset
+        {
             *last_free = None;
         }
         if let Some((level, blocks, _)) = &game.terrain {

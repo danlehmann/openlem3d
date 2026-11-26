@@ -22,6 +22,9 @@ pub struct Settings {
     /// Backspace runs the level back in time (ours); off, no snapshots are
     /// kept for it.
     pub rewind: bool,
+    /// In the headset, moves to another camera view glide as on the
+    /// screen (ours); off, the view cuts there in the dark.
+    pub vr_glide: bool,
     /// Volumes and camera speed, 0–10 lights as on the original's sliders.
     pub music: u8,
     pub effects: u8,
@@ -332,6 +335,7 @@ impl Default for Settings {
             calibrated: false,
             fps: false,
             rewind: true,
+            vr_glide: true,
             music: 8,
             effects: 8,
             camera: 5,
@@ -481,6 +485,7 @@ impl Settings {
                 "enhanced" => s.mode = if flag { Mode::Enhanced } else { Mode::Original },
                 "fps" => s.fps = flag,
                 "rewind" => s.rewind = flag,
+                "vr_glide" => s.vr_glide = flag,
                 "music" => s.music = level.unwrap_or(s.music),
                 "effects" => s.effects = level.unwrap_or(s.effects),
                 "camera" => s.camera = level.unwrap_or(s.camera),
@@ -519,7 +524,7 @@ impl Settings {
         let Some(path) = Self::path() else { return };
         let on = |b: bool| if b { "on" } else { "off" };
         let text = format!(
-            "fullscreen = {}\nmode = {}\npreset = {}\nresolution = {}\nfiltering = {}\nwaves = {}\nreflections = {}\nshadows = {}\nglow = {}\nsnow = {}\nsandstorm = {}\nwindows = {}\ncalibrated = {}\nfps = {}\nrewind = {}\nmusic = {}\neffects = {}\ncamera = {}\nrating = {}\ncompleted = {}\nbest = {}\n",
+            "fullscreen = {}\nmode = {}\npreset = {}\nresolution = {}\nfiltering = {}\nwaves = {}\nreflections = {}\nshadows = {}\nglow = {}\nsnow = {}\nsandstorm = {}\nwindows = {}\ncalibrated = {}\nfps = {}\nrewind = {}\nvr_glide = {}\nmusic = {}\neffects = {}\ncamera = {}\nrating = {}\ncompleted = {}\nbest = {}\n",
             on(self.fullscreen),
             self.mode.key(),
             self.graphics.preset.key(),
@@ -535,6 +540,7 @@ impl Settings {
             on(self.calibrated),
             on(self.fps),
             on(self.rewind),
+            on(self.vr_glide),
             self.music,
             self.effects,
             self.camera,

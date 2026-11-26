@@ -100,6 +100,13 @@ pub struct SceneSprites {
     /// whose middle is darkened by the shade (0–1).
     pub shadow_vertices: Vec<f32>,
     pub shadow_indices: Vec<u32>,
+    /// Soft round halos added around lights (ours, in a headset, in place
+    /// of the glow's bloom), in the same layout: `pos` the light, uv from
+    /// −1 to 1 across the disc, `params.x` its strength, `params.y` 1 when
+    /// it flickers, `offset.x` its radius in units, `light` its colour
+    /// (linear RGB).
+    pub halo_vertices: Vec<f32>,
+    pub halo_indices: Vec<u32>,
 }
 
 /// Triangles sharing one texture.
@@ -245,6 +252,15 @@ pub struct SceneCamera {
     /// How enclosed the camera is, 0 (open air) to 1 (inside a tunnel):
     /// the dust sweeping past it and the snow falling stay outside.
     pub shelter: f32,
+    /// In a headset the sky is all round the player, fixed in the world:
+    /// how high (radians above the horizon) the top of the panorama is,
+    /// as the screen shows it; 0 for the sky laid out on the screen.
+    pub dome: f32,
+    /// With [`SceneCamera::glow`], the glow is shown by halos round the
+    /// lights ([`SceneSprites::halo_vertices`]) instead of blooming over
+    /// the view: the scene is drawn straight onto the target (a headset's,
+    /// where the bloom costs too much).
+    pub halos: bool,
 }
 
 /// Draws over a pass's drawing (the UI): given the pass, and whether it has
@@ -292,7 +308,7 @@ enum Field {
 
 /// The scene's colour format while glowing: room above white.
 const HDR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
-const UNIFORM_SIZE: u64 = 288 + SOLID_WORDS as u64 * 4;
+const UNIFORM_SIZE: u64 = 304 + SOLID_WORDS as u64 * 4;
 /// Words of [`SceneData::solid`]: a bit per cell of the 32 × 16 × 32 grid.
 pub const SOLID_WORDS: usize = 16 * 32;
 /// Snowflakes (`scene.wgsl`'s `SNOW_FLAKES`).
@@ -349,8 +365,9 @@ pub struct SceneGpu {
     sprite_atlas: Option<wgpu::BindGroup>,
     /// Per-frame sprite geometry: buffers (grown as needed) and index count.
     sprites: Option<(wgpu::Buffer, wgpu::Buffer, u32)>,
-    /// The same for the shadows.
+    /// The same for the shadows and the halos.
     shadows: Option<(wgpu::Buffer, wgpu::Buffer, u32)>,
+    halos: Option<(wgpu::Buffer, wgpu::Buffer, u32)>,
     /// The glowing scene's targets, made anew when the size changes.
     hdr: Option<HdrTargets>,
     /// Depth buffer and its size.
@@ -502,6 +519,8 @@ enum Which {
     Shadow,
     ShadowReset,
     ShadowMask,
+    /// Halos: added onto what is drawn, behind what is in front (VR).
+    Halo,
     /// Sheets of dust sweeping across the view in a sandstorm.
     DustSheets,
     /// Sand grains blown along the wind in a sandstorm.
@@ -793,6 +812,7 @@ impl SceneGpu {
             sprite_atlas: None,
             sprites: None,
             shadows: None,
+            halos: None,
             hdr: None,
             depth: None,
             depth_format,
@@ -1081,6 +1101,53 @@ impl SceneGpu {
             cache: self.cache.as_ref().map(|(c, _)| c),
         })
         };
+        let halo = || {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("scene halos"),
+            layout: Some(&pl_scene),
+            vertex: wgpu::VertexState {
+                module: &self.shader,
+                entry_point: Some("vs_halo"),
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: (VERTEX_FLOATS * 4) as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &wgpu::vertex_attr_array![
+                        0 => Float32x3, 1 => Float32x2, 2 => Float32x2, 3 => Float32x2, 4 => Float32x2, 5 => Float32x3
+                    ],
+                }],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &self.shader,
+                entry_point: Some("fs_halo"),
+                // What is there, plus the halo's light.
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState {
+                        color: wgpu::BlendComponent {
+                            src_factor: wgpu::BlendFactor::One,
+                            dst_factor: wgpu::BlendFactor::One,
+                            operation: wgpu::BlendOperation::Add,
+                        },
+                        alpha: wgpu::BlendComponent::OVER,
+                    }),
+                    write_mask: wgpu::ColorWrites::COLOR,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: Default::default(),
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: self.depth_format,
+                depth_write_enabled: Some(false),
+                depth_compare: Some(wgpu::CompareFunction::Greater),
+                stencil: Default::default(),
+                bias: Default::default(),
+            }),
+            multisample: Default::default(),
+            multiview_mask: None,
+            cache: self.cache.as_ref().map(|(c, _)| c),
+        })
+        };
         match which {
             Which::DustSheets => dust_sheets(),
             Which::Sand => sand(),
@@ -1139,6 +1206,7 @@ impl SceneGpu {
                 }),
                 wgpu::ColorWrites::ALL,
             ),
+            Which::Halo => halo(),
             Which::Geometry => geometry("scene geometry", wgpu::Face::Back),
             // Mirrored, the faces turn over.
             Which::Mirrored => geometry("scene mirrored", wgpu::Face::Front),
@@ -1504,7 +1572,11 @@ fn prepare(
     };
     // Heat shimmer goes with the storm, over the same deserts; it is kept
     // in the alpha of the glowing scene, so only while that is drawn.
-    let heat = if glow && camera.bloom { storm } else { 0.0 };
+    let heat = if glow && camera.bloom && !camera.halos {
+        storm
+    } else {
+        0.0
+    };
     // A night sky shows our stars and clouds only in our modes.
     let sky = match content.data.as_ref() {
         Some(d) if camera.ours && d.starry => 1.0,
@@ -1544,6 +1616,14 @@ fn prepare(
         Some([x, z, extent]) => [x, z, extent / WAVE_FIELD as f32, WAVE_FIELD as f32],
         None => [0.0; 4],
     });
+    // The sky all round in a headset: the top of its panorama, the
+    // target's size, and how tall a tile of the all-round sky is.
+    uniforms.extend([
+        camera.dome,
+        w as f32,
+        h as f32,
+        crate::DEFAULT_FOV_Y.to_radians(),
+    ]);
     // From clip space back to the world, for rays through the screen.
     uniforms.extend(camera.view_proj.inverse().to_cols_array());
     // The cells the sand grains are kept out of the lee of.
@@ -1566,6 +1646,13 @@ fn prepare(
         &mut gpu.shadows,
         &sprites.shadow_vertices,
         &sprites.shadow_indices,
+    );
+    upload_dynamic(
+        device,
+        queue,
+        &mut gpu.halos,
+        &sprites.halo_vertices,
+        &sprites.halo_indices,
     );
     if gpu.version == Some(content.version) {
         return;
@@ -1791,8 +1878,8 @@ fn draw(
         let s = (camera.pixels.x, camera.pixels.y);
         (s, gpu.low_target(&device, s, format))
     });
-    let hdr =
-        (camera.glow && camera.bloom && low.is_none()).then(|| gpu.hdr_targets(&device, size));
+    let hdr = (camera.glow && camera.bloom && !camera.halos && low.is_none())
+        .then(|| gpu.hdr_targets(&device, size));
     let scene_format = if hdr.is_some() { HDR_FORMAT } else { format };
     let depth_size = match (&low, &hdr) {
         (Some(l), _) => l.0,
@@ -1822,6 +1909,7 @@ fn draw(
             Which::ShadowMask,
         ),
         (gpu.shadows.as_ref().is_some_and(|s| s.2 > 0), Which::Shadow),
+        (gpu.halos.as_ref().is_some_and(|h| h.2 > 0), Which::Halo),
         (snow, Which::Snow),
         (storm, Which::Sand),
         (storm, Which::DustSheets),
@@ -2090,6 +2178,16 @@ fn draw(
             };
             pass.set_bind_group(0, sky, &[]);
             pass.draw(0..3, instance.clone());
+        }
+        // Halos round the lights, over what is behind them.
+        if let (false, Some((v, i, n))) = (mirrored, &gpu.halos)
+            && *n > 0
+        {
+            pass.set_pipeline(scene_p(Which::Halo));
+            pass.set_bind_group(0, &gpu.blank, &[]);
+            pass.set_vertex_buffer(0, v.slice(..));
+            pass.set_index_buffer(i.slice(..), wgpu::IndexFormat::Uint32);
+            pass.draw_indexed(0..*n, 0, 0..1);
         }
         // Snowflakes, behind what is nearer.
         if snow && !mirrored {

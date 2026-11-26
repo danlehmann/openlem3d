@@ -22,6 +22,28 @@ const STRENGTH: f32 = 0.9;
 /// light and a face.
 const STEPS_PER_UNIT: f32 = 6.0;
 
+/// A light's halo in a headset (ours, by eye): its radius in units, and
+/// how strongly its colour shows at its middle.
+const HALO_RADIUS: f32 = 0.6;
+const HALO_STRENGTH: f32 = 0.45;
+
+/// The halos round `lights` (`SceneSprites::halo_vertices` and its
+/// indices).
+pub fn halos(lights: &[Light]) -> (Vec<f32>, Vec<u32>) {
+    let mut vertices = Vec::with_capacity(lights.len() * 4 * crate::scene_render::VERTEX_FLOATS);
+    let mut indices = Vec::with_capacity(lights.len() * 6);
+    for (n, l) in lights.iter().enumerate() {
+        for (u, v) in [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
+            vertices.extend(l.pos);
+            vertices.extend([u, v, HALO_STRENGTH, 1.0, HALO_RADIUS, 0.0, 0.0, 0.0]);
+            vertices.extend(l.colour);
+        }
+        let base = n as u32 * 4;
+        indices.extend([0, 1, 2, 0, 2, 3].map(|i| base + i));
+    }
+    (vertices, indices)
+}
+
 /// The colour of the glowing pixels of `pixels`, weighted by their glow,
 /// scaled so its strongest channel is 1; `None` if nothing glows.
 pub fn glow_colour(pixels: &[u8], glow: &[f32], pal: &Palette) -> Option<[f32; 3]> {

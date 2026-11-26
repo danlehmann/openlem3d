@@ -93,6 +93,8 @@ pub(crate) struct LevelList {
     glyphs: Vec<(NodeId, u32)>,
     body: Option<NodeId>,
     tapped: Option<u32>,
+    /// The mouse button (a VR controller's trigger) held on the list.
+    held: Option<Held>,
     /// The row highlighted from the keys (or a gamepad), by its place in
     /// the list, and the rating it is in; the pointer over a row highlights
     /// that one.
@@ -292,6 +294,16 @@ pub(crate) fn ensure_menu(w: &mut World) {
     w.list = list;
 }
 
+/// A press of the mouse button on the level list: where it went down, where
+/// the pointer was last, whether it has dragged the list, and the row it
+/// went down on.
+struct Held {
+    start: Vec2,
+    last: Vec2,
+    dragged: bool,
+    row: Option<u32>,
+}
+
 /// Clicks, hover colour, scrolling and rating changes.
 pub(crate) fn menu_input(w: &mut World) {
     // Played with a gamepad, B goes back: no button for it.
@@ -317,6 +329,17 @@ pub(crate) fn menu_input(w: &mut World) {
             })
             .sum();
     delta -= touches.iter().map(|t| t.delta().y).sum::<f32>() / row_px;
+    // The mouse button held drags the list as a finger does (for a VR
+    // controller's trigger above all).
+    let (mouse, cursor) = (&w.e.input.mouse, w.e.window.cursor_position());
+    if let Some(held) = &mut list.held
+        && mouse.pressed(MouseButton::Left)
+        && let Some(at) = cursor
+    {
+        delta -= (at.y - held.last.y) / row_px;
+        held.last = at;
+        held.dragged |= at.distance(held.start) >= crate::touch::TAP_SLOP;
+    }
     // The keys move the highlighted row (the first press highlights the
     // top row shown), and the list scrolls to keep it in view.
     let steps = keys.just_pressed(KeyCode::ArrowDown) as i32
@@ -377,7 +400,25 @@ pub(crate) fn menu_input(w: &mut World) {
     }
     // A finger chooses a row by tapping it (lifting without having dragged)
     // rather than by landing on it, so that it can drag the list; the mouse
-    // chooses on the click.
+    // alike, on letting go over the row it went down on.
+    let row_at = |i: Option<usize>| i.and_then(|i| list.rows.get(i)).map(|&(_, r)| r);
+    if mouse.just_pressed(MouseButton::Left) {
+        list.held = cursor.map(|at| Held {
+            start: at,
+            last: at,
+            dragged: false,
+            row: row_at(hovered),
+        });
+    }
+    let clicked = if mouse.just_released(MouseButton::Left) {
+        list.held
+            .take()
+            .filter(|h| !h.dragged)
+            .and_then(|h| h.row)
+            .filter(|&r| row_at(hovered) == Some(r))
+    } else {
+        None
+    };
     let pressed = list
         .rows
         .iter()
@@ -401,7 +442,7 @@ pub(crate) fn menu_input(w: &mut World) {
             None
         }
     } else {
-        pressed
+        clicked
     };
     let entered = keys.any_just_pressed([KeyCode::Enter, KeyCode::NumpadEnter]);
     let chosen = chosen.or_else(|| {
@@ -438,6 +479,12 @@ pub(crate) fn back_to_menu(w: &mut World) {
         } else if keys.just_pressed(KeyCode::KeyX) {
             confirm.question = None;
             w.next_state = Some(level_menu(current.number));
+        } else if keys.just_pressed(KeyCode::F12) {
+            // Options: the menu closes and F12 opens them
+            // (`options::open_in_level`); back from them, the level is as
+            // it was.
+            confirm.question = None;
+            game.paused = was_paused;
         } else if keys.any_just_pressed([KeyCode::KeyN, KeyCode::Escape]) {
             confirm.question = None;
             game.paused = was_paused;

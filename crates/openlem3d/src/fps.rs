@@ -25,7 +25,7 @@ pub(crate) struct Fps {
     frames: u32,
     since: Option<f32>,
     rate: u32,
-    shown: Option<(NodeId, u32, Vec2)>,
+    shown: Option<(NodeId, u32, Vec2, bool)>,
 }
 
 pub(crate) fn update(w: &mut World) {
@@ -42,8 +42,13 @@ pub(crate) fn update(w: &mut World) {
         f.rate = (f.frames as f32 / (now - since)).round() as u32;
         (f.frames, f.since) = (0, Some(now));
     }
-    if let Some((id, rate, size)) = f.shown
-        && (!w.settings.fps || rate != f.rate || size != screen || !w.ui.contains(id))
+    let palette = w.panel.palette;
+    if let Some((id, rate, size, on_palette)) = f.shown
+        && (!w.settings.fps
+            || rate != f.rate
+            || size != screen
+            || on_palette != palette
+            || !w.ui.contains(id))
     {
         w.ui.remove(id);
         f.shown = None;
@@ -60,14 +65,21 @@ pub(crate) fn update(w: &mut World) {
         height: percent(100),
         ..default()
     }));
-    let k = screen.y / ROWS;
+    // In VR, on the palette under the minimap.
     let (glyphs, width) = font.layout(&format!("{} FPS", f.rate));
-    let left = (screen.x - width * k) / 2.0;
+    let (middle, top, k) = if palette {
+        let (at, k) = crate::panel::palette_fps(&w.screen);
+        (at.x, at.y, k)
+    } else {
+        let k = screen.y / ROWS;
+        (screen.x / 2.0, TOP * k, k)
+    };
+    let left = middle - width * k / 2.0;
     for (shade, d) in [(Some(Color::srgba(0.0, 0.0, 0.0, 0.7)), 1.0), (None, 0.0)] {
         for (x, image) in &glyphs {
             let mut glyph = UiNode::image(image.clone()).layout(Node {
                 left: px(left + (x + d) * k),
-                top: px((TOP + d) * k),
+                top: px(top + d * k),
                 width: px(font.size.x * k),
                 height: px(font.size.y * k),
                 ..default()
@@ -78,5 +90,5 @@ pub(crate) fn update(w: &mut World) {
             ui.child(root, glyph);
         }
     }
-    f.shown = Some((root, f.rate, screen));
+    f.shown = Some((root, f.rate, screen, palette));
 }
