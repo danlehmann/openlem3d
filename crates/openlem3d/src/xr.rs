@@ -1110,7 +1110,9 @@ pub(crate) fn render(w: &mut World) {
     // A waiting turner's arrows, in the headset's space.
     let space_from_world = x.place.world_from_space().inverse();
     let arrows: Vec<(Vec3, Vec4)> = turner
-        .map(|(centre, dirs, chosen)| turner_arrows(centre, dirs, chosen))
+        .map(|(centre, dirs, chosen)| {
+            turner_arrows(centre, dirs, chosen, x.seen_from.map(|(eye, _)| eye))
+        })
         .unwrap_or_default()
         .into_iter()
         .map(|(p, colour)| (space_from_world.transform_point3(p), colour))
@@ -1538,11 +1540,17 @@ fn fov_projection(fov: xr::Fovf) -> Mat4 {
     )
 }
 
-/// A turner's two arrows, flat beside the lemming at `centre` pointing to
-/// its sides `dirs` (level units): the one a click would pick bright, the
-/// other faint; both half bright while neither is clearly meant. White with
-/// a dark rim, as the panel's arrows.
-fn turner_arrows(centre: Vec3, dirs: [Vec3; 2], chosen: Option<usize>) -> Vec<(Vec3, Vec4)> {
+/// A turner's two arrows beside the lemming at `centre` pointing to its
+/// sides `dirs` (level units), each turned about its own direction to face
+/// the eye at `eye` (flat on the ground without one): the one a click would
+/// pick bright, the other faint; both half bright while neither is clearly
+/// meant. White with a dark rim, as the panel's arrows.
+fn turner_arrows(
+    centre: Vec3,
+    dirs: [Vec3; 2],
+    chosen: Option<usize>,
+    eye: Option<Vec3>,
+) -> Vec<(Vec3, Vec4)> {
     let mut out = Vec::new();
     for (k, d) in dirs.into_iter().enumerate() {
         let alpha = match chosen {
@@ -1550,7 +1558,10 @@ fn turner_arrows(centre: Vec3, dirs: [Vec3; 2], chosen: Option<usize>) -> Vec<(V
             Some(_) => 0.2,
             None => 0.6,
         };
-        let across = Vec3::new(-d.z, 0.0, d.x);
+        let flat = Vec3::new(-d.z, 0.0, d.x);
+        let across = eye.map_or(flat, |eye| {
+            d.cross(eye - (centre + d * 0.55)).normalize_or(flat)
+        });
         for (grow, colour) in [
             (0.05, Vec4::new(0.0, 0.0, 0.0, 0.7 * alpha)),
             (0.0, Vec4::new(1.0, 1.0, 1.0, alpha)),
