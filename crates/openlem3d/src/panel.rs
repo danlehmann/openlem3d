@@ -1289,18 +1289,21 @@ fn caption(w: &mut World) {
                 let i = w.highlight.lemming.filter(|_| w.highlight.on)?;
                 return sim.lemmings.get(i).filter(|l| !l.gone).and_then(state_name);
             }
-            let point = w.screen.cursor(&w.e.window)?;
-            if w.ui.any_active() {
-                return None;
-            }
-            // Riding along, not the lemming ridden with.
-            let i = crate::hud::lemming_near(
-                sim,
-                &w.camera,
-                w.screen.size,
-                point,
-                w.lemming_cam.following(),
-            )?;
+            // Riding along, not the lemming ridden with; in VR, off the
+            // UI's screen, the one on the controller's ray.
+            let following = w.lemming_cam.following();
+            let i = match w.screen.cursor(&w.e.window) {
+                Some(point) => {
+                    if w.ui.any_active() {
+                        return None;
+                    }
+                    crate::hud::lemming_near(sim, &w.camera, w.screen.size, point, following)?
+                }
+                None => {
+                    let (from, dir) = w.level_aim.ray?;
+                    crate::hud::lemming_on_ray(sim, from, dir, following)?
+                }
+            };
             state_name(&sim.lemmings[i])
         })()
         .unwrap_or("")

@@ -82,9 +82,6 @@ const VIGNETTE_INNER: f32 = 0.45;
 const VIGNETTE_EDGE: f32 = 0.95;
 const VIGNETTE_DARK: f32 = 0.9;
 const VIGNETTE_FADE: f32 = 0.2;
-/// The field of view of the game's camera along the ray (degrees): only
-/// the middle, where the pointer is, matters.
-const AIM_FOV_Y: f32 = 30.0;
 /// The ray: drawn at most this long (metres), this wide, and the dot at its
 /// end this big (radians across, as seen).
 const BEAM_LONGEST: f32 = 30.0;
@@ -188,8 +185,6 @@ pub(crate) struct Xr {
     clicking: Option<usize>,
     /// The hand pointing (0 left, 1 right).
     hand: usize,
-    /// The game camera's view along the ray, while it points into the level.
-    aim: Option<Mat4>,
     /// The ray to draw, in the headset's space.
     beam: Option<Beam>,
     overlay: Option<Overlay>,
@@ -336,7 +331,6 @@ unsafe fn try_start(profile: bool) -> Result<(Box<Xr>, Gpu), Error> {
         time: None,
         clicking: None,
         hand: 1,
-        aim: None,
         beam: None,
         overlay: None,
         turn_ready: true,
@@ -664,8 +658,9 @@ pub(crate) fn input(w: &mut World) {
     {
         x.gliding = None;
     }
-    // Squeezes count only while they are read.
+    // Squeezes and the ray count only while they are read.
     w.game.squeeze = [0.0; 2];
+    w.level_aim.ray = None;
     let (Some(time), true) = (x.time, x.focused) else {
         return;
     };
@@ -818,9 +813,12 @@ pub(crate) fn input(w: &mut World) {
     if rays[x.hand].is_none() {
         x.hand = 1 - x.hand;
     }
-    x.aim = None;
     let mut under_ray = None;
     x.beam = None;
+    w.level_aim = crate::hud::LevelAim {
+        ray: None,
+        vr: true,
+    };
     let panel = if x.panel_pose.palette {
         crate::panel::palette_pixels(&w.screen)
     } else if x.panel_pose.popup {
@@ -854,29 +852,15 @@ pub(crate) fn input(w: &mut World) {
                     colour: BEAM_PANEL,
                 });
             } else {
-                // Into the level: the game sees it as a view along the ray
-                // with the pointer in its middle.
+                // Into the level: the level picks along the ray
+                // (`hud::LevelAim`), and the pointer is off the UI's screen.
                 let anchor = x.place.world_from_space();
                 let from = anchor.transform_point3(origin);
                 let toward = anchor.transform_vector3(dir).normalize();
-                let up = anchor.transform_vector3(rotation * Vec3::Y).normalize();
-                let size = w.screen.size;
-                let view_proj = crate::projection(AIM_FOV_Y, size.x / size.y.max(1.0), 0.5)
-                    * Mat4::look_to_rh(from, toward, up);
-                x.aim = Some(view_proj);
-                // The pointer in the middle of the whole screen, where no
-                // button is (not of the palette's or popup's part of it).
-                let whole = w.screen.pixels;
-                window.set_physical_cursor_position(Some(Vec2::new(
-                    (whole.x + whole.z / 2) as f32,
-                    (whole.y + whole.w / 2) as f32,
-                )));
-                let aim_camera = SceneCamera {
-                    view_proj,
-                    ..w.camera
-                };
+                w.level_aim.ray = Some((from, toward));
+                window.set_physical_cursor_position(None);
                 let picked = w.game.sim.as_ref().and_then(|sim| {
-                    let i = crate::hud::lemming_at(sim, &aim_camera, size, size / 2.0)?;
+                    let i = crate::hud::lemming_on_ray(sim, from, toward, None)?;
                     under_ray = Some(i);
                     Some(Vec3::from_array(sim.lemmings[i].pos.map(crate::units)) + Vec3::Y * 0.2)
                 });
@@ -943,7 +927,6 @@ pub(crate) fn input(w: &mut World) {
         }
         (w.selected.0, w.selected.1) = selected;
     }
-    aim(w);
 }
 
 /// Where the head is in the level, in units, and the way it faces (the
@@ -952,17 +935,6 @@ pub(crate) fn seen_from(w: &World) -> Option<(Vec3, f32)> {
     match &w.renderer.xr {
         State::On(x) => x.seen_from,
         _ => None,
-    }
-}
-
-/// Points the game's camera along the controller's ray while it points
-/// into the level, so that what the pointer picks is what the ray meets.
-/// After the camera's own update, and at the start of the frame.
-pub(crate) fn aim(w: &mut World) {
-    if let State::On(x) = &w.renderer.xr
-        && let Some(view_proj) = x.aim
-    {
-        w.camera.view_proj = view_proj;
     }
 }
 
@@ -976,15 +948,7 @@ pub(crate) fn render(w: &mut World) {
         && !w.preview.active;
     let on = matches!(w.renderer.xr, State::On(_));
     // A turner waiting for its side: its arrows, drawn in the level.
-    let aim = match &w.renderer.xr {
-        State::On(x) => x.aim,
-        _ => None,
-    };
-    let aim_camera = aim.map(|view_proj| SceneCamera {
-        view_proj,
-        ..w.camera
-    });
-    let turner = crate::hud::pending_turner_sides(w, aim_camera.as_ref());
+    let turner = crate::hud::pending_turner_sides(w);
     w.panel.palette = palette && on;
     // The level's menu pops up ahead instead.
     let popup = w.state == crate::menu::AppState::Playing && w.confirm.question.is_some();

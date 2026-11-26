@@ -366,6 +366,8 @@ pub struct World {
     minimap_view: minimap::MinimapView,
     selected: hud::SelectedSkill,
     pending: hud::PendingTurner,
+    /// The VR controller's ray into the level (`xr`).
+    level_aim: hud::LevelAim,
     ride_press: hud::RidePress,
     highlight: hud::Highlight,
     arrows: hud::TurnerArrows,
@@ -466,6 +468,7 @@ impl World {
             minimap_view: minimap::MinimapView::default(),
             selected: hud::SelectedSkill::default(),
             pending: hud::PendingTurner::default(),
+            level_aim: hud::LevelAim::default(),
             ride_press: hud::RidePress::default(),
             highlight: hud::Highlight::default(),
             arrows: hud::TurnerArrows::default(),
@@ -630,8 +633,6 @@ impl World {
                 camera_controls(self);
                 view_replay::play(self);
                 view_replay::record(self);
-                #[cfg(all(target_os = "android", feature = "xr"))]
-                xr::aim(self);
                 minimap::build_base(self);
                 minimap::draw(self);
                 minimap::click(self);

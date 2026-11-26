@@ -98,6 +98,86 @@ pub(crate) fn to_screen(camera: &SceneCamera, size: Vec2, pos: Vec3) -> Option<(
     Some((screen, px_per_unit))
 }
 
+/// The VR controller's ray into the level (`xr`): where it starts and its
+/// unit direction, in world units, while it points into the level rather
+/// than at a panel; the level picks along it where it would at the pointer
+/// (which is then off the UI's screen). `vr` while in the headset.
+#[derive(Default, Clone, Copy)]
+pub struct LevelAim {
+    pub ray: Option<(Vec3, Vec3)>,
+    pub vr: bool,
+}
+
+/// How far off a ray a lemming can still be picked: at least
+/// [`PICK_RADIUS_UNITS`] away from it, more with distance (radians).
+const RAY_PICK_ANGLE: f32 = 0.035;
+/// How far beside a waiting turner the ray must pass for its side to count
+/// as clearly meant (world units).
+const RAY_TURNER_CLEAR: f32 = 0.15;
+
+/// The lemming nearest a ray (`from`, unit `dir`; world units), if one is
+/// close enough to it, other than `except`.
+pub(crate) fn lemming_on_ray(
+    sim: &l3d_sim::Simulation,
+    from: Vec3,
+    dir: Vec3,
+    except: Option<usize>,
+) -> Option<usize> {
+    let mut best: Option<(usize, f32)> = None;
+    for (i, l) in sim.lemmings.iter().enumerate() {
+        if l.gone || except == Some(i) {
+            continue;
+        }
+        let c = lemming_centre(l);
+        let t = (c - from).dot(dir);
+        if t <= 0.0 {
+            continue;
+        }
+        let off = (from + dir * t).distance(c) / PICK_RADIUS_UNITS.max(t * RAY_PICK_ANGLE);
+        if off < 1.0 && best.is_none_or(|(_, b)| off < b) {
+            best = Some((i, off));
+        }
+    }
+    best.map(|(i, _)| i)
+}
+
+/// A lemming's two sides (anticlockwise, clockwise) as level unit vectors.
+fn sides_of(l: &l3d_sim::Lemming) -> [Vec3; 2] {
+    let side = |d: l3d_sim::Dir| {
+        let [x, _, z] = d.delta();
+        Vec3::new(x as f32, 0.0, z as f32).normalize_or_zero()
+    };
+    [side(l.dir.anticlockwise()), side(l.dir.clockwise())]
+}
+
+/// The side of lemming `l` (0 anticlockwise, 1 clockwise) a ray passes
+/// nearer, as seen from above, and whether clearly so.
+fn ray_turner_side(l: &l3d_sim::Lemming, from: Vec3, dir: Vec3) -> (usize, bool) {
+    let c = lemming_centre(l);
+    let t = (c - from).dot(dir).max(0.0);
+    let off = (from + dir * t - c).with_y(0.0);
+    let fit = sides_of(l).map(|s| s.dot(off.normalize_or_zero()));
+    let clear = off.length() > RAY_TURNER_CLEAR && (fit[0] - fit[1]).abs() > ARROW_CLEAR_MARGIN;
+    (if fit[0] >= fit[1] { 0 } else { 1 }, clear)
+}
+
+/// Gives lemming `i` its waiting turner, pointing to the side a ray passes
+/// nearer; whether the sim took it.
+fn give_turner_on_ray(sim: &mut l3d_sim::Simulation, i: usize, from: Vec3, dir: Vec3) -> bool {
+    let l = &sim.lemmings[i];
+    let (side, _) = ray_turner_side(l, from, dir);
+    let to = [l.dir.anticlockwise(), l.dir.clockwise()][side];
+    sim.assign_turner(i, to)
+}
+
+/// Where a click lands in the level: a point on the screen, or the VR
+/// controller's ray.
+#[derive(Clone, Copy)]
+enum At {
+    Point(Vec2),
+    Ray(Vec3, Vec3),
+}
+
 /// A lemming's centre in world units.
 pub(crate) fn lemming_centre(l: &l3d_sim::Lemming) -> Vec3 {
     Vec3::from_array(l.pos.map(crate::units)) + Vec3::Y * 0.2
@@ -168,6 +248,7 @@ pub struct RidePress(pub Option<Vec2>);
 /// turner takes two: one on the lemming, then one to the side it should
 /// point to.
 pub(crate) fn assign_on_pointer(w: &mut World) {
+    let aim_ray = w.level_aim.ray;
     let (mouse, touches, starts) = (&w.e.input.mouse, &w.e.input.touches, &w.touch_starts);
     let (window, screen, camera) = (&w.e.window, &w.screen, &w.camera);
     let (selected, pending, lemming_cam) = (&mut w.selected, &mut w.pending, &mut w.lemming_cam);
@@ -227,9 +308,15 @@ pub(crate) fn assign_on_pointer(w: &mut World) {
     if let Some(f) = following
         && pending.0 != Some(f)
     {
-        if let Some(point) = ride_click.or(tap)
-            && let Some(i) = lemming_near(sim, camera, screen.size, point, Some(f))
-        {
+        // In VR, the lemming on the ray, at the click.
+        let other = match (ride_click.or(tap), aim_ray) {
+            (Some(point), _) => lemming_near(sim, camera, screen.size, point, Some(f)),
+            (None, Some((from, dir))) if mouse.just_pressed(action) => {
+                lemming_on_ray(sim, from, dir, Some(f))
+            }
+            _ => None,
+        };
+        if let Some(i) = other {
             lemming_cam.ride(i, highlight, selected, view);
             sfx.play("SPOTFX/SCALE");
         }
@@ -243,8 +330,17 @@ pub(crate) fn assign_on_pointer(w: &mut World) {
         // highlighted waits for the next tap, not this one).
         tap
     };
-    let Some(point) = point else { return };
+    // In VR, off the UI's screen, the click is along the controller's ray.
+    let at = match (point, aim_ray) {
+        (Some(p), _) => At::Point(p),
+        (None, Some((from, dir))) if mouse.just_pressed(action) => At::Ray(from, dir),
+        _ => return,
+    };
     let size = screen.size;
+    let give_turner = |sim: &mut l3d_sim::Simulation, riding: Option<f32>, i: usize| match at {
+        At::Point(point) => give_pending_turner(sim, camera, size, riding, i, point),
+        At::Ray(from, dir) => Some(give_turner_on_ray(sim, i, from, dir)),
+    };
     // Riding along, nothing is selected (verified): a turner given to the
     // lemming ridden with points to the side of the screen clicked (left
     // half: its left). (A click on another lemming rides along with it, on
@@ -255,7 +351,7 @@ pub(crate) fn assign_on_pointer(w: &mut World) {
                 return;
             }
             pending.0 = None;
-            if let Some(ok) = give_pending_turner(sim, camera, size, Some(view.head), f, point) {
+            if let Some(ok) = give_turner(sim, Some(view.head), f) {
                 sfx.play(if ok { "VOXFX/OK2" } else { "VOXFX/UH_UH1" });
             }
             return;
@@ -266,12 +362,15 @@ pub(crate) fn assign_on_pointer(w: &mut World) {
         return;
     }
     if let Some(i) = pending.0.take().filter(|_| !picking) {
-        if let Some(ok) = give_pending_turner(sim, camera, size, None, i, point) {
+        if let Some(ok) = give_turner(sim, None, i) {
             sfx.play(if ok { "VOXFX/OK2" } else { "VOXFX/UH_UH1" });
         }
         return;
     }
-    let best = lemming_at(sim, camera, size, point);
+    let best = match at {
+        At::Point(point) => lemming_at(sim, camera, size, point),
+        At::Ray(from, dir) => lemming_on_ray(sim, from, dir, None),
+    };
     // Armed, the face rides along with the lemming clicked, even with a
     // skill selected (verified).
     if picking {
@@ -333,32 +432,20 @@ fn turner_sides(
 
 /// For VR, where the arrows are drawn in the level: the lemming waiting for
 /// its turner's side, its centre, its two sides (anticlockwise, clockwise;
-/// level unit vectors), and the side a click would pick now if it is clear,
-/// seen with `camera` (the controller's aim, its pointer in the middle;
-/// none while pointing elsewhere). Not riding along.
+/// level unit vectors), and the side a click along the controller's ray
+/// would pick now, if clearly one (none while it points elsewhere). Not
+/// riding along.
 #[cfg_attr(not(feature = "xr"), allow(dead_code))]
-pub(crate) fn pending_turner_sides(
-    w: &World,
-    camera: Option<&SceneCamera>,
-) -> Option<(Vec3, [Vec3; 2], Option<usize>)> {
+pub(crate) fn pending_turner_sides(w: &World) -> Option<(Vec3, [Vec3; 2], Option<usize>)> {
     if w.state != AppState::Playing || w.lemming_cam.following().is_some() {
         return None;
     }
     let l = w.game.sim.as_ref()?.lemmings.get(w.pending.0?)?;
-    let side = |d: l3d_sim::Dir| {
-        let [x, _, z] = d.delta();
-        Vec3::new(x as f32, 0.0, z as f32).normalize_or_zero()
-    };
-    let sides = [side(l.dir.anticlockwise()), side(l.dir.clockwise())];
-    let size = w.screen.size;
-    let point = size / 2.0;
-    let chosen = camera.and_then(|camera| {
-        let (at, _, fit) = turner_sides(camera, size, l, Some(point))?;
-        let clear = point.distance(at) > ARROW_CLEAR_DISTANCE * size.y / 200.0
-            && (fit[0] - fit[1]).abs() > ARROW_CLEAR_MARGIN;
-        clear.then_some(if fit[0] >= fit[1] { 0 } else { 1 })
+    let chosen = w.level_aim.ray.and_then(|(from, dir)| {
+        let (side, clear) = ray_turner_side(l, from, dir);
+        clear.then_some(side)
     });
-    Some((lemming_centre(l), sides, chosen))
+    Some((lemming_centre(l), sides_of(l), chosen))
 }
 
 /// Gives lemming `i` its waiting turner, pointing to the side a click at
@@ -454,7 +541,8 @@ pub(crate) fn place_turner_marker(w: &mut World) {
     let (window, screen, lemming_cam) = (&w.e.window, &w.screen, &w.lemming_cam);
     let gamepad = crate::gamepad::in_use(w);
     let shown = (|| {
-        if w.state != AppState::Playing {
+        // In VR the arrows are drawn in the level (`xr`).
+        if w.state != AppState::Playing || w.level_aim.vr {
             return None;
         }
         // Riding along with a turner waiting for its side: one arrow near
