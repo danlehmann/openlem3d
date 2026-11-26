@@ -22,6 +22,11 @@ pub struct Settings {
     /// Backspace runs the level back in time (ours); off, no snapshots are
     /// kept for it.
     pub rewind: bool,
+    /// The replay camera is Original: a replay, and running the level back,
+    /// also show what the player saw (the camera's moves, the lemming view,
+    /// highlighting), and a change to the view ends the replay, as in the
+    /// original. Free (false): the viewer moves the view freely (ours).
+    pub original_replays: bool,
     /// Volumes and camera speed, 0–10 lights as on the original's sliders.
     pub music: u8,
     pub effects: u8,
@@ -164,8 +169,8 @@ impl Filtering {
     pub fn name(self) -> &'static str {
         match self {
             Filtering::Off => "Off",
-            Filtering::Smooth => "Smooth",
-            Filtering::Sharp => "Sharp",
+            Filtering::Smooth => "Smooth (bilinear)",
+            Filtering::Sharp => "Sharp (anisotropic)",
         }
     }
 
@@ -332,6 +337,7 @@ impl Default for Settings {
             calibrated: false,
             fps: false,
             rewind: true,
+            original_replays: false,
             music: 8,
             effects: 8,
             camera: 5,
@@ -481,6 +487,7 @@ impl Settings {
                 "enhanced" => s.mode = if flag { Mode::Enhanced } else { Mode::Original },
                 "fps" => s.fps = flag,
                 "rewind" => s.rewind = flag,
+                "replay_camera" => s.original_replays = v == "original",
                 "music" => s.music = level.unwrap_or(s.music),
                 "effects" => s.effects = level.unwrap_or(s.effects),
                 "camera" => s.camera = level.unwrap_or(s.camera),
@@ -519,7 +526,7 @@ impl Settings {
         let Some(path) = Self::path() else { return };
         let on = |b: bool| if b { "on" } else { "off" };
         let text = format!(
-            "fullscreen = {}\nmode = {}\npreset = {}\nresolution = {}\nfiltering = {}\nwaves = {}\nreflections = {}\nshadows = {}\nglow = {}\nsnow = {}\nsandstorm = {}\nwindows = {}\ncalibrated = {}\nfps = {}\nrewind = {}\nmusic = {}\neffects = {}\ncamera = {}\nrating = {}\ncompleted = {}\nbest = {}\n",
+            "fullscreen = {}\nmode = {}\npreset = {}\nresolution = {}\nfiltering = {}\nwaves = {}\nreflections = {}\nshadows = {}\nglow = {}\nsnow = {}\nsandstorm = {}\nwindows = {}\ncalibrated = {}\nfps = {}\nrewind = {}\nreplay_camera = {}\nmusic = {}\neffects = {}\ncamera = {}\nrating = {}\ncompleted = {}\nbest = {}\n",
             on(self.fullscreen),
             self.mode.key(),
             self.graphics.preset.key(),
@@ -535,6 +542,11 @@ impl Settings {
             on(self.calibrated),
             on(self.fps),
             on(self.rewind),
+            if self.original_replays {
+                "original"
+            } else {
+                "free"
+            },
             self.music,
             self.effects,
             self.camera,

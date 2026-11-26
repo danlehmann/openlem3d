@@ -425,8 +425,8 @@ pub(crate) fn back_to_menu(w: &mut World) {
     let keys = &w.e.input.keys;
     let (confirm, current, game) = (&mut w.confirm, &mut w.current, &mut w.game);
     let restart = |game: &mut crate::Game, current: &mut crate::CurrentLevel| {
-        if let Some(sim) = &game.sim {
-            game.replay = Some(crate::Replay::new(sim.log.clone()));
+        if let Some(replay) = crate::Replay::attempt(game) {
+            game.replay = Some(replay);
             current.loaded = None;
         }
     };
@@ -435,6 +435,9 @@ pub(crate) fn back_to_menu(w: &mut World) {
         if keys.any_just_pressed([KeyCode::KeyR, KeyCode::KeyY]) {
             confirm.question = None;
             restart(game, current);
+            // R answers here: it doesn't also raise the camera, which would
+            // end a replay showing the view as played (`view_replay`).
+            w.e.input.keys.release(KeyCode::KeyR);
         } else if keys.just_pressed(KeyCode::KeyX) {
             confirm.question = None;
             w.next_state = Some(level_menu(current.number));
